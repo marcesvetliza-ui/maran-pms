@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
-import {auditDiagnosis} from '../../services/programming-assistant/semantic-audit';
+import {auditDiagnosis,diagnosisStatements} from '../../services/programming-assistant/semantic-audit';
 import {diagnose} from '../../services/programming-assistant/diagnose';
 import {financialConsistencyIssues} from '../../services/programming-assistant/consistency';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
@@ -8,7 +8,7 @@ const version='a'.repeat(40);
 const ticket={version,title:'Error al facturar',actual:'Dos personas intentaron facturar el mismo cargo.',expected:'Saber qué implica el rechazo y qué verificar.',module:'facturacion',messages:[]} as SupportTicket;
 const unsafe='El cargo fue facturado por otra operación, por lo que no se ha duplicado la facturación ni el cobro.';
 const report=(proposal=unsafe):SupportDiagnosis=>({summary:'El código valida el saldo antes de emitir. No se dispone de registros para confirmar los cobros reales.',certainty:'sustentado_en_codigo',cause:'El servidor rechaza un importe superior al saldo facturable.',proposal,proposedTests:[],questions:[],dataRepair:'',limitations:['No hay registro operativo real que pruebe ausencia de doble cobro.'],evidence:[{path:'server/billing/routes.ts',start:1672,end:1684,explanation:'El saldo se valida antes de permitir facturar.'}]});
-const rejection={approved:false,issues:[{field:'proposal',quote:'no se ha duplicado la facturación ni el cobro',problem:'Afirma un resultado operativo que el resumen y las limitaciones declaran desconocido.',correction:'Separar protección implementada de hechos del incidente; consultar registros antes de concluir.'}]};
+const rejection={approved:false,issues:[{statementId:'proposal_1_1',problem:'Afirma un resultado operativo que el resumen y las limitaciones declaran desconocido.',correction:'Separar protección implementada de hechos del incidente; consultar registros antes de concluir.'}]};
 const response=(content:unknown,tokens=500)=>({usage:{total_tokens:tokens,prompt_tokens:100},choices:[{message:{role:'assistant',content:JSON.stringify(content)}}]});
 async function setup(){const source=new CodeSource(process.cwd(),version);await source.read('server/billing/routes.ts',1672,1684);return source;}
 it('sends the entire report to an isolated, read-only review context',async()=>{
@@ -18,17 +18,17 @@ it('sends the entire report to an isolated, read-only review context',async()=>{
   expect(request.messages).toHaveLength(2);expect(request.messages.map((m:any)=>m.role)).toEqual(['system','user']);
   expect(request.tools).toBeUndefined();
   const payload=JSON.parse(request.messages[1].content);
-  expect(payload.diagnosis).toEqual(report());
+  expect(payload.diagnosis).toEqual(diagnosisStatements(report()));
   expect(payload.capabilities).toMatchObject({testsExecuted:false,operationalDatabaseAccess:false});
   expect(payload.evidence.citedCode[0].content).toContain('saldo suficiente para facturar');
   return response(rejection);
  }}}};
  const result=await auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000});
- expect(result.approved).toBe(false);expect(result.issues[0].quote).toBe(rejection.issues[0].quote);expect(calls).toBe(1);
+ expect(result.approved).toBe(false);expect(result.issues[0].quote).toBe(unsafe);expect(calls).toBe(1);
 });
-it('rejects reviewer observations that do not quote the actual report',async()=>{
+it('rejects reviewer references that do not belong to the actual report',async()=>{
  const source=await setup();
- const client={chat:{completions:{create:async()=>response({...rejection,issues:[{...rejection.issues[0],quote:'texto que no existe'}]})}}};
+ const client={chat:{completions:{create:async()=>response({...rejection,issues:[{...rejection.issues[0],statementId:'proposal_999_1'}]})}}};
  await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({code:'evidence_audit_invalid',auditTokens:500});
 });
 it.each([{approved:true,issues:rejection.issues},{approved:false,issues:[]}])('does not accept an internally contradictory verdict',async verdict=>{
@@ -56,7 +56,7 @@ it('requires a corrected full report and a new passing audit, counting both call
  const client={chat:{completions:{create:async(request:any)=>{
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response(audits===1?rejection:{approved:true,issues:[]});}
   writer++;
-  if(writer===3)expect(JSON.parse(request.messages.at(-1).content).semanticIssues[0].quote).toBe(rejection.issues[0].quote);
+  if(writer===3)expect(JSON.parse(request.messages.at(-1).content).semanticIssues[0].quote).toBe(unsafe);
   return response(writer<3?report():corrected,1000);
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
@@ -83,7 +83,7 @@ it.each([
  ['invalid_json',{choices:[{message:{content:'not json private text'}}]}],
  ['invalid_schema',{choices:[{message:{content:'{}'}}]}],
  ['inconsistent_verdict',response({approved:false,issues:[]})],
- ['quote_mismatch',response({...rejection,issues:[{...rejection.issues[0],quote:'nonexistent private text'}]})],
+ ['invalid_reference',response({...rejection,issues:[{...rejection.issues[0],statementId:'proposal_999_1'}]})],
 ])('records the bounded audit failure reason %s without reviewer content',async(reason,result)=>{
  const source=await setup();
  const client={chat:{completions:{create:async(request:any)=>{
@@ -119,15 +119,16 @@ it('sends the same string limits to OpenAI that the local validator enforces',as
  const source=await setup();const draft=report();draft.summary='x'.repeat(800);
  const client={chat:{completions:{create:async(request:any)=>{
   const properties=request.response_format.json_schema.schema.properties.issues.items.properties;
-  expect(properties.quote).toMatchObject({minLength:1,maxLength:800});
+  expect(properties.quote).toBeUndefined();
+  expect(properties.statementId.enum).toContain('summary_1_1');
   expect(properties.problem).toMatchObject({minLength:1,maxLength:600});
   expect(properties.correction).toMatchObject({minLength:1,maxLength:600});
-  return response({approved:false,issues:[{field:'summary',quote:draft.summary,problem:'p'.repeat(600),correction:'c'.repeat(600)}]});
+  return response({approved:false,issues:[{statementId:'summary_1_1',problem:'p'.repeat(600),correction:'c'.repeat(600)}]});
  }}}};
  const result=await auditDiagnosis(ticket,draft,source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000});
  expect(result.approved).toBe(false);expect(result.issues).toHaveLength(1);
 });
-it.each(['quote','problem','correction'] as const)('rejects oversized %s without silently shortening or approving it',async field=>{
+it.each(['problem','correction'] as const)('rejects oversized %s without silently shortening or approving it',async field=>{
  const source=await setup();const issue={...rejection.issues[0],[field]:'private text '.repeat(100)};
  const client={chat:{completions:{create:async()=>response({approved:false,issues:[issue]})}}};
  await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({
@@ -156,11 +157,11 @@ it.each([true,false])('audits a provenance-checked draft directly when another a
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){
    audits++;
    const payload=JSON.parse(request.messages[1].content);
-   expect(payload.diagnosis).toEqual(draft);
+   expect(payload.diagnosis).toEqual(diagnosisStatements(draft));
    expect(payload.evidence.coverageChecklist.length).toBeGreaterThan(0);
    expect(payload.evidence.citedCode).toHaveLength(5);
    expect(request.tools).toBeUndefined();
-   return response(approved?{approved:true,issues:[]}:{approved:false,issues:[{field:'proposal',quote:'Consultar el estado persistido antes de operar.',problem:'Falta acotar la conclusión.',correction:'Explicar lo desconocido.'}]},1500);
+   return response(approved?{approved:true,issues:[]}:{approved:false,issues:[{statementId:'proposal_1_1',problem:'Falta acotar la conclusión.',correction:'Explicar lo desconocido.'}]},1500);
   }
   writer++;expect(writer).toBe(1);
   return {...response(draft,67097),usage:{total_tokens:67097,prompt_tokens:22000}};
@@ -175,4 +176,31 @@ it.each([true,false])('audits a provenance-checked draft directly when another a
   expect(result.report.proposal).not.toBe(draft.proposal);
   expect(result.report.summary).toContain('Revisión parcial');
  }
+});
+it('preserves all report text and array boundaries when numbering Unicode fragments',()=>{
+ const draft=report();draft.summary='  Texto con tildes, comillas “exactas” y emoji 🧾.\n'.repeat(50);
+ draft.questions=['Primera consulta','Segunda consulta'];draft.dataRepair='Revisar sin modificar';
+ draft.evidence.push({...draft.evidence[0],explanation:'Otra explicación independiente.'});
+ const result=diagnosisStatements(draft);
+ expect(new Set(result.statements.map(item=>item.id)).size).toBe(result.statements.length);
+ expect(result.statements.filter(item=>item.field==='summary').map(item=>item.text).join('')).toBe(draft.summary);
+ expect(result.statements.filter(item=>item.field==='questions').map(item=>item.text)).toEqual(draft.questions);
+ expect(result.statements.find(item=>item.field==='dataRepair')?.text).toBe(draft.dataRepair);
+ for(const [index,reference] of result.evidenceReferences.entries()){
+  expect(result.statements.filter(item=>reference.statementIds.includes(item.id)).map(item=>item.text).join('')).toBe(draft.evidence[index].explanation);
+ }
+ expect(result.statements.every(item=>Array.from(item.text).length<=800)).toBe(true);
+});
+it('reconstructs the original citation from a selected ID and rejects model-supplied quote replacements',async()=>{
+ const source=await setup();
+ const client={chat:{completions:{create:async(request:any)=>{
+  const payload=JSON.parse(request.messages[1].content);
+  expect(request.response_format.json_schema.schema.properties.issues.items.properties.statementId.enum)
+   .toEqual(payload.diagnosis.statements.map((item:any)=>item.id));
+  return response(rejection);
+ }}}};
+ const result=await auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000});
+ expect(result.issues[0]).toMatchObject({field:'proposal',quote:unsafe});
+ const forged={chat:{completions:{create:async()=>response({approved:false,issues:[{...rejection.issues[0],quote:'model paraphrase'}]})}}};
+ await expect(auditDiagnosis(ticket,report(),source,forged as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:'invalid_schema'});
 });

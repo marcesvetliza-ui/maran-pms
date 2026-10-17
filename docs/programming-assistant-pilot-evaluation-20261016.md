@@ -418,3 +418,32 @@ Dos regresiones usan 67.097 tokens simulados y las cinco citas: aprobación term
 con 68.597 y una auditoría; rechazo conserva el informe neutral sin publicar la
 recomendación. 131 pruebas aprobadas, TypeScript y bundle del servicio correctos.
 No se llamó al modelo real: sigue pendiente evaluar su respuesta en el demo.
+
+### Revisión rechazada por transcripción de citas (`quote_mismatch`)
+
+El intento real llegó al revisor pero falló al exigir que su cita fuera una
+subcadena idéntica del campo indicado (76.555 tokens, 5 rondas, 6 consultas).
+El log no conserva la cita y no permite saber si hubo paráfrasis, cambio de campo
+o diferencias tipográficas. La coincidencia textual era una responsabilidad
+innecesaria del modelo: ya se dispone del informe original en el servidor.
+
+El contrato interno de auditoría ahora devuelve `statementId`, elegido de un
+enum generado para ese informe, más problema y corrección. El servidor fragmenta
+el texto completo en orden sin omitir caracteres, mantiene límites de arrays y
+propiedad de las referencias, y reconstruye `field` y `quote` desde el ID. El
+modelo no puede aportar una cita alternativa ni un campo incompatible con ese
+ID. No se envía una segunda copia del diagnóstico: los fragmentos constituyen
+el informe completo; las referencias de evidencia conservan archivo y líneas.
+La numeración es local a cada solicitud y se renueva para cada informe corregido.
+
+La revisión semántica sigue siendo obligatoria. Referencias desconocidas,
+propiedades extra o veredictos incoherentes se rechazan; no se normalizan
+paráfrasis ni se aprueba por falta de formato. Continúan los mismos límites,
+preflight, identidad del caso y ausencia de acceso operativo. Sin cambios en
+HTTP, esquema de base, UI ni main.
+
+132 pruebas aprobadas. Se verifican conservación Unicode y arrays, enum de IDs,
+reconstrucción de citas, rechazo de referencias inexistentes y de citas forjadas,
+aprobación/rechazo/corrección y reserva de presupuesto. TypeScript y bundle del
+servicio correctos. No se llamó a OpenAI real; la calidad del criterio del modelo
+continúa pendiente de evaluación en el demo.
