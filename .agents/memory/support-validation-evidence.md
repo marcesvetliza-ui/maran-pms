@@ -1,0 +1,22 @@
+---
+name: Support validation evidence
+description: Why support-assistant protocol tests and real-model assessments must remain distinct.
+---
+
+Do not conclude that a support diagnosis passed review from the audit counter,
+or that a green simulated-provider suite establishes useful real-model answers.
+Inspect each review outcome and, when available, the corresponding statement
+and finding. An internal inability to finish validation is not evidence that the
+operator failed to supply facts.
+
+**Why:** Earlier local fixes to reviewer JSON and citations could pass their
+targeted checks while the actual lifecycle stopped after a valid rejection,
+before attempting correction. The expensive path and the compact successful
+simulation established controller behavior, not the unknown content or quality
+of the real review.
+
+**How to apply:** Keep a regression that crosses rejection, full correction and
+new approval under the same total budget. Assess real-model behavior separately
+with a pinned revision, repeated synthetic cases, positive and negative controls,
+and human review. If credentials are unavailable, state that real evaluation
+was not executed instead of extrapolating its outcome from mocks.

@@ -284,7 +284,7 @@ export default function ProgrammingSupport() {
                     Diagnóstico y propuesta
                   </h2>
                   <Badge variant="outline">
-                    {ticket.report.certainty.replaceAll("_", " ")}
+                    {ticket.report.validationStatus === "incomplete" ? "Validación inconclusa" : ticket.report.certainty.replaceAll("_", " ")}
                   </Badge>
                   {citedScreens(ticket.report).length>0 && <p className="text-sm text-muted-foreground">Interfaz con evidencia citada: {citedScreens(ticket.report).join(', ')}.</p>}
                   {(

@@ -1,12 +1,13 @@
 // These protocol tests isolate the earlier stages. Semantic review has its own
 // tests with explicit reject/approve responses and independent request checks.
-vi.mock('../../services/programming-assistant/semantic-audit',()=>({auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
+vi.mock('../../services/programming-assistant/semantic-audit',async(importOriginal)=>({...await importOriginal<typeof import("../../services/programming-assistant/semantic-audit")>(),auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
 import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it, expect } from "vitest";
 import { CodeSource } from "../../services/programming-assistant/source";
 import { diagnose } from "../../services/programming-assistant/diagnose";
+import {auditDiagnosis} from "../../services/programming-assistant/semantic-audit";
 import type { SupportTicket } from "../../shared/programming-support";
 
 let directory: string;
@@ -149,8 +150,10 @@ describe("read-only code investigator", () => {
       expect(request.tool_choice).toBe("none");
       const toolMessages=request.messages.filter((m:any)=>m.role==="tool");
       if(round===2){
-        expect(toolMessages).toHaveLength(28);
-        expect(toolMessages.filter((m:any)=>JSON.parse(m.content).researchClosed)).toHaveLength(8);
+        expect(toolMessages).toHaveLength(0);
+        const closure=JSON.parse(request.messages.find((m:any)=>m.role==="user").content);
+        expect(closure.readings.length).toBeGreaterThan(0);
+        expect(closure.omittedRanges).toBeGreaterThan(0);
       }else{
         expect(toolMessages).toHaveLength(0);
         expect(JSON.parse(request.messages[1].content).draft).toEqual(report);
@@ -158,7 +161,8 @@ describe("read-only code investigator", () => {
       return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
-    expect(result.calls).toBe(20);expect(round).toBe(3);expect(result.report.certainty).toBe("falta_informacion");
+    expect(result.calls).toBe(20);expect(round).toBe(2);expect(result.report.certainty).toBe("falta_informacion");
+    expect(result.semanticAudits).toBe(1);
   });
   it("closes early on accumulated tokens and still reviews a valid partial report", async () => {
     const source=await fixture();
@@ -171,7 +175,7 @@ describe("read-only code investigator", () => {
       return {usage:{total_tokens:1000},choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
-    expect(round).toBe(3);expect(result.tokens).toBe(52000);
+    expect(round).toBe(2);expect(result.tokens).toBe(51000);
   });
   it("reserves the draft and coverage review based on measured prompt cost before 50k", async () => {
     const source=await fixture();
@@ -185,7 +189,7 @@ describe("read-only code investigator", () => {
       return {usage:{total_tokens:8000,prompt_tokens:7000},choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
-    expect(round).toBe(3);expect(result.tokens).toBe(52000);expect(result.calls).toBe(1);
+    expect(round).toBe(2);expect(result.tokens).toBe(44000);expect(result.calls).toBe(1);
   });
   it("finds definitions and tests across filenames without exposing excluded files", async () => {
     const source=await fixture();
@@ -209,20 +213,20 @@ describe("read-only code investigator", () => {
       expect(result.definitions.every(r=>source.validates(r))).toBe(true);
     }
   });
-  it("reviews a draft and reads a called symbol before the final conclusion", async () => {
+  it("reads a called symbol during research before submitting the draft to mandatory audit", async () => {
     const source=await fixture();
     await writeFile(path.join(directory,"server","generic.ts"),"export function factor(){return 0.001;}");
     const draft={summary:"Falta función",certainty:"falta_informacion",cause:"",proposal:"",proposedTests:[],questions:[],dataRepair:"",limitations:[],evidence:[]};
     let round=0;
     const client={chat:{completions:{create:async(request:any)=>{
       const current=round++;
-      if(current===0)return {choices:[{message:{role:"assistant",content:JSON.stringify(draft)}}]};
-      if(current===1){expect(JSON.parse(request.messages.at(-1).content).review).toContain("inspect_symbol");return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"symbol1",type:"function",function:{name:"inspect_symbol",arguments:'{"symbol":"factor"}'}}]}}]};}
+      if(current===0){return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"symbol1",type:"function",function:{name:"inspect_symbol",arguments:'{"symbol":"factor"}'}}]}}]};}
       expect(JSON.parse(request.messages.at(-1).content).definitions[0].content).toContain("0.001");
       return {choices:[{message:{role:"assistant",content:JSON.stringify({...draft,summary:"Factor leído",certainty:"sustentado_en_codigo",evidence:[{path:"server/generic.ts",start:1,end:1,explanation:"Conversión"}]})}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
-    expect(round).toBe(3);expect(result.calls).toBe(1);expect(result.report.certainty).toBe("sustentado_en_codigo");
+    expect(round).toBe(2);expect(result.calls).toBe(1);expect(result.report.certainty).toBe("sustentado_en_codigo");
+    expect(result.semanticAudits).toBe(1);
   });
   it("can read missing evidence during a late correction without bypassing validation", async () => {
     const source=await fixture();
@@ -238,7 +242,7 @@ describe("read-only code investigator", () => {
       return {choices:[{message:{role:"assistant",content:null,tool_calls:[{id:`read-${current}`,type:"function",function:{name:"read_code",arguments:JSON.stringify({path:"server/late.ts",start:line,end:line})}}]}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
-    expect(round).toBe(13);
+    expect(round).toBe(12);
     expect(result.calls).toBe(2);
     expect(result.report.evidence).toEqual(report.evidence);
   });
@@ -268,7 +272,7 @@ describe("read-only code investigator", () => {
       return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result = await diagnose({version:source.version} as SupportTicket,source,{apiKey:"not-used",model:"mock"},client as any);
-    expect(attempts).toBe(3);
+    expect(attempts).toBe(2);
     expect(result.report.summary).toBe(report.summary);
     expect(result.report.limitations.length).toBeLessThanOrEqual(10);
     expect(result.report.limitations.join(" ")).toContain("revisión humana");
@@ -453,7 +457,7 @@ describe("read-only code investigator", () => {
       { apiKey: "not-used", model: "mock" },
       client as any,
     );
-    expect(attempts).toBe(3);
+    expect(attempts).toBe(2);
     expect(result.report.evidence[0].end).toBe(1);
   });
   it("rejects a diagnosis citing unread source", async () => {
@@ -506,26 +510,29 @@ describe("read-only code investigator", () => {
   });
 });
 
-it('preserves only a read-verified draft as partial if coverage review exceeds tokens',async()=>{
+it('preserves only references with validation-incomplete metadata if the audit exceeds tokens',async()=>{
  const source=new CodeSource(process.cwd(),'a'.repeat(40));
  const read=await source.read('shared/room-availability.ts',1,10);
  const report={summary:'El código inspeccionado define la comparación de fechas.',certainty:'sustentado_en_codigo',cause:'Comparación inspeccionada',proposal:'Cambiar',proposedTests:[],questions:[],dataRepair:'Modificar datos',limitations:[],evidence:[{path:read.path,start:read.start,end:read.end,explanation:'Comparación'}]};
  let round=0;
- const client={chat:{completions:{create:async()=>round++===0 ? {usage:{total_tokens:1000,prompt_tokens:500},choices:[{message:{role:'assistant',content:JSON.stringify(report)}}]} : {usage:{total_tokens:100000},choices:[]}}}};
+ vi.mocked(auditDiagnosis).mockResolvedValueOnce({approved:true,issues:[],tokens:100001});
+ const client={chat:{completions:{create:async()=>{round++;return {usage:{total_tokens:1000,prompt_tokens:500},choices:[{message:{role:'assistant',content:JSON.stringify(report)}}]};}}}};
  const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(result.report.certainty).toBe('falta_informacion');
+ expect(result.report.validationStatus).toBe('incomplete');
+ expect(result.report.certainty).toBe('hipotesis');
  expect(result.report.summary).toContain('Revisión parcial');
  expect(result.report.evidence.map(({path,start,end})=>({path,start,end}))).toEqual(report.evidence.map(({path,start,end})=>({path,start,end})));
  expect(result.report.cause).toBe('');
  expect(result.report.dataRepair).toBe('');
  expect(result.report.proposal).not.toContain('Cambiar');
- expect(round).toBe(2);
+ expect(round).toBe(1);
 });
 
 it('does not mask a provider authentication failure as a partial diagnosis',async()=>{
  const source=new CodeSource(process.cwd(),'a'.repeat(40));
  const report={summary:'Revisión pendiente',certainty:'falta_informacion',cause:'',proposal:'',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]};
  let round=0;
+ vi.mocked(auditDiagnosis).mockRejectedValueOnce(Object.assign(new Error('provider authentication'),{status:401}));
  const client={chat:{completions:{create:async()=>{
   if(round++===0)return {choices:[{message:{role:'assistant',content:JSON.stringify(report)}}]};
   throw Object.assign(new Error('provider authentication'),{status:401});

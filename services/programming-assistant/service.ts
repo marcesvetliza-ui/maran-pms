@@ -1,4 +1,5 @@
 import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails } from "./errors";
+import {safeStageEvents} from "./lifecycle";
 import {dailyInvestigationLimit} from "./budget";
 import express from "express";
 import pg from "pg";
@@ -307,6 +308,7 @@ export async function createService(
             readFileCount:result.readFiles.length,
             certainty:result.report.certainty,
             partialReason:result.partialReason,
+            stages:safeStageEvents(result.stages),
           });
           ticket.report = result.report;
           ticket.reportId = randomUUID();
@@ -321,6 +323,7 @@ export async function createService(
             investigation: investigationMetrics(error),
             auditReason: auditFailureReason(error),
             auditSchemaIssues: auditSchemaFailureDetails(error),
+            stages:safeStageEvents((error as {stages?:unknown})?.stages),
           });
           ticket.status = "failed";
           ticket.lastError = failure.message;
@@ -333,6 +336,7 @@ export async function createService(
         if (
           saved.rowCount &&
           ticket.report &&
+          ticket.report.validationStatus !== "incomplete" &&
           ticket.status !== "failed" &&
           config.notification
         )

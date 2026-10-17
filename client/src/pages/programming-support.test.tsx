@@ -48,3 +48,16 @@ it('shows the cited screen and exact assertion fragments without claiming test e
  expect(screen.getByText(/24: expect\(isRoomAvailableForInterval/)).toBeInTheDocument();
  expect(state.request).not.toHaveBeenCalled();
 });
+
+it('shows internal incomplete validation without asking the operator for missing facts',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'case-partial',title:'Validación pendiente',status:'validation_incomplete',version:'a'.repeat(40),
+   report:{summary:'Revisión parcial: falta completar la validación.',certainty:'hipotesis',validationStatus:'incomplete',
+     cause:'',proposal:'Completar revisión',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]},
+   actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-10-17T12:00:00Z',messages:[]}];
+ render(<ProgrammingSupport/>);
+ await user.click(screen.getByRole('button',{name:/Validación pendiente/}));
+ expect(screen.getAllByText('Validación inconclusa').length).toBeGreaterThan(0);
+ expect(screen.queryByText('Información necesaria para continuar')).not.toBeInTheDocument();
+ expect(state.request).not.toHaveBeenCalled();
+});

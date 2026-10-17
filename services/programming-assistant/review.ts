@@ -47,3 +47,32 @@ export async function buildCoverageReview(report:SupportDiagnosis,source:CodeSou
   allowedReadRanges:[...source.readRanges].map(([path,ranges])=>({path,ranges})),
  };
 }
+
+/** A bounded, source-backed handoff into drafting, not a summary invented by
+ * another model. Keep file diversity so one long handler cannot evict the
+ * client/helper/lock/test evidence. Missing ranges stay explicitly missing.
+ */
+export async function buildResearchClosure(source:CodeSource,coverageChecklist:readonly string[]=[]) {
+ const consulted=[...source.readRanges].map(([path,ranges])=>({path,ranges:[...ranges]}));
+ const readings:Array<{path:string;start:number;end:number;content:string;incomplete:boolean}>=[];
+ let remaining=24000,omittedRanges=0;
+ for(const entry of consulted) {
+  let fileBudget=Math.min(6000,remaining);
+  const ranges=entry.ranges.slice(-6);
+  omittedRanges+=entry.ranges.length-ranges.length;
+  for(const [start,end] of ranges){
+   if(fileBudget<200 || remaining<200){omittedRanges++;continue;}
+   const read=await source.read(entry.path,start,Math.min(end,start+159));
+   const selected:string[]=[];
+   for(const line of read.content.split("\n")){
+    if(line.length+1>Math.min(fileBudget,remaining))break;
+    selected.push(line);fileBudget-=line.length+1;remaining-=line.length+1;
+   }
+   if(!selected.length){omittedRanges++;continue;}
+   const last=Number(selected.at(-1)!.match(/^(\d+):/)?.[1] || start);
+   readings.push({...read,end:last,content:selected.join("\n"),incomplete:last<end});
+  }
+ }
+ return {coverageChecklist,readings,omittedRanges,
+  scope:"Sólo código consultado. Los rangos incompletos/omitidos no prueban el flujo completo. No se ejecutaron pruebas ni se consultaron registros operativos. Si falta evidencia central, acotar la conclusión; nunca inventarla."};
+}

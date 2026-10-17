@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
-import {buildCoverageReview,coverageReviewInstruction} from '../../services/programming-assistant/review';
+import {buildCoverageReview,buildResearchClosure,coverageReviewInstruction} from '../../services/programming-assistant/review';
 import {orientInvestigation} from '../../services/programming-assistant/navigation';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
 
@@ -36,4 +36,17 @@ it('does not expand a full history or claim that a capped citation was fully aud
  const review=await buildCoverageReview(draft,source);
  expect(review.citedCode.reduce((sum,read)=>sum+read.content.length,0)).toBeLessThanOrEqual(16000);
  expect(review.omittedCitations>0 || review.citedCode.some(read=>read.incomplete)).toBe(true);
+});
+
+it('hands source-backed bounded evidence to drafting without replaying the research transcript',async()=>{
+ const source=new CodeSource(process.cwd(),'a'.repeat(40));
+ await source.read('server/billing/routes.ts',1660,1700);
+ await source.read('client/src/lib/prefactura-submission.ts',1,80);
+ await source.read('server/tests/folio-invoice-concurrency.test.ts',219,238);
+ const closure=await buildResearchClosure(source,['Distinguir factura de cobro']);
+ expect(closure.readings.reduce((sum,read)=>sum+read.content.length,0)).toBeLessThanOrEqual(24000);
+ expect(closure.readings.some(read=>read.path.includes('prefactura-submission'))).toBe(true);
+ expect(closure.readings.every(read=>source.validates(read))).toBe(true);
+ expect(closure.coverageChecklist).toEqual(['Distinguir factura de cobro']);
+ expect(closure.scope).toContain('No se ejecutaron pruebas');
 });

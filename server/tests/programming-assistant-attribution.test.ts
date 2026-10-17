@@ -1,6 +1,6 @@
 // These protocol tests isolate the earlier stages. Semantic review has its own
 // tests with explicit reject/approve responses and independent request checks.
-vi.mock('../../services/programming-assistant/semantic-audit',()=>({auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
+vi.mock('../../services/programming-assistant/semantic-audit',async(importOriginal)=>({...await importOriginal<typeof import("../../services/programming-assistant/semantic-audit")>(),auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
 import {it,expect,vi} from 'vitest';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -64,6 +64,7 @@ it('feeds the direct throw to correction and then accepts a corrected, reviewed 
   return {choices:[{message:{role:'assistant',content:JSON.stringify(current===0?wrong:corrected)}}]};
  }}}};
  const result=await diagnose({version:s.version} as SupportTicket,s,{apiKey:'unused',model:'mock'},client as any);
- expect(requests).toBe(3);expect(result.report.cause).toBe(corrected.cause);
+ expect(requests).toBe(2);expect(result.report.cause).toBe(corrected.cause);
+ expect(result.semanticAudits).toBe(1);
  expect(result.report.certainty).toBe('sustentado_en_codigo');
 });
