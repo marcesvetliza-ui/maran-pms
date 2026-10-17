@@ -43,3 +43,10 @@ it('explains a failed independent coherence review without exposing model conten
  expect(diagnosisFailure({code:'evidence_audit_invalid',message:'private provider output'})).toMatchObject({code:'diagnosis_audit'});
  expect(JSON.stringify(diagnosisFailure({code:'evidence_semantic_rejected',message:'private provider output'}))).not.toContain('private provider output');
 });
+
+it('only logs allowlisted audit reasons, never arbitrary reviewer text',async()=>{
+ const {auditFailureReason}=await import('../../services/programming-assistant/errors');
+ expect(auditFailureReason({auditReason:'output_limit'})).toBe('output_limit');
+ expect(auditFailureReason({auditReason:'private reviewer content'})).toBeUndefined();
+ expect(auditFailureReason(null)).toBeUndefined();
+});

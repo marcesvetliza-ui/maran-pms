@@ -104,3 +104,9 @@ export function investigationMetrics(error: unknown) {
   if ([data.rounds, data.calls, data.tokens].some(value => typeof value !== "number" || !Number.isFinite(value) || value < 0)) return undefined;
   return { rounds: data.rounds, calls: data.calls, tokens: data.tokens, phase: data.phase };
 }
+
+/** Fixed reason labels only: never log the reviewer text or source payload. */
+export function auditFailureReason(error: unknown) {
+  const reason = (error as {auditReason?:unknown} | null)?.auditReason;
+  return typeof reason === "string" && ["output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch"].includes(reason) ? reason : undefined;
+}

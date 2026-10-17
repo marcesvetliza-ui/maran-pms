@@ -1,4 +1,4 @@
-import { diagnosisFailure, investigationMetrics } from "./errors";
+import { diagnosisFailure, investigationMetrics, auditFailureReason } from "./errors";
 import {dailyInvestigationLimit} from "./budget";
 import express from "express";
 import pg from "pg";
@@ -318,6 +318,7 @@ export async function createService(
             code: failure.code,
             model: config.model,
             investigation: investigationMetrics(error),
+            auditReason: auditFailureReason(error),
           });
           ticket.status = "failed";
           ticket.lastError = failure.message;

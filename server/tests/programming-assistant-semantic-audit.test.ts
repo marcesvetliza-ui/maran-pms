@@ -77,3 +77,18 @@ it('never converts an audit authentication failure into an approved or partial d
  }}}};
  await expect(diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({status:401});
 });
+it.each([
+ ['output_limit',{choices:[{finish_reason:'length',message:{content:'incomplete private text'}}]}],
+ ['refusal',{choices:[{message:{refusal:'private refusal'}}]}],
+ ['invalid_json',{choices:[{message:{content:'not json private text'}}]}],
+ ['invalid_schema',{choices:[{message:{content:'{}'}}]}],
+ ['inconsistent_verdict',response({approved:false,issues:[]})],
+ ['quote_mismatch',response({...rejection,issues:[{...rejection.issues[0],quote:'nonexistent private text'}]})],
+])('records the bounded audit failure reason %s without reviewer content',async(reason,result)=>{
+ const source=await setup();
+ const client={chat:{completions:{create:async(request:any)=>{
+  expect(request.max_completion_tokens).toBe(3200);
+  return {...result,usage:{total_tokens:500}};
+ }}}};
+ await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:reason,auditTokens:500,message:'No se pudo verificar la evidencia en la auditoría de coherencia.'});
+});

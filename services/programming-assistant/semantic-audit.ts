@@ -22,20 +22,26 @@ export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosi
  const {citedCode,operationalTestsConsulted,interfaceScope}=await buildCoverageReview(report,source);
  const payload=JSON.stringify({case:investigationCase(ticket),diagnosis:report,evidence:{citedCode,operationalTestsConsulted,interfaceScope},capabilities:{codeInspectionOnly:true,testsExecuted:false,operationalDatabaseAccess:false}});
  // Conservative preflight. No request is made if its reserved cost cannot fit.
- const estimate=Math.ceil((payload.length+auditInstruction.length)/2)+4000+1600;
+ const estimate=Math.ceil((payload.length+auditInstruction.length)/2)+4000+3200;
  if(estimate>options.remainingTokens)throw Object.assign(new Error('No queda presupuesto para verificar la coherencia del diagnóstico.'),{code:'audit_budget'});
  let tokens=0;
+ let auditReason="invalid_json";
  try {
-  const response=await client.chat.completions.create({model:options.model,messages:[{role:'system',content:auditInstruction},{role:'user',content:payload}],max_completion_tokens:1600,response_format:{type:'json_schema',json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema}}},{signal:options.signal});
+  const response=await client.chat.completions.create({model:options.model,messages:[{role:'system',content:auditInstruction},{role:'user',content:payload}],max_completion_tokens:3200,response_format:{type:'json_schema',json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema}}},{signal:options.signal});
   tokens=response.usage?.total_tokens || 0;
-  if(response.choices[0]?.finish_reason==='length')throw new Error('Auditoría incompleta');
-  const verdict=verdictSchema.parse(JSON.parse(response.choices[0]?.message?.content || '{}'));
+  if(response.choices[0]?.finish_reason==='length'){auditReason='output_limit';throw new Error('Auditoría incompleta');}
+  if(response.choices[0]?.message?.refusal){auditReason='refusal';throw new Error('Auditoría rechazada');}
+  const parsed=JSON.parse(response.choices[0]?.message?.content || '{}');
+  auditReason='invalid_schema';
+  const verdict=verdictSchema.parse(parsed);
+  auditReason='inconsistent_verdict';
   if(verdict.approved!== (verdict.issues.length===0))throw new Error('Veredicto contradictorio');
+  auditReason='quote_mismatch';
   for(const issue of verdict.issues)if(!fieldText(report,issue.field).includes(issue.quote))throw new Error('La observación no cita el texto revisado');
   return {...verdict,tokens};
  }catch(error){
   // Provider failures remain provider failures; do not turn them into approval.
   if(error && typeof error==='object' && ('status' in error || ['APIConnectionError','APIConnectionTimeoutError','AbortError','TimeoutError'].includes((error as Error).name)))throw Object.assign(error,{auditTokens:tokens});
-  throw Object.assign(new Error('No se pudo verificar la evidencia en la auditoría de coherencia.'),{code:'evidence_audit_invalid',auditTokens:tokens});
+  throw Object.assign(new Error('No se pudo verificar la evidencia en la auditoría de coherencia.'),{code:'evidence_audit_invalid',auditTokens:tokens,auditReason});
  }
 }

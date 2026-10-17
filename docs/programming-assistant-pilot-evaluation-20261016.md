@@ -337,3 +337,20 @@ y rechazo controladas. **No se consultó al modelo real en estas pruebas.**
 La revisión semántica sigue siendo probabilística y puede equivocarse. Esto
 verifica que el sistema exige y respeta su veredicto; no demuestra que el modelo
 real detectará toda contradicción. Falta repetir el caso en el piloto actualizado.
+
+### Fallo real de la auditoría: diagnóstico insuficiente del propio servicio
+
+El intento del modelo `gpt-4.1-mini` terminó con `diagnosis_audit`, 5 rondas,
+9 consultas de código y 73.879 tokens. Ese código indica respuesta inválida o
+incompleta del revisor, no rechazo semántico del informe. El log anterior no
+permite distinguir truncamiento, JSON, esquema, contradicción del veredicto o
+cita inexistente: no se atribuye una causa concreta sin esa evidencia.
+
+Se amplió la salida máxima del revisor de 1.600 a 3.200 tokens, contabilizada en
+el preflight del presupuesto total existente. Las cuatro observaciones posibles
+incluyen citas y explicaciones; el margen anterior podía truncarlas. No se
+eliminan controles ni se publica una respuesta sin aprobar. El servicio registra
+ahora `auditReason` con seis etiquetas permitidas, sin texto del modelo ni código
+consultado. Regresiones simuladas cubren cada etiqueta y el límite de salida;
+queda pendiente repetir el caso con el modelo real tras desplegar ambos servicios
+en la misma revisión.
