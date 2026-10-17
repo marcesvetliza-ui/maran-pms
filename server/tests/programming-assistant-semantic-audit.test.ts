@@ -115,3 +115,22 @@ it('completes final validation on compact evidence after an expensive research p
  expect(result.partialReason).toBeUndefined();
  expect(result.tokens).toBe(70500);expect(writer).toBe(2);expect(audits).toBe(1);
 });
+it('sends the same string limits to OpenAI that the local validator enforces',async()=>{
+ const source=await setup();const draft=report();draft.summary='x'.repeat(800);
+ const client={chat:{completions:{create:async(request:any)=>{
+  const properties=request.response_format.json_schema.schema.properties.issues.items.properties;
+  expect(properties.quote).toMatchObject({minLength:1,maxLength:800});
+  expect(properties.problem).toMatchObject({minLength:1,maxLength:600});
+  expect(properties.correction).toMatchObject({minLength:1,maxLength:600});
+  return response({approved:false,issues:[{field:'summary',quote:draft.summary,problem:'p'.repeat(600),correction:'c'.repeat(600)}]});
+ }}}};
+ const result=await auditDiagnosis(ticket,draft,source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000});
+ expect(result.approved).toBe(false);expect(result.issues).toHaveLength(1);
+});
+it.each(['quote','problem','correction'] as const)('rejects oversized %s without silently shortening or approving it',async field=>{
+ const source=await setup();const issue={...rejection.issues[0],[field]:'private text '.repeat(100)};
+ const client={chat:{completions:{create:async()=>response({approved:false,issues:[issue]})}}};
+ await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({
+  code:'evidence_audit_invalid',auditReason:'invalid_schema',auditSchemaIssues:[{path:`issues.item.${field}`,code:'too_big'}],
+ });
+});

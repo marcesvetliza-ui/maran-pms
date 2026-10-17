@@ -50,3 +50,12 @@ it('only logs allowlisted audit reasons, never arbitrary reviewer text',async()=
  expect(auditFailureReason({auditReason:'private reviewer content'})).toBeUndefined();
  expect(auditFailureReason(null)).toBeUndefined();
 });
+it('logs only schema paths and validation codes, without rejected values',async()=>{
+ const {auditSchemaFailureDetails}=await import('../../services/programming-assistant/errors');
+ expect(auditSchemaFailureDetails({auditSchemaIssues:[
+  {path:'issues.item.quote',code:'too_big',value:'private text'},
+  {path:'secret',code:'too_big'},
+  {path:'issues',code:'private text'},
+ ]})).toEqual([{path:'issues.item.quote',code:'too_big'}]);
+ expect(auditSchemaFailureDetails(null)).toBeUndefined();
+});

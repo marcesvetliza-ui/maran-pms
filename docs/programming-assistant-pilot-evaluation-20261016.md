@@ -377,3 +377,20 @@ consumidos: el contexto de revisión conserva caso y evidencia, y termina con
 aprobación independiente dentro del presupuesto (70.500 tokens simulados).
 124 pruebas aprobadas, TypeScript y compilación del servicio correctos. Esto
 verifica el protocolo y el manejo del presupuesto, no la calidad del modelo real.
+
+### Auditoría inválida por esquema
+
+El nuevo intento real falló con `auditReason: invalid_schema`, a los 52.913
+tokens (5 rondas, 8 consultas). Se detectó una divergencia comprobable del
+contrato: el esquema JSON enviado al proveedor no limitaba los strings, mientras
+Zod exigía quote de 1–800 caracteres y problem/correction de 1–600. Un resultado
+válido para el proveedor podía ser rechazado localmente. El log de ese intento
+no identifica el campo, por lo que no se afirma que una longitud específica lo
+haya provocado.
+
+Se igualaron esos límites en el esquema enviado y las instrucciones. No se
+recortan ni aceptan respuestas inválidas. Los errores de esquema registran sólo
+hasta cuatro rutas/códigos permitidos (por ejemplo issues.item.quote/too_big),
+sin valores ni texto del modelo. Las regresiones verifican el contrato enviado,
+aceptación en los límites, rechazo por exceso y sanitización del log. La batería
+suma 129 pruebas aprobadas; no incluye una llamada real a OpenAI.

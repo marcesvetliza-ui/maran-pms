@@ -110,3 +110,11 @@ export function auditFailureReason(error: unknown) {
   const reason = (error as {auditReason?:unknown} | null)?.auditReason;
   return typeof reason === "string" && ["output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch"].includes(reason) ? reason : undefined;
 }
+
+export function auditSchemaFailureDetails(error: unknown) {
+  const issues=(error as {auditSchemaIssues?:unknown} | null)?.auditSchemaIssues;
+  if(!Array.isArray(issues))return undefined;
+  const allowedPaths=/^(approved|issues)(\.item)?(\.(field|quote|problem|correction))?$/;
+  const allowedCodes=["too_small","too_big","invalid_type","invalid_value","invalid_enum_value","unrecognized_keys"];
+  return issues.slice(0,4).filter(issue=>issue && typeof issue.path==='string' && allowedPaths.test(issue.path) && allowedCodes.includes(issue.code)).map(({path,code})=>({path,code}));
+}
