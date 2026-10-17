@@ -394,3 +394,27 @@ hasta cuatro rutas/códigos permitidos (por ejemplo issues.item.quote/too_big),
 sin valores ni texto del modelo. Las regresiones verifican el contrato enviado,
 aceptación en los límites, rechazo por exceso y sanitización del log. La batería
 suma 129 pruebas aprobadas; no incluye una llamada real a OpenAI.
+
+### Corte previo a la auditoría con 67.097 tokens
+
+El usuario informó otro cierre parcial con 67.097 tokens, 13 consultas y cero
+auditorías intentadas. El bloque pegado no incluye `partialReason`, por lo que
+no prueba qué rama produjo esa salida. Sí se reprodujo el corte por reserva de
+cierre usando ese consumo, las cinco referencias de la respuesta y un informe
+extenso válido: el guard anterior devolvía referencias neutrales sin siquiera
+intentar una auditoría que cabía en el saldo disponible.
+
+Ahora la reserva de otra pasada del autor no impide usar el presupuesto para
+revisar directamente el borrador que ya pasó procedencia, atribución, citas y
+coherencia determinista. Se usa el mismo finalizador auditado que en el camino
+normal. La auditoría recibe también el checklist del caso y criterios de alcance,
+pruebas y preguntas operativas. No obtiene herramientas ni acceso operativo.
+Su preflight conserva el límite total y puede rechazar la solicitud si no cabe.
+Si rechaza el informe, la corrección se prepara con un contexto nuevo y acotado;
+si no cabe esa corrección más su revisión, se conserva la salida neutral. Nunca
+se publica por el solo hecho de no tener presupuesto.
+
+Dos regresiones usan 67.097 tokens simulados y las cinco citas: aprobación termina
+con 68.597 y una auditoría; rechazo conserva el informe neutral sin publicar la
+recomendación. 131 pruebas aprobadas, TypeScript y bundle del servicio correctos.
+No se llamó al modelo real: sigue pendiente evaluar su respuesta en el demo.

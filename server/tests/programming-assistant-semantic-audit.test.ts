@@ -134,3 +134,45 @@ it.each(['quote','problem','correction'] as const)('rejects oversized %s without
   code:'evidence_audit_invalid',auditReason:'invalid_schema',auditSchemaIssues:[{path:`issues.item.${field}`,code:'too_big'}],
  });
 });
+it.each([true,false])('audits a provenance-checked draft directly when another author pass cannot fit (approved=%s)',async approved=>{
+ const source=await setup();
+ const refs=[
+  ['server/billing/routes.ts',1664,1684],
+  ['server/billing/invoiceAdvisoryLock.ts',9,21],
+  ['server/tests/folio-invoice-concurrency.test.ts',219,238],
+  ['client/src/lib/prefactura-submission.ts',61,69],
+  ['client/src/components/PrefacturaDialog.tsx',1673,1698],
+ ] as const;
+ for(const [path,start,end] of refs)await source.read(path,start,end);
+ const draft=report('Consultar comprobantes y Caja para conocer los cobros reales.');
+ // A verbose but schema-valid report plus the actual five cited ranges makes
+ // the old writer+review reservation exceed 100k at the reported 67,097 tokens.
+ draft.summary='Descripción del código inspeccionado. '.repeat(75);
+ draft.cause='El servidor valida el saldo facturable. '.repeat(120);
+ draft.proposal='Consultar el estado persistido antes de operar. '.repeat(100);
+ draft.evidence=refs.map(([path,start,end])=>({path,start,end,explanation:'Fragmento de código consultado para este diagnóstico. '.repeat(20)}));
+ let writer=0,audits=0;
+ const client={chat:{completions:{create:async(request:any)=>{
+  if(request.response_format.json_schema.name==='maran_diagnosis_audit'){
+   audits++;
+   const payload=JSON.parse(request.messages[1].content);
+   expect(payload.diagnosis).toEqual(draft);
+   expect(payload.evidence.coverageChecklist.length).toBeGreaterThan(0);
+   expect(payload.evidence.citedCode).toHaveLength(5);
+   expect(request.tools).toBeUndefined();
+   return response(approved?{approved:true,issues:[]}:{approved:false,issues:[{field:'proposal',quote:'Consultar el estado persistido antes de operar.',problem:'Falta acotar la conclusión.',correction:'Explicar lo desconocido.'}]},1500);
+  }
+  writer++;expect(writer).toBe(1);
+  return {...response(draft,67097),usage:{total_tokens:67097,prompt_tokens:22000}};
+ }}}};
+ const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
+ expect(writer).toBe(1);expect(audits).toBe(1);expect(result.tokens).toBe(68597);
+ if(approved){
+  expect(result.report.proposal).toBe(draft.proposal);
+  expect(result.partialReason).toBeUndefined();
+ }else{
+  expect(result.partialReason).toBe('closure_budget');
+  expect(result.report.proposal).not.toBe(draft.proposal);
+  expect(result.report.summary).toContain('Revisión parcial');
+ }
+});
