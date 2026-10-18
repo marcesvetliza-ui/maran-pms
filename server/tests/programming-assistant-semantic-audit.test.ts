@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
-import {auditDiagnosis,diagnosisStatements} from '../../services/programming-assistant/semantic-audit';
+import {auditDiagnosis,diagnosisStatements,auditReport} from '../../services/programming-assistant/semantic-audit';
 import {diagnose} from '../../services/programming-assistant/diagnose';
 import {financialConsistencyIssues} from '../../services/programming-assistant/consistency';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
@@ -18,7 +18,7 @@ it('sends the entire report to an isolated, read-only review context',async()=>{
   expect(request.messages).toHaveLength(2);expect(request.messages.map((m:any)=>m.role)).toEqual(['system','user']);
   expect(request.tools).toBeUndefined();
   const payload=JSON.parse(request.messages[1].content);
-  expect(payload.diagnosis).toEqual(diagnosisStatements(report()));
+  expect(payload.diagnosis).toEqual(auditReport(report()));
   expect(payload.capabilities).toMatchObject({testsExecuted:false,operationalDatabaseAccess:false});
   expect(payload.evidence.citedCode[0].content).toContain('saldo suficiente para facturar');
   return response(rejection);
@@ -157,7 +157,7 @@ it.each([true,false])('does not start an audit without a reserve for correction 
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){
    audits++;
    const payload=JSON.parse(request.messages[1].content);
-   expect(payload.diagnosis).toEqual(diagnosisStatements(draft));
+    expect(payload.diagnosis).toEqual(auditReport(draft));
    expect(payload.evidence.coverageChecklist.length).toBeGreaterThan(0);
    expect(payload.evidence.citedCode).toHaveLength(5);
    expect(request.tools).toBeUndefined();

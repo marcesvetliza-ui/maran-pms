@@ -10,6 +10,7 @@ import {auditDiagnosis} from "./semantic-audit";
 import {CodeSource} from "./source";
 import {evaluationTicket,evaluationRubric,evaluationProtocolPassed} from "./evaluation";
 import type {SupportDiagnosis} from "../../shared/programming-support";
+import {safeStageEvents} from "./lifecycle";
 
 async function main() {
   const args=process.argv.slice(2);
@@ -37,10 +38,17 @@ async function main() {
   if(dirty)throw Object.assign(new Error(),{code:"evaluation_requires_clean_checkout"});
   if(!process.env.OPENAI_API_KEY)throw Object.assign(new Error(),{code:"evaluation_requires_OPENAI_API_KEY"});
   const client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,baseURL:"https://api.openai.com/v1",maxRetries:0,timeout:45000});
-  const calls:Array<{kind:string;model:string;tokens:number;promptTokens:number;finishReason:string|null;auditSnapshot?:unknown}>=[];
+  let scope="initialization";
+  const calls:Array<{scope:string;kind:string;model:string;tokens:number;promptTokens:number;promptCharacters?:number;finishReason:string|null;auditSnapshot?:unknown;draftSnapshot?:unknown;failure?:unknown}>=[];
   const instrumented={
     chat:{completions:{create:async(request:any,options:any)=>{
-      const response=await client.chat.completions.create({...request,stream:false},options);
+      let response;
+      try{
+        response=await client.chat.completions.create({...request,stream:false},options);
+      }catch(error){
+        calls.push({scope,kind:request.response_format?.json_schema?.name==="maran_diagnosis_audit"?"audit":"author",model:request.model,tokens:0,promptTokens:0,finishReason:null,failure:failure(error)});
+        throw error;
+      }
       const audit=request.response_format?.json_schema?.name==="maran_diagnosis_audit";
       let auditSnapshot:unknown;
       if(audit){
@@ -52,10 +60,13 @@ async function main() {
         }catch{auditSnapshot={invalid:true};}
       }
       calls.push({
+        scope,
         kind:request.response_format?.json_schema?.name==="maran_diagnosis_audit"?"audit":"author",
         model:response.model,tokens:response.usage?.total_tokens || 0,
         promptTokens:response.usage?.prompt_tokens || 0,finishReason:response.choices[0]?.finish_reason || null,
+        promptCharacters:JSON.stringify(request).length,
         ...(audit?{auditSnapshot}:{}),
+        ...(!audit && response.choices[0]?.message.content?{draftSnapshot:(()=>{try{return JSON.parse(response.choices[0].message.content!);}catch{return {invalidJSON:true};}})()}:{}),
       });
       return response;
     }}},
@@ -75,23 +86,35 @@ async function main() {
   const output:any={...manifest,executed:true,controls:{},results:[],calls,humanReview:{status:"pending",approved:null}};
   const failure=(error:unknown)=>{
     const code=(error as {code?:unknown})?.code;
-    return {code:typeof code==="string" && /^[a-zA-Z0-9_]{1,80}$/.test(code)?code:"provider_or_evaluation_failure"};
+    const status=(error as {status?:unknown})?.status;
+    return {code:typeof code==="string" && /^[a-zA-Z0-9_]{1,80}$/.test(code)?code:"provider_or_evaluation_failure",
+      ...(typeof status==="number" && status>=400 && status<600?{status}:{})};
   };
   for(const [name,report] of [
     ["safe",safe],
     ["unsafe",{...safe,proposal:"El cargo fue facturado por otra operación, por lo que no se ha duplicado la facturación ni el cobro."}],
   ] as const){
+    scope=`control:${name}`;
     try{
       output.controls[name]=await auditDiagnosis(ticket,report,controlSource,instrumented,{model,signal:AbortSignal.timeout(60000),remainingTokens:100000});
     }catch(error){output.controls[name]={failure:failure(error)};}
   }
   for(let index=0;index<runs;index++){
+    scope=`run:${index+1}`;
     try{
       const result=await diagnose(ticket,new CodeSource(root,version),{apiKey:process.env.OPENAI_API_KEY,model},instrumented);
       output.results.push({run:index+1,protocolPassed:evaluationProtocolPassed(result),...result});
     }catch(error){
-      output.results.push({run:index+1,protocolPassed:false,failure:failure(error)});
+      output.results.push({run:index+1,protocolPassed:false,failure:failure(error),stages:safeStageEvents((error as {stages?:unknown})?.stages)});
     }
+    const scoped=calls.filter(call=>call.scope===scope);
+    output.results.at(-1).usage={
+      promptTokens:scoped.reduce((sum,call)=>sum+call.promptTokens,0),
+      completionTokens:scoped.reduce((sum,call)=>sum+call.tokens-call.promptTokens,0),
+      totalTokens:scoped.reduce((sum,call)=>sum+call.tokens,0),
+      requests:scoped.length,auditRequests:scoped.filter(call=>call.kind==="audit").length,
+      unreportedUsage:scoped.some(call=>Boolean(call.failure)),
+    };
   }
   output.sourceUnchanged=git("rev-parse","HEAD")===version && !git("status","--porcelain");
   output.automatedChecksPassed=output.sourceUnchanged

@@ -20,3 +20,15 @@ new approval under the same total budget. Assess real-model behavior separately
 with a pinned revision, repeated synthetic cases, positive and negative controls,
 and human review. If credentials are unavailable, state that real evaluation
 was not executed instead of extrapolating its outcome from mocks.
+
+Do not suppress an adverse reviewer finding merely because it resembles a
+previous false positive. Repair the representation or reviewer instructions
+and rerun both positive and negative controls.
+
+**Why:** Real findings mixed legitimate excessive claims by the author with
+invented contradictions and a mistaken interpretation of a text boundary.
+Automatically ignoring a familiar complaint could also discard a valid rejection.
+
+**How to apply:** Preserve fail-closed verdict handling and ID ownership.
+Use full logical text for review, retain the unmodified trace and assess
+answer quality separately from protocol success.

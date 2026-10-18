@@ -24,6 +24,23 @@ export function requestCost(request: unknown, outputTokens: number) {
   return Math.ceil(JSON.stringify(request).length / 2) + 512 + outputTokens;
 }
 
+/** Per-case calibration from provider prompt usage, never completion usage.
+ * Source/Spanish JSON was overestimated by >2x in the real evaluation. Retain
+ * a /3 floor, 25% margin over the largest measured density, and fixed overhead.
+ * This remains an estimate: actual usage checks and fail-closed caps still apply.
+ */
+export class RequestBudget {
+  private largestDensity=0;
+  observe(request:unknown,promptTokens:unknown) {
+    if(typeof promptTokens!=="number" || !Number.isFinite(promptTokens) || promptTokens<=0)return;
+    this.largestDensity=Math.max(this.largestDensity,promptTokens/JSON.stringify(request).length);
+  }
+  estimate(request:unknown,outputTokens:number) {
+    const density=this.largestDensity ? Math.max(1/3,this.largestDensity*1.25) : 1/2;
+    return Math.ceil(JSON.stringify(request).length*density)+512+outputTokens;
+  }
+}
+
 export function fits(tokens: number, ...costs: number[]) {
   return tokens + costs.reduce((sum, cost) => sum + cost, 0) <= CASE_TOKENS;
 }
@@ -31,8 +48,8 @@ export function fits(tokens: number, ...costs: number[]) {
 /** A correction can change its length; keep output-sized headroom for re-audit.
  * This is a reservation, never authorization to skip the second audit.
  */
-export function correctionCycleCost(correctionRequest: unknown, auditCost: number) {
-  return requestCost(correctionRequest, AUTHOR_OUTPUT) + auditCost + AUTHOR_OUTPUT;
+export function correctionCycleCost(correctionRequest: unknown, auditCost: number,estimate=requestCost) {
+  return estimate(correctionRequest, AUTHOR_OUTPUT) + auditCost + AUTHOR_OUTPUT;
 }
 
 export class StageTelemetry {
