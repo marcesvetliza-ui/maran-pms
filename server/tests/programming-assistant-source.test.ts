@@ -147,7 +147,8 @@ describe("read-only code investigator", () => {
     let round=0;
     const client={chat:{completions:{create:async(request:any)=>{
       if(round++===0)return {choices:[{message:{role:"assistant",content:null,tool_calls:Array.from({length:28},(_,i)=>({id:`budget-${i}`,type:"function",function:{name:"read_code",arguments:JSON.stringify({path:"server/budget.ts",start:i+1,end:i+1})}}))}}]};
-      expect(request.tool_choice).toBe("none");
+      expect(request.tool_choice).toBeUndefined();
+      expect(request.tools).toBeUndefined();
       const toolMessages=request.messages.filter((m:any)=>m.role==="tool");
       if(round===2){
         expect(toolMessages).toHaveLength(0);
@@ -171,7 +172,8 @@ describe("read-only code investigator", () => {
     const client={chat:{completions:{create:async(request:any)=>{
       const current=round++;
       if(current===0)return {usage:{total_tokens:50000},choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"missing",type:"function",function:{name:"find_files",arguments:'{"term":"missing"}'}}]}}]};
-      expect(request.tool_choice).toBe("none");
+      expect(request.tool_choice).toBeUndefined();
+      expect(request.tools).toBeUndefined();
       return {usage:{total_tokens:1000},choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
     const result=await diagnose({version:source.version} as SupportTicket,source,{apiKey:"unused",model:"mock"},client as any);
@@ -184,7 +186,8 @@ describe("read-only code investigator", () => {
     const client={chat:{completions:{create:async(request:any)=>{
       const current=round++;
       if(current===0)return {usage:{total_tokens:36000,prompt_tokens:35000},choices:[{message:{role:"assistant",content:null,tool_calls:[{id:"missing",type:"function",function:{name:"find_files",arguments:'{"term":"missing"}'}}]}}]};
-      expect(request.tool_choice).toBe("none");
+      expect(request.tool_choice).toBeUndefined();
+      expect(request.tools).toBeUndefined();
       if(current===2)expect(JSON.stringify(request.messages)).toContain('Antes de entregar el diagnóstico');
       return {usage:{total_tokens:8000,prompt_tokens:7000},choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
     }}}};
@@ -235,7 +238,7 @@ describe("read-only code investigator", () => {
     let round=0;
     const client={chat:{completions:{create:async(request:any)=>{
       const current=round++;
-      if (current===9) expect(request.tool_choice).toBe("none");
+      if (current===9) expect(request.tools).toBeUndefined();
       if (current===10) expect(request.tool_choice).toBe("auto");
       if (current===9 || current>=11) return {choices:[{message:{role:"assistant",content:JSON.stringify(report)}}]};
       const line=current===10?2:1;

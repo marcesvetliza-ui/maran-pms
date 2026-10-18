@@ -13,6 +13,8 @@ export type StageEvent = {
   totalTokens: number;
   elapsedMs: number;
   estimatedTokens?: number;
+  reservedTokens?: number;
+  availableTokens?: number;
   issueCount?: number;
   issueStatements?: string[];
   reason?: "schema" | "provenance" | "claim" | "attribution" | "consistency" | "budget";
@@ -57,7 +59,7 @@ export class StageTelemetry {
   constructor(private readonly now = () => Date.now()) {}
   start() { return this.now(); }
   record(stage: DiagnosisStage, outcome: StageEvent["outcome"], started: number,
-    tokens: number, totalTokens: number, extra: Pick<StageEvent, "estimatedTokens" | "issueCount" | "issueStatements" | "reason"> = {}) {
+    tokens: number, totalTokens: number, extra: Pick<StageEvent, "estimatedTokens" | "reservedTokens" | "availableTokens" | "issueCount" | "issueStatements" | "reason"> = {}) {
     // Only enums and bounded numeric counters; never report/case/provider text.
     if (this.events.length < 100) this.events.push({
       stage, outcome, tokens, totalTokens, elapsedMs: Math.max(0, this.now() - started), ...extra,
@@ -75,6 +77,8 @@ export function safeStageEvents(input: unknown): StageEvent[] {
     && numeric(e.tokens) && numeric(e.totalTokens) && numeric(e.elapsedMs)).map(e=>({
     stage:e.stage,outcome:e.outcome,tokens:e.tokens,totalTokens:e.totalTokens,elapsedMs:e.elapsedMs,
     ...(numeric(e.estimatedTokens)?{estimatedTokens:e.estimatedTokens}:{}),
+     ...(numeric(e.reservedTokens)?{reservedTokens:e.reservedTokens}:{}),
+     ...(numeric(e.availableTokens)?{availableTokens:e.availableTokens}:{}),
     ...(numeric(e.issueCount)?{issueCount:e.issueCount}:{}),
     ...(Array.isArray(e.issueStatements)?{issueStatements:e.issueStatements.slice(0,4).filter((id:unknown)=>typeof id==="string" && /^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/.test(id))}:{}),
     ...(reasons.includes(e.reason)?{reason:e.reason}:{}),

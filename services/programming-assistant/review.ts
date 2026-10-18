@@ -26,20 +26,29 @@ export async function buildCoverageReview(report:SupportDiagnosis,source:CodeSou
   citedCode.push({...read,end,content:selected.join('\n'),incomplete:end<ref.end || !selected.length});
  }
  const operationalTestsConsulted=[];
+  // Reviewer receives these lines in citedCode already. Keep mocks/assertions
+  // once, rather than charging for overlapping reads in all three future calls.
+  const included=new Set(citedCode.flatMap(read=>read.content.split('\n').map(line=>`${read.path}:${line.match(/^(\d+):/)?.[1]}`)));
  let testBudget=8000;
  for(const [path,ranges] of [...source.readRanges].filter(([path])=>/(?:\/tests\/|\.test\.)/.test(path)&&!/programming-(assistant|diagnosis|support)/.test(path)).slice(0,2)) {
   for(const [start,end] of ranges.slice(0,3)){
    if(testBudget<1000)break;
    const read=await source.read(path,start,Math.min(end,start+159));
    const selected:string[]=[];
-   for(const line of read.content.split('\n')){if(line.length+1>testBudget)break;selected.push(line);testBudget-=line.length+1;}
-   if(selected.length)operationalTestsConsulted.push({...read,content:selected.join('\n'),partial:selected.length<read.content.split('\n').length,executed:false});
+    let partial=false,duplicatesInCitedCode=false;
+    for(const line of read.content.split('\n')){
+     const key=`${path}:${line.match(/^(\d+):/)?.[1]}`;
+     if(included.has(key)){duplicatesInCitedCode=true;continue;}
+     if(line.length+1>testBudget){partial=true;break;}
+     included.add(key);selected.push(line);testBudget-=line.length+1;
+    }
+    operationalTestsConsulted.push({...read,content:selected.join('\n'),partial,duplicatesInCitedCode,executed:false});
   }
  }
  return {
   coverageChecklist,
   operationalTestsConsulted,
-  testScope:'Lecturas parciales, nunca ejecución. Verificar las aserciones y los mocks. No declarar ausencia de pruebas ni proponer como nueva una aserción ya leída.',
+   testScope:'Lecturas, nunca ejecución. Las líneas no repetidas aquí ya están en citedCode o en una lectura anterior: duplicatesInCitedCode no indica truncamiento. partial=true sí indica un corte por presupuesto. Verificar aserciones y mocks en ambas secciones. No declarar ausencia de pruebas ni proponer como nueva una aserción ya leída.',
   review:'Antes de entregar el diagnóstico, revisá este borrador contra el código citado y aplicá la revisión final. Usar inspect_symbol para completar definiciones que falten y corregir preguntas y citas. Entregar el JSON definitivo.',
   citedCode,
   interfaceScope:citedScreens(report),

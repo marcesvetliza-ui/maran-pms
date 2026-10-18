@@ -1,10 +1,12 @@
 import {it,expect} from "vitest";
 import fixture from "./fixtures/assistant-real-failures.json";
+import blocked from "./fixtures/assistant-real-blocked-draft.json";
 import {CodeSource} from "../../services/programming-assistant/source";
 import {diagnose} from "../../services/programming-assistant/diagnose";
 import {auditDiagnosis,auditReport,diagnosisStatements,auditInstruction} from "../../services/programming-assistant/semantic-audit";
 import {RequestBudget,requestCost,correctionCycleCost,fits} from "../../services/programming-assistant/lifecycle";
 import {financialConsistencyIssues} from "../../services/programming-assistant/consistency";
+import {buildCoverageReview} from "../../services/programming-assistant/review";
 import type {SupportDiagnosis,SupportTicket} from "../../shared/programming-support";
 
 const version="a".repeat(40);
@@ -89,4 +91,34 @@ it("rejects the real unsupported completed-emission inference while permitting i
  expect(financialConsistencyIssues(r)).toEqual([]);
  r.proposal="El mensaje puede deberse a que otro proceso completó la factura, o a una autorización pendiente. Consultar estados y pagos.";
  expect(financialConsistencyIssues(r)).toEqual([]);
+ r.proposal="El mensaje indica capacidad utilizada por otra factura en proceso o emitida. No confirma el resultado operativo.";
+ expect(financialConsistencyIssues(r)).toEqual([]);
+});
+
+it("audits the exact archived 50,372-token draft with all its citations, without weakening the rejection/correction reserve",async()=>{
+ const source=new CodeSource(process.cwd(),version);
+ for(const ref of blocked.report.evidence)await source.read(ref.path,ref.start,ref.end);
+ let audits=0;
+ const client={chat:{completions:{create:async(req:any)=>{
+  if(req.response_format.json_schema.name==="maran_diagnosis_audit"){audits++;return response({approved:true,issues:[]});}
+  return response(blocked.report,blocked.spent,blocked.promptTokens);
+ }}}};
+ const result=await diagnose(ticket,source,{apiKey:"unused",model:"mock"},client as any);
+ expect(result.partialReason,JSON.stringify(result.stages)).toBeUndefined();
+ expect(audits).toBe(1);expect(result.report.validationStatus).toBe("complete");
+});
+
+it("does not retransmit test lines that are already in cited evidence, while retaining mock setup and partial flags",async()=>{
+ const source=new CodeSource(process.cwd(),version);
+ await source.read("server/tests/folio-invoice-concurrency.test.ts",1,80);
+ await source.read("server/tests/folio-invoice-concurrency.test.ts",219,249);
+ const r=report();r.evidence=[{path:"server/tests/folio-invoice-concurrency.test.ts",start:219,end:249,explanation:"Test con mocks, no ejecutado."}];
+ const review=await buildCoverageReview(r,source);
+ const all=review.citedCode.map(c=>c.content).join("\n");
+ const tests=review.operationalTestsConsulted;
+ expect(tests.some(test=>test.start===1 && test.content.includes("1:"))).toBe(true);
+ const duplicate=tests.find(test=>test.start===219)!;
+ expect(duplicate.content).toBe("");expect(duplicate.partial).toBe(false);
+ expect(duplicate.duplicatesInCitedCode).toBe(true);
+ expect(all).toContain("expect([first.status, second.status].sort()).toEqual([201, 409])");
 });

@@ -37,9 +37,13 @@ it.each([1680,26680])("reserves the complete reject/correct/re-audit cycle (firs
     author++;
     if(author===1)return response(draft(),40000);
     expect(author).toBe(2);
-    expect(request.tool_choice).toBe("none");
+    expect(request.tool_choice).toBeUndefined();
+    expect(request.tools).toBeUndefined();
     expect(request.messages.some((m:any)=>m.role==="tool")).toBe(false);
-    expect(JSON.parse(request.messages[1].content).semanticIssues[0].quote).toBe(unsafe);
+    const payload=JSON.parse(request.messages[1].content);
+    expect(payload.semanticIssues[0].statementId).toBe("proposal_1_1");
+    expect(payload.semanticIssues[0]).not.toHaveProperty("quote");
+    expect(payload.diagnosis.statements.find((s:any)=>s.id==="proposal_1_1").text).toBe(unsafe);
     return response(corrected,6500);
   }}}};
   const result=await diagnose(ticket,source,{apiKey:"unused",model:"mock"},client as any);

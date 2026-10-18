@@ -56,7 +56,11 @@ it('requires a corrected full report and a new passing audit, counting both call
  const client={chat:{completions:{create:async(request:any)=>{
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response(audits===1?rejection:{approved:true,issues:[]});}
   writer++;
-  if(writer===2)expect(JSON.parse(request.messages.find((m:any)=>m.role==='user').content).semanticIssues[0].quote).toBe(unsafe);
+  if(writer===2){
+   const payload=JSON.parse(request.messages.find((m:any)=>m.role==='user').content);
+   expect(payload.semanticIssues[0].statementId).toBe("proposal_1_1");
+   expect(payload.diagnosis.statements.find((s:any)=>s.id==="proposal_1_1").text).toBe(unsafe);
+  }
   return response(writer<2?report():corrected,1000);
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);

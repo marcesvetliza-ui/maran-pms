@@ -37,8 +37,19 @@ entrada observado en las solicitudes de código/español. Ahora, por caso:
   comprobando uso real y límites; si no cabe, nunca se omite la auditoría.
 - El recorrido específico de conflicto de facturación ya trae lecturas de
   servidor, estados fiscales, bloqueo, cliente, mocks y aserciones. Se limita
-  su exploración adicional a tres rondas antes del borrador, sin omitir los
+  su exploración adicional a dos rondas antes del borrador, sin omitir los
   validadores posteriores ni impedir una corrección del informe.
+
+La primera repetición del parche volvió a bloquear una corrida a 50.372 tokens
+tras una corrección determinista; esa traza no se descarta. Su borrador exacto
+está también en un fixture. Por eso se deduplican las líneas de tests ya
+presentes en las citas y en otras lecturas, y la corrección utiliza IDs sobre
+campos completos en lugar de reenviar citas de texto. Los mocks y aserciones
+siguen disponibles una vez; una omisión por presupuesto continúa marcada.
+El bloqueo de presupuesto ahora informa la reserva concreta y lo disponible.
+La redacción/corrección sin consultas no envía herramientas deshabilitadas.
+Su instrucción unificada conserva las mismas restricciones sin repetir el
+documento de navegación ni pedir herramientas que ya no puede usar.
 
 Sigue siendo un pronóstico con margen, no un tokenizer exacto ni una garantía
 del costo del proveedor. La nueva traza guarda caracteres, consumo y ámbito
