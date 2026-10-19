@@ -272,6 +272,9 @@ export type ReservationSource = "directo" | "web" | "booking" | "expedia" | "air
 
 export type HousekeepingPreparation = {roomId:string; state:'prepared'|'review'; note:string; markedAt:string; markedBy:string; previousRoomId?:string|null; movedAt?:string; movedBy?:string};
 export const reservations = pgTable("reservations", {
+  pricingScheme: text("pricing_scheme").notNull().default("legacy"),
+  pricingRevision: integer("pricing_revision").notNull().default(0),
+  nightlyPricing: jsonb("nightly_pricing").$type<import("./nightlyPricing").PricedNight[]>(),
   stayDetails: jsonb("stay_details").$type<StaySelection>(),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   housekeepingPreparation: jsonb("housekeeping_preparation").$type<HousekeepingPreparation>(),

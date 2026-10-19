@@ -48,6 +48,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool, withDatabaseTransaction } from "./db";
+import { initializeNightlyPricing, guardPricingUpdate, mayChangePricing, withReservationFinancialLock } from "./nightlyPricingGuard";
 import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
 import {
   type User, type InsertUser,
@@ -1167,6 +1168,7 @@ export class DatabaseStorage implements IStorage {
     // (voucher ya usado, vencido, etc.) — si applyGiftVoucher falla, no se
     // crea nada.
     const id = randomUUID();
+    await initializeNightlyPricing(insertData);
     const voucherId = insertData.voucherId as string | null | undefined;
     if (voucherId) {
       const amount = parseFloat((reservation as any).voucherAppliedAmount || "0");
@@ -1272,10 +1274,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
+    if (mayChangePricing(reservation)) {
+      return withReservationFinancialLock(id, () => this.updateReservationPricingLocked(id, reservation));
+    }
+    return this.updateReservationPricingLocked(id, reservation);
+  }
+
+  private async updateReservationPricingLocked(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
     return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
       await db.execute(sql`SELECT id FROM reservations WHERE id=${id} FOR UPDATE`);
       const existing = await this.getReservation(id);
       if (!existing) return undefined;
+      await guardPricingUpdate(existing, reservation);
       if (reservation.guestId && reservation.guestId !== existing.guestId) {
         reservation = { ...reservation, stayDetails: null };
         await db.delete(reservationCompanions).where(and(eq(reservationCompanions.reservationId, id), isNotNull(reservationCompanions.profileMemberId)));

@@ -1,4 +1,5 @@
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
+import { ReservationNightlyPricing, ReservationFolioSummary } from "@/components/reservation-nightly-pricing";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -833,6 +834,13 @@ export function ReservationFormDialog({
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertReservation>) => {
       if (isEditing) {
+        if (reservation.pricingScheme === "nightly_v1") {
+          if (data.checkInDate !== reservation.checkInDate || data.checkOutDate !== reservation.checkOutDate) {
+            throw new Error("Para agregar o quitar noches usá Modificar estadía desde el Folio.");
+          }
+          data = { ...data };
+          for (const key of ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountType", "discountValue", "nights", "pricingScheme", "nightlyPricing", "pricingRevision", "checkInDate", "checkOutDate", "voucherId", "voucherAppliedAmount"] as const) delete data[key];
+        }
         const res = await apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservation.id}`, data as Record<string, unknown>);
         return res.json();
       }
@@ -1051,6 +1059,7 @@ export function ReservationFormDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
+          {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Las tarifas y fechas de esta reserva se mantienen desde el Folio: Editar tarifas / Modificar estadía. Este formulario edita los demás datos.</p>}
           <div className="grid gap-4 py-4">
             <GuestSelector
               selectedGuest={selectedGuest}
@@ -1527,6 +1536,7 @@ export function ReservationFormDialog({
                     <Label htmlFor="checkIn">Fecha Check-in</Label>
                     <Input
                       id="checkIn"
+                      disabled={reservation?.pricingScheme === "nightly_v1"}
                       type="date"
                       value={formData.checkInDate}
                       onChange={(e) => handleDateChange("checkInDate", e.target.value)}
@@ -1539,6 +1549,7 @@ export function ReservationFormDialog({
                     <Label htmlFor="checkOut">Fecha Check-out</Label>
                     <Input
                       id="checkOut"
+                      disabled={reservation?.pricingScheme === "nightly_v1"}
                       type="date"
                       value={formData.checkOutDate}
                       min={formData.checkInDate ? (() => { const d = new Date(formData.checkInDate + "T12:00:00"); d.setDate(d.getDate()+1); return toArgentinaDateStr(d); })() : undefined}
@@ -1637,6 +1648,7 @@ export function ReservationFormDialog({
                 <Label htmlFor="discountValue">Valor Descuento</Label>
                 <Input
                   id="discountValue"
+                  readOnly={reservation?.pricingScheme === "nightly_v1"}
                   type="number"
                   min={0}
                   step="0.01"
@@ -1656,7 +1668,7 @@ export function ReservationFormDialog({
                     min={0}
                     step="0.01"
                     value={formData.baseRatePerNight || ""}
-                    readOnly={formData.ratePlanId !== "__special__"}
+                    readOnly={reservation?.pricingScheme === "nightly_v1" || formData.ratePlanId !== "__special__"}
                     onChange={formData.ratePlanId === "__special__" ? (e) => handleBaseRateChange(e.target.value) : undefined}
                     placeholder="0.00"
                     className={`pl-7 ${formData.ratePlanId === "__special__" ? "" : "bg-muted cursor-not-allowed"}`}
@@ -2298,7 +2310,7 @@ const GROUP_PERSONAL_EXTRAS_PAYMENT_METHODS = new Set([
 ]);
 
 export function ReservationDetailDialog({
-  reservation,
+  reservation: initialReservation,
   open,
   onOpenChange,
   onCancel,
@@ -2312,6 +2324,17 @@ export function ReservationDetailDialog({
   onEdit?: () => void;
   currentUserRole?: string;
 }) {
+  const { data: liveReservation } = useQuery<ReservationWithDetails>({
+    queryKey: ["/api/reservations", initialReservation.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/reservations/${initialReservation.id}`, { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudo actualizar la reserva.");
+      return response.json();
+    },
+    enabled: open,
+    refetchOnMount: "always",
+  });
+  const reservation = liveReservation || initialReservation;
   const { toast } = useToast();
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
@@ -3124,11 +3147,11 @@ export function ReservationDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={dialogContentRef}
-        className="w-[95vw] max-w-[680px] max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0"
+        className="reservation-wide-folio max-h-[94dvh] flex flex-col overflow-hidden p-0 gap-0"
       >
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
-            <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
+            <>{reservation.guest?.firstName} {reservation.guest?.lastName} · Habitación {reservation.room?.roomNumber}<ReservationStatusBadge status={reservation.status} /></>
           </DialogTitle>
           {(reservation as any).company && (
             <p className="text-xs text-muted-foreground">Empresa asociada: <span className="font-medium text-foreground">{(reservation as any).company.razonSocial || (reservation as any).company.nombreFantasia}</span></p>
@@ -3137,7 +3160,7 @@ export function ReservationDetailDialog({
             <p className="text-xs text-muted-foreground">Agencia asociada: <span className="font-medium text-foreground">{(reservation as any).agency.razonSocial || (reservation as any).agency.nombreFantasia}</span></p>
           )}
           <DialogDescription>
-            Detalle de la reservación
+            Reserva {reservation.reservationCode} · {formatDateAR(reservation.checkInDate)} → {formatDateAR(reservation.checkOutDate)} · {reservation.nights} noches
           </DialogDescription>
         </DialogHeader>
 
@@ -3182,7 +3205,7 @@ export function ReservationDetailDialog({
           </div>
         )}
 
-        <Tabs defaultValue="datos" className="flex min-h-0 flex-1 flex-col">
+        <Tabs defaultValue="folio" className="flex min-h-0 flex-1 flex-col">
           <TabsList className="grid shrink-0 mx-6 mt-4 grid-cols-3">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
             <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
@@ -3702,6 +3725,9 @@ export function ReservationDetailDialog({
             data-reservation-tab-scroll
             className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4"
           >
+            <div className="folio-layout">
+            <div className="folio-main">
+            <ReservationNightlyPricing reservationId={reservation.id} role={currentUserRole} onLegacyEdit={onEdit ? () => { onEdit(); onOpenChange(false); } : undefined} />
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3 border rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">Plan Tarifario</p>
@@ -3763,9 +3789,9 @@ export function ReservationDetailDialog({
               </div>
             )}
 
-            <div className="border rounded-lg">
+            <div className={`border rounded-lg ${reservation.pricingScheme === "nightly_v1" ? "hidden" : ""}`}>
               <div className="p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">Resumen de Alojamiento</h4>
+                <h4 className="font-semibold">Referencia global de alojamiento (esquema anterior)</h4>
               </div>
               <div className="p-3">
                 <div className="flex justify-between text-sm mb-2">
@@ -4874,6 +4900,9 @@ export function ReservationDetailDialog({
                 </div>
               );
             })()}
+            </div>
+            <ReservationFolioSummary lodging={subtotalRoom} consumptions={totalConsumptions + totalNdAmount} payments={totalPayments} total={totalToPay} pendingCollection={pendingCollection} pendingBilling={pendingBilling} />
+            </div>
           </TabsContent>
 
           <TabsContent
@@ -4932,7 +4961,7 @@ export function ReservationDetailDialog({
                 data-testid="button-edit-from-detail"
               >
                 <Pencil className="h-4 w-4 mr-2" />
-                Editar
+                Editar datos de reserva
               </Button>
             )}
             {reservation.status === "checked_in" && (

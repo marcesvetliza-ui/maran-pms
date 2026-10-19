@@ -68,6 +68,10 @@ async function buildAll() {
   await copyDir("server/assets", "dist/server/assets");
 
   console.log("building server...");
+  await buildServer("dist/index.cjs", "production");
+}
+
+async function buildServer(outfile: string, mode: "production" | "development") {
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
   const allDeps = [
     ...Object.keys(pkg.dependencies || {}),
@@ -80,13 +84,24 @@ async function buildAll() {
     platform: "node",
     bundle: true,
     format: "cjs",
-    outfile: "dist/index.cjs",
+    outfile,
     define: {
-      "process.env.NODE_ENV": '"production"',
+      "process.env.NODE_ENV": JSON.stringify(mode),
     },
     minify: true,
-    external: externals,
+    // The demo uses only the guarded static frontend; never bundle Vite's
+    // top-level-await development config into the CommonJS demo entry.
+    external: mode === "development" ? [...externals, "./vite"] : externals,
     logLevel: "info",
+  });
+}
+
+async function buildNightlyDemoServer() {
+  // Never overwrite the deployable production entry with local-cookie settings.
+  await buildServer("dist/nightly-demo/index.cjs", "development");
+  const { symlink } = await import("node:fs/promises");
+  await symlink("../public", "dist/nightly-demo/public", "dir").catch((error) => {
+    if (error.code !== "EEXIST") throw error;
   });
 }
 
@@ -100,7 +115,9 @@ async function generateSourceZip() {
   }
 }
 
-buildAll().then(() => generateSourceZip()).catch((err) => {
+(process.argv.includes("--nightly-demo-server")
+  ? buildNightlyDemoServer()
+  : buildAll().then(() => generateSourceZip())).catch((err) => {
   console.error(err);
   process.exit(1);
 });

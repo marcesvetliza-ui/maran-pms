@@ -2,6 +2,7 @@ import {preparationMoveWarning} from "../housekeepingPreparation";
 import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
 import { guestCountAfterCompanionChange } from "@shared/reservationGuestCount";
 import type { Express } from "express";
+import { registerNightlyPricingRoutes } from "./nightlyPricing";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
@@ -133,6 +134,7 @@ export function calculateGroupPersonalExtrasCap(input: {
 }
 
 export function registerReservationsRoutes(app: Express) {
+  registerNightlyPricingRoutes(app);
   registerGuestStayRoutes(app);
   registerManualChargeActionRoutes(app);
 
@@ -543,7 +545,7 @@ export function registerReservationsRoutes(app: Express) {
 
       // Auto-recalculate totalRoomAmount if nights change but totalRoomAmount wasn't explicitly sent
       // This fixes planning drag-and-drop which only sends roomId/checkInDate/checkOutDate/nights
-      if (req.body.nights !== undefined && req.body.totalRoomAmount === undefined) {
+      if (existing.pricingScheme !== "nightly_v1" && req.body.nights !== undefined && req.body.totalRoomAmount === undefined) {
         const newNights = Number(req.body.nights);
         const rate = parseFloat(existing.finalRatePerNight || "0");
         if (!isNaN(newNights) && newNights > 0 && rate > 0) {

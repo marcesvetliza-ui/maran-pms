@@ -129,6 +129,15 @@ export function ReservationDetailModal({
   };
 
   const saveEdit = () => {
+    if (reservation?.pricingScheme === "nightly_v1") {
+      if (editCheckIn !== reservation.checkInDate || editCheckOut !== reservation.checkOutDate ||
+          editRatePerNight !== reservation.finalRatePerNight?.toString()) {
+        toast({ title: "Usá el Folio", description: "Las noches y tarifas se modifican desde Modificar estadía / Editar tarifas, con vista previa y motivo.", variant: "destructive" });
+        return;
+      }
+      updateReservationMutation.mutate({ source: editChannel, notes: editNotes, earlyCheckIn: editEarlyCheckIn, lateCheckOut: editLateCheckOut });
+      return;
+    }
     const ci = new Date(editCheckIn + "T12:00:00");
     const co = new Date(editCheckOut + "T12:00:00");
     const nights = Math.max(1, Math.round((co.getTime() - ci.getTime()) / (1000 * 60 * 60 * 24)));
@@ -289,11 +298,11 @@ export function ReservationDetailModal({
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label className="text-xs">Check-in</Label>
-                  <Input type="date" value={editCheckIn} onChange={(e) => setEditCheckIn(e.target.value)} data-testid="input-edit-checkin" />
+                  <Input type="date" disabled={reservation?.pricingScheme === "nightly_v1"} value={editCheckIn} onChange={(e) => setEditCheckIn(e.target.value)} data-testid="input-edit-checkin" />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Check-out</Label>
-                  <Input type="date" value={editCheckOut} onChange={(e) => setEditCheckOut(e.target.value)} data-testid="input-edit-checkout" />
+                  <Input type="date" disabled={reservation?.pricingScheme === "nightly_v1"} value={editCheckOut} onChange={(e) => setEditCheckOut(e.target.value)} data-testid="input-edit-checkout" />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Canal</Label>
@@ -308,7 +317,7 @@ export function ReservationDetailModal({
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Tarifa/noche</Label>
-                  <Input type="number" min={0} step="0.01" value={editRatePerNight} onChange={(e) => setEditRatePerNight(e.target.value)} data-testid="input-edit-rate" />
+                  <Input type="number" disabled={reservation?.pricingScheme === "nightly_v1"} min={0} step="0.01" value={editRatePerNight} onChange={(e) => setEditRatePerNight(e.target.value)} data-testid="input-edit-rate" />
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -501,7 +510,7 @@ export function ReservationDetailModal({
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" onClick={() => { onEdit(reservation); onOpenChange(false); }} className="w-full sm:w-auto" data-testid="button-edit-reservation">
-                  <Pencil className="h-4 w-4 mr-2" />Editar
+                  <Pencil className="h-4 w-4 mr-2" />Editar datos de reserva
                 </Button>
               )
             )}
@@ -543,7 +552,7 @@ export function ReservationDetailModal({
               </Button>
             )}
             <Button variant="outline" onClick={() => { onOpenChange(false); onNavigate(`/reservations?view=${reservationId}`); }} className="w-full sm:w-auto" data-testid="button-view-full">
-              <ExternalLink className="h-4 w-4 mr-2" />Ver Completo
+              <ExternalLink className="h-4 w-4 mr-2" />{reservation?.pricingScheme === "nightly_v1" ? "Ver Folio · Tarifas y estadía" : "Ver Completo"}
             </Button>
           </DialogFooter>
         )}

@@ -28,6 +28,12 @@ const app = express();
 app.set("trust proxy", 1);
 const httpServer = createServer(app);
 const PORT = parseInt(process.env.PORT || "5000", 10);
+// A compiled frontend without development dependency-cache sharing. This flag
+// is deliberately restricted to the exact disposable, Unix-socket demo DB.
+const serveBuiltFrontend = process.env.NODE_ENV === "production" || (
+  process.env.NIGHTLY_DEMO_STATIC === "1" &&
+  process.env.DATABASE_URL === "postgresql://runner@/maran_nightly_folio_demo?host=%2Ftmp%2Fmaran-nightly-folio-demo%2Fsocket&port=55478"
+);
 let startupReady = false;
 
 app.get("/health", (_req, res) => {
@@ -41,7 +47,7 @@ app.use((req, res, next) => {
   return res.status(503).json({ message: "La aplicación se está iniciando" });
 });
 
-if (process.env.NODE_ENV === "production") {
+if (serveBuiltFrontend) {
   serveStaticFiles(app); // serves index.html → healthcheck returns 200
 }
 httpServer.listen({ port: PORT, host: "0.0.0.0", reusePort: true }, () => {
@@ -203,7 +209,7 @@ app.use((req, res, next) => {
 
   // ── 3. SPA catch-all / Vite dev ─────────────────────────────────────────
   //    Must come AFTER all API routes so /api/* routes are matched first.
-  if (process.env.NODE_ENV === "production") {
+  if (serveBuiltFrontend) {
     serveSpaFallback(app);
   } else {
     const { setupVite } = await import("./vite");
