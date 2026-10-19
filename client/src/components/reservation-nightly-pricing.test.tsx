@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createRef } from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useQuery } from "@tanstack/react-query";
-import { ReservationFolioSummary, ReservationNightlyPricing } from "./reservation-nightly-pricing";
+import { ReservationFolioSummary, ReservationNightlyPricing, type ReservationNightlyPricingHandle } from "./reservation-nightly-pricing";
+import { ReservationFolioHeader } from "./reservation-folio-header";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: vi.fn(),
@@ -64,11 +67,14 @@ describe("Folio con información operativa", () => {
   it("conserva la tabla y las acciones de las tarifas nocturnas reales", () => {
     data.reservation.pricingScheme = "nightly_v1";
     data.reservation.nightlyPricing = [{ date: "2026-10-20", rateCents: 18000, discountCents: 0 }];
-    render(<ReservationNightlyPricing reservationId="saved-reservation" role="reception" />);
+    const ref = createRef<ReservationNightlyPricingHandle>();
+    render(<ReservationNightlyPricing ref={ref} reservationId="saved-reservation" role="reception" />);
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Editar tarifas" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Modificar estadía" })).toBeEnabled();
     expect(screen.queryByText("Importe de la estadía")).not.toBeInTheDocument();
+    act(() => ref.current?.openStay());
+    expect(screen.getByRole("dialog", { name: "Modificar estadía" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Seleccionar noche 20/10/2026")).not.toBeChecked();
   });
 
   it("mantiene la habilitación explícita para las altas nuevas", () => {
@@ -83,5 +89,31 @@ describe("Folio con información operativa", () => {
     expect(screen.getByText("Saldo a favor")).toBeInTheDocument();
     expect(screen.getByText(/\$\s*20,00/)).toBeInTheDocument();
     expect(screen.queryByText(/Caja automáticamente|no descuentan las tarifas/i)).not.toBeInTheDocument();
+  });
+
+  it("conecta la selección de noches con el descuento real del editor", () => {
+    data.reservation.pricingScheme = "nightly_v1";
+    data.reservation.nightlyPricing = [{ date: "2026-10-20", rateCents: 18000, discountCents: 0 }];
+    render(<ReservationNightlyPricing reservationId="saved-reservation" role="reception" />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Seleccionar noche 20/10/2026" }));
+    expect(screen.getByText("1 noche seleccionada")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar descuento" }));
+    expect(screen.getByRole("combobox", { name: "Tipo de descuento" })).toHaveValue("percent");
+    expect(screen.getByRole("button", { name: "Confirmar cambios" })).toBeDisabled();
+  });
+
+  it("usa la cabecera aprobada con datos y acciones de la reserva, sin ejemplo", () => {
+    const close = vi.fn(), edit = vi.fn();
+    render(<Dialog open><DialogContent><ReservationFolioHeader
+      reservation={{ ...data.reservation, reservationCode: "RES-REAL", guest: { firstName: "Ana", lastName: "Test" }, room: { roomNumber: "205", roomType: { name: "Doble" } } }}
+      status={<span>Confirmada</span>} onClose={close} onEditStay={edit}
+    /></DialogContent></Dialog>);
+    expect(screen.getByRole("heading", { name: "Ana Test" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Habitación 205" })).toBeInTheDocument();
+    expect(screen.queryByText(/Prototipo|Datos de ejemplo|Sofía Álvarez|Restablecer ejemplo/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Modificar estadía" }));
+    expect(edit).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar detalle de reserva" }));
+    expect(close).toHaveBeenCalledOnce();
   });
 });

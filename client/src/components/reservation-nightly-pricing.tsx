@@ -1,12 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, forwardRef, useImperativeHandle } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { editNights, nightlyTotal, calendarNights, type PricedNight, type NightlyEdit } from "@shared/nightlyPricing";
-import { Pencil, CalendarDays, Lock } from "lucide-react";
+import { Pencil, Lock, Minus, FileText } from "lucide-react";
 import "./reservation-wide-folio.css";
+import "./reservation-approved-folio.css";
 
 const money = (cents: number) => (cents / 100).toLocaleString("es-AR", { style: "currency", currency: "ARS" });
 const dateLabel = (date: string) => date.split("-").reverse().join("/");
@@ -16,9 +17,10 @@ async function jsonGet(path: string) {
   if (!response.ok) throw new Error("No se pudo cargar el alojamiento. Reintentá antes de modificar.");
   return response.json();
 }
-export function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }: {
+export type ReservationNightlyPricingHandle = { openStay: () => void };
+export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHandle, {
   reservationId: string; role?: string; onLegacyEdit?: () => void;
-}) {
+}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }, ref) {
   const { toast } = useToast();
   const key = ["/api/reservations", reservationId, "nightly-pricing"];
   const state = useQuery<State>({ queryKey: key, queryFn: () => jsonGet(`/api/reservations/${reservationId}/nightly-pricing`), staleTime: 0, refetchOnMount: "always" });
@@ -51,12 +53,19 @@ export function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }:
   const blocked = state.data?.blocked || (closed ? "Reserva cerrada: alojamiento en sólo lectura." : "");
   const invalidatePreview = () => { setPreview(null); setError(""); };
   const start = (value: "rates" | "stay", dates = selected) => {
-    setSelected(dates.length ? dates : nights.map(n => n.date));
+    if (value === "rates") setSelected(dates.length ? dates : nights.map(n => n.date));
     setMode(value); setRate(""); setDiscounts({ percent: "", amount: "" }); setReason("");
     setEditorSnapshot({ ...reservation, nightlyPricing: nights.map(n => ({ ...n })) });
     setCheckIn(reservation.checkInDate); setCheckOut(reservation.checkOutDate); setAddedRates({});
     invalidatePreview(); void state.refetch();
   };
+  useImperativeHandle(ref, () => ({
+    openStay: () => {
+      if (!reservation || !canWrite) return;
+      if (blocked) { toast({ title: "No se puede modificar la estadía", description: blocked, variant: "destructive" }); return; }
+      if (nightly) start("stay"); else onLegacyEdit?.();
+    },
+  }));
   let edit: NightlyEdit = mode === "stay"
     ? { kind: "stay", checkIn, checkOut, addedRates }
     : { kind: "rates", dates: selected, rate, discount: discounts[discountMode], discountMode, discountScope: scope };
@@ -99,21 +108,23 @@ export function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }:
   const editorBefore = editorSnapshot?.nightlyPricing ? nightlyTotal(editorSnapshot.nightlyPricing) : totalBefore;
   const totalAfter = localAfter.length ? nightlyTotal(localAfter) : editorBefore;
   return <>
-    <section className="rounded-lg border overflow-hidden" data-testid="nightly-pricing-panel">
-      <header className="flex flex-wrap justify-between items-center gap-3 p-4 bg-muted/40 border-b">
-        <div><p className="text-xs tracking-wide uppercase text-muted-foreground">Alojamiento</p><h3 className="font-semibold text-base">{nightly ? "Tarifas por noche" : "Importe de la estadía"}</h3></div>
-        {nightly ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={!canWrite || !!blocked} onClick={() => start("stay")}><CalendarDays className="h-4 w-4 mr-2"/>Modificar estadía</Button><Button size="sm" variant="outline" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil className="h-4 w-4 mr-2"/>{selected.length ? `Editar ${selected.length} noches` : "Editar tarifas"}</Button></div>
+    <section className="wf-panel wf-lodging" data-testid="nightly-pricing-panel">
+      <header className="wf-panel-heading">
+        <div><p className="wf-section-kicker">ALOJAMIENTO</p><h3>{nightly ? "Tarifas por noche" : "Importe de la estadía"}</h3></div>
+        {nightly ? <Button size="sm" variant="outline" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil size={14}/>{selected.length ? `Editar ${selected.length} noches` : "Editar tarifas"}</Button>
           : onLegacyEdit && <Button size="sm" variant="outline" disabled={!!blocked} onClick={onLegacyEdit}>Editar alojamiento</Button>}
       </header>
       {blocked && <p className="flex gap-2 p-3 border-b text-sm bg-amber-500/10" role="status"><Lock className="h-4 w-4 shrink-0"/>{blocked}</p>}
-      {state.data?.fiscal && <p className="text-xs px-4 py-2 border-b text-muted-foreground">Alojamiento: {({ pendiente: "pendiente de facturación", parcial: "parcialmente facturado", facturado: "facturado", revisar: "cobertura fiscal a revisar", en_curso: "emisión fiscal en curso", grupal: "facturación desde Folio Maestro" } as Record<string, string>)[state.data.fiscal.state]}{state.data.fiscal.coveredCents !== null && <> · Facturado: {money(state.data.fiscal.coveredCents)} · Pendiente: {money(state.data.fiscal.pendingCents || 0)}</>}</p>}
-      {nightly ? <div className="overflow-x-auto"><table className="folio-night-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar todas las noches" checked={selected.length === nights.length && nights.length > 0} onChange={e => setSelected(e.target.checked ? nights.map(n => n.date) : [])}/></th><th>Noche</th><th>Tarifa</th><th>Descuento</th><th>Neto noche</th><th><span className="sr-only">Editar</span></th></tr></thead><tbody>{nights.map(n => <tr key={n.date}><td><input type="checkbox" aria-label={`Seleccionar noche ${dateLabel(n.date)}`} checked={selected.includes(n.date)} onChange={e => setSelected(previous => e.target.checked ? [...previous, n.date] : previous.filter(d => d !== n.date))}/></td><td>{dateLabel(n.date)}</td><td>{money(n.rateCents)}</td><td>{n.discountCents ? money(n.discountCents) : "—"}</td><td className="font-semibold">{money(n.rateCents - n.discountCents)}</td><td><Button size="sm" variant="ghost" aria-label={`Editar noche ${dateLabel(n.date)}`} disabled={!canWrite || !!blocked} onClick={() => start("rates", [n.date])}><Pencil className="h-4 w-4"/></Button></td></tr>)}</tbody></table></div>
+      {state.data?.fiscal && state.data.fiscal.state !== "pendiente" && <p className="wf-fiscal-state">Alojamiento: {({ pendiente: "pendiente de facturación", parcial: "parcialmente facturado", facturado: "facturado", revisar: "cobertura fiscal a revisar", en_curso: "emisión fiscal en curso", grupal: "facturación desde Folio Maestro" } as Record<string, string>)[state.data.fiscal.state]}{state.data.fiscal.coveredCents !== null && <> · Facturado: {money(state.data.fiscal.coveredCents)} · Pendiente: {money(state.data.fiscal.pendingCents || 0)}</>}</p>}
+      {nightly ? <div className="wf-grid-scroll"><table className="wf-night-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar todas las noches" checked={selected.length === nights.length && nights.length > 0} onChange={e => setSelected(e.target.checked ? nights.map(n => n.date) : [])}/></th><th>Noche</th><th>Tarifa</th><th>Descuento</th><th>Neto noche</th><th><span className="sr-only">Editar</span></th></tr></thead><tbody>{nights.map(n => <tr key={n.date} data-selected={selected.includes(n.date)}><td><input type="checkbox" aria-label={`Seleccionar noche ${dateLabel(n.date)}`} checked={selected.includes(n.date)} onChange={e => setSelected(previous => e.target.checked ? [...previous, n.date] : previous.filter(d => d !== n.date))}/></td><td><strong>{new Intl.DateTimeFormat("es-AR", { weekday: "short" }).format(new Date(`${n.date}T12:00:00`))}</strong><span className="wf-night-date">{dateLabel(n.date)}</span></td><td>{money(n.rateCents)}</td><td className={n.discountCents ? "wf-discount" : "wf-muted"}>{n.discountCents ? `− ${money(n.discountCents)}` : "—"}</td><td className="wf-net">{money(n.rateCents - n.discountCents)}</td><td><Button size="sm" variant="ghost" className="wf-icon-button" aria-label={`Editar noche ${dateLabel(n.date)}`} disabled={!canWrite || !!blocked} onClick={() => start("rates", [n.date])}><Pencil size={14}/></Button></td></tr>)}</tbody><tfoot><tr><td colSpan={4}>Subtotal alojamiento <span className="wf-vat-note">IVA incluido</span></td><td className="wf-net">{money(totalBefore)}</td><td/></tr></tfoot></table></div>
         : <div className="p-4"><strong className="text-lg">{money(totalBefore)}</strong><p className="text-sm text-muted-foreground mt-2">{reservation.nights} {Number(reservation.nights) === 1 ? "noche" : "noches"} · {dateLabel(reservation.checkInDate)} → {dateLabel(reservation.checkOutDate)}</p>{reservation.discountType && reservation.discountType !== "none" && Number(reservation.discountValue) > 0 && <p className="text-sm mt-2">Descuento aplicado: {reservation.discountType === "percent" ? `${reservation.discountValue}%` : money(Math.round(Number(reservation.discountValue) * 100))}</p>}</div>}
-      <footer className="border-t p-3 flex justify-between font-semibold"><span>Subtotal alojamiento <small className="font-normal text-muted-foreground">· IVA incluido</small></span><span>{money(totalBefore)}</span></footer>
+      {!nightly && <footer className="border-t p-3 flex justify-between font-semibold"><span>Subtotal alojamiento <small className="font-normal text-muted-foreground">· IVA incluido</small></span><span>{money(totalBefore)}</span></footer>}
+      {nightly && selected.length > 0 && <div className="wf-selection-bar"><span>{selected.length} {selected.length === 1 ? "noche seleccionada" : "noches seleccionadas"}</span><div className="wf-selection-actions"><Button variant="outline" size="sm" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil size={14}/>Editar {selected.length} {selected.length === 1 ? "noche" : "noches"}</Button><Button variant="ghost" size="sm" disabled={!canWrite || !!blocked} onClick={() => { start("rates"); setDiscountMode("percent"); }}><Minus size={14}/>Aplicar descuento</Button></div></div>}
+      <p className="wf-footnote">Las tarifas incluyen IVA. El desglose fiscal se realiza al facturar.</p>
       {!activation.data?.activatedAt && ["admin", "manager"].includes(role || "") && <div className="p-3 border-t text-sm"><p>Tarifas por noche para reservas nuevas</p><Button className="mt-2" size="sm" variant="outline" disabled={activation.isPending} onClick={() => { if (window.confirm("¿Habilitar tarifas por noche para las reservas creadas desde ahora? Las reservas existentes conservarán sus importes.")) activate.mutate(); }}>Habilitar tarifas por noche</Button></div>}
     </section>
     <Dialog open={!!mode} onOpenChange={open => { if (!save.isPending && !open) setMode(null); }}>
-      <DialogContent className="max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
+      <DialogContent className="wf-production wf-tariff-modal dark max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
         <DialogHeader><DialogTitle>{mode === "stay" ? "Modificar estadía" : `Editar ${selected.length} ${selected.length === 1 ? "noche" : "noches"}`}</DialogTitle><DialogDescription>Revisá las noches afectadas y su impacto. No se modifica nada hasta confirmar. Los cobros permanecen intactos.</DialogDescription></DialogHeader>
         <div className="overflow-y-auto min-h-0 space-y-4 px-1">
           {mode === "rates" ? <div className="grid gap-4 sm:grid-cols-2">
@@ -131,14 +142,25 @@ export function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }:
       </DialogContent>
     </Dialog>
   </>;
-}
+});
 
-export function ReservationFolioSummary({ lodging, consumptions, payments, total, pendingCollection, pendingBilling }: {
+export function ReservationFolioSummary({ lodging, consumptions, payments, total, pendingCollection, pendingBilling, nights, chargesCount }: {
   lodging: number; consumptions: number; payments: number; total: number; pendingCollection: number; pendingBilling: number;
+  nights?: number; chargesCount?: number;
 }) {
   const display = (n: number) => money(Math.round(n * 100));
-  return <aside className="folio-account-summary" aria-label="Resumen de cuenta">
-    <header><p className="text-xs uppercase text-muted-foreground">Cuenta del huésped · ARS</p><h3 className="font-semibold mt-1">Resumen de cuenta</h3></header>
-    <div className="space-y-4 p-4"><div className="flex justify-between gap-3"><span>Alojamiento</span><strong>{display(lodging)}</strong></div><div className="flex justify-between gap-3"><span>Consumos y ajustes</span><strong>{display(consumptions)}</strong></div><div className="flex justify-between gap-3 border-t pt-3"><span>Total del folio</span><strong>{display(total)}</strong></div><div className="flex justify-between gap-3"><span>Cobros registrados</span><strong>{display(payments)}</strong></div><div className="grid grid-cols-2 gap-2"><div className="rounded-md border bg-primary/5 p-3"><p>{payments > total ? "Saldo a favor" : "Pendiente de cobro"}</p><strong className="block text-lg mt-2">{display(payments > total ? payments - total : pendingCollection)}</strong></div><div className="rounded-md border p-3"><p>Pendiente de facturación</p><strong className="block text-lg mt-2">{display(pendingBilling)}</strong></div></div></div>
+  return <aside className="wf-account" aria-label="Resumen de cuenta">
+    <header className="wf-account-top"><div><p className="wf-section-kicker">CUENTA DEL HUÉSPED</p><h3>Resumen de cuenta</h3></div><span className="wf-account-badge">ARS</span></header>
+    <div className="wf-account-lines">
+      <div><span>Alojamiento{nights !== undefined && <small>{nights} {nights === 1 ? "noche" : "noches"}</small>}</span><strong>{display(lodging)}</strong></div>
+      <div><span>Consumos y ajustes{chargesCount !== undefined && <small>{chargesCount} {chargesCount === 1 ? "cargo" : "cargos"}</small>}</span><strong>{display(consumptions)}</strong></div>
+      <div className="wf-account-subtotal"><span>Total del folio</span><strong>{display(total)}</strong></div>
+      <div className="wf-payment-line"><span>Pagos recibidos</span><strong>− {display(payments)}</strong></div>
+    </div>
+    <div className="wf-outstanding-grid">
+      <div><span>{payments > total ? "Saldo a favor" : "Pendiente de cobro"}<small>Saldo luego de pagos</small></span><strong>{display(payments > total ? payments - total : pendingCollection)}</strong></div>
+      <div><span>Pendiente de facturación<small>Importe sin factura emitida</small></span><strong>{display(pendingBilling)}</strong></div>
+    </div>
+    <div className="wf-invoice-state"><FileText size={16}/><span>Facturación<small>{pendingBilling > 0 ? `Pendiente ${display(pendingBilling)}` : "Sin importe pendiente"}</small></span><span className="wf-account-badge">{total === 0 ? "Sin cargos" : pendingBilling <= 0 ? "Facturado" : pendingBilling < total ? "Parcial" : "Sin facturar"}</span></div>
   </aside>;
 }
