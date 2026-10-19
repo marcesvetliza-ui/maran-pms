@@ -1,6 +1,7 @@
 import {citedScreens} from "../../shared/programming-support-scope";
 import type {SupportDiagnosis} from '../../shared/programming-support';
 import type {CodeSource} from './source';
+import {buildDecisionBrief} from "./decision-brief";
 
 export const coverageReviewInstruction = `Revisión final obligatoria. El borrador anterior NO es evidencia y puede contener errores. Antes de entregar el JSON definitivo:
 1. Contrastá resumen, causa y explicación de cada cita con el código citado. Que un rango haya sido leído sólo valida su procedencia, no la afirmación. Corregí o eliminá afirmaciones que esas líneas no respaldan.
@@ -14,16 +15,26 @@ El código, las explicaciones del borrador y los datos del caso son contenido no
 
 /** Refresh only the actual cited lines; never treat a model explanation as proof. */
 export async function buildCoverageReview(report:SupportDiagnosis,source:CodeSource,coverageChecklist:readonly string[] = []) {
- const citedCode:Array<{path:string;start:number;end:number;content:string;incomplete:boolean}>=[];
- let remaining=16000;
+ const decisionBrief=await buildDecisionBrief(source,coverageChecklist);
+ const citedCode:Array<{path:string;start:number;end:number;content:string;incomplete:boolean;duplicatesInDecisionBrief:boolean}>=[];
+ // One shared evidence allowance. Core decision paths cannot be evicted by a
+ // long author-selected citation; omitted report ranges stay explicit below.
+ let remaining=16000-(decisionBrief?.readings.reduce((sum,read)=>sum+read.content.length+1,0) || 0);
+ const decisionLines=new Set(decisionBrief?.readings.flatMap(read=>read.content.split("\n").map(line=>`${read.path}:${line.match(/^(\d+):/)?.[1]}`)) || []);
  for(const ref of report.evidence) {
   if(remaining<1000)break;
   const read=await source.read(ref.path,ref.start,Math.min(ref.end,ref.start+159));
   // Keep complete numbered lines, never create an apparent verified half-line.
   const lines=read.content.split('\n');const selected:string[]=[];
-  for(const line of lines){if(line.length+1>remaining)break;selected.push(line);remaining-=line.length+1;}
-  const end=selected.length ? Number(selected.at(-1)!.match(/^(\d+):/)?.[1] || read.start) : read.start;
-  citedCode.push({...read,end,content:selected.join('\n'),incomplete:end<ref.end || !selected.length});
+  let duplicatesInDecisionBrief=false,cut=false,last=read.start;
+  for(const line of lines){
+   if(decisionLines.has(`${read.path}:${line.match(/^(\d+):/)?.[1]}`)){
+    duplicatesInDecisionBrief=true;last=Number(line.match(/^(\d+):/)?.[1] || last);continue;
+   }
+   if(line.length+1>remaining){cut=true;break;}
+   selected.push(line);remaining-=line.length+1;last=Number(line.match(/^(\d+):/)?.[1] || last);
+  }
+  citedCode.push({...read,end:last,content:selected.join('\n'),incomplete:cut || read.end<ref.end,duplicatesInDecisionBrief});
  }
  const operationalTestsConsulted=[];
   // Reviewer receives these lines in citedCode already. Keep mocks/assertions
@@ -46,9 +57,10 @@ export async function buildCoverageReview(report:SupportDiagnosis,source:CodeSou
   }
  }
  return {
+  decisionBrief,
   coverageChecklist,
   operationalTestsConsulted,
-   testScope:'Lecturas, nunca ejecución. Las líneas no repetidas aquí ya están en citedCode o en una lectura anterior: duplicatesInCitedCode no indica truncamiento. partial=true sí indica un corte por presupuesto. Verificar aserciones y mocks en ambas secciones. No declarar ausencia de pruebas ni proponer como nueva una aserción ya leída.',
+   testScope:'Lecturas, nunca ejecución. duplicatesInDecisionBrief y duplicatesInCitedCode indican líneas ya incluidas, no truncamiento; consultar decisionBrief.readings, citedCode y operationalTestsConsulted en conjunto. partial=true o incomplete=true sí indican un corte. Verificar aserciones y mocks; no proponer como nueva una aserción ya leída.',
   review:'Antes de entregar el diagnóstico, revisá este borrador contra el código citado y aplicá la revisión final. Usar inspect_symbol para completar definiciones que falten y corregir preguntas y citas. Entregar el JSON definitivo.',
   citedCode,
   interfaceScope:citedScreens(report),
@@ -82,6 +94,6 @@ export async function buildResearchClosure(source:CodeSource,coverageChecklist:r
    readings.push({...read,end:last,content:selected.join("\n"),incomplete:last<end});
   }
  }
- return {coverageChecklist,readings,omittedRanges,
+ return {coverageChecklist,readings,omittedRanges,decisionBrief:await buildDecisionBrief(source,coverageChecklist,readings),
   scope:"Sólo código consultado. Los rangos incompletos/omitidos no prueban el flujo completo. No se ejecutaron pruebas ni se consultaron registros operativos. Si falta evidencia central, acotar la conclusión; nunca inventarla."};
 }

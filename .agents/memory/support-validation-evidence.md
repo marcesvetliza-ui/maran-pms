@@ -32,3 +32,15 @@ Automatically ignoring a familiar complaint could also discard a valid rejection
 **How to apply:** Preserve fail-closed verdict handling and ID ownership.
 Use full logical text for review, retain the unmodified trace and assess
 answer quality separately from protocol success.
+
+Prefer a brief, source-backed operational answer over an expanding list of
+forbidden expressions. Pair actual failed reports with valid counterexamples
+when changing review behavior.
+
+**Why:** The user requires useful operator guidance without fixing false
+approvals at the cost of false rejections. A prudent consultation step does not
+need every internal implementation detail unless it makes a claim about it.
+
+**How to apply:** Review scope and necessary conditions against source evidence;
+keep both negative and positive cases. Deliver the patch and offline evidence
+for review before requesting another paid model evaluation.

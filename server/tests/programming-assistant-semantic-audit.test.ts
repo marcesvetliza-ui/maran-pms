@@ -115,7 +115,7 @@ it('completes coverage in the mandatory audit without another expensive author p
   return response(safe,5000);
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(result.report.proposal).toBe(safe.proposal);
+ expect(result.report.proposal,JSON.stringify(result.stages)).toBe(safe.proposal);
  expect(result.partialReason).toBeUndefined();
  expect(result.tokens).toBe(40500);expect(writer).toBe(1);expect(audits).toBe(1);
 });

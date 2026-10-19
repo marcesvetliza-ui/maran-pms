@@ -32,9 +32,9 @@ export async function orientInvoiceConflict(source:CodeSource) {
  return reads;
 }
 export const invoiceConflictChecklist=[
- 'Explicar capacidad facturable consumida O reservada: leer estados emitida/parcial/autorizacion_pendiente que la consumen. Un rechazo de saldo NO demuestra que otra factura terminó de emitirse. Diferenciar autorización pendiente, emisión y cobro; citar el bloqueo si se afirma serialización concurrente.',
- 'Separar factura de cobro: leer el orden de emisión y pagos en el cliente/helper. Un 409 no demuestra cuántos cobros hay en el caso real; sin registros operativos, decirlo explícitamente y proponer consulta de comprobantes y Caja sin repetir operaciones.',
- 'Revisar el catch de Prefactura y explicar qué ve el operador y qué puede verificar después del rechazo.',
- 'Buscar y leer pruebas existentes antes de recomendar crearlas. Si el test leído ya contiene Promise.all, estados 201/409 y una emisión, describir esas aserciones como leídas, sin decir que se ejecutaron ni que prueban Caja real. Revisar mocks y distinguir HTTP simulado de PostgreSQL real.',
- 'No extender la conclusión a Grupos, SPA u otros circuitos no necesarios. No presentar paymentId como requisito si el caso no lo informó.',
+ 'Capacidad por importe y estados fiscales: contrastar decisionBrief; citar el lock si se afirma serialización.',
+ 'Separar factura de cobro: contrastar orden emisión/pagos; sin registros operativos, consultar comprobantes y Caja sin repetir operaciones.',
+ 'Catch de Prefactura: explicar mensaje, descarte condicionado e identidad según las ramas leídas.',
+ 'Tests: identificar mocks y aserciones ya existentes, leídos pero no ejecutados; proponer sólo comprobaciones adicionales útiles.',
+ 'Alcance: reserva e interfaz identificadas; responder la consulta sin extender a otros circuitos ni pedir datos técnicos investigables.',
 ];
