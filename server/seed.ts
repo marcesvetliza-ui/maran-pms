@@ -528,7 +528,7 @@ export async function seedDatabase() {
     { id: "crc1", area: "reception", areaLabel: "Recepción", shiftsPerDay: 3, isActive: true },
     { id: "crc2", area: "restaurant", areaLabel: "Restaurante", shiftsPerDay: 2, isActive: true },
     { id: "crc3", area: "spa", areaLabel: "SPA", shiftsPerDay: 1, isActive: true },
-    { id: "crc4", area: "events", areaLabel: "Eventos", shiftsPerDay: 1, isActive: true },
+    { id: "crc4", area: "events", areaLabel: "Eventos", shiftsPerDay: 1, isActive: false },
   ]).onConflictDoNothing();
 
   console.log("Database seeded successfully!");

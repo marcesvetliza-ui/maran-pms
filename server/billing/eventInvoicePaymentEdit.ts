@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
-import { storage } from "../db-storage";
 
 const CASH_METHODS = new Set(["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago"]);
 const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
@@ -61,7 +60,7 @@ export async function editEventInvoiceCashMethod(invoiceId: number, newMethod: s
   }
 
   const registered = await db.execute(sql`
-    SELECT id, shift_id FROM cash_movements
+    SELECT id, shift_id, area FROM cash_movements
     WHERE source_type = 'event' AND source_id = ${eventId} AND anulado = false
   `);
   if (registered.rows.length !== 1) {
@@ -93,7 +92,10 @@ export async function editEventInvoiceCashMethod(invoiceId: number, newMethod: s
 
   const amount = Number(payment.amount);
   const label = `${invoice.tipo_comprobante}-${String(invoice.punto_venta).padStart(4, "0")}-${String(invoice.numero).padStart(8, "0")}`;
-  const shift = await storage.getOrCreateActiveTurno("events");
+  // A historical reclassification stays on its original drawer. Never create
+  // a new Events shift or move it to Reception/Administration implicitly.
+  if (!cashRow.shift_id) throw invalid("El cobro no tiene un turno de caja de origen verificable.");
+  const shift = { id: cashRow.shift_id };
 
   return db.transaction(async (tx) => {
     const locked = await tx.execute(sql`SELECT id FROM sales_invoices WHERE id = ${invoiceId} AND estado IN ('emitida','parcial') FOR UPDATE`);
@@ -116,7 +118,7 @@ export async function editEventInvoiceCashMethod(invoiceId: number, newMethod: s
     `);
     await tx.execute(sql`INSERT INTO cash_movements
       (id, shift_id, area, source_type, source_id, source_label, payment_method, amount, movement_type, registered_by, receipt_type, receipt_number)
-      VALUES (${randomUUID()}, ${shift.id}, 'events', 'event', ${eventId}, ${label}, ${newMethod}, ${amount.toFixed(2)},
+      VALUES (${randomUUID()}, ${shift.id}, ${cashRow.area}, 'event', ${eventId}, ${label}, ${newMethod}, ${amount.toFixed(2)},
         'income', ${operator}, ${invoice.tipo_comprobante}, nextval('cash_movements_receipt_number_seq'::regclass)::text)`);
 
     await tx.execute(sql`

@@ -399,13 +399,6 @@ export default function EventsPage() {
     queryKey: ["/api/agencies"],
   });
 
-  const { data: eventsShift } = useQuery<{ id: string; openedBy: string | null; status: string } | null>({
-    queryKey: ["/api/cash/shifts/current", "events"],
-    queryFn: () => fetch("/api/cash/shifts/current?area=events").then(r => r.json()),
-    refetchInterval: 30000,
-  });
-  const eventsShiftActive = !!(eventsShift && eventsShift.openedBy && eventsShift.status === "open");
-
   // Invoice data for invoiced events that emitted an AFIP factura
   const { data: eventInvoice } = useQuery<any>({
     queryKey: ["/api/billing/invoices", selectedEvent?.invoiceId],
@@ -2054,18 +2047,11 @@ export default function EventsPage() {
               </TabsContent>
 
               <TabsContent value="charges" className="space-y-4">
-                {!eventsShiftActive && (
-                  <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                    <span className="text-base">⚠️</span>
-                    <span>No hay un turno de caja activo para Eventos. Tomá el turno en Caja — Eventos antes de cargar cargos.</span>
-                  </div>
-                )}
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium">Cargos del Evento</h4>
                   {selectedEvent.status !== "invoiced" && selectedEvent.status !== "cancelled" && (
                     <Button
                       size="sm"
-                      disabled={!eventsShiftActive}
                       onClick={() => {
                         chargeForm.reset();
                         setIsChargeEditable(false);
@@ -3047,15 +3033,7 @@ export default function EventsPage() {
                   )}
                 </div>
 
-                {selectedTable.status === "open" && !eventsShiftActive && (
-                  <div className="mt-3 pt-3 border-t">
-                    <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                      <span className="text-base">⚠️</span>
-                      <span>Sin turno activo — tomá el turno en Caja — Eventos para agregar cargos.</span>
-                    </div>
-                  </div>
-                )}
-                {selectedTable.status === "open" && eventsShiftActive && (
+                {selectedTable.status === "open" && (
                   <div className="mt-3 pt-3 border-t space-y-2">
                     <p className="text-sm font-medium">Agregar Cargo</p>
                     <Select onValueChange={(val) => {

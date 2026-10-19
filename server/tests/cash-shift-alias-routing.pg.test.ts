@@ -78,18 +78,6 @@ runPostgresTests("PostgreSQL: cash shift alias routing", () => {
       newerArea: "reception",
       queryAreas: ["reception", "recepcion"],
     },
-    {
-      label: "eventos first, events newer",
-      firstArea: "eventos",
-      newerArea: "events",
-      queryAreas: ["eventos", "events"],
-    },
-    {
-      label: "events first, eventos newer",
-      firstArea: "events",
-      newerArea: "eventos",
-      queryAreas: ["eventos", "events"],
-    },
   ])("finds the newest open shift regardless of alias ($label)", async ({
     firstArea,
     newerArea,
@@ -107,6 +95,30 @@ runPostgresTests("PostgreSQL: cash shift alias routing", () => {
       }
     } finally {
       await removeFixtures([firstId, newerId]);
+    }
+  });
+
+  it.each(["events", "eventos"])("retires %s without changing history or routing money elsewhere", async area => {
+    const id = randomUUID();
+    try {
+      await insertShift(id, area, "NOW() + INTERVAL '1 minute'");
+      await testPool!.query("UPDATE cash_shifts SET auto_creado = true WHERE id = $1", [id]);
+      const before = (await testPool!.query("SELECT * FROM cash_shifts WHERE id = $1", [id])).rows;
+      expect(await storage.getCurrentShift(area)).toBeUndefined();
+      expect((await storage.getCashShifts(area)).map(row => row.id)).toContain(id);
+      expect((await storage.getCashShifts(undefined, "open")).map(row => row.id)).not.toContain(id);
+      expect((await storage.getAutocreadoShifts()).map(row => row.id)).not.toContain(id);
+      await expect(storage.getOrCreateActiveTurno(area)).rejects.toThrow(/desactivada/);
+      await expect(storage.openShift({ area, openedBy: "test" } as any)).rejects.toThrow(/desactivada/);
+      await expect(storage.tomarTurno(id, "test")).rejects.toThrow(/desactivada/);
+      await expect(storage.closeShift(id, "test", 0)).rejects.toThrow(/desactivada/);
+      const movementCount = (await testPool!.query("SELECT count(*) FROM cash_movements")).rows;
+      await expect(storage.registerCashMovement(area, "event", id, "test", "efectivo", "100")).rejects.toThrow(/desactivada/);
+      await expect(storage.createCashMovement({ area: "recepcion", shiftId: id } as any)).rejects.toThrow(/desactivada/);
+      expect((await testPool!.query("SELECT count(*) FROM cash_movements")).rows).toEqual(movementCount);
+      expect((await testPool!.query("SELECT * FROM cash_shifts WHERE id = $1", [id])).rows).toEqual(before);
+    } finally {
+      await removeFixtures([id]);
     }
   });
 

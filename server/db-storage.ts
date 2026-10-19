@@ -16,7 +16,7 @@ import {
   projectReservationOperationalReportRows,
 } from "./reservation-operational-balances";
 import { visibleGuestCondition } from "./guest-visibility";
-import { getCashShiftAreaVariants, normalizeCashShiftArea } from "./cashArea";
+import { getCashShiftAreaVariants, normalizeCashShiftArea, isEventCashArea, assertOperationalCashArea } from "./cashArea";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -7829,10 +7829,12 @@ export class DatabaseStorage implements IStorage {
   // ==================== Cash Register Module ====================
 
   async getCashConfigs(): Promise<CashRegisterConfig[]> {
-    return db.select().from(cashRegisterConfigs).orderBy(asc(cashRegisterConfigs.area));
+    const configs = await db.select().from(cashRegisterConfigs).orderBy(asc(cashRegisterConfigs.area));
+    return configs.map(config => isEventCashArea(config.area) ? { ...config, isActive: false } : config);
   }
 
   async updateCashConfig(area: string, data: Partial<InsertCashRegisterConfig>): Promise<CashRegisterConfig | undefined> {
+    if (isEventCashArea(area) || isEventCashArea(data.area)) data = { ...data, isActive: false };
     const [updated] = await db.update(cashRegisterConfigs)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(cashRegisterConfigs.area, area))
@@ -7844,12 +7846,14 @@ export class DatabaseStorage implements IStorage {
     const conditions: any[] = [];
     if (area) conditions.push(inArray(cashShifts.area, getCashShiftAreaVariants(area)));
     if (status) conditions.push(eq(cashShifts.status, status));
+    if (status === "open" && !area) conditions.push(not(inArray(cashShifts.area, getCashShiftAreaVariants("events"))));
     return db.select().from(cashShifts)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id));
   }
 
   async getCurrentShift(area: string): Promise<CashShift | undefined> {
+    if (isEventCashArea(area)) return undefined;
     const [shift] = await db.select().from(cashShifts)
       .where(and(inArray(cashShifts.area, getCashShiftAreaVariants(area)), eq(cashShifts.status, "open")))
       .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id))
@@ -7873,6 +7877,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async openShift(data: InsertCashShift): Promise<CashShift> {
+    assertOperationalCashArea(data.area);
     const existing = await this.getCurrentShift(data.area);
     if (existing) throw new Error("Ya hay un turno abierto para esta área");
     const shiftNumber = await this._nextShiftNumber(data.area);
@@ -7903,6 +7908,7 @@ export class DatabaseStorage implements IStorage {
     return db.transaction(async (tx) => {
     const [shift] = await tx.select().from(cashShifts).where(eq(cashShifts.id, shiftId)).for("update");
     if (!shift) throw new Error("Turno no encontrado");
+    assertOperationalCashArea(shift.area);
     if (shift.status !== "open") throw new Error("El turno ya está cerrado");
 
     // Update turnoTipo if provided and not already set
@@ -8023,6 +8029,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getOrCreateActiveTurno(area: string): Promise<CashShift> {
+    assertOperationalCashArea(area);
     const turnoActivo = await this.getCurrentShift(area);
 
     if (turnoActivo) return turnoActivo;
@@ -8043,6 +8050,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async initCashShifts(): Promise<void> {
+    // Retire the configuration only. Never close or rewrite historical shifts/money.
+    await db.update(cashRegisterConfigs).set({ isActive: false })
+      .where(and(inArray(cashRegisterConfigs.area, getCashShiftAreaVariants("events")), eq(cashRegisterConfigs.isActive, true)));
     const areas = ["recepcion", "restaurant", "spa"];
     for (const area of areas) {
       const existing = await this.getCurrentShift(area);
@@ -8063,6 +8073,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async tomarTurno(shiftId: string, operador: string, turnoTipo?: string | null): Promise<CashShift> {
+    const [existing] = await db.select({ area: cashShifts.area }).from(cashShifts).where(eq(cashShifts.id, shiftId));
+    if (existing) assertOperationalCashArea(existing.area);
     const setValues: Record<string, any> = { openedBy: operador, autoCreado: false };
     if (turnoTipo) setValues.turnoTipo = turnoTipo;
     const [shift] = await db.update(cashShifts)
@@ -8075,7 +8087,7 @@ export class DatabaseStorage implements IStorage {
 
   async getAutocreadoShifts(): Promise<CashShift[]> {
     return db.select().from(cashShifts)
-      .where(and(eq(cashShifts.status, "open"), eq(cashShifts.autoCreado, true)))
+      .where(and(eq(cashShifts.status, "open"), eq(cashShifts.autoCreado, true), not(inArray(cashShifts.area, getCashShiftAreaVariants("events")))))
       .orderBy(desc(cashShifts.openedAt));
   }
 
@@ -8255,6 +8267,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {
+    assertOperationalCashArea(data.area);
+    if (data.shiftId) {
+      const [shift] = await db.select({ area: cashShifts.area }).from(cashShifts).where(eq(cashShifts.id, data.shiftId));
+      if (shift) assertOperationalCashArea(shift.area);
+    }
     // Generic/manual creation is deliberately unable to link a cash movement
     // to a payment. Only registerCashMovement and transactional internal flows
     // may set paymentId.
@@ -8271,6 +8288,7 @@ export class DatabaseStorage implements IStorage {
 
   async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<CashMovement> {
     // Resolver ambos alias y conservar el área del turno elegido.
+    assertOperationalCashArea(area);
     area = normalizeCashShiftArea(area);
     for (;;) {
       const turno = await this.getOrCreateActiveTurno(area);

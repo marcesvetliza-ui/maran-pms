@@ -23,6 +23,7 @@ import { normalizeToSpanishPaymentMethod } from "../payment-method";
 import { registerArcaCredentialDiagnosticRoutes } from "./credentialDiagnosticRoutes";
 import { audit } from "../audit";
 import { storage, getArgentinaToday } from "../db-storage";
+import { isEventCashArea } from "../cashArea";
 import { assetPath } from "../utils/assetPath";
 import {
   assertGroupInvoiceAllocation,
@@ -1088,6 +1089,9 @@ export function registerBillingRoutes(app: Express) {
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      if (isEventCashArea(cashArea)) {
+        return res.status(400).json({ error: "La caja de Eventos está desactivada. Los cobros se registran en Administración o Recepción." });
+      }
       let checkoutDiscount: CheckoutDiscount | undefined;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
@@ -3353,7 +3357,7 @@ export function registerBillingRoutes(app: Express) {
           const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
           const pvArea = (pvRow.rows[0] as any)?.area || (original.group_id ? "recepcion" : "restaurant");
           const totalNC = parseFloat(String((nc as any).montoTotal || "0"));
-          if (totalNC > 0) {
+          if (totalNC > 0 && !isEventCashArea(pvArea)) {
             const nroOriginal = `${original.tipo_comprobante}-${String(original.numero).padStart(8, "0")}`;
             const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
             await storage.registerCashMovement(
@@ -3562,7 +3566,7 @@ export function registerBillingRoutes(app: Express) {
 
                 // Cash reversal for the voided payment
                 try {
-                  await storage.registerCashMovement(
+                  if (cashArea !== "event" && !isEventCashArea(cashArea)) await storage.registerCashMovement(
                     cashArea, "payment_void", movId,
                     `Anulación pago ${cashArea} ${payLabel} — ${nroNC}`,
                     mov.payment_method, String(mov.amount), "expense", operador
@@ -3925,7 +3929,7 @@ export function registerBillingRoutes(app: Express) {
         const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nd.puntoVenta} AND activo = true LIMIT 1`);
         const pvArea = (pvRow.rows[0] as any)?.area || "recepcion";
         const totalND = parseFloat(String((nd as any).montoTotal || "0"));
-        if (totalND > 0) {
+        if (totalND > 0 && !isEventCashArea(pvArea)) {
           const nroND = `${nd.tipoComprobante}-${String(nd.numero).padStart(8, "0")}`;
           await storage.registerCashMovement(
             pvArea,

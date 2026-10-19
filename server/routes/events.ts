@@ -393,16 +393,7 @@ export function registerEventsRoutes(app: Express) {
         await storage.updateEvent(req.params.eventId, { totalPaid: totalPaid.toFixed(2) } as any);
       }
 
-      try {
-        const evt = await storage.getEvent(req.params.eventId);
-        const label = `Evento ${evt?.name || req.params.eventId} - Pago ${method}`;
-        await storage.registerCashMovement(
-          "events", "event", req.params.eventId, label,
-          method, String(amount), "income"
-        );
-      } catch (e) {
-        console.error("Error registrando movimiento de caja:", e);
-      }
+      // Eventos no tiene caja propia; no replicar cobros en otro parte.
 
       // Motor financiero: escribir al folio del evento
       storage.addFolioPayment(
@@ -753,16 +744,7 @@ export function registerEventsRoutes(app: Express) {
         createdAt: new Date(),
       });
 
-      try {
-        const evt = await storage.getEvent(req.params.eventId);
-        const label = `Evento ${evt?.name || req.params.eventId} - Mesa ${table.label || table.tableNumber} - Pago ${method}`;
-        await storage.registerCashMovement(
-          "events", "event", req.params.eventId, label,
-          method, String(amount), "income"
-        );
-      } catch (e) {
-        console.error("Error registrando movimiento de caja:", e);
-      }
+      // Eventos no tiene caja propia; no replicar cobros en otro parte.
 
       res.status(201).json(payment);
     } catch (error) {
@@ -941,18 +923,7 @@ export function registerEventsRoutes(app: Express) {
 
       await storage.updateEvent(req.params.eventId, { ncId: nc.id } as any);
 
-      // Informativo en Caja de Eventos para control — emitir la NC no cobra
-      // ni devuelve plata por sí misma.
-      try {
-        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
-        const nroOriginal = `${originalInvoice.tipoComprobante}-${String(originalInvoice.numero).padStart(8, "0")}`;
-        await storage.registerCashMovement(
-          "events", "nota_credito", String(nc.id),
-          `${nroNC} s/${nroOriginal} — ${event.name}`,
-          "nc", String(parseFloat(String(nc.montoTotal || "0")).toFixed(2)), "informational",
-          (req as any).user?.fullName || (req as any).user?.username,
-        );
-      } catch (cashErr) { console.error("[NC evento] Error registrando movimiento de caja:", cashErr); }
+      // La NC modifica el comprobante/folio, sin generar una caja de Eventos.
 
       // Write void folio_movements for each payment so the folio balance
       // correctly reflects the reversal (balance goes back to non-zero).
@@ -1076,18 +1047,7 @@ export function registerEventsRoutes(app: Express) {
       // Persist NC id on the table record
       await storage.updateEventTable(req.params.tableId, { ncId: nc.id } as any);
 
-      // Informativo en Caja de Eventos para control — emitir la NC no cobra
-      // ni devuelve plata por sí misma.
-      try {
-        const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
-        const nroOriginal = `${originalInvoice.tipoComprobante}-${String(originalInvoice.numero).padStart(8, "0")}`;
-        await storage.registerCashMovement(
-          "events", "nota_credito", String(nc.id),
-          `${nroNC} s/${nroOriginal} — Mesa ${table.tableNumber}`,
-          "nc", String(parseFloat(String(nc.montoTotal || "0")).toFixed(2)), "informational",
-          (req as any).user?.fullName || (req as any).user?.username,
-        );
-      } catch (cashErr) { console.error("[NC mesa evento] Error registrando movimiento de caja:", cashErr); }
+      // La NC modifica el comprobante/folio, sin generar una caja de Eventos.
 
       // Write void folio_movements for each table payment so the folio balance
       // correctly reflects the reversal (balance goes back to non-zero).

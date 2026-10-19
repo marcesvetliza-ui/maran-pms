@@ -2529,7 +2529,7 @@ export async function registerRoutes(
       if (existing.rows && existing.rows.length > 0) {
         return res.json({ success: true, message: "Cash configs ya existen" });
       }
-      await db.execute(sql`INSERT INTO cash_register_configs (id, area, area_label, shifts_per_day, is_active) VALUES ('crc1', 'reception', 'Recepción', 3, true), ('crc2', 'restaurant', 'Restaurante', 2, true), ('crc3', 'spa', 'SPA', 1, true), ('crc4', 'events', 'Eventos', 1, true)`);
+      await db.execute(sql`INSERT INTO cash_register_configs (id, area, area_label, shifts_per_day, is_active) VALUES ('crc1', 'reception', 'Recepción', 3, true), ('crc2', 'restaurant', 'Restaurante', 2, true), ('crc3', 'spa', 'SPA', 1, true), ('crc4', 'events', 'Eventos', 1, false)`);
       res.json({ success: true, message: "Cash configs creadas correctamente" });
     } catch (error: any) {
       console.error("Error creating cash configs:", error);
@@ -3811,7 +3811,7 @@ export async function registerRoutes(
           autoCreado: cashShifts.autoCreado,
         })
         .from(cashShifts)
-        .where(eq(cashShifts.status, "open"));
+        .where(and(eq(cashShifts.status, "open"), sql`${cashShifts.area} NOT IN ('events', 'eventos')`));
 
       // 5. Habitaciones sucias
       const habitacionesSucias = await db

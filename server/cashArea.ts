@@ -26,3 +26,14 @@ export function getCashShiftAreaVariants(rawArea: string): string[] {
 export function isValidCashShiftArea(rawArea: unknown): rawArea is CashShiftArea {
   return typeof rawArea === "string" && (CASH_SHIFT_AREAS as readonly string[]).includes(normalizeCashShiftArea(rawArea));
 }
+
+/** Events is a business module, not an operating cash drawer. Keep aliases for history. */
+export function isEventCashArea(area: unknown): boolean {
+  return typeof area === "string" && normalizeCashShiftArea(area) === "events";
+}
+
+export function assertOperationalCashArea(area: unknown): void {
+  if (isEventCashArea(area)) throw Object.assign(new Error(
+    "La caja de Eventos está desactivada. Los cobros se registran en Administración o Recepción.",
+  ), { code: "EVENTS_CASH_DISABLED", statusCode: 400 });
+}

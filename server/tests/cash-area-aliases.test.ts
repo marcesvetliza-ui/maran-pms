@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertOperationalCashArea,
   getCashShiftAreaVariants,
   isValidCashShiftArea,
   normalizeCashShiftArea,
@@ -22,5 +23,15 @@ describe("cash shift area aliases", () => {
     expect(isValidCashShiftArea("eventos")).toBe(true);
     expect(isValidCashShiftArea("unknown")).toBe(false);
     expect(isValidCashShiftArea(null)).toBe(false);
+  });
+});
+
+describe("retired Events drawer", () => {
+  it.each(["events", "eventos"])("keeps %s readable but blocks new operations", area => {
+    expect(isValidCashShiftArea(area)).toBe(true);
+    expect(() => assertOperationalCashArea(area)).toThrow(/desactivada/);
+  });
+  it.each(["reception", "recepcion", "restaurant", "spa"])("keeps %s operational", area => {
+    expect(() => assertOperationalCashArea(area)).not.toThrow();
   });
 });

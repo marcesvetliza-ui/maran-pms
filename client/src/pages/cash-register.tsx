@@ -3276,6 +3276,16 @@ export default function CashRegister() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
+  useEffect(() => {
+    if (isLoading || !configs) return;
+    if (parteSeleccionado && !allActiveConfigs.some(config => config.area === parteSeleccionado)) {
+      sessionStorage.removeItem("caja_parte_activo");
+      setParteSeleccionado(null);
+      setCurrentTab(undefined);
+      if (isAdminOrManager) setMostrarSelectorParte(true);
+    }
+  }, [configs, isLoading, parteSeleccionado, isAdminOrManager]);
+
   function seleccionarParte(area: string) {
     setShiftRefreshToken((token) => token + 1);
     setParteSeleccionado(area);
