@@ -5,7 +5,8 @@ export type ReviewCase = {
   id:string;
   ticket:SupportTicket;
   report:SupportDiagnosis;
-  expected:{approved:boolean;reason:string;field?:string;quote?:string};
+  // null = qualitative review only, never a required rejection or acceptance.
+  expected:{approved:boolean|null;reason:string;field?:string;quote?:string};
 };
 const ticket=archived.case as SupportTicket;
 const evidence:SupportDiagnosis["evidence"]=[
@@ -30,7 +31,7 @@ export const reviewCases:ReviewCase[]=[
   ...archived.runs.map((run,index)=>({
     id:`real-run-${run.run}`,ticket,report:run.report as SupportDiagnosis,
     expected:[
-      {approved:false,field:"cause",quote:"hay un intento de descarte condicionado del intento de facturación por medio de hasClaim",reason:"La explicación y el consejo de reintento omiten condiciones materiales del descarte y la distinción entre rechazo definitivo y estado incierto."},
+      {approved:null,reason:"Revisión cualitativa: el texto describe un descarte condicionado y conserva la intención cuando el estado no lo permite. Las condiciones omitidas no demuestran por sí solas una falsedad material ni afirma conservación de identidad tras descarte confirmado. La frase sobre cobros automáticos es ambigua entre emisión fiscal y el flujo completo de Prefactura. Ver docs/programming-assistant-decision-review.md; no puntuar como aprobación ni rechazo obligatorios."},
       {approved:false,field:"questions",quote:"¿Se utiliza el mismo sistema de bloqueo para todos los tipos de reserva y facturación involucrados en el hotel?",reason:"Traslada investigación técnica al operador y amplía el alcance; la consulta principal puede responderse con el código."},
       {approved:false,field:"evidence",quote:"para permitir reintentos seguros manteniendo la identidad de la operación",reason:"Confunde el descarte confirmado que cambia identidad con la verificación incierta que conserva el intento; además generaliza unicidad y declara desconocida una pantalla ya identificada."},
     ][index],

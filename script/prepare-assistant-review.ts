@@ -18,6 +18,11 @@ async function main(){
   writeFileSync("generated-artifacts/assistant-review/offline-review-corpus.json",JSON.stringify({
     kind:"offline-review-corpus",revision,
     executed:false,providerCalls:0,
+    scoring:{
+      mandatoryCaseIds:reviewCases.filter(item=>item.expected.approved!==null).map(item=>item.id),
+      qualitativeCaseIds:reviewCases.filter(item=>item.expected.approved===null).map(item=>item.id),
+      rule:"approved=null excludes the case from mandatory pass/fail scoring. It is not approval and never overrides the auditor's actual verdict.",
+    },
     note:"Expected labels are review targets, not measured model verdicts. Mock tests only prove payload/protocol. No paid evaluation was run.",
     cases:output,
   },null,2)+"\n");

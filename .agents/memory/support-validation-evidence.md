@@ -44,3 +44,13 @@ need every internal implementation detail unless it makes a claim about it.
 **How to apply:** Review scope and necessary conditions against source evidence;
 keep both negative and positive cases. Deliver the patch and offline evidence
 for review before requesting another paid model evaluation.
+
+A required negative label needs an unambiguous material claim contradicted by
+source, not merely omitted implementation detail. Ambiguous original reports
+remain intact as qualitative cases, with neither compulsory approval nor rejection.
+
+**Why:** The user explicitly requires not penalizing correct brevity or changing
+a label just to make an evaluation pass.
+
+**How to apply:** Justify adjudication against exact wording and source before
+model evaluation; keep qualitative cases out of mandatory accuracy scoring.

@@ -65,11 +65,56 @@ para los tres informes y cinco ejemplos que deben aceptarse:
 
 Los controles originales seguro/inseguro no se modifican.
 
+### Adjudicación de `real-run-1`
+
+El informe original se conserva íntegro. La expectativa anterior de rechazo se
+apoyaba en una descripción incompleta de las condiciones del descarte, no en
+una afirmación falsa inequívoca. Se clasifica como **revisión cualitativa**:
+`expected.approved=null`, fuera de la puntuación obligatoria de aprobación o
+rechazo. Esto no lo convierte en un ejemplo positivo ni anula un rechazo real.
+
+Contraste realizado sobre el código de esta rama, sin modificarlo:
+
+- **Causa:** «hay un intento de descarte condicionado […] por medio de hasClaim
+  […] pero no se elimina la intención si el estado no lo permite».
+  `client/src/lib/prefactura-submission.ts:61-69` exige conjuntamente rechazo
+  400/403/409, invoiceRequest, ausencia de invoice local, creditOperationId
+  string y hasClaim=false. La frase no enumera todo, pero tampoco afirma que
+  hasClaim sea la única condición ni que se descarte incondicionalmente.
+  Exigir la enumeración completa sólo por su brevedad no demuestra un error
+  material.
+- **Identidad:** `client/src/components/PrefacturaDialog.tsx:1675-1693` cambia
+  el ID tras discarded=true y conserva el intento si falla la verificación.
+  A diferencia de real-run-3, real-run-1 no afirma que un descarte confirmado
+  conserve la identidad. Su consejo de reintento es poco preciso, pero no
+  prescribe inequívocamente una operación nueva ante un estado incierto.
+- **Cobro:** «no hace cobros automáticos con la emisión» admite dos lecturas.
+  `client/src/lib/prefactura-submission.ts:39-59` solicita primero la factura y
+  después recorre los pagos guardados. Sería incorrecto asegurar que Prefactura
+  jamás procesa pagos tras emitir; el informe no formula esa garantía explícita
+  y puede estar separando emisión fiscal de cobro. Se conserva la ambigüedad
+  como observación cualitativa, sin imponer una interpretación para rechazar.
+- **Capacidad:** `server/billing/routes.ts:1640-1684` considera estados y
+  compara importes. La referencia del informe a «misma capacidad fiscal» no
+  equivale por sí sola a prohibir documentos parciales válidos.
+
+No se identificó una contradicción material inequívoca suficiente para imponer
+el rechazo. Persisten observaciones de precisión, extensión y utilidad, que
+deben revisarse sin confundirlas con una falsedad demostrada. No se adjudica
+aprobación semántica al informe.
+
+El corpus mantiene ocho casos: **dos rechazos obligatorios**, **cinco aceptaciones
+obligatorias** y **uno cualitativo**. El export incluye grupos separados para
+evitar que el caso cualitativo se cuente como acierto, fallo o aceptación por
+coerción de `null` a booleano. Los siete casos obligatorios no se relabelan.
+
 ## Qué prueban las verificaciones sin proveedor
 
 Las pruebas verifican contenido y procedencia del paquete, caminos presentes
 aunque el autor no los cite, alcance de pantalla, deduplicación y presupuesto.
-Los casos positivos y negativos recorren el protocolo con proveedor simulado.
+Los siete casos obligatorios recorren el protocolo con proveedor simulado.
+El caso cualitativo recorre por separado aprobación y rechazo simulados para
+verificar que el protocolo no altera el veredicto ni impone una etiqueta.
 Un caso cruza informe real rechazado, reemplazo completo breve y nueva auditoría.
 La suite previa conserva los casos de presupuesto, IDs, fallo seguro y controles.
 
@@ -98,7 +143,6 @@ npx tsx script/extract-assistant-regression.ts /ruta/al/7dd993bab98b-17923491963
 ```
 
 Antes de autorizar otra tanda real, revisar el diff, los informes archivados,
-las expectativas negativas y los ejemplos válidos. En especial, la corrida 1
-contiene omisiones más sutiles que las afirmaciones materiales de las corridas
-2/3: la expectativa de corrección debe revisarse sin convertir brevedad en motivo
-automático de rechazo.
+las expectativas negativas, el caso cualitativo y los ejemplos válidos. La
+clasificación se justifica contra texto y código antes de observar un veredicto
+del modelo; no se cambia para mejorar una tasa de aprobación.

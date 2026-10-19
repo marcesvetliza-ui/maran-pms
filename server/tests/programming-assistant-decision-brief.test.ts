@@ -16,6 +16,7 @@ const response=(verdict:unknown,tokens=500)=>({
   choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(verdict)}}],
 });
 function expectedVerdict(item:typeof reviewCases[number]){
+  if(item.expected.approved===null)throw new Error("Qualitative review has no mandatory verdict.");
   if(item.expected.approved)return {approved:true,issues:[]};
   const statement=diagnosisStatements(item.report).statements.find(s=>
     s.field===item.expected.field && s.text.includes(item.expected.quote!));
@@ -30,7 +31,15 @@ it("keeps all three complete archived reports with provenance, without rewriting
   expect(createHash("sha256").update(JSON.stringify(archived.runs.map(r=>r.report))).digest("hex"))
     .toBe("71e5e4e1419ac80d03ad41013ff81dc0efaec127d31e021decf5bfb7a42aa85d");
   expect(archived.runs.every(r=>r.originalProtocolPassed)).toBe(true);
-  expect(reviewCases.slice(0,3).every(r=>!r.expected.approved)).toBe(true);
+  expect(reviewCases.slice(0,3).map(r=>r.expected.approved)).toEqual([null,false,false]);
+});
+it("keeps real-run-1 qualitative rather than silently turning it into a positive control",()=>{
+  expect(reviewCases[0].id).toBe("real-run-1");
+  expect(reviewCases[0].report).toEqual(archived.runs[0].report);
+  expect(reviewCases[0].expected.approved).toBeNull();
+  expect(()=>expectedVerdict(reviewCases[0])).toThrow("no mandatory verdict");
+  expect(reviewCases.filter(item=>item.expected.approved===true)).toHaveLength(5);
+  expect(reviewCases.filter(item=>item.expected.approved===false).map(item=>item.id)).toEqual(["real-run-2","real-run-3"]);
 });
 it("supplies source-backed decision paths even when the author omits the helper and screen",async()=>{
   const s=source(),draft=structuredClone(reviewCases[3].report);
@@ -90,7 +99,7 @@ it("shares the bounded evidence allowance without repeating core code in author 
 });
 
 describe("offline replay contracts — provider verdicts are simulated, NOT measured semantic accuracy",()=>{
-  it.each(reviewCases)("$id preserves the entire report and the expected approve/reject protocol",async item=>{
+  it.each(reviewCases.filter(item=>item.expected.approved!==null))("$id preserves the entire report and the expected approve/reject protocol",async item=>{
     const s=source();
     const verdict=expectedVerdict(item);
     const create=vi.fn(async(request:any)=>{
@@ -109,6 +118,26 @@ describe("offline replay contracts — provider verdicts are simulated, NOT meas
     expect(result.approved).toBe(item.expected.approved);
     expect(result.issues).toHaveLength(item.expected.approved?0:1);
     expect(create).toHaveBeenCalledTimes(1);
+  });
+  it.each([true,false])("real-run-1 preserves the independent verdict without a mandatory label (approved=%s)",async approved=>{
+    const item=reviewCases[0],s=source();
+    // These two verdicts test transport only, not the validity of this finding.
+    const statement=diagnosisStatements(item.report).statements.find(part=>part.field==="proposal")!;
+    const verdict=approved ? {approved:true,issues:[]} : {
+      approved:false,issues:[{statementId:statement.id,problem:"Observación simulada para verificar el protocolo.",correction:"Revisar contra el código."}],
+    };
+    const client={chat:{completions:{create:async(request:any)=>{
+      const payload=JSON.parse(request.messages[1].content);
+      expect(payload.diagnosis.statements.find((part:any)=>part.field==="cause").text).toBe(item.report.cause);
+      expect(payload.expected).toBeUndefined();
+      return response(verdict);
+    }}}};
+    const result=await auditDiagnosis(item.ticket,item.report,s,client as any,{
+      model:"offline-mock",signal:AbortSignal.timeout(30000),remainingTokens:100000,coverageChecklist:invoiceConflictChecklist,
+    });
+    expect(result.approved).toBe(approved);
+    expect(result.issues).toHaveLength(approved?0:1);
+    expect(item.expected.approved).toBeNull();
   });
   it("sends a complete concise replacement through the same evidence and an independent re-audit",async()=>{
     const bad=reviewCases[2],good=reviewCases[3],s=source();
