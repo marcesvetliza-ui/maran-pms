@@ -3789,25 +3789,11 @@ export function ReservationDetailDialog({
               </div>
             )}
 
-            <div className={`border rounded-lg ${reservation.pricingScheme === "nightly_v1" ? "hidden" : ""}`}>
+            {(earlyCharge > 0 || lateCharge > 0) && <div className="border rounded-lg">
               <div className="p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">Referencia global de alojamiento (esquema anterior)</h4>
+                <h4 className="font-semibold">Ingreso y salida fuera de horario</h4>
               </div>
               <div className="p-3">
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Tarifa por noche</span>
-                  <span>${(parseFloat(reservation.totalRoomAmount || "0") / (reservation.nights || 1)).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                {reservation.discountType !== "none" && (
-                  <div className="flex justify-between text-sm mb-2 text-muted-foreground">
-                    <span>Descuento aplicado ({reservation.discountType === "percent" ? `${reservation.discountValue}%` : `$${reservation.discountValue}`})</span>
-                    <span>—</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Cantidad de noches</span>
-                  <span>x {reservation.nights}</span>
-                </div>
                 {earlyCharge > 0 && (
                   <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
                     <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
@@ -3826,7 +3812,7 @@ export function ReservationDetailDialog({
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">* Precio incluye IVA (21%). El desglose se realiza al facturar.</p>
               </div>
-            </div>
+            </div>}
 
             <div className="border rounded-lg">
               <div className="flex items-center justify-between p-3 border-b bg-muted/50">
