@@ -1,3 +1,4 @@
+import {RecipeIngredientPicker} from "@/components/recipe-ingredient-picker";
 import { useState } from "react";
 import { RecipeIngredientUnit } from "@/components/recipe-ingredient-unit";
 import { useForm } from "react-hook-form";
@@ -427,6 +428,21 @@ export default function RecetasCostosPage() {
     const y = parseFloat(String(rec.productionYield || "0"));
     if (y <= 0) return 0;
     return baseRecipeTotalCost(rec) / y;
+  };
+
+  const ingredientRecipeOptions = ingredientRecipes.map(recipe=>({
+    id:recipe.id,name:recipe.name || "Elaboración",unit:ingredientUnit(recipe),
+    yield:String(recipe.productionYield || "0"),yieldUnit:recipe.productionUnit || ingredientUnit(recipe),cost:baseRecipeCostPerUnit(recipe),
+  }));
+  const selectIngredientRecipe = (id:string) => {
+    const recipe=ingredientRecipes.find(candidate=>candidate.id===id);
+    if(!recipe)return;
+    const cost=baseRecipeCostPerUnit(recipe);
+    setNewIngredientSubRecipeId(recipe.id);
+    setNewIngredientInventoryId("");
+    setNewIngredientName(recipe.name || "Elaboración");
+    setNewIngredientUnit(ingredientUnit(recipe));
+    setNewIngredientCost(cost>0?cost.toFixed(4):"0");
   };
 
   const ingredientStockItem = ingredientSourceType === "inventario"
@@ -1142,109 +1158,11 @@ export default function RecetasCostosPage() {
               </div>
             )}
 
-            {selectedRecipeItem && currentRecipe && currentRecipe.ingredients.length > 0 && (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Ingrediente</TableHead>
-                    <TableHead className="text-right">Cant. Neta</TableHead>
-                    <TableHead>Unidad</TableHead>
-                    <TableHead className="text-right">Merma %</TableHead>
-                    <TableHead className="text-right">Cant. Bruta</TableHead>
-                    <TableHead className="text-right">Costo Unit.</TableHead>
-                    <TableHead className="text-right">Subtotal</TableHead>
-                    <TableHead>Stock</TableHead>
-                    <TableHead className="w-10"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {currentRecipe.ingredients.map((ing) => {
-                    const merma = parseFloat(ing.merma || "0");
-                    const qty = parseFloat(ing.quantity);
-                    const grossQty = merma > 0 ? qty / (1 - merma / 100) : qty;
-                    const subtotal = ingCostWithMerma(ing);
-                    return (
-                      <TableRow key={ing.id}>
-                        <TableCell className="font-medium">{ing.ingredientName}</TableCell>
-                        <TableCell className="text-right">{ing.quantity}</TableCell>
-                        <TableCell>{ing.unit}</TableCell>
-                        <TableCell className="text-right">
-                          {merma > 0
-                            ? <span className="text-amber-600 font-medium">{merma.toFixed(1)}%</span>
-                            : <span className="text-muted-foreground">—</span>
-                          }
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground text-xs">
-                          {merma > 0 ? `${grossQty.toFixed(3)} ${ing.unit}` : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          ${parseFloat(ing.unitCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          ${subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                          {merma > 0 && (
-                            <div className="text-xs text-amber-600">+merma</div>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {ing.subRecipeId ? (
-                            <span className="text-xs text-violet-600 font-medium flex items-center gap-1">
-                              <FlaskConical className="h-3 w-3" /> Elaboración
-                            </span>
-                          ) : ing.inventoryItemId ? (
-                            <span className="text-xs text-green-600 font-medium">✓ Vinculado</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Solo costeo</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => deleteIngredientMutation.mutate(ing.id)}
-                            data-testid={`button-delete-ingredient-${ing.id}`}
-                          >
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  <TableRow className="font-bold">
-                    <TableCell colSpan={6} className="text-right">Costo Total:</TableCell>
-                    <TableCell className="text-right">
-                      ${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                    </TableCell>
-                    <TableCell></TableCell>
-                    <TableCell></TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            )}
-
-            {selectedRecipeItem && currentRecipe && !currentCostReady && <p className="rounded-md border p-3 text-sm text-muted-foreground">Costo pendiente: completá los ingredientes y sus costos para calcular el margen.</p>}
-            {selectedRecipeItem && currentRecipe && currentCostReady && (
-              <div className="flex items-center gap-4 p-3 bg-muted rounded-md text-sm">
-                <div>Costo: <strong>${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
-                <div>Precio: <strong>${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
-                <div>
-                  Margen:{" "}
-                  <strong className={parseFloat(selectedRecipeItem.price) - recipeCost >= 0 ? "text-green-600" : "text-red-600"}>
-                    ${(parseFloat(selectedRecipeItem.price) - recipeCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                    {" "}({parseFloat(selectedRecipeItem.price) > 0
-                      ? (((parseFloat(selectedRecipeItem.price) - recipeCost) / parseFloat(selectedRecipeItem.price)) * 100).toFixed(1)
-                      : 0}%)
-                  </strong>
-                </div>
-              </div>
-            )}
-
-            {selectedRecipeItem && <div className="border-t pt-4 space-y-3">
-              <Label className="block font-medium">Agregar Ingrediente</Label>
+            {selectedRecipeItem && <div className="rounded-lg border bg-muted/20 p-4 md:p-5 space-y-4">
+              <Label className="block text-base font-semibold">Agregar Ingrediente</Label>
 
               {/* Toggle: Materia Prima vs Elaboración */}
-              <div className="flex gap-1 p-1 bg-muted rounded-md w-fit">
+              <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-md w-fit">
                 <button
                   type="button"
                   className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "inventario" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
@@ -1361,45 +1279,7 @@ export default function RecetasCostosPage() {
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">{ingredientSourceType === "produccion" ? "Seleccionar preparación con stock" : "Seleccionar elaboración base"}</Label>
-                  {ingredientRecipes.length === 0 ? (
-                    <div className="border rounded-md p-4 text-sm text-muted-foreground text-center">
-                      No hay elaboraciones creadas aún. Creá una en la pestaña "Elaboraciones".
-                    </div>
-                  ) : (
-                    <div className="border rounded-md max-h-52 overflow-y-auto divide-y">
-                      {ingredientRecipes.map((br) => {
-                        const cpUnit = baseRecipeCostPerUnit(br);
-                        const isSelected = newIngredientSubRecipeId === br.id;
-                        return (
-                          <button
-                            key={br.id}
-                            type="button"
-                            className={`w-full text-left px-3 py-2 hover:bg-accent flex items-center justify-between gap-2 ${isSelected ? "bg-accent" : ""}`}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              setNewIngredientSubRecipeId(br.id);
-                              setNewIngredientInventoryId("");
-                              setNewIngredientName(br.name || "Elaboración");
-                              setNewIngredientUnit(ingredientUnit(br));
-                              setNewIngredientCost(cpUnit > 0 ? String(cpUnit.toFixed(4)) : "0");
-                            }}
-                          >
-                            <div>
-                              <span className="text-sm font-medium flex items-center gap-1">
-                                <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
-                                {br.name}
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                Rinde: {br.productionYield} {br.productionUnit} — Costo/u: ${cpUnit.toLocaleString("es-AR", { minimumFractionDigits: 4 })}
-                              </span>
-                            </div>
-                            {isSelected && <span className="text-xs text-violet-600 font-medium">✓ Seleccionado</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <RecipeIngredientPicker key={`dish-${ingredientSourceType}`} mode={ingredientSourceType} options={ingredientRecipeOptions} selectedId={newIngredientSubRecipeId} onSelect={selectIngredientRecipe}/>
                   {newIngredientSubRecipeId && (
                     <p className="text-xs text-violet-600">{ingredientSourceType === "produccion" ? "✓ Se consumirá el producto preparado, sin repetir sus materias primas" : "✓ Se consumirán los ingredientes de la elaboración al cerrar la orden"}</p>
                   )}
@@ -1408,7 +1288,7 @@ export default function RecetasCostosPage() {
 
               {newIngredientName && (
                 <div className="space-y-2">
-                  <div className="flex items-end gap-2">
+                  <div className="flex flex-wrap items-end gap-3">
                     <div className="flex-1 space-y-1">
                       <Label className="text-xs">Cantidad neta *</Label>
                       <Input
@@ -1460,7 +1340,6 @@ export default function RecetasCostosPage() {
               )}
 
               <Button
-                size="sm"
                 onClick={() => {
                   if (!currentRecipe || !newIngredientName || !newIngredientQty) return;
                   addIngredientMutation.mutate({
@@ -1482,6 +1361,106 @@ export default function RecetasCostosPage() {
                 Agregar Ingrediente
               </Button>
             </div>}
+
+            {selectedRecipeItem && <h3 className="font-semibold pt-2">Ingredientes de la receta</h3>}
+            {selectedRecipeItem && currentRecipe && currentRecipe.ingredients.length > 0 && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Ingrediente</TableHead>
+                    <TableHead className="text-right">Cant. Neta</TableHead>
+                    <TableHead>Unidad</TableHead>
+                    <TableHead className="text-right">Merma %</TableHead>
+                    <TableHead className="text-right">Cant. Bruta</TableHead>
+                    <TableHead className="text-right">Costo Unit.</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead>Stock</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {currentRecipe.ingredients.map((ing) => {
+                    const merma = parseFloat(ing.merma || "0");
+                    const qty = parseFloat(ing.quantity);
+                    const grossQty = merma > 0 ? qty / (1 - merma / 100) : qty;
+                    const subtotal = ingCostWithMerma(ing);
+                    return (
+                      <TableRow key={ing.id}>
+                        <TableCell className="font-medium">{ing.ingredientName}</TableCell>
+                        <TableCell className="text-right">{ing.quantity}</TableCell>
+                        <TableCell>{ing.unit}</TableCell>
+                        <TableCell className="text-right">
+                          {merma > 0
+                            ? <span className="text-amber-600 font-medium">{merma.toFixed(1)}%</span>
+                            : <span className="text-muted-foreground">—</span>
+                          }
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground text-xs">
+                          {merma > 0 ? `${grossQty.toFixed(3)} ${ing.unit}` : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          ${parseFloat(ing.unitCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          ${subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          {merma > 0 && (
+                            <div className="text-xs text-amber-600">+merma</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {ing.subRecipeId ? (
+                            <span className="text-xs text-violet-600 font-medium flex items-center gap-1">
+                              <FlaskConical className="h-3 w-3" /> Elaboración
+                            </span>
+                          ) : ing.inventoryItemId ? (
+                            <span className="text-xs text-green-600 font-medium">✓ Vinculado</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Solo costeo</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => deleteIngredientMutation.mutate(ing.id)}
+                            data-testid={`button-delete-ingredient-${ing.id}`}
+                          >
+                            <Trash2 className="h-3 w-3 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="font-bold">
+                    <TableCell colSpan={6} className="text-right">Costo Total:</TableCell>
+                    <TableCell className="text-right">
+                      ${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell></TableCell>
+                    <TableCell></TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            )}
+
+            {selectedRecipeItem && currentRecipe && !currentCostReady && <p className="rounded-md border p-3 text-sm text-muted-foreground">Costo pendiente: completá los ingredientes y sus costos para calcular el margen.</p>}
+            {selectedRecipeItem && currentRecipe && currentCostReady && (
+              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted rounded-md text-sm">
+                <div>Costo: <strong>${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
+                <div>Precio: <strong>${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
+                <div>
+                  Margen:{" "}
+                  <strong className={parseFloat(selectedRecipeItem.price) - recipeCost >= 0 ? "text-green-600" : "text-red-600"}>
+                    ${(parseFloat(selectedRecipeItem.price) - recipeCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    {" "}({parseFloat(selectedRecipeItem.price) > 0
+                      ? (((parseFloat(selectedRecipeItem.price) - recipeCost) / parseFloat(selectedRecipeItem.price)) * 100).toFixed(1)
+                      : 0}%)
+                  </strong>
+                </div>
+              </div>
+            )}
+
 
           </div>
 
@@ -1858,88 +1837,13 @@ export default function RecetasCostosPage() {
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-            {/* Ingredient table */}
-            {currentBaseRecipe && currentBaseRecipe.ingredients.length > 0 && (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Ingrediente</TableHead>
-                    <TableHead className="text-right">Cant. Neta</TableHead>
-                    <TableHead>Unidad</TableHead>
-                    <TableHead className="text-right">Merma %</TableHead>
-                    <TableHead className="text-right">Costo Unit.</TableHead>
-                    <TableHead className="text-right">Subtotal</TableHead>
-                    <TableHead className="w-10"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {currentBaseRecipe.ingredients.map((ing) => {
-                    const merma = parseFloat(ing.merma || "0");
-                    const subtotal = ingCostWithMerma(ing);
-                    return (
-                      <TableRow key={ing.id}>
-                        <TableCell className="font-medium">
-                          {ing.subRecipeId && <FlaskConical className="h-3 w-3 text-violet-400 inline mr-1" />}
-                          {ing.ingredientName}
-                        </TableCell>
-                        <TableCell className="text-right">{ing.quantity}</TableCell>
-                        <TableCell>{ing.unit}</TableCell>
-                        <TableCell className="text-right">
-                          {merma > 0 ? <span className="text-amber-600">{merma.toFixed(1)}%</span> : "—"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          ${parseFloat(ing.unitCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          ${subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost" size="icon" className="h-6 w-6"
-                            onClick={() => deleteIngredientMutation.mutate(ing.id)}
-                          >
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  <TableRow className="font-bold">
-                    <TableCell colSpan={5} className="text-right">Costo Total del lote:</TableCell>
-                    <TableCell className="text-right">
-                      ${baseRecipeTotalCost(currentBaseRecipe).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                    </TableCell>
-                    <TableCell />
-                  </TableRow>
-                  {currentBaseRecipe.productionYield && parseFloat(String(currentBaseRecipe.productionYield)) > 0 && (
-                    <TableRow className="text-violet-700 dark:text-violet-400">
-                      <TableCell colSpan={5} className="text-right text-sm">
-                        Costo por {currentBaseRecipe.productionUnit}:
-                      </TableCell>
-                      <TableCell className="text-right text-sm font-semibold">
-                        ${baseRecipeCostPerUnit(currentBaseRecipe).toLocaleString("es-AR", { minimumFractionDigits: 4 })}
-                      </TableCell>
-                      <TableCell />
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            )}
-
-            {currentBaseRecipe && currentBaseRecipe.ingredients.length === 0 && (
-              <div className="border-2 border-dashed rounded-md p-6 text-center text-sm text-muted-foreground">
-                <FlaskConical className="h-8 w-8 mx-auto opacity-30 mb-2" />
-                <p>Esta elaboración no tiene ingredientes aún. Agregá materias primas abajo.</p>
-              </div>
-            )}
-
             {/* Add ingredient form */}
             {currentBaseRecipe && (
-              <div className="border-t pt-4 space-y-3">
-                <Label className="block font-medium">Agregar Ingrediente a la Elaboración</Label>
+              <div className="rounded-lg border bg-muted/20 p-4 md:p-5 space-y-4">
+                <Label className="block text-base font-semibold">Agregar Ingrediente a la Elaboración</Label>
 
                 {/* Toggle */}
-                <div className="flex gap-1 p-1 bg-muted rounded-md w-fit">
+                <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-md w-fit">
                   <button
                     type="button"
                     className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "inventario" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
@@ -2024,43 +1928,14 @@ export default function RecetasCostosPage() {
                   </div>
                 ) : (
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Seleccionar otra elaboración</Label>
-                    {ingredientRecipes.filter(br => br.id !== currentBaseRecipe.id).length === 0 ? (
-                      <div className="border rounded-md p-3 text-sm text-muted-foreground text-center">
-                        No hay otras elaboraciones disponibles.
-                      </div>
-                    ) : (
-                      <div className="border rounded-md max-h-40 overflow-y-auto divide-y">
-                        {ingredientRecipes.filter(br => br.id !== currentBaseRecipe.id).map((br) => {
-                          const cpUnit = baseRecipeCostPerUnit(br);
-                          return (
-                            <button key={br.id} type="button"
-                              className={`w-full text-left px-3 py-2 hover:bg-accent flex items-center justify-between ${newIngredientSubRecipeId === br.id ? "bg-accent" : ""}`}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setNewIngredientSubRecipeId(br.id);
-                                setNewIngredientInventoryId("");
-                                setNewIngredientName(br.name || "Elaboración");
-                                setNewIngredientUnit(ingredientUnit(br));
-                                setNewIngredientCost(cpUnit > 0 ? String(cpUnit.toFixed(4)) : "0");
-                              }}
-                            >
-                              <span className="text-sm font-medium flex items-center gap-1">
-                                <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
-                                {br.name}
-                              </span>
-                              <span className="text-xs text-muted-foreground">Costo/u: ${cpUnit.toLocaleString("es-AR", { minimumFractionDigits: 4 })}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
+                    <RecipeIngredientPicker key={`base-${ingredientSourceType}`} mode={ingredientSourceType} options={ingredientRecipeOptions.filter(option=>option.id!==currentBaseRecipe.id)} selectedId={newIngredientSubRecipeId} onSelect={selectIngredientRecipe}/>
+
                   </div>
                 )}
 
                 {newIngredientName && (
                   <div className="space-y-2">
-                    <div className="flex items-end gap-2">
+                    <div className="flex flex-wrap items-end gap-3">
                       <div className="flex-1 space-y-1">
                         <Label className="text-xs">Cantidad neta *</Label>
                         <Input type="number" placeholder="Ej: 200" step="0.001"
@@ -2110,6 +1985,84 @@ export default function RecetasCostosPage() {
                 </Button>
               </div>
             )}
+
+            <h3 className="font-semibold pt-2">Ingredientes de la elaboración</h3>
+            {/* Ingredient table */}
+            {currentBaseRecipe && currentBaseRecipe.ingredients.length > 0 && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Ingrediente</TableHead>
+                    <TableHead className="text-right">Cant. Neta</TableHead>
+                    <TableHead>Unidad</TableHead>
+                    <TableHead className="text-right">Merma %</TableHead>
+                    <TableHead className="text-right">Costo Unit.</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {currentBaseRecipe.ingredients.map((ing) => {
+                    const merma = parseFloat(ing.merma || "0");
+                    const subtotal = ingCostWithMerma(ing);
+                    return (
+                      <TableRow key={ing.id}>
+                        <TableCell className="font-medium">
+                          {ing.subRecipeId && <FlaskConical className="h-3 w-3 text-violet-400 inline mr-1" />}
+                          {ing.ingredientName}
+                        </TableCell>
+                        <TableCell className="text-right">{ing.quantity}</TableCell>
+                        <TableCell>{ing.unit}</TableCell>
+                        <TableCell className="text-right">
+                          {merma > 0 ? <span className="text-amber-600">{merma.toFixed(1)}%</span> : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          ${parseFloat(ing.unitCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          ${subtotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost" size="icon" className="h-6 w-6"
+                            onClick={() => deleteIngredientMutation.mutate(ing.id)}
+                          >
+                            <Trash2 className="h-3 w-3 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="font-bold">
+                    <TableCell colSpan={5} className="text-right">Costo Total del lote:</TableCell>
+                    <TableCell className="text-right">
+                      ${baseRecipeTotalCost(currentBaseRecipe).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+                  {currentBaseRecipe.productionYield && parseFloat(String(currentBaseRecipe.productionYield)) > 0 && (
+                    <TableRow className="text-violet-700 dark:text-violet-400">
+                      <TableCell colSpan={5} className="text-right text-sm">
+                        Costo por {currentBaseRecipe.productionUnit}:
+                      </TableCell>
+                      <TableCell className="text-right text-sm font-semibold">
+                        ${baseRecipeCostPerUnit(currentBaseRecipe).toLocaleString("es-AR", { minimumFractionDigits: 4 })}
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
+
+            {currentBaseRecipe && currentBaseRecipe.ingredients.length === 0 && (
+              <div className="border-2 border-dashed rounded-md p-6 text-center text-sm text-muted-foreground">
+                <FlaskConical className="h-8 w-8 mx-auto opacity-30 mb-2" />
+                <p>Esta elaboración no tiene ingredientes aún. Agregá los ingredientes desde el formulario de arriba.</p>
+              </div>
+            )}
+
+
           </div>
 
           <DialogFooter className="shrink-0 pt-2 border-t">
