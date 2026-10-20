@@ -1,10 +1,9 @@
-# Folio nocturno: integración propuesta para el hotel
+# Folio nocturno: integración para el hotel
 
 ## Estado y alcance
 
 Preparado sobre `main` `299a8b6ca35cc7fb50a40c6b35b3c3a906d92dc6`, en
-`integrate/reservation-nightly-folio-hotel`. No constituye publicación ni activación
-para el hotel. No se accedió a datos operativos ni se emitieron comprobantes reales.
+`integrate/reservation-nightly-folio-hotel`. El usuario autorizó su integración a main y el uso automático sin activación manual. No se accedió a datos operativos ni se emitieron comprobantes reales.
 
 Se incorporan los permisos individuales de `64065c60` y `f485b953` con la herencia
 del hotel, y cambios seleccionados del demo: motor `e873c6b8`, presentación
@@ -39,25 +38,27 @@ En la revisión se corrigió la respuesta del aviso de cupo tentativo para conse
 `code=GROUP_BLOCK_WARNING`: el cliente existente necesita ese código para ofrecer
 confirmación explícita. Se agregaron pruebas sobre esa combinación.
 
-## Activación y publicación (pendientes de autorización)
+## Publicación sin activación manual
 
-La migración sólo agrega columnas con default `legacy`. Es idempotente tanto en
-SQL como en el runner incremental. No inserta
-`system_settings.reservation_nightly_activation_at`, no actualiza reservas existentes
-y no copia configuración del demo.
+El diseño nuevo aparece en todas las reservas. Las anteriores mantienen su esquema
+`legacy`, sus importes y su edición habitual (con protección fiscal); no hay backfill
+ni reconstrucción de tarifas históricas. Toda nueva alta del servidor usa
+`nightly_v1` automáticamente desde la publicación, sin depender de fecha de ingreso,
+fecha aportada por el cliente ni configuración del demo.
 
-Si se autoriza la publicación, publicar primero el commit revisado y comprobar
-migraciones, salud y herencia de permisos. La activación es una decisión separada:
-un admin/manager confirma **Habilitar tarifas por noche**. El servidor registra una
-única fecha UTC, con auditoría; una segunda confirmación no cambia esa fecha. Sólo
-altas nuevas desde ese momento usan `nightly_v1`, independientemente del ingreso.
-No hay corte automático por “mañana” ni conversión por fecha de estadía.
+Se retiraron la consulta, el botón y los endpoints de activación. La antigua clave
+`reservation_nightly_activation_at`, si existe, no condiciona altas nuevas ni necesita
+modificarse. No se copian ajustes del demo al hotel.
 
-Antes de activar, revisar si la clave ya existe en el hotel; no reemplazarla
-silenciosamente. Después, comprobar una nueva reserva autorizada y una anterior.
-No borrar la clave ni volver a software que desconoce `nightly_v1` cuando ya existen
-reservas nocturnas: cualquier suspensión de nuevas altas o reversión necesita un
-plan que mantenga su lectura y edición. Esta integración no ejecuta esa operación.
+La migración es idempotente y agrega columnas con default `legacy` para preservar
+filas existentes. La aplicación asigna el esquema nocturno al crear; no se modifica
+el default SQL para no convertir altas de versiones anteriores durante el despliegue.
+No volver a software que desconozca `nightly_v1` una vez existan reservas nocturnas:
+una reversión necesita mantener su lectura y edición.
+
+Los paquetes conservan su total exacto: si la tarifa informada es el promedio
+redondeado sin descuento, se reparten los centavos restantes entre las noches sin
+inventar un descuento ni rechazar un total legítimo.
 
 ## Validación de la combinación
 
@@ -66,8 +67,8 @@ nocturna dejó de depender de una plantilla/socket del demo: exige consentimient
 `ALLOW_DESTRUCTIVE_PG_TESTS=true`, host local y nombre de base de pruebas; crea datos
 sintéticos propios, restaura la activación y elimina sus fixtures.
 
-- 19 pruebas PostgreSQL nocturnas: middleware, permisos heredados y revocados,
-  conservación legacy con/sin activación, preview, persistencia, importe en
+- 20 pruebas PostgreSQL nocturnas: middleware, permisos heredados y revocados,
+  altas automáticas sin configuración y conservación legacy, preview, persistencia, importe en
   Prefactura, anticipo intacto, historial, conflictos, bloqueos fiscales y grupales,
   extensión y disponibilidad, aviso tentativo, rollback y carrera con emisión.
 - 9 pruebas del circuito de reservas con API y autenticación reales: idempotencia,
@@ -75,7 +76,7 @@ sintéticos propios, restaura la activación y elimina sus fixtures.
 - 7 pruebas PostgreSQL de distribución/cobros y edición de forma de pago de grupos.
 - 39 pruebas de permisos, concurrencia de facturación, alcance grupal, recuperación
   de pago de grupos y notas de crédito del Folio.
-- 31 pruebas de aritmética nocturna, componentes y submission de Prefactura.
+- 34 pruebas de aritmética nocturna, componentes y submission de Prefactura.
 - TypeScript y build del proyecto.
 - Navegador Chromium local, datos y API simulados: detalle completo a 1366×960,
   820×1180 y 390×844, cuadro dentro del viewport; selección de dos noches,
@@ -97,5 +98,5 @@ npx vitest run --config vitest.server.pg.config.ts server/tests/reservation-oper
 
 Las comprobaciones visuales usan respuestas simuladas y no acreditan un recorrido
 completo contra el hotel. No se probó ARCA real, emisión fiscal productiva ni
-notificaciones externas. La revisión final y autorización de publicación siguen
-pendientes.
+notificaciones externas. La autorización de integración a main fue recibida; el estado del despliegue debe
+comprobarse por separado.

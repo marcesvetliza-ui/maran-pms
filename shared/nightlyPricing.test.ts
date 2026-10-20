@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { buildPackagePricingPatch } from "../client/src/lib/reservation-package-pricing";
 import { allocateCents, calendarNights, editNights, initialNightlyPricing, moneyCents, nightlyTotal, type NightlyEdit } from "./nightlyPricing";
 const nights = [
   { date: "2026-10-20", rateCents: 9_000_000, discountCents: 0 },
@@ -64,6 +65,13 @@ describe("Contratos nocturnos en centavos", () => {
     expect(calendarNights("2028-02-28", "2028-03-01")).toEqual(["2028-02-28", "2028-02-29"]);
     expect(() => calendarNights("2026-02-30", "2026-03-02")).toThrow();
     expect(() => calendarNights("2026-03-02", "2026-03-02")).toThrow();
+  });
+  it.each([3,6,7])("conserva el total de un paquete de %i noches sin crear descuentos por redondeo", count => {
+    const dates = calendarNights("2090-01-01", `2090-01-${String(count+1).padStart(2,"0")}`);
+    const lines = initialNightlyPricing({...buildPackagePricingPatch(100,count),checkInDate:dates[0],checkOutDate:`2090-01-${String(count+1).padStart(2,"0")}`});
+    expect(nightlyTotal(lines)).toBe(10000);
+    expect(lines.every(n=>n.discountCents===0)).toBe(true);
+    expect(Math.max(...lines.map(n=>n.rateCents))-Math.min(...lines.map(n=>n.rateCents))).toBeLessThanOrEqual(1);
   });
   it("contrata al crear con total exacto y no inventa un importe incompatible", () => {
     const result = initialNightlyPricing({ checkInDate: "2026-10-20", checkOutDate: "2026-10-22", baseRatePerNight: "90000", totalRoomAmount: "179999.99" });

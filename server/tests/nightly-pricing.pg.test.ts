@@ -123,7 +123,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     actor = "housekeeping";
     expect((await request(`${pathFor()}/apply`, rateBody())).status).toBe(403);
     actor = "reception";
-    expect((await request("/api/reservation-pricing/activation", { confirm: true })).status).toBe(403);
+
   });
   it("hereda el acceso del hotel y aplica revocación individual también en preview y PATCH", async () => {
     actor = "reception";
@@ -143,8 +143,8 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     }
     expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
   });
-  it("sin activación una nueva reserva conserva legacy aunque el cliente intente activarla", async () => {
-    const activation = (await request("/api/reservation-pricing/activation")).data.activatedAt;
+  it("sin configuración una nueva reserva usa precios nocturnos sin aceptar el detalle inyectado", async () => {
+    const activation = (await applicationPool.query("SELECT value FROM system_settings WHERE key='reservation_nightly_activation_at'")).rows[0]?.value;
     await applicationPool.query("DELETE FROM system_settings WHERE key='reservation_nightly_activation_at'");
     try {
       const result = await request("/api/reservations", {
@@ -154,11 +154,23 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
         status:"confirmed",source:"directo",pricingScheme:"nightly_v1",nightlyPricing:fixture.nightlyPricing,
       });
       expect(result.status).toBe(201);
-      expect(result.data.pricingScheme).toBe("legacy");
-      expect(result.data.nightlyPricing).toBe(null);
+      expect(result.data.pricingScheme).toBe("nightly_v1");
+      expect(result.data.nightlyPricing).toEqual([{date:"2090-03-01",rateCents:9000000,discountCents:0}]);
     } finally {
       await applicationPool.query("INSERT INTO system_settings(key,value,category,updated_at) VALUES ('reservation_nightly_activation_at',$1,'reservations',NOW())",[activation]);
     }
+  });
+  it("crea paquetes con total exacto aunque el promedio por noche redondee hacia abajo", async () => {
+    const result=await request("/api/reservations",{
+      guestId:fixture.guestId,roomTypeId:fixture.roomTypeId,roomId:idFor("room-5"),
+      checkInDate:"2090-04-01",checkOutDate:"2090-04-04",nights:3,
+      baseRatePerNight:"33.33",finalRatePerNight:"33.33",totalRoomAmount:"100.00",
+      discountType:"none",discountValue:"0",status:"confirmed",source:"directo",
+    });
+    expect(result.status).toBe(201);
+    expect(result.data.totalRoomAmount).toBe("100.00");
+    expect(nightlyTotal(result.data.nightlyPricing)).toBe(10000);
+    expect(result.data.nightlyPricing.every((n:any)=>n.discountCents===0)).toBe(true);
   });
   it.each(["autorizacion_pendiente","ambiguous"])("no modifica alojamiento ante evidencia fiscal %s", async state => {
     const id=idFor("full");
@@ -215,7 +227,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect(log[0].descripcion).toContain('"after"');
     expect(await moneyEvidence()).toEqual(evidence);
   });
-  it("activa sólo nuevas altas del servidor; fecha de ingreso futura no convierte las anteriores", async () => {
+  it("usa el esquema nocturno sólo en nuevas altas del servidor; fecha de ingreso futura no convierte las anteriores", async () => {
     const future = (offset: number) => new Date(Date.parse(`${fixture.checkInDate}T00:00:00Z`) + offset * 86400000).toISOString().slice(0,10);
     const body = { guestId: fixture.guestId, roomTypeId: fixture.roomTypeId, roomId: idFor("room-5"),
       checkInDate: future(30), checkOutDate: future(31), nights: 1,
@@ -226,16 +238,14 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect(first.status).toBe(201);
     expect(first.data.pricingScheme).toBe("nightly_v1");
     expect(first.data.nightlyPricing).toEqual([{ date: body.checkInDate, rateCents: 9_000_000, discountCents: 500_000 }]);
-    const activation = (await request("/api/reservation-pricing/activation")).data.activatedAt;
-    expect((await request("/api/reservation-pricing/activation", { confirm: true })).status).toBe(200);
-    expect((await request("/api/reservation-pricing/activation")).data.activatedAt).toBe(activation);
+    const activation = (await applicationPool.query("SELECT value FROM system_settings WHERE key='reservation_nightly_activation_at'")).rows[0]?.value;
     expect((await saved(idFor("legacy"))).pricingScheme).toBe("legacy");
     await applicationPool.query("UPDATE system_settings SET value='2999-01-01T00:00:00Z' WHERE key='reservation_nightly_activation_at'");
     try {
       const second = await request("/api/reservations", { ...body, checkInDate: future(32), checkOutDate: future(33), pricingScheme: "nightly_v1" });
       expect(second.status).toBe(201);
-      expect(second.data.pricingScheme).toBe("legacy");
-      expect(second.data.nightlyPricing).toBe(null);
+      expect(second.data.pricingScheme).toBe("nightly_v1");
+      expect(second.data.nightlyPricing).toEqual([{date:future(32),rateCents:9000000,discountCents:500000}]);
     } finally {
       await applicationPool.query("UPDATE system_settings SET value=$1 WHERE key='reservation_nightly_activation_at'", [activation]);
     }
