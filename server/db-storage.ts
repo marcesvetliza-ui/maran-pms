@@ -5,7 +5,8 @@ import { stockUnits } from "./inventorySafety";
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
 import { planIngredientsWithActualQuantities, grossQuantityFor } from "./recipeStockDeduction";
-import { queueAutomaticConsumption } from "./inventoryStockEngine";
+import { queueAutomaticConsumption, unitFactor } from "./inventoryStockEngine";
+import { convertInventoryQuantity } from "./inventoryUnits";
 import { assertPaymentRequestMatches, type ReservationPaymentRequest } from "./reservationPaymentRequest";
 import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
@@ -5361,6 +5362,12 @@ export class DatabaseStorage implements IStorage {
         if (!sub.rows.length) throw Object.assign(new Error("La elaboración seleccionada está inactiva o no existe"), {statusCode:409});
       }
       await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
+      if (ingredient.inventoryItemId) {
+        const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, ingredient.inventoryItemId)).for("share");
+        const factor = await unitFactor(tx, item.id, ingredient.unit, item.unit);
+        convertInventoryQuantity(Number(ingredient.quantity), factor);
+        ingredient = { ...ingredient, unitCost: (Number(item.costPrice || 0) * factor).toFixed(4) };
+      }
       const [created] = await tx.insert(recipeIngredients).values(ingredient as any).returning();
       return created;
     });
@@ -5369,11 +5376,20 @@ export class DatabaseStorage implements IStorage {
   async updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined> {
     return db.transaction(async tx => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      const [existing] = await tx.select().from(recipeIngredients).where(eq(recipeIngredients.id, id)).for("update");
+      if (!existing) return undefined;
+      const effective = { ...existing, ...ingredient };
       if (ingredient.subRecipeId) {
         const sub = await tx.execute(sql`SELECT id FROM recipes WHERE id=${ingredient.subRecipeId} AND is_active='true' FOR SHARE`);
         if (!sub.rows.length) throw Object.assign(new Error("La elaboración seleccionada está inactiva o no existe"), { statusCode: 409 });
       }
-      await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
+      await requireActiveInventoryReferences(tx, effective.inventoryItemId, effective.warehouseId);
+      if (effective.inventoryItemId) {
+        const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, effective.inventoryItemId)).for("share");
+        const factor = await unitFactor(tx, item.id, effective.unit, item.unit);
+        convertInventoryQuantity(Number(effective.quantity), factor);
+        ingredient = { ...ingredient, unitCost: (Number(item.costPrice || 0) * factor).toFixed(4) };
+      }
       const [updated] = await tx.update(recipeIngredients).set(ingredient as any).where(eq(recipeIngredients.id, id)).returning();
       return updated;
     });

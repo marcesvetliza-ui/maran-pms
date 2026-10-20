@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RecipeIngredientUnit } from "@/components/recipe-ingredient-unit";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -427,6 +428,21 @@ export default function RecetasCostosPage() {
     if (y <= 0) return 0;
     return baseRecipeTotalCost(rec) / y;
   };
+
+  const ingredientStockItem = ingredientSourceType === "inventario"
+    ? inventoryItems.find(item => item.id === newIngredientInventoryId)
+    : undefined;
+  const ingredientUnitControl = ingredientStockItem ? <RecipeIngredientUnit
+    key={ingredientStockItem.id}
+    itemId={ingredientStockItem.id} stockUnit={ingredientStockItem.unit}
+    stockCost={Number(ingredientStockItem.costPrice || 0)}
+    unit={newIngredientUnit} quantity={newIngredientQty}
+    onChange={value => {
+      setNewIngredientUnit(value.unit);
+      setNewIngredientQty(value.quantity);
+      setNewIngredientCost(value.cost);
+    }}
+  /> : <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm">{newIngredientUnit}</div>;
 
   // Open dialog to edit an elaboración (or create its recipe shell first)
   const openBaseRecipeEditDialog = (rec: Recipe) => {
@@ -1295,7 +1311,7 @@ export default function RecetasCostosPage() {
                             onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}
                           >✕</button>
                         </div>
-                        <p className="px-3 py-2 text-xs text-muted-foreground">Materias primas: artículos activos. Los semielaborados se eligen en Preparación con stock. Café comprado por kilo: 8 g equivalen a 0,008 kg.</p><div className="max-h-52 overflow-y-auto">
+                        <p className="px-3 py-2 text-xs text-muted-foreground">Materias primas: artículos activos. Los semielaborados se eligen en Preparación con stock. Podés elegir la unidad de consumo; cantidad y costo se convierten juntos.</p><div className="max-h-52 overflow-y-auto">
                           {(() => {
                             const filtered = (inventoryItems as any[]).filter((i: any) =>
                               i.isActive !== "false" && i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch ||
@@ -1406,9 +1422,7 @@ export default function RecetasCostosPage() {
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs">Unidad</Label>
-                      <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm font-medium min-w-14 justify-center">
-                        {newIngredientUnit}
-                      </div>
+                      {ingredientUnitControl}
                     </div>
                     <div className="w-24 space-y-1">
                       <Label className="text-xs">Merma %</Label>
@@ -1977,7 +1991,7 @@ export default function RecetasCostosPage() {
                             <button type="button" className="text-muted-foreground hover:text-foreground"
                               onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}>✕</button>
                           </div>
-                          <p className="px-3 py-2 text-xs text-muted-foreground">Los semielaborados se eligen en Preparación con stock. Si el café tiene unidad kg, cargá la cantidad en kg (8 g = 0,008 kg).</p><div className="max-h-48 overflow-y-auto">
+                          <p className="px-3 py-2 text-xs text-muted-foreground">Los semielaborados se eligen en Preparación con stock. Podés elegir gramos aunque el stock esté en kg; el costo se convierte junto con la cantidad.</p><div className="max-h-48 overflow-y-auto">
                             {(() => {
                               const filtered = (inventoryItems as any[]).filter((i: any) =>
                                 i.isActive !== "false" && i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()))
@@ -2054,9 +2068,7 @@ export default function RecetasCostosPage() {
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Unidad</Label>
-                        <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm font-medium min-w-14 justify-center">
-                          {newIngredientUnit}
-                        </div>
+                        {ingredientUnitControl}
                       </div>
                       <div className="w-24 space-y-1">
                         <Label className="text-xs">Merma %</Label>

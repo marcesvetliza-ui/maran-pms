@@ -27,3 +27,23 @@ it('preserves all nine decimal places when displaying and saving a small factor'
  fireEvent.click(screen.getByRole('button',{name:'Guardar equivalencias'}));
  await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('PUT','/api/inventory/items/test-item/unit-conversions',{conversions:[{fromUnit:'paquete',factor:'0.000000123'}]}));
 });
+it('loads a 3000 g unit container without asking for an inverse factor',async()=>{
+ const client=new QueryClient({defaultOptions:{queries:{retry:false,queryFn:async()=>[]}}});
+ render(<QueryClientProvider client={client}><InventoryUnitConversions itemId="bucket" stockUnit="unidad"/></QueryClientProvider>);
+ const content=await screen.findByLabelText('Contenido del envase');
+ fireEvent.change(content,{target:{value:'3000'}});
+ fireEvent.click(screen.getByRole('button',{name:'Usar este contenido'}));
+ expect(screen.getByRole('status').textContent).toContain('Falta guardar');
+ fireEvent.click(screen.getByRole('button',{name:'Guardar equivalencias'}));
+ await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('PUT','/api/inventory/items/bucket/unit-conversions',{conversions:[
+  {fromUnit:'kg',factor:'0.333333333'}, {fromUnit:'g',factor:'0.000333333'},
+ ]}));
+});
+it('a package content changes equivalences, not the stock unit or the price',async()=>{
+ const client=new QueryClient({defaultOptions:{queries:{retry:false,queryFn:async()=>[]}}});
+ render(<QueryClientProvider client={client}><InventoryUnitConversions itemId="chicken" stockUnit="kg"/></QueryClientProvider>);
+ fireEvent.change(await screen.findByLabelText('Contenido del envase'),{target:{value:'3000'}});
+ fireEvent.click(screen.getByRole('button',{name:'Usar este contenido'}));
+ fireEvent.click(screen.getByRole('button',{name:'Guardar equivalencias'}));
+ await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('PUT','/api/inventory/items/chicken/unit-conversions',{conversions:[{fromUnit:'unidad',factor:'3'}]}));
+});
