@@ -27,6 +27,9 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
   const activation = useQuery<{ activatedAt: string | null; timeZone: string }>({
     queryKey: ["/api/reservation-pricing/activation"], queryFn: () => jsonGet("/api/reservation-pricing/activation"),
   });
+  const access = useQuery<{ canEdit: boolean }>({
+    queryKey: ["/api/reservation-edit-permission"], staleTime: 0, refetchOnMount: "always",
+  });
   const [selected, setSelected] = useState<string[]>([]);
   const [mode, setMode] = useState<"rates" | "stay" | null>(null);
   const [rate, setRate] = useState("");
@@ -48,7 +51,7 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
     setMode(null); setSelected([]); setPreview(null); setEditorSnapshot(null); setReason(""); setError("");
   }, [reservationId]);
   const nightly = reservation?.pricingScheme === "nightly_v1";
-  const canWrite = ["admin", "manager", "reception", "jefe_recepcion", "comercial"].includes(role || "");
+  const canWrite = access.data?.canEdit === true && !access.isError;
   const closed = ["checked_out", "cancelled", "no_show"].includes(reservation?.status);
   const blocked = state.data?.blocked || (closed ? "Reserva cerrada: alojamiento en sólo lectura." : "");
   const invalidatePreview = () => { setPreview(null); setError(""); };
@@ -61,7 +64,8 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
   };
   useImperativeHandle(ref, () => ({
     openStay: () => {
-      if (!reservation || !canWrite) return;
+      if (!reservation) return;
+      if (!canWrite) { toast({ title: "Alojamiento en sólo lectura", description: "Un administrador debe habilitar tu permiso individual para editar tarifas y noches.", variant: "destructive" }); return; }
       if (blocked) { toast({ title: "No se puede modificar la estadía", description: blocked, variant: "destructive" }); return; }
       if (nightly) start("stay"); else onLegacyEdit?.();
     },
@@ -112,9 +116,10 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       <header className="wf-panel-heading">
         <div><p className="wf-section-kicker">ALOJAMIENTO</p><h3>{nightly ? "Tarifas por noche" : "Importe de la estadía"}</h3></div>
         {nightly ? <Button size="sm" variant="outline" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil size={14}/>{selected.length ? `Editar ${selected.length} noches` : "Editar tarifas"}</Button>
-          : onLegacyEdit && <Button size="sm" variant="outline" disabled={!!blocked} onClick={onLegacyEdit}>Editar alojamiento</Button>}
+          : onLegacyEdit && <Button size="sm" variant="outline" disabled={!canWrite || !!blocked} onClick={onLegacyEdit}>Editar alojamiento</Button>}
       </header>
       {blocked && <p className="flex gap-2 p-3 border-b text-sm bg-amber-500/10" role="status"><Lock className="h-4 w-4 shrink-0"/>{blocked}</p>}
+      {!canWrite && <p className="p-3 border-b text-sm" role="status">{access.isError ? "No se pudo verificar tu permiso. Reintentá antes de modificar." : access.isPending ? "Verificando permiso de edición…" : "Alojamiento en sólo lectura: no tenés habilitado el permiso individual de edición."}</p>}
       {state.data?.fiscal && state.data.fiscal.state !== "pendiente" && <p className="wf-fiscal-state">Alojamiento: {({ pendiente: "pendiente de facturación", parcial: "parcialmente facturado", facturado: "facturado", revisar: "cobertura fiscal a revisar", en_curso: "emisión fiscal en curso", grupal: "facturación desde Folio Maestro" } as Record<string, string>)[state.data.fiscal.state]}{state.data.fiscal.coveredCents !== null && <> · Facturado: {money(state.data.fiscal.coveredCents)} · Pendiente: {money(state.data.fiscal.pendingCents || 0)}</>}</p>}
       {nightly ? <div className="wf-grid-scroll"><table className="wf-night-table"><thead><tr><th><input type="checkbox" aria-label="Seleccionar todas las noches" checked={selected.length === nights.length && nights.length > 0} onChange={e => setSelected(e.target.checked ? nights.map(n => n.date) : [])}/></th><th>Noche</th><th>Tarifa</th><th>Descuento</th><th>Neto noche</th><th><span className="sr-only">Editar</span></th></tr></thead><tbody>{nights.map(n => <tr key={n.date} data-selected={selected.includes(n.date)}><td><input type="checkbox" aria-label={`Seleccionar noche ${dateLabel(n.date)}`} checked={selected.includes(n.date)} onChange={e => setSelected(previous => e.target.checked ? [...previous, n.date] : previous.filter(d => d !== n.date))}/></td><td><strong>{new Intl.DateTimeFormat("es-AR", { weekday: "short" }).format(new Date(`${n.date}T12:00:00`))}</strong><span className="wf-night-date">{dateLabel(n.date)}</span></td><td>{money(n.rateCents)}</td><td className={n.discountCents ? "wf-discount" : "wf-muted"}>{n.discountCents ? `− ${money(n.discountCents)}` : "—"}</td><td className="wf-net">{money(n.rateCents - n.discountCents)}</td><td><Button size="sm" variant="ghost" className="wf-icon-button" aria-label={`Editar noche ${dateLabel(n.date)}`} disabled={!canWrite || !!blocked} onClick={() => start("rates", [n.date])}><Pencil size={14}/></Button></td></tr>)}</tbody><tfoot><tr><td colSpan={4}>Subtotal alojamiento <span className="wf-vat-note">IVA incluido</span></td><td className="wf-net">{money(totalBefore)}</td><td/></tr></tfoot></table></div>
         : <div className="p-4"><strong className="text-lg">{money(totalBefore)}</strong><p className="text-sm text-muted-foreground mt-2">{reservation.nights} {Number(reservation.nights) === 1 ? "noche" : "noches"} · {dateLabel(reservation.checkInDate)} → {dateLabel(reservation.checkOutDate)}</p>{reservation.discountType && reservation.discountType !== "none" && Number(reservation.discountValue) > 0 && <p className="text-sm mt-2">Descuento aplicado: {reservation.discountType === "percent" ? `${reservation.discountValue}%` : money(Math.round(Number(reservation.discountValue) * 100))}</p>}</div>}
@@ -138,7 +143,7 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
           {preview && <p className="text-sm text-emerald-700 dark:text-emerald-300" role="status">Propuesta validada por el servidor{mode === "stay" ? " y disponibilidad verificada" : ""}. Total: {money(preview.newTotalCents)}.</p>}
           {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
         </div>
-        <DialogFooter className="shrink-0"><Button variant="ghost" disabled={save.isPending} onClick={() => setMode(null)}>Cancelar · Sin cambios</Button><Button variant="outline" disabled={!!localError || !!stale || save.isPending || !selected.length} onClick={() => save.mutate(false)}>Revisar propuesta</Button><Button disabled={!!localError || !!stale || !preview || reason.trim().length < 3 || save.isPending || !!blocked} onClick={() => save.mutate(true)}>Confirmar cambios</Button></DialogFooter>
+        <DialogFooter className="shrink-0"><Button variant="ghost" disabled={save.isPending} onClick={() => setMode(null)}>Cancelar · Sin cambios</Button><Button variant="outline" disabled={!canWrite || !!localError || !!stale || save.isPending || (mode === "rates" && !selected.length)} onClick={() => save.mutate(false)}>Revisar propuesta</Button><Button disabled={!canWrite || !!localError || !!stale || !preview || reason.trim().length < 3 || save.isPending || !!blocked} onClick={() => save.mutate(true)}>Confirmar cambios</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </>;

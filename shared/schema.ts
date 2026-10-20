@@ -2164,6 +2164,16 @@ export const rolePermissions = pgTable("role_permissions", {
   roleResourceKeyUnique: uniqueIndex("role_permissions_role_resource_key_idx").on(table.role, table.resourceKey),
 }));
 
+export const userPermissionOverrides = pgTable("user_permission_overrides", {
+  userId: varchar("user_id").notNull().references(() => systemUsers.id, { onDelete: "cascade" }),
+  resourceKey: text("resource_key").notNull(),
+  allowed: boolean("allowed").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  updatedBy: varchar("updated_by"),
+}, table => ({
+  userResourceUnique: uniqueIndex("user_permission_overrides_user_resource_idx").on(table.userId, table.resourceKey),
+}));
+
 export const insertRolePermissionSchema = createInsertSchema(rolePermissions).omit({ id: true, createdAt: true });
 export type InsertRolePermission = z.infer<typeof insertRolePermissionSchema>;
 export type RolePermission = typeof rolePermissions.$inferSelect;
