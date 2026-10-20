@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, withDatabaseTransaction } from "./db";
 import { requireAuth, requireRole } from "./auth";
+import { hasPermission } from "./permissions";
 import { accommodationPermission, ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
 
 export async function ensureAccommodationPermissionsSchema() {
@@ -18,7 +19,7 @@ export async function canEditAccommodation(user: { id: string; role: string }): 
   const result = await db.execute(sql`SELECT allowed FROM user_permission_overrides
     WHERE user_id=${user.id} AND resource_key=${ACCOMMODATION_PERMISSION}`);
   const override = (result.rows[0] as { allowed: boolean } | undefined)?.allowed;
-  return accommodationPermission(user.role, override);
+  return accommodationPermission(user.role, override, hasPermission(user.role, "sidebar:/reservations"));
 }
 
 export function registerAccommodationPermissionRoutes(app: Express) {
@@ -33,8 +34,8 @@ export function registerAccommodationPermissionRoutes(app: Express) {
         ON p.user_id=u.id AND p.resource_key=${ACCOMMODATION_PERMISSION}
         ORDER BY lower(u.username)`);
       res.json(result.rows.map((row: any) => ({
-        ...row, inherited: accommodationPermission(row.role, null),
-        canEdit: accommodationPermission(row.role, row.override),
+        ...row, inherited: hasPermission(row.role, "sidebar:/reservations"),
+        canEdit: accommodationPermission(row.role, row.override, hasPermission(row.role, "sidebar:/reservations")),
       })));
     } catch { res.status(503).json({ error: "No se pudieron cargar los permisos por usuario." }); }
   });
