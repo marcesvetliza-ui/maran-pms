@@ -261,7 +261,7 @@ export function ReservationFormDialog({
     staleTime: 0,
     refetchOnMount: "always",
   });
-  const lodgingReadOnly = isEditing && accommodationAccess.data?.canEdit !== true;
+  const lodgingReadOnly = isEditing && (accommodationAccess.data?.canEdit !== true || accommodationAccess.isError);
 
   const sectionCardClass = (isComplete: boolean, isRequired: boolean): string => {
     if (isComplete) return "border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700 transition-colors";

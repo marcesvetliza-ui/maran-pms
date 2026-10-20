@@ -149,6 +149,8 @@ const ALLOW_RULES: PathRule[] = [
   exact("GET", "/api/revenue/suggestion-config", "ver configuración Revenue"),
   exact("GET", "/api/revenue/reference-rate-plans", "ver planes de referencia Revenue"),
   exact("GET", "/api/permissions/mine", "permisos del propio usuario"),
+  exact("GET", "/api/reservation-edit-permission", "permiso individual propio de alojamiento"),
+  exact("GET", "/api/reservation-pricing/activation", "estado de tarifas nocturnas, solo lectura"),
   // Reservas: listado, detalle, planning, crear/editar, check-in/out y
   // operaciones normales de uso diario (transferencias, deshacer, etc.)
   prefix("*", "/api/reservations", "módulo reservas"),

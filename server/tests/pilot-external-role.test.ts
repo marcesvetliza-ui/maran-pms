@@ -29,6 +29,12 @@ function callMiddleware(role: string, method: string, apiPath: string): { status
 }
 
 describe("authorizePilotExternalRole — reglas exhaustivas (Fase 6)", () => {
+  it("permite consultar el permiso propio, no concedérselo ni activar tarifas", () => {
+    expect(callMiddleware(PILOT_EXTERNAL_ROLE, "GET", "/api/reservation-edit-permission").nextCalled).toBe(true);
+    expect(callMiddleware(PILOT_EXTERNAL_ROLE, "GET", "/api/reservation-pricing/activation").nextCalled).toBe(true);
+    expect(callMiddleware(PILOT_EXTERNAL_ROLE, "PUT", "/api/admin/accommodation-permissions/self").status).toBe(403);
+    expect(callMiddleware(PILOT_EXTERNAL_ROLE, "POST", "/api/reservation-pricing/activation").status).toBe(403);
+  });
   it("no afecta a roles distintos de piloto_externo (siempre next())", () => {
     for (const role of ["admin", "manager", "reception", "comercial"]) {
       const { nextCalled, status } = callMiddleware(role, "POST", "/api/reservations/x/cancel");

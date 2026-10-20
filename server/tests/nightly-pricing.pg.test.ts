@@ -10,7 +10,7 @@ const available = existsSync("/tmp/maran-nightly-folio-demo/socket/.s.PGSQL.5547
 const database = `nightly_folio_test_${process.pid}_${Date.now()}`;
 const admin = new pg.Pool({ host: "/tmp/maran-nightly-folio-demo/socket", port: 55478, user: "runner", database: "postgres", ssl: false });
 let applicationPool: pg.Pool, server: Server, base: string, storage: any, fixture: any;
-let actor: "admin" | "reception" | "housekeeping" | null = "admin";
+let actor: "admin" | "reception" | "housekeeping" | "piloto_externo" | null = "admin";
 let created = false, counter = 0;
 const editable = "nightly-demo-editable";
 const url = `postgresql://runner@/${database}?host=%2Ftmp%2Fmaran-nightly-folio-demo%2Fsocket&port=55478`;
@@ -44,7 +44,12 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     created = true;
     process.env.DATABASE_URL = url;
     ({ pool: applicationPool } = await import("../db"));
-    await applicationPool.query("INSERT INTO role_permissions(role,resource_key) VALUES ('admin','sidebar:/reservations') ON CONFLICT DO NOTHING");
+    const permissions = await import("../accommodationPermissions");
+    await permissions.ensureAccommodationPermissionsSchema();
+    await applicationPool.query(`INSERT INTO system_users(id,username,email,full_name,role,created_at)
+      VALUES ('permission-fixture','permission.fixture','fixture@example.invalid','Synthetic permission test','piloto_externo',NOW())
+      ON CONFLICT(id) DO NOTHING`);
+    await applicationPool.query("INSERT INTO role_permissions(role,resource_key) VALUES ('admin','sidebar:/reservations'),('piloto_externo','sidebar:/reservations') ON CONFLICT DO NOTHING");
     await (await import("../permissions")).loadRolePermissionsCache();
     ({ storage } = await import("../db-storage"));
     const { registerReservationsRoutes } = await import("../routes/reservations");
@@ -64,9 +69,11 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     app.use(express.json());
     app.use((req, _res, next) => {
       req.isAuthenticated = (() => actor !== null) as any;
-      if (actor) req.user = { id: "nightly-demo-admin", username: "Demo Actor", role: actor } as any;
+      if (actor) req.user = { id: actor === "piloto_externo" ? "permission-fixture" : "nightly-demo-admin", username: "Demo Actor", role: actor } as any;
       next();
     });
+    app.use("/api", (await import("../pilot-external-role")).authorizePilotExternalRole);
+    permissions.registerAccommodationPermissionRoutes(app);
     registerReservationsRoutes(app);
     app.use((error: any, _req: any, res: any, _next: any) => {
       console.error("Synthetic API middleware error:", error.stack || error.message);
@@ -79,6 +86,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
   }, 60_000);
   beforeEach(async () => {
     actor = "admin";
+    await applicationPool.query("DELETE FROM user_permission_overrides WHERE user_id IN ('permission-fixture','nightly-demo-admin')");
     await applicationPool.query(`UPDATE reservations SET nightly_pricing=$1,pricing_revision=0,
       total_room_amount=$2,base_rate_per_night=$3,final_rate_per_night=$4,
       discount_type='none',discount_value=0,check_in_date=$5,check_out_date=$6,nights=3
@@ -90,6 +98,28 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     if (applicationPool) await applicationPool.end();
     if (created) await admin.query(`DROP DATABASE ${database} WITH (FORCE)`);
     await admin.end();
+  });
+  it("admin grants and revokes only the individual permission without changing roles", async () => {
+    const endpoint = "/api/admin/accommodation-permissions/permission-fixture";
+    actor = "piloto_externo";
+    expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(false);
+    expect((await request(endpoint, { allowed: true }, "PUT")).status).toBe(403);
+    expect((await request(`/api/reservations/${editable}/nightly-pricing/preview`, rateBody())).status).toBe(403);
+    actor = "admin";
+    const grant = await fetch(`${base}${endpoint}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allowed: true }) });
+    expect(grant.status).toBe(204);
+    actor = "piloto_externo";
+    expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
+    expect((await request(`/api/reservations/${editable}/nightly-pricing/preview`, rateBody())).status).toBe(200);
+    expect((await request(`/api/reservations/nightly-demo-full/nightly-pricing/preview`, rateBody())).status).toBe(409);
+    actor = "admin";
+    const revoke = await fetch(`${base}${endpoint}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allowed: false }) });
+    expect(revoke.status).toBe(204);
+    actor = "piloto_externo";
+    expect((await request(`/api/reservations/${editable}/nightly-pricing/preview`, rateBody())).status).toBe(403);
+    expect((await request(`/api/reservations/${editable}/nightly-pricing/apply`, rateBody())).status).toBe(403);
+    expect((await applicationPool.query("SELECT role FROM system_users WHERE id='permission-fixture'")).rows[0].role).toBe("piloto_externo");
+    expect((await applicationPool.query("SELECT count(*) FROM audit_logs WHERE entity_type='user_permission' AND entity_id='permission-fixture'")).rows[0].count).toBe("2");
   });
   it("autoriza con middleware real, sin depender de los controles del navegador", async () => {
     actor = null;
