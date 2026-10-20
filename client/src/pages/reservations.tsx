@@ -252,6 +252,13 @@ export function ReservationFormDialog({
 }) {
   const { toast } = useToast();
   const isEditing = !!reservation;
+  const accommodationAccess = useQuery<{ canEdit: boolean }>({
+    queryKey: ["/api/reservation-edit-permission"],
+    enabled: open && isEditing,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const lodgingReadOnly = isEditing && accommodationAccess.data?.canEdit !== true;
 
   const sectionCardClass = (isComplete: boolean, isRequired: boolean): string => {
     if (isComplete) return "border-green-500 bg-green-50 dark:bg-green-950/30 dark:border-green-700 transition-colors";
@@ -1232,12 +1239,13 @@ export function ReservationFormDialog({
               </div>
             </div>
 
+            {lodgingReadOnly && <p className="rounded border p-3 text-sm" role="status">Tarifas y noches en sólo lectura. {accommodationAccess.isError ? "No se pudo verificar tu permiso; reintentá antes de modificar." : "Un administrador puede habilitar tu permiso individual en Permisos."}</p>}
             <div className={`rounded-lg border p-3 grid gap-2 ${sectionCardClass(!!formData.ratePlanId, !isEditing)}`}>
               <Label htmlFor="ratePlan">Plan Tarifario</Label>
               <Select
                 value={formData.ratePlanId || ""}
                 onValueChange={handleRatePlanChange}
-                disabled={!selectedRoomTypeId}
+                disabled={lodgingReadOnly || !selectedRoomTypeId}
               >
                 <SelectTrigger data-testid="select-rate-plan">
                   <SelectValue placeholder="Seleccionar plan tarifario" />
@@ -1274,6 +1282,7 @@ export function ReservationFormDialog({
                       onChange={(e) => setFormData({ ...formData, specialRateReason: e.target.value })}
                       rows={2}
                       data-testid="input-special-rate-reason"
+                      disabled={lodgingReadOnly}
                     />
                   </div>
                 </div>
@@ -1478,7 +1487,7 @@ export function ReservationFormDialog({
                     }
                   }}
               >
-                <SelectTrigger data-testid="select-package">
+                <SelectTrigger disabled={lodgingReadOnly} data-testid="select-package">
                   <SelectValue placeholder={isLoadingPackages ? "Cargando paquetes..." : "Sin paquete"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1527,6 +1536,7 @@ export function ReservationFormDialog({
                     <Label htmlFor="checkIn">Fecha Check-in</Label>
                     <Input
                       id="checkIn"
+                      disabled={lodgingReadOnly}
                       type="date"
                       value={formData.checkInDate}
                       onChange={(e) => handleDateChange("checkInDate", e.target.value)}
@@ -1539,6 +1549,7 @@ export function ReservationFormDialog({
                     <Label htmlFor="checkOut">Fecha Check-out</Label>
                     <Input
                       id="checkOut"
+                      disabled={lodgingReadOnly}
                       type="date"
                       value={formData.checkOutDate}
                       min={formData.checkInDate ? (() => { const d = new Date(formData.checkInDate + "T12:00:00"); d.setDate(d.getDate()+1); return toArgentinaDateStr(d); })() : undefined}
@@ -1620,6 +1631,7 @@ export function ReservationFormDialog({
               <div className="grid gap-2">
                 <Label htmlFor="discountType">Tipo Descuento</Label>
                 <Select
+                  disabled={lodgingReadOnly}
                   value={formData.discountType}
                   onValueChange={(value) => handleDiscountChange(value as DiscountType, undefined)}
                 >
@@ -1642,7 +1654,7 @@ export function ReservationFormDialog({
                   step="0.01"
                   value={formData.discountValue || ""}
                   onChange={(e) => handleDiscountChange(undefined, e.target.value)}
-                  disabled={formData.discountType === "none"}
+                  disabled={lodgingReadOnly || formData.discountType === "none"}
                   data-testid="input-discount-value"
                 />
               </div>
@@ -1656,7 +1668,7 @@ export function ReservationFormDialog({
                     min={0}
                     step="0.01"
                     value={formData.baseRatePerNight || ""}
-                    readOnly={formData.ratePlanId !== "__special__"}
+                    readOnly={lodgingReadOnly || formData.ratePlanId !== "__special__"}
                     onChange={formData.ratePlanId === "__special__" ? (e) => handleBaseRateChange(e.target.value) : undefined}
                     placeholder="0.00"
                     className={`pl-7 ${formData.ratePlanId === "__special__" ? "" : "bg-muted cursor-not-allowed"}`}
