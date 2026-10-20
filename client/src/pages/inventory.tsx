@@ -1,3 +1,4 @@
+import {InventoryUnitCorrection} from "@/components/inventory-unit-correction";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import {InventoryPriceComparison} from "@/components/inventory-price-comparison";
 import {stockReportHtml,stockReportCsv,type StockReport} from "@/lib/inventory-stock-report";
@@ -727,6 +728,8 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
 }
 
 export default function InventoryPage() {
+  const [unitCorrectionItem,setUnitCorrectionItem]=useState<InventoryItem|null>(null);
+  const {data:unitCorrectionAccess}=useQuery<{allowed:boolean}>({queryKey:["/api/inventory/unit-correction-access"]});
   const canCost = useInventoryPermission("cost");
   const canSeeValorTotal = useInventoryPermission("valor-total");
   const canOperate = useInventoryPermission("operate");
@@ -1461,7 +1464,7 @@ export default function InventoryPage() {
                       <td className="p-3 text-right tabular-nums whitespace-nowrap">
                         {canCost && !historical ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="p-3"><div className="flex flex-wrap items-center justify-end gap-1"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button permission="catalog" variant="ghost" size="sm" disabled={purchaseStateMutation.isPending || item.isActive === "false"} onClick={()=>purchaseStateMutation.mutate(items.find(i=>i.id===item.id))}>{(item as any).purchaseEnabled === false ? "Habilitar compras" : "No comprar"}</Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                      <td className="p-3"><div className="flex flex-wrap items-center justify-end gap-1">{unitCorrectionAccess?.allowed && !historical && item.isActive !== "false" && <Button variant="ghost" size="sm" onClick={()=>setUnitCorrectionItem(items.find(i=>i.id===item.id)!)}>Corregir unidad</Button>}<Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button permission="catalog" variant="ghost" size="sm" disabled={purchaseStateMutation.isPending || item.isActive === "false"} onClick={()=>purchaseStateMutation.mutate(items.find(i=>i.id===item.id))}>{(item as any).purchaseEnabled === false ? "Habilitar compras" : "No comprar"}</Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
@@ -2522,6 +2525,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
       <InternalMovementForm open={isInternalMovOpen} onClose={() => setIsInternalMovOpen(false)} />
 
 
+      {unitCorrectionItem && <InventoryUnitCorrection key={unitCorrectionItem.id} item={unitCorrectionItem} onClose={()=>setUnitCorrectionItem(null)}/>}
       {/* Price History Dialog */}
       <Dialog open={isPriceHistoryOpen} onOpenChange={setIsPriceHistoryOpen}>
         <DialogContent className="max-w-lg">

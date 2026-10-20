@@ -1,4 +1,5 @@
 import {validateInventoryConversions} from "../inventoryConversionValidation";
+import {registerInventoryUnitCorrectionRoutes} from "../inventoryUnitCorrection";
 import { insertInventoryItemSchema } from "@shared/schema";
 import { protectWarehouseDeactivation } from "../inventoryLifecycle";
 import {registerInventoryHistoryRoutes} from "../inventoryHistory";
@@ -24,6 +25,7 @@ const INVENTORY_WRITE_RESOURCE_KEY = "api:inventory:write";
 
 export function registerInventoryRoutes(app: Express) {
   app.use("/api/inventory", requireAuth, inventoryAccess);
+  registerInventoryUnitCorrectionRoutes(app);
   registerInventoryStage2Routes(app);
   registerInventoryLocationRoutes(app);
   registerInventoryHistoryRoutes(app);

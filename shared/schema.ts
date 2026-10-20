@@ -2114,6 +2114,7 @@ export const systemUsers = pgTable("system_users", {
   // (mismo rol) y no dejaba sumar gente de otras áreas que también atiende
   // mesas. NULL hasta que corre la migración de backfill (ver server/migrate.ts).
   esMozo: text("es_mozo"),
+  canCorrectInventoryUnit: boolean("can_correct_inventory_unit").notNull().default(false),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").notNull(),
   lockedAt: timestamp("locked_at"),

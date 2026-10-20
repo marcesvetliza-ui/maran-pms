@@ -62,6 +62,7 @@ const userFormSchema = z.object({
   phone: z.string().optional(),
   isActive: z.string().default("true"),
   esMozo: z.string().default("false"),
+  canCorrectInventoryUnit: z.boolean().default(false),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
@@ -1063,6 +1064,7 @@ export default function AdministrationPage() {
       phone: "",
       isActive: "true",
       esMozo: "false",
+      canCorrectInventoryUnit: false,
     });
     setIsUserDialogOpen(true);
   };
@@ -1079,6 +1081,7 @@ export default function AdministrationPage() {
       phone: user.phone || "",
       isActive: user.isActive || "true",
       esMozo: (user as any).esMozo === "true" ? "true" : "false",
+      canCorrectInventoryUnit: (user as any).canCorrectInventoryUnit === true,
     });
     setIsUserDialogOpen(true);
   };
@@ -1999,6 +2002,13 @@ export default function AdministrationPage() {
                 )}
               />
 
+              <FormField control={userForm.control} name="canCorrectInventoryUnit" render={({ field }) => (
+                <FormItem className="flex items-center justify-between rounded-md border p-3">
+                  <div><FormLabel>Corregir unidades mal cargadas en Inventario</FormLabel>
+                    <p className="text-xs text-muted-foreground">Permiso excepcional por usuario. Conserva cantidades y costos; exige motivo e historial. Desactivarlo al terminar la revisión.</p></div>
+                  <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-user-inventory-unit-correction" /></FormControl>
+                </FormItem>
+              )}/>
               <FormField
                 control={userForm.control}
                 name="esMozo"

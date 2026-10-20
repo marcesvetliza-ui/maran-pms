@@ -1,6 +1,7 @@
 import {sql} from 'drizzle-orm';
 import {db} from './db';
 export async function ensureInventoryStage2Schema(){
+ await ensureInventoryUnitCorrectionPermission();
  await db.execute(sql`CREATE TABLE IF NOT EXISTS inventory_unit_conversions (
  item_id varchar NOT NULL REFERENCES inventory_items(id), from_unit text NOT NULL,
  factor numeric(18,9) NOT NULL CHECK(factor>0), updated_at timestamp NOT NULL DEFAULT now(),
@@ -14,4 +15,22 @@ export async function ensureInventoryStage2Schema(){
  await db.execute(sql`CREATE TABLE IF NOT EXISTS inventory_source_reversals(id varchar PRIMARY KEY DEFAULT gen_random_uuid(),source_type text NOT NULL,source_id varchar NOT NULL,reason text NOT NULL,actor varchar NOT NULL,created_at timestamp NOT NULL DEFAULT now(),completed_at timestamp,UNIQUE(source_type,source_id))`);
  await db.execute(sql`CREATE TABLE IF NOT EXISTS inventory_production_requests(request_id varchar PRIMARY KEY,payload jsonb NOT NULL,run_id varchar REFERENCES production_runs(id),created_at timestamp NOT NULL DEFAULT now())`);
  await db.execute(sql`CREATE INDEX IF NOT EXISTS inventory_consumption_jobs_pending_idx ON inventory_consumption_jobs(status,created_at)`);
+}
+
+/** One-time grant by a unique existing identity, subsequently stored on user ID.
+ * Renaming a user or restarting must never regrant a revoked permission. */
+export async function ensureInventoryUnitCorrectionPermission(){
+ await db.execute(sql`DO $$ BEGIN
+   PERFORM pg_advisory_xact_lock(173410,70);
+   IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='system_users' AND column_name='can_correct_inventory_unit') THEN
+     ALTER TABLE system_users ADD COLUMN can_correct_inventory_unit boolean NOT NULL DEFAULT false;
+     UPDATE system_users SET can_correct_inventory_unit=true
+     WHERE id=(SELECT min(id) FROM system_users WHERE lower(trim(full_name))='gonzalo villanueva' AND is_active='true'
+       HAVING count(*)=1);
+     INSERT INTO audit_logs(action,module,entity_type,entity_id,description,details,timestamp)
+       SELECT 'update','administration','system_user',id,'Permiso excepcional para corregir unidades de Inventario',
+         '{"canCorrectInventoryUnit":true,"source":"initial_named_authorization"}',now()
+       FROM system_users WHERE can_correct_inventory_unit=true;
+   END IF;
+ END $$`);
 }
