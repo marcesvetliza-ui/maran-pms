@@ -4,6 +4,7 @@ import { z } from "zod";
 import { storage } from "../db-storage";
 import { db, withDatabaseTransaction } from "../db";
 import { requireAuth, requireRole, requirePermission } from "../auth";
+import { canEditAccommodation } from "../accommodationPermissions";
 import { accommodationFiscalStatus, NIGHTLY_ACTIVATION_KEY, withNightlyWriter, withReservationFinancialLock } from "../nightlyPricingGuard";
 import { amountString, calendarNights, editNights, nightlyTotal, pricingError, type PricedNight } from "@shared/nightlyPricing";
 
@@ -94,7 +95,12 @@ export function registerNightlyPricingRoutes(app: Express) {
   app.get("/api/reservations/:id/nightly-pricing", requireAuth, async (req, res) => {
     try { res.json(await getState(req.params.id)); } catch (error) { sendError(res, error); }
   });
-  const writeMiddleware = [requireAuth, requireRole(["admin", "manager", "reception", "jefe_recepcion", "comercial"]), requirePermission("sidebar:/reservations")];
+  const writeMiddleware = [requireAuth, requirePermission("sidebar:/reservations"), async (req: Request, res: Response, next: import("express").NextFunction) => {
+    try {
+      if (!await canEditAccommodation(req.user!)) return res.status(403).json({ error: "No tenés permiso para editar tarifas y noches de alojamiento." });
+      next();
+    } catch { res.status(503).json({ error: "No se pudo verificar tu permiso. Reintentá antes de modificar." }); }
+  }];
   app.post("/api/reservations/:id/nightly-pricing/preview", ...writeMiddleware, async (req, res) => {
     try {
       const { reservation: _, ...preview } = await buildProposal(req.params.id, requestSchema.parse(req.body));

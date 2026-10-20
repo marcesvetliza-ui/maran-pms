@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ShieldCheck } from "lucide-react";
+import { AccommodationUserPermissions } from "@/components/accommodation-user-permissions";
 
 type PermissionsCatalogResponse = {
   roles: string[];
@@ -88,6 +89,7 @@ export default function AdminPermisosPage() {
         </div>
       </div>
 
+      <AccommodationUserPermissions />
       <Input
         placeholder="Buscar sección o ítem…"
         value={filter}

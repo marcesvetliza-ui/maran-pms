@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { registerAccommodationPermissionRoutes } from "../accommodationPermissions";
 import { db } from "../db";
 import { rolePermissions } from "@shared/schema";
 import { requireRole } from "../auth";
@@ -27,6 +28,7 @@ const KNOWN_ROLES = new Set<string>(ALL_SYSTEM_ROLES);
  * de la migración de Etapa 3 por esa razón.
  */
 export function registerAdminPermissionsRoutes(app: Express) {
+  registerAccommodationPermissionRoutes(app);
   app.get("/api/admin/role-permissions", requireRole(["admin"]), async (_req, res) => {
     try {
       const rows = await db
