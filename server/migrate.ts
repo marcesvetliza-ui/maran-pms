@@ -5003,5 +5003,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   }
   await ensureCcManualTrackingSchema();
   await ensureRevenueManagementSchema();
+  const { ensureAccommodationPermissionsSchema } = await import("./accommodationPermissions");
+  await ensureAccommodationPermissionsSchema();
   logger.info("Migraciones incrementales completadas.");
 }
