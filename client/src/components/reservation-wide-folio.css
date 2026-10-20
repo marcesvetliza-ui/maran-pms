@@ -1,0 +1,20 @@
+.reservation-wide-folio { width:96vw; max-width:1360px; height:94dvh; }
+.folio-layout { display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:18px; align-items:start; }
+.folio-main { min-width:0; display:flex; flex-direction:column; gap:16px; }
+.folio-account-summary { position:sticky; top:0; border:1px solid hsl(var(--border)); border-radius:8px; background:hsl(var(--card)); font-size:14px; }
+.folio-account-summary header { padding:18px 16px; border-bottom:1px solid hsl(var(--border)); }
+.folio-night-table { width:100%; min-width:510px; font-size:14px; border-collapse:collapse; }
+.folio-night-table th { color:hsl(var(--muted-foreground)); font-size:12px; background:hsl(var(--muted)/.4); text-align:left; }
+.folio-night-table th,.folio-night-table td { padding:12px 14px; border-bottom:1px solid hsl(var(--border)); white-space:nowrap; }
+.folio-night-table input[type=checkbox] { width:16px; height:16px; accent-color:hsl(var(--primary)); }
+.folio-input { display:block; width:100%; padding:9px 10px; border:1px solid hsl(var(--input)); border-radius:5px; color:hsl(var(--foreground)); background:hsl(var(--background)); font-size:14px; }
+.folio-input:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
+.reservation-wide-folio .folio-legacy-lodging { display:none; }
+@media(max-width:1100px) {
+ .folio-layout { grid-template-columns:minmax(0,1fr); }
+ .folio-account-summary { position:relative; grid-row:1; }
+}
+@media(max-width:600px) {
+ .reservation-wide-folio { width:98vw; height:96dvh; }
+ .reservation-wide-folio [data-reservation-tab-scroll] { padding:12px; }
+}

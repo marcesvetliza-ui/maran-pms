@@ -1617,6 +1617,11 @@ export async function runMigrations() {
   // Incremental schema additions — each wrapped in an 8s timeout so a hung
   // DDL lock in Railway/PgBouncer never prevents the app from starting.
   const T = 8_000;
+  await withTimeout("reservations.nightly_pricing", T, () => db.execute(sql`
+    ALTER TABLE reservations ADD COLUMN IF NOT EXISTS pricing_scheme text NOT NULL DEFAULT 'legacy';
+    ALTER TABLE reservations ADD COLUMN IF NOT EXISTS pricing_revision integer NOT NULL DEFAULT 0;
+    ALTER TABLE reservations ADD COLUMN IF NOT EXISTS nightly_pricing jsonb;
+  `));
   await withTimeout("payments.request_identity", T, () =>
     pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL)
   );

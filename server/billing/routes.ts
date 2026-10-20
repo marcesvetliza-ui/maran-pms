@@ -40,6 +40,7 @@ import { allocateDebitReversalBySource } from "@shared/reservationDebitNote";
 import { getOperationalReservationCharges, isInvoiceableReservationCharge } from "@shared/reservationFolio";
 import { assertFinancialSchemaReady } from "../migrate";
 import { withInvoiceAdvisoryLock } from "./invoiceAdvisoryLock";
+import { withReservationFinancialLock, withFinancialScopeLock } from "../nightlyPricingGuard";
 import { exposeInvoiceReconciliation } from "./reconciliationPresentation";
 import {
   equalCreditSnapshots,
@@ -435,7 +436,7 @@ export function validateReservationInvoicePaymentDetail(
  * mutex: it coordinates every app instance that shares this PostgreSQL DB.
  */
 async function withReservationInvoiceLock<T>(reservationId: string, action: () => Promise<T>): Promise<T> {
-  return withInvoiceAdvisoryLock(pool, `folio-invoice:${reservationId}`, action);
+  return withReservationFinancialLock(reservationId, action);
 }
 
 async function reconcileReservationCreditSettlement(invoiceId: number, lockAlreadyHeld = false): Promise<void> {
@@ -561,7 +562,7 @@ async function reconcileReservationCreditSettlement(invoiceId: number, lockAlrea
 
 /** Serializes group-source validation and invoice persistence across app instances. */
 async function withGroupInvoiceLock<T>(groupId: string, action: () => Promise<T>): Promise<T> {
-  return withInvoiceAdvisoryLock(pool, `group-invoice:${groupId}`, action);
+  return withFinancialScopeLock(`group-invoice:${groupId}`, action);
 }
 
 /** Serializes SPA account validation and invoice persistence across app instances. */

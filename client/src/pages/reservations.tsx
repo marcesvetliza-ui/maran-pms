@@ -1,4 +1,6 @@
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
+import { ReservationNightlyPricing, ReservationFolioSummary, type ReservationNightlyPricingHandle } from "@/components/reservation-nightly-pricing";
+import { ReservationFolioHeader } from "@/components/reservation-folio-header";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -839,6 +841,13 @@ export function ReservationFormDialog({
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertReservation>) => {
       if (isEditing) {
+        if (reservation.pricingScheme === "nightly_v1") {
+          if (data.checkInDate !== reservation.checkInDate || data.checkOutDate !== reservation.checkOutDate) {
+            throw new Error("Para agregar o quitar noches usá Modificar estadía desde el Folio.");
+          }
+          data = { ...data };
+          for (const key of ["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountType", "discountValue", "nights", "pricingScheme", "nightlyPricing", "pricingRevision", "checkInDate", "checkOutDate", "voucherId", "voucherAppliedAmount"] as const) delete data[key];
+        }
         const res = await apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservation.id}`, data as Record<string, unknown>);
         return res.json();
       }
@@ -1058,6 +1067,7 @@ export function ReservationFormDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
+          {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Las tarifas y fechas de esta reserva se mantienen desde el Folio: Editar tarifas / Modificar estadía. Este formulario edita los demás datos.</p>}
           <div className="grid gap-4 py-4">
             <GuestSelector
               selectedGuest={selectedGuest}
@@ -1245,7 +1255,7 @@ export function ReservationFormDialog({
               <Select
                 value={formData.ratePlanId || ""}
                 onValueChange={handleRatePlanChange}
-                disabled={lodgingReadOnly || !selectedRoomTypeId}
+                disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1" || !selectedRoomTypeId}
               >
                 <SelectTrigger data-testid="select-rate-plan">
                   <SelectValue placeholder="Seleccionar plan tarifario" />
@@ -1487,7 +1497,7 @@ export function ReservationFormDialog({
                     }
                   }}
               >
-                <SelectTrigger disabled={lodgingReadOnly} data-testid="select-package">
+                <SelectTrigger disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1"} data-testid="select-package">
                   <SelectValue placeholder={isLoadingPackages ? "Cargando paquetes..." : "Sin paquete"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1536,7 +1546,7 @@ export function ReservationFormDialog({
                     <Label htmlFor="checkIn">Fecha Check-in</Label>
                     <Input
                       id="checkIn"
-                      disabled={lodgingReadOnly}
+                      disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1"}
                       type="date"
                       value={formData.checkInDate}
                       onChange={(e) => handleDateChange("checkInDate", e.target.value)}
@@ -1549,7 +1559,7 @@ export function ReservationFormDialog({
                     <Label htmlFor="checkOut">Fecha Check-out</Label>
                     <Input
                       id="checkOut"
-                      disabled={lodgingReadOnly}
+                      disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1"}
                       type="date"
                       value={formData.checkOutDate}
                       min={formData.checkInDate ? (() => { const d = new Date(formData.checkInDate + "T12:00:00"); d.setDate(d.getDate()+1); return toArgentinaDateStr(d); })() : undefined}
@@ -1631,7 +1641,7 @@ export function ReservationFormDialog({
               <div className="grid gap-2">
                 <Label htmlFor="discountType">Tipo Descuento</Label>
                 <Select
-                  disabled={lodgingReadOnly}
+                  disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1"}
                   value={formData.discountType}
                   onValueChange={(value) => handleDiscountChange(value as DiscountType, undefined)}
                 >
@@ -1649,6 +1659,7 @@ export function ReservationFormDialog({
                 <Label htmlFor="discountValue">Valor Descuento</Label>
                 <Input
                   id="discountValue"
+                  readOnly={reservation?.pricingScheme === "nightly_v1"}
                   type="number"
                   min={0}
                   step="0.01"
@@ -1668,7 +1679,7 @@ export function ReservationFormDialog({
                     min={0}
                     step="0.01"
                     value={formData.baseRatePerNight || ""}
-                    readOnly={lodgingReadOnly || formData.ratePlanId !== "__special__"}
+                    readOnly={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1" || formData.ratePlanId !== "__special__"}
                     onChange={formData.ratePlanId === "__special__" ? (e) => handleBaseRateChange(e.target.value) : undefined}
                     placeholder="0.00"
                     className={`pl-7 ${formData.ratePlanId === "__special__" ? "" : "bg-muted cursor-not-allowed"}`}
@@ -2310,7 +2321,7 @@ const GROUP_PERSONAL_EXTRAS_PAYMENT_METHODS = new Set([
 ]);
 
 export function ReservationDetailDialog({
-  reservation,
+  reservation: initialReservation,
   open,
   onOpenChange,
   onCancel,
@@ -2324,6 +2335,23 @@ export function ReservationDetailDialog({
   onEdit?: () => void;
   currentUserRole?: string;
 }) {
+  const { data: liveReservation } = useQuery<ReservationWithDetails>({
+    queryKey: ["/api/reservations", initialReservation.id],
+    queryFn: async () => {
+      const response = await fetch(`/api/reservations/${initialReservation.id}`, { credentials: "include" });
+      if (!response.ok) throw new Error("No se pudo actualizar la reserva.");
+      return response.json();
+    },
+    enabled: open,
+    refetchOnMount: "always",
+  });
+  const reservation = liveReservation || initialReservation;
+  const detailAccommodationAccess = useQuery<{ canEdit: boolean }>({
+    queryKey: ["/api/reservation-edit-permission"],
+    enabled: open,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
   const { toast } = useToast();
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
@@ -2353,6 +2381,8 @@ export function ReservationDetailDialog({
   );
 
   const [showAddCharge, setShowAddCharge] = useState(false);
+  const [detailTab, setDetailTab] = useState("folio");
+  const nightlyPricingRef = useRef<ReservationNightlyPricingHandle>(null);
   const [earlyCheckoutDialogOpen, setEarlyCheckoutDialogOpen] = useState(false);
   const [groupDepartureConfirmOpen, setGroupDepartureConfirmOpen] = useState(false);
   const [groupDepartureReason, setGroupDepartureReason] = useState("");
@@ -3138,22 +3168,17 @@ export function ReservationDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={dialogContentRef}
-        className="w-[95vw] max-w-[680px] max-h-[90dvh] flex flex-col overflow-hidden p-0 gap-0"
+        className="reservation-wide-folio wf-production dark max-h-[94dvh] flex flex-col overflow-hidden gap-0"
       >
-        <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
-          <DialogTitle className="flex items-center gap-2">
-            <>Reserva {reservation.reservationCode}<ReservationStatusBadge status={reservation.status} /></>
-          </DialogTitle>
-          {(reservation as any).company && (
-            <p className="text-xs text-muted-foreground">Empresa asociada: <span className="font-medium text-foreground">{(reservation as any).company.razonSocial || (reservation as any).company.nombreFantasia}</span></p>
-          )}
-          {!(reservation as any).company && (reservation as any).agency && (
-            <p className="text-xs text-muted-foreground">Agencia asociada: <span className="font-medium text-foreground">{(reservation as any).agency.razonSocial || (reservation as any).agency.nombreFantasia}</span></p>
-          )}
-          <DialogDescription>
-            Detalle de la reservación
-          </DialogDescription>
-        </DialogHeader>
+        <ReservationFolioHeader
+          reservation={reservation}
+          status={<ReservationStatusBadge status={reservation.status} />}
+          onClose={() => onOpenChange(false)}
+          onEditStay={!isLocked && detailAccommodationAccess.data?.canEdit === true && !detailAccommodationAccess.isError && (reservation.pricingScheme === "nightly_v1" || onEdit) ? () => {
+            setDetailTab("folio");
+            requestAnimationFrame(() => nightlyPricingRef.current?.openStay());
+          } : undefined}
+        />
 
         {(isChargesError || isPaymentsError) && (
           <div className="mx-6 mt-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" data-testid="banner-folio-load-error">
@@ -3196,8 +3221,8 @@ export function ReservationDetailDialog({
           </div>
         )}
 
-        <Tabs defaultValue="datos" className="flex min-h-0 flex-1 flex-col">
-          <TabsList className="grid shrink-0 mx-6 mt-4 grid-cols-3">
+        <Tabs value={detailTab} onValueChange={setDetailTab} className="wf-tabs flex min-h-0 flex-1 flex-col">
+          <TabsList className="wf-tab-list">
             <TabsTrigger value="datos" data-testid="tab-datos">Datos</TabsTrigger>
             <TabsTrigger value="folio" data-testid="tab-folio">Folio</TabsTrigger>
             <TabsTrigger value="historial" data-testid="tab-historial" className="flex items-center gap-1">
@@ -3210,7 +3235,7 @@ export function ReservationDetailDialog({
           <TabsContent
             value="datos"
             data-reservation-tab-scroll
-            className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4"
+            className="wf-content mt-0 min-h-0 flex-1 overflow-y-auto space-y-4"
           >
             {!editingGuest ? (
               <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
@@ -3714,18 +3739,11 @@ export function ReservationDetailDialog({
           <TabsContent
             value="folio"
             data-reservation-tab-scroll
-            className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-4"
+            className="wf-content mt-0 min-h-0 flex-1 overflow-y-auto"
           >
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 border rounded-lg">
-                <p className="text-sm text-muted-foreground mb-1">Plan Tarifario</p>
-                <p className="font-medium">{reservation.ratePlan?.name || "Tarifa Base"}</p>
-              </div>
-              <div className="p-3 border rounded-lg">
-                <p className="text-sm text-muted-foreground mb-1">Estado</p>
-                <ReservationStatusBadge status={reservation.status} />
-              </div>
-            </div>
+            <div className="wf-folio-layout">
+            <div className="wf-folio-left">
+            <ReservationNightlyPricing ref={nightlyPricingRef} reservationId={reservation.id} role={currentUserRole} onLegacyEdit={onEdit ? () => { onEdit(); onOpenChange(false); } : undefined} />
             {reservation.isUpgrade && (
               <div className="p-3 border border-amber-300 dark:border-amber-700 rounded-lg bg-amber-50 dark:bg-amber-950/30">
                 <div className="flex items-center gap-1.5 mb-2">
@@ -3756,46 +3774,11 @@ export function ReservationDetailDialog({
               </div>
             )}
 
-            {!isLocked && (
-              <div className="flex justify-end">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-2 border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-300"
-                  onClick={() => {
-                    setBulkSelectedChargeIds(new Set());
-                    setBulkIncludeAccommodation(false);
-                    setBulkTargetReservationId("");
-                    setBulkTransferNote("");
-                    setShowBulkTransfer(true);
-                  }}
-                  data-testid="button-bulk-transfer"
-                >
-                  <ArrowRightLeft className="h-4 w-4" />
-                  Transferir folio a otra habitación
-                </Button>
-              </div>
-            )}
-
-            <div className="border rounded-lg">
+            {(earlyCharge > 0 || lateCharge > 0) && <div className="border rounded-lg">
               <div className="p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">Resumen de Alojamiento</h4>
+                <h4 className="font-semibold">Ingreso y salida fuera de horario</h4>
               </div>
               <div className="p-3">
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Tarifa por noche</span>
-                  <span>${(parseFloat(reservation.totalRoomAmount || "0") / (reservation.nights || 1)).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                {reservation.discountType !== "none" && (
-                  <div className="flex justify-between text-sm mb-2 text-muted-foreground">
-                    <span>Descuento aplicado ({reservation.discountType === "percent" ? `${reservation.discountValue}%` : `$${reservation.discountValue}`})</span>
-                    <span>—</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Cantidad de noches</span>
-                  <span>x {reservation.nights}</span>
-                </div>
                 {earlyCharge > 0 && (
                   <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
                     <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
@@ -3814,17 +3797,19 @@ export function ReservationDetailDialog({
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">* Precio incluye IVA (21%). El desglose se realiza al facturar.</p>
               </div>
-            </div>
+            </div>}
 
-            <div className="border rounded-lg">
-              <div className="flex items-center justify-between p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">Consumos / Cargos Adicionales</h4>
+            <div className="wf-panel wf-consumptions">
+              <div className="wf-panel-heading compact">
+                <div><p className="wf-section-kicker">CARGOS ADICIONALES</p><h3>Consumos</h3></div>
+                <div className="wf-heading-end"><span className="wf-total-tag">${fmtMoney(totalConsumptions)}</span>
                 {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => setShowAddCharge(!showAddCharge)} data-testid="button-add-charge">
                   <Plus className="h-4 w-4 mr-1" />
-                  Agregar
+                  Agregar consumo
                 </Button>
                 )}
+                </div>
               </div>
 
               {showAddCharge && (
@@ -3988,35 +3973,34 @@ export function ReservationDetailDialog({
                 </div>
               )}
 
-              <div className="divide-y max-h-[150px] overflow-y-auto">
+              <div className="wf-charge-list divide-y">
                 {consumptionCharges.map((charge) => {
                   const isAnulado = (charge as any).status === "anulado";
                   const restaurantOrderNum = charge.category === "restaurant"
                     ? (charge.description.match(/Pedido\s+(\S+)/)?.[1] ?? null)
                     : null;
                   return (
-                  <div key={charge.id} className={`flex items-center justify-between p-3 text-sm ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`charge-row-${charge.id}`}>
-                    <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
-                      <Badge variant="outline" className="text-xs shrink-0">{categoryLabels[charge.category]}</Badge>
+                  <div key={charge.id} className={`wf-ledger-row flex items-center justify-between ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`charge-row-${charge.id}`}>
+                    <div className="wf-charge-description flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                      <span className={`wf-ledger-bullet ${charge.category}`} aria-hidden="true"/>
+                      <span className="wf-charge-copy"><strong>{categoryLabels[charge.category]}</strong><small className={isAnulado ? "line-through" : ""}>{stripTransferTags(charge.description)} · {formatDateAR(charge.date)}</small></span>
                       {isAnulado && <Badge variant="destructive" className="text-xs shrink-0">ANULADO</Badge>}
                       {(charge as any).isRecurring && <Badge variant="secondary" className="text-xs shrink-0 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700">×noche</Badge>}
-                      <span className={`truncate ${isAnulado ? "line-through text-muted-foreground" : ""}`}>{stripTransferTags(charge.description)}</span>
-                      <span className="text-muted-foreground text-xs shrink-0">({formatDateAR(charge.date)})</span>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <div className="wf-charge-actions flex items-center gap-1 shrink-0 ml-2">
                       <span className={`font-medium tabular-nums ${isAnulado ? "line-through text-muted-foreground" : ""}`} data-testid={`text-charge-amount-${charge.id}`}>
                         ${fmtMoney(charge.amount)}
                       </span>
                       {restaurantOrderNum && (
                         <Button
-                          size="icon"
+                          size="sm"
                           variant="ghost"
-                          className="h-6 w-6"
+                          className="h-7 px-2 text-xs"
                           onClick={() => setRestaurantVoucherOrderNum(restaurantOrderNum)}
                           title="Ver detalle del consumo"
                           data-testid={`button-voucher-${charge.id}`}
                         >
-                          <Eye className="h-3 w-3 text-orange-500" />
+                          <Eye className="h-3 w-3 mr-1" />Ver origen
                         </Button>
                       )}
                       {!isLocked && !isAnulado && (
@@ -4035,26 +4019,26 @@ export function ReservationDetailDialog({
                         {/* Bug K: invoiced charges cannot be transferred or cancelled — must go through NC */}
                         {!invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="h-6 w-6"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
                           onClick={() => setTransferringChargeId(charge.id)}
                           title="Transferir a otra habitación"
                           data-testid={`button-transfer-charge-${charge.id}`}
                         >
-                          <ArrowRightLeft className="h-3 w-3 text-blue-600" />
+                          <ArrowRightLeft className="h-3 w-3 mr-1" />Transferir
                         </Button>
                         )}
                         {!invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="h-6 w-6"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
                           onClick={() => { setAnularTarget({ type: "cargo", id: charge.id }); setMotivoAnulacion(""); }}
                           title="Anular cargo"
                           data-testid={`button-anular-charge-${charge.id}`}
                         >
-                          <Ban className="h-3 w-3 text-destructive" />
+                          <Ban className="h-3 w-3 mr-1" />Anular
                         </Button>
                         )}
                         </>
@@ -4138,23 +4122,25 @@ export function ReservationDetailDialog({
             </Dialog>
 
             <div className="border rounded-lg">
-              <div className="flex items-center justify-between p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">{isGroupReservation ? "Cobro de extras personales" : "Pagos / Anticipos"}</h4>
+              <div className="wf-panel-heading compact">
+                <div><p className="wf-section-kicker">COBROS</p><h3>{isGroupReservation ? "Extras personales" : "Pagos registrados"}</h3></div>
+                <div className="wf-heading-end"><span className="wf-paid-tag">${fmtMoney(totalPayments)} recibidos</span>
                 {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => {
                   if (!showAddPayment) {
                     const amt = isGroupReservation
                       ? (groupPersonalExtrasBalance > 0 ? groupPersonalExtrasBalance.toFixed(2) : "")
-                      : (balance > 0 ? fmtMoney(balance) : "");
+                      : (balance > 0 ? balance.toFixed(2) : "");
                     setNewPayment({ ...newPayment, amount: amt });
                     setPaymentRows([{ amount: amt, method: "efectivo", reference: "", billingTarget: "guest" }]);
                   }
                   setShowAddPayment(!showAddPayment);
                 }} data-testid="button-add-payment" disabled={isConfirmingPayment || (isGroupReservation && groupPersonalExtrasBalance <= 0.009)}>
                   <Plus className="h-4 w-4 mr-1" />
-                  {isGroupReservation ? "Cobrar extras personales" : "Registrar Pago"}
+                  {isGroupReservation ? "Cobrar extras personales" : "Registrar pago"}
                 </Button>
                 )}
+                </div>
               </div>
 
               {isGroupReservation && (
@@ -4888,12 +4874,15 @@ export function ReservationDetailDialog({
                 </div>
               );
             })()}
+            </div>
+            <ReservationFolioSummary lodging={subtotalRoom} consumptions={totalConsumptions + totalNdAmount} payments={totalPayments} total={totalToPay} pendingCollection={pendingCollection} pendingBilling={pendingBilling} nights={reservation.nights} chargesCount={activeConsumptionCharges.length + folioNdMovements.length} />
+            </div>
           </TabsContent>
 
           <TabsContent
             value="historial"
             data-reservation-tab-scroll
-            className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 py-4"
+            className="wf-content mt-0 min-h-0 flex-1 overflow-y-auto"
           >
             {changelog.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground gap-2">
@@ -4926,8 +4915,8 @@ export function ReservationDetailDialog({
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2 sm:justify-between">
-          <div className="flex gap-2 flex-wrap">
+        <DialogFooter className="wf-footer shrink-0 gap-2 sm:justify-between">
+          <div className="wf-footer-actions">
             <Button
               variant="outline"
               onClick={printConfirmation}
@@ -4936,6 +4925,13 @@ export function ReservationDetailDialog({
               <FileText className="h-4 w-4 mr-2" />
               Confirmación
             </Button>
+            {!isLocked && <Button size="sm" variant="outline" onClick={() => {
+              setBulkSelectedChargeIds(new Set());
+              setBulkIncludeAccommodation(false);
+              setBulkTargetReservationId("");
+              setBulkTransferNote("");
+              setShowBulkTransfer(true);
+            }} data-testid="button-bulk-transfer"><ArrowRightLeft className="h-3.5 w-3.5 mr-1.5"/>Transferir folio</Button>}
             {onEdit && reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
               <Button
                 variant="outline"
@@ -4946,7 +4942,7 @@ export function ReservationDetailDialog({
                 data-testid="button-edit-from-detail"
               >
                 <Pencil className="h-4 w-4 mr-2" />
-                Editar
+                Editar datos de reserva
               </Button>
             )}
             {reservation.status === "checked_in" && (
