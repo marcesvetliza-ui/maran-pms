@@ -17,6 +17,8 @@ import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceServi
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
 import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth, requireRole, requirePermission } from "../auth";
+import { canEditAccommodation } from "../accommodationPermissions";
+import { changesAccommodation } from "@shared/accommodationPermission";
 import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
@@ -481,6 +483,9 @@ export function registerReservationsRoutes(app: Express) {
         return res.status(404).json({ error: "Reservation not found" });
       }
       const preparationWarning=preparationMoveWarning(existing.housekeepingPreparation??null,existing.roomId,req.body.roomId,preparationAck);
+      if (changesAccommodation(existing, req.body) && !await canEditAccommodation(req.user!)) {
+        return res.status(403).json({ error: "No tenés permiso para editar tarifas y noches de alojamiento. Solicitá la habilitación individual a un administrador." });
+      }
       if(preparationWarning)return res.status(409).json(preparationWarning);
       // The persisted link is authoritative. Generic reservation editors do not
       // send contextGroupId, and without it an extension is counted once inside
