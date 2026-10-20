@@ -1,7 +1,7 @@
 export const ACCOMMODATION_EDIT_ROLES = ["admin", "manager", "reception", "jefe_recepcion", "comercial"];
 export const ACCOMMODATION_PERMISSION = "reservations:edit-accommodation";
-export function accommodationPermission(role: string, override: boolean | null | undefined): boolean {
-  return override ?? ACCOMMODATION_EDIT_ROLES.includes(role);
+export function accommodationPermission(role: string, override: boolean | null | undefined, inherited = ACCOMMODATION_EDIT_ROLES.includes(role)): boolean {
+  return override ?? inherited;
 }
 const numericFields = new Set(["baseRatePerNight", "finalRatePerNight", "totalRoomAmount", "discountValue", "nights"]);
 export const accommodationFields = [
