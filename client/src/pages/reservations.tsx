@@ -2346,6 +2346,12 @@ export function ReservationDetailDialog({
     refetchOnMount: "always",
   });
   const reservation = liveReservation || initialReservation;
+  const detailAccommodationAccess = useQuery<{ canEdit: boolean }>({
+    queryKey: ["/api/reservation-edit-permission"],
+    enabled: open,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
   const { toast } = useToast();
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
@@ -3166,7 +3172,7 @@ export function ReservationDetailDialog({
           reservation={reservation}
           status={<ReservationStatusBadge status={reservation.status} />}
           onClose={() => onOpenChange(false)}
-          onEditStay={!isLocked && ["admin", "manager", "reception", "jefe_recepcion", "comercial"].includes(currentUserRole || "") && (reservation.pricingScheme === "nightly_v1" || onEdit) ? () => {
+          onEditStay={!isLocked && detailAccommodationAccess.data?.canEdit === true && !detailAccommodationAccess.isError && (reservation.pricingScheme === "nightly_v1" || onEdit) ? () => {
             setDetailTab("folio");
             requestAnimationFrame(() => nightlyPricingRef.current?.openStay());
           } : undefined}
