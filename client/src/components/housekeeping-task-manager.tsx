@@ -1,3 +1,5 @@
+import {useStaffAvailability} from "./housekeeping-staff-availability";
+import {availabilityDescription} from "@shared/housekeepingAvailability";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, parseApiError, queryClient } from "@/lib/queryClient";
@@ -65,6 +67,8 @@ export function HousekeepingTaskManager({
     priority: "normal",
     notes: "",
   });
+  const availability = useStaffAvailability(form.scheduledDate);
+  const selectedAvailability = availability.data?.find(v=>v.userId===form.assignedTo);
   const [message, setMessage] = useState("");
   const requestedEdit = useRef<HousekeepingTaskWithRoom | null>(null);
   useEffect(() => {
@@ -334,11 +338,13 @@ export function HousekeepingTaskManager({
                   <option value="">Sin asignar</option>
                   {staff.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.fullName}
+                      {s.fullName} · {availability.data?.find(v=>v.userId===s.id)?.status ? availabilityDescription(availability.data.find(v=>v.userId===s.id)) : "Sin completar"}
                     </option>
                   ))}
                 </select>
               </label>
+              {availability.isError&&<p role="alert" className="text-sm">No se pudo consultar la disponibilidad; no se puede confirmar quién trabaja.</p>}
+              {selectedAvailability?.status&&selectedAvailability.status!=="working"&&<p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{selectedAvailability.fullName}: {availabilityDescription(selectedAvailability)}. Revisá la asignación antes de guardar.{selectedAvailability.notes ? ` ${selectedAvailability.notes}` : ""}</p>}
               <label>
                 Tipo de tarea
                 <select

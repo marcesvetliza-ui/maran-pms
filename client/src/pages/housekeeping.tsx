@@ -1,3 +1,4 @@
+import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
 import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
 import {HousekeepingPlanningView} from "@/components/housekeeping-planning";
@@ -2155,6 +2156,7 @@ export default function Housekeeping() {
 
         {isSupervisor && (
         <TabsContent value="turno">
+          <HousekeepingStaffAvailability />
           <div className="mt-4 space-y-6">
             {/* ── Cards por mucama ── */}
             <div className="space-y-3">

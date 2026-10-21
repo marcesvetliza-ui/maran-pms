@@ -5012,5 +5012,18 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await ensureRevenueManagementSchema();
   const { ensureAccommodationPermissionsSchema } = await import("./accommodationPermissions");
   await ensureAccommodationPermissionsSchema();
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS housekeeping_staff_availability (
+ user_id varchar NOT NULL REFERENCES system_users(id),
+ scheduled_date text NOT NULL,
+ status text NOT NULL CHECK (status IN ('working','day_off','absent')),
+ shift text,
+ start_time text,
+ end_time text,
+ notes text NOT NULL DEFAULT '',
+ updated_by varchar NOT NULL,
+ updated_at timestamptz NOT NULL DEFAULT NOW(),
+ PRIMARY KEY(user_id,scheduled_date)
+);
+`);
   logger.info("Migraciones incrementales completadas.");
 }

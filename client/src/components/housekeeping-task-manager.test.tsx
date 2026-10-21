@@ -213,3 +213,13 @@ describe("Creación y asignación de tareas", () => {
   });
 
 });
+
+it("advierte franco al asignar sin ocultar la excepción", async () => {
+  vi.mocked(apiRequest).mockImplementation(async (method, url) => new Response(JSON.stringify(String(url).includes('/availability?') ? [{userId:'worker',fullName:'Mucama de prueba',status:'day_off',shift:null,startTime:null,endTime:null,notes:'Franco acordado'}] : method==='GET' ? tasks : []),{status:200}));
+  render(<Harness />);
+  fireEvent.click(screen.getByRole('button',{name:'Crear y asignar tareas'}));
+  await screen.findByRole('option',{name:/Mucama de prueba · Franco/});
+  fireEvent.change(screen.getByLabelText('Responsable'),{target:{value:'worker'}});
+  expect(screen.getByRole('alert')).toHaveTextContent('Franco');
+  expect(screen.getByRole('alert')).toHaveTextContent('Franco acordado');
+});

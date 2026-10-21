@@ -443,6 +443,18 @@ export type HousekeepingTaskStatus = "pending" | "in_progress" | "completed" | "
 export type HousekeepingTaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
 export type HousekeepingPriority = "low" | "normal" | "high" | "urgent";
 
+export const housekeepingStaffAvailability = pgTable("housekeeping_staff_availability", {
+  userId: varchar("user_id").notNull().references(() => systemUsers.id),
+  scheduledDate: text("scheduled_date").notNull(),
+  status: text("status").notNull(),
+  shift: text("shift"),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
+  notes: text("notes").notNull().default(""),
+  updatedBy: varchar("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", {withTimezone: true}).notNull().defaultNow(),
+}, table => [primaryKey({columns: [table.userId, table.scheduledDate]})]);
+
 export const housekeepingTasks = pgTable("housekeeping_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roomId: varchar("room_id").notNull(),
