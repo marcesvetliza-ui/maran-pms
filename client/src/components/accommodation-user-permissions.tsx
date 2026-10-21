@@ -4,13 +4,32 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { z } from "zod";
 
 const key = ["/api/admin/accommodation-permissions"];
-type Row = { id: string; username: string; fullName: string; role: string; override: boolean | null; inherited: boolean; canEdit: boolean };
+const rowsSchema = z.array(z.object({
+  id: z.string(),
+  username: z.string(),
+  fullName: z.string().nullable(),
+  role: z.string(),
+  override: z.boolean().nullable(),
+  inherited: z.boolean(),
+  canEdit: z.boolean(),
+}));
 export function AccommodationUserPermissions() {
   const { toast } = useToast();
   const [filter, setFilter] = useState("");
-  const users = useQuery<Row[]>({ queryKey: key, staleTime: 0, refetchOnMount: "always" });
+  const users = useQuery({
+    queryKey: key,
+    queryFn: async () => {
+      const response = await apiRequest("GET", key[0]);
+      const parsed = rowsSchema.safeParse(await response.json());
+      if (!parsed.success) throw new Error("La respuesta de permisos por usuario es inválida.");
+      return parsed.data;
+    },
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
   const save = useMutation({
     mutationFn: ({ id, allowed }: { id: string; allowed: boolean | null }) =>
       apiRequest("PUT", `/api/admin/accommodation-permissions/${id}`, { allowed }),
@@ -29,7 +48,7 @@ export function AccommodationUserPermissions() {
       <Input aria-label="Buscar usuario para permiso de alojamiento" placeholder="Buscar usuario o nombre…" value={filter} onChange={e => setFilter(e.target.value)} className="max-w-sm" />
       {users.isPending ? <p>Cargando usuarios…</p> : users.isError ? <p role="alert" className="text-destructive">No se pudieron cargar los permisos. <button onClick={() => void users.refetch()}>Reintentar</button></p> :
         <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="p-2">Usuario / rol</th><th className="p-2">Permiso individual</th><th className="p-2">Resultado</th></tr></thead>
-          <tbody>{users.data?.filter(u => `${u.username} ${u.fullName}`.toLowerCase().includes(filter.toLowerCase())).map(u =>
+          <tbody>{users.data?.filter(u => `${u.username} ${u.fullName ?? ""}`.toLowerCase().includes(filter.toLowerCase())).map(u =>
             <tr key={u.id} className="border-b"><td className="p-2"><strong>{u.username}</strong><p className="text-muted-foreground">{u.fullName} · {u.role}</p></td>
               <td className="p-2"><select className="rounded border bg-background p-2" aria-label={`Editar alojamiento: ${u.username}`} value={u.override === null ? "inherit" : u.override ? "allow" : "deny"} disabled={save.isPending}
                 onChange={e => save.mutate({ id: u.id, allowed: e.target.value === "inherit" ? null : e.target.value === "allow" })}>
