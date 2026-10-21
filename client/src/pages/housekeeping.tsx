@@ -1,5 +1,6 @@
 import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
+import {HousekeepingPlanningView} from "@/components/housekeeping-planning";
 import {HousekeepingTaskManager} from "@/components/housekeeping-task-manager";
 import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
@@ -1419,6 +1420,7 @@ export default function Housekeeping() {
   const isMucama = !isSupervisor;
   const [taskPlannerOpen,setTaskPlannerOpen]=useState(false);
   const [plannerRooms,setPlannerRooms]=useState<string[]>([]);
+  const [plannerDate,setPlannerDate]=useState<string|undefined>(undefined);
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [mobileView, setMobileView] = useState(() => localStorage.getItem("hk_mobile_view") === "true");
@@ -1851,10 +1853,11 @@ export default function Housekeeping() {
         <h1 className="text-2xl font-bold" data-testid="text-page-title">Housekeeping</h1>
       </div>
 
-      {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value)setPlannerRooms([]);}}/>}
+      {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} initialDate={plannerDate} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value){setPlannerRooms([]);setPlannerDate(undefined);}}}/>}
       <Tabs defaultValue="rooms">
-        <TabsList>
-          <TabsTrigger value="rooms">Habitaciones</TabsTrigger>
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1">
+          <TabsTrigger value="rooms">Habitaciones · Hoy</TabsTrigger>
+          {isSupervisor&&<TabsTrigger value="planning">Planificación por fecha</TabsTrigger>}
           {isSupervisor && (
             <TabsTrigger value="turno" data-testid="tab-turno" className="gap-1">
               <CalendarClock className="h-4 w-4" />
@@ -1886,6 +1889,7 @@ export default function Housekeeping() {
           <TabsTrigger value="inventory" data-testid="tab-housekeeping-inventory" className="gap-1"><Boxes className="h-4 w-4" />Inventario Housekeeping</TabsTrigger>
         </TabsList>
 
+        {isSupervisor&&<TabsContent value="planning"><HousekeepingPlanningView onCreateTask={(roomId,date)=>{setPlannerRooms([roomId]);setPlannerDate(date);setTaskPlannerOpen(true);}}/></TabsContent>}
         <TabsContent value="inventory"><HousekeepingInventory /></TabsContent>
 
         <TabsContent value="rooms">

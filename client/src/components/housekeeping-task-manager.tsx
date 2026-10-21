@@ -43,12 +43,14 @@ export function HousekeepingTaskManager({
   open,
   onOpenChange,
   initialRoomIds,
+  initialDate,
 }: {
   rooms: RoomWithType[];
   staff: { id: string; fullName: string }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialRoomIds: string[];
+  initialDate?: string;
 }) {
   const { toast } = useToast();
   const [date, setDate] = useState(getArgentinaToday),
@@ -83,7 +85,7 @@ export function HousekeepingTaskManager({
               notes: task.notes || "",
             }
           : {
-              scheduledDate: date,
+              scheduledDate: initialDate || date,
               assignedTo: "",
               taskType: "checkout_clean",
               priority: "normal",

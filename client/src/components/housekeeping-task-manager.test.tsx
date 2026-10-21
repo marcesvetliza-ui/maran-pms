@@ -30,7 +30,7 @@ const rooms: any = [
 const staff = [{ id: "worker", fullName: "Mucama de prueba" }],
   initial: string[] = [];
 let tasks: any[] = [];
-function Harness() {
+function Harness({initialDate}:{initialDate?:string}={}) {
   const [open, setOpen] = useState(false);
   return (
     <QueryClientProvider client={queryClient}>
@@ -40,6 +40,7 @@ function Harness() {
         open={open}
         onOpenChange={setOpen}
         initialRoomIds={initial}
+        initialDate={initialDate}
       />
     </QueryClientProvider>
   );
@@ -205,5 +206,10 @@ describe("Creación y asignación de tareas", () => {
     } finally {
       confirm.mockRestore();
     }
+  });  it("uses the date selected in the planning view for a new task", () => {
+    render(<Harness initialDate="2095-02-02"/>);
+    fireEvent.click(screen.getByRole("button",{name:"Crear y asignar tareas"}));
+    expect(screen.getByLabelText("Fecha de la tarea")).toHaveValue("2095-02-02");
   });
+
 });

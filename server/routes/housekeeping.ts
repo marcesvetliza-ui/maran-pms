@@ -1,3 +1,4 @@
+import {registerHousekeepingPlanning} from "../housekeepingPlanning";
 import {registerHousekeepingTaskRoutes} from "../housekeepingTasks";
 import { lostFoundShippingSchema, lostFoundStatusUpdateSchema } from "@shared/lostFoundDelivery";
 import type { Express } from "express";
@@ -44,6 +45,7 @@ export function registerHousekeepingRoutes(app: Express) {
       });res.json(result);
     }catch(error:any){res.status(error.statusCode||500).json({error:error.message});}
   });
+  registerHousekeepingPlanning(app);
   registerHousekeepingTaskRoutes(app);
 
   // ==================== LOST & FOUND MODULE ====================

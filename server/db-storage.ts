@@ -699,14 +699,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRoom(room: InsertRoom): Promise<Room> {
-    const [created] = await db.insert(rooms).values(room as any).returning();
+    const [created] = await db.insert(rooms).values({...room,bedConfigRevision:0} as any).returning();
     return created;
   }
 
   async updateRoom(id: string, room: Partial<InsertRoom>): Promise<Room | undefined> {
     const safeUpdates: Record<string, any> = {};
     for (const [key, val] of Object.entries(room)) {
-      if (val !== undefined) safeUpdates[key] = val;
+      if (key !== "bedConfigRevision" && val !== undefined) safeUpdates[key] = val;
+    }
+    if (Object.prototype.hasOwnProperty.call(safeUpdates,"bedConfig")) {
+      safeUpdates.bedConfigRevision=sql`CASE WHEN ${rooms.bedConfig} IS DISTINCT FROM ${safeUpdates.bedConfig} THEN ${rooms.bedConfigRevision}+1 ELSE ${rooms.bedConfigRevision} END`;
     }
     if (Object.keys(safeUpdates).length === 0) {
       const [existing] = await db.select().from(rooms).where(eq(rooms.id, id));
@@ -1132,6 +1135,7 @@ export class DatabaseStorage implements IStorage {
     return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
       const insertData = { ...(reservation as any) };
       delete insertData.housekeepingPreparation;
+      delete insertData.housekeepingBedPreparation;
       const contextGroupId = insertData._inventoryContextGroupId as string | undefined;
       const overrideSoft = insertData._inventoryOverrideTentativeGroupWarning === true;
       delete insertData._inventoryContextGroupId;
@@ -1345,7 +1349,7 @@ export class DatabaseStorage implements IStorage {
 
   private async updateReservationUnlocked(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
     const safeData: Record<string, any> = {};
-    const protectedFields = ["id", "createdAt", "reservationCode"];
+    const protectedFields = ["id", "createdAt", "reservationCode", "housekeepingBedPreparation"];
     const fkFields = ["guestId", "roomId", "roomTypeId"];
     const validStatuses = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled", "no_show"];
     for (const [key, value] of Object.entries(reservation)) {
@@ -1358,6 +1362,9 @@ export class DatabaseStorage implements IStorage {
     if (Object.keys(safeData).length === 0) return undefined;
 
     const before = (await db.select().from(reservations).where(eq(reservations.id, id)))[0];
+    if (before && ["roomId","bedTypeId","bedTypeNotes"].some(key=>safeData[key]!==undefined&&String(safeData[key]??"")!==String((before as any)[key]??""))) {
+      safeData.housekeepingBedPreparation=null;
+    }
 
     // Igual que en createReservation: aplicar ANTES de commitear el update.
     // Si el voucher ya no está disponible, el PATCH entero falla en vez de

@@ -476,6 +476,7 @@ export function registerReservationsRoutes(app: Express) {
       const preparationAck=req.body.acknowledgeHousekeepingPreparation;
       delete req.body.acknowledgeHousekeepingPreparation;
       delete req.body.housekeepingPreparation;
+      delete req.body.housekeepingBedPreparation;
       const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
       delete req.body.contextGroupId;
