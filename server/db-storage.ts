@@ -4398,6 +4398,8 @@ export class DatabaseStorage implements IStorage {
       );
     } else if (date) {
       tasks = await db.select().from(housekeepingTasks).where(eq(housekeepingTasks.scheduledDate, date));
+    } else if (assignedTo) {
+      tasks = await db.select().from(housekeepingTasks).where(eq(housekeepingTasks.assignedTo, assignedTo));
     } else {
       tasks = await db.select().from(housekeepingTasks);
     }
