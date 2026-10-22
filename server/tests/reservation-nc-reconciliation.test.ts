@@ -11,7 +11,11 @@ const state = vi.hoisted(() => ({
 
 vi.mock("../db", () => ({
   db: {
-    execute: vi.fn(async () => state.responses.shift() ?? { rows: [] }),
+    execute: vi.fn(async (query:any) => {
+      const {PgDialect}=await import("drizzle-orm/pg-core");
+      if(new PgDialect().sqlToQuery(query).sql.includes("SELECT group_id FROM group_reservation_links"))return {rows:[]};
+      return state.responses.shift() ?? {rows:[]};
+    }),
     transaction: vi.fn(async (callback: any) => callback({
       execute: async () => {
         state.transactionExecutions++;
@@ -880,4 +884,10 @@ describe("group debit notes", () => {
       "nd", "12.34", "informational", expect.anything(), expect.anything(),
     );
   });
+});
+
+it("blocks another group NC while the original attempt awaits recovery",async()=>{
+ const groupInvoice={...multiChargeInvoice,reserva_id:null,group_id:'group-pending'};
+ state.responses=[{rows:[groupInvoice]},{rows:[groupInvoice]},{rows:[{id:90}]}];
+ await withServer(async base=>{const response=await fetch(`${base}/api/billing/invoices/12/nota-credito`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo:'Reintento',items:[{sourceId:'accommodation',amount:100}]})});expect(response.status).toBe(409);expect(await response.json()).toMatchObject({pendingCreditNoteId:90,error:expect.stringContaining('Reintentar y conciliar')});});expect(state.emittedCalls).toHaveLength(0);
 });

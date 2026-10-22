@@ -26,7 +26,7 @@ describe("cola de reintentos ARCA", () => {
     toastMock.mockReset();
   });
 
-  it("muestra el reconciliation_error exacto y lo refresca después de otro fallo", async () => {
+  it.each([false,true])("muestra y actualiza el error exacto de NC pendiente (grupo=%s)", async (group) => {
     const firstError = "ARCA: servicio temporalmente no disponible";
     const retryError = "ARCA: fecha del comprobante fuera del período permitido";
     let pendingRequestCount = 0;
@@ -42,7 +42,8 @@ describe("cola de reintentos ARCA", () => {
           tipo_comprobante: "NCB",
           punto_venta: 1,
           numero: 15,
-          reserva_id: "reservation-1",
+          reserva_id: group ? null : "reservation-1",
+          group_id: group ? "group-1" : null,
           monto_total: "100.00",
           original_tipo_comprobante: "FB",
           original_punto_venta: 1,
@@ -70,6 +71,7 @@ describe("cola de reintentos ARCA", () => {
     );
 
     expect(await screen.findByText(firstError)).toBeInTheDocument();
+    expect(screen.getByText(group ? /Grupo #group-1/ : /Reserva #reservation-1/)).toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByTestId("btn-reconcile-credit-note-90"));
 

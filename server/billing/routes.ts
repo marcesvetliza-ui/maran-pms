@@ -1,3 +1,4 @@
+import { recoverGroupCreditNote } from "./groupCreditRecovery";
 import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
 import {creditNoteAccountMovement} from './creditNoteAccountMovement';
@@ -852,7 +853,7 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
-  // Pending reservation NCs are intentionally visible outside date filters:
+  // Pending reservation and group NCs remain visible outside date filters:
   // an authorized fiscal correction must be actionable until its Folio
   // adjustment has been committed.
   app.get("/api/billing/credit-note-reconciliations/pending", requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), async (_req, res) => {
@@ -867,7 +868,7 @@ export function registerBillingRoutes(app: Express) {
           orig.cliente_razon_social AS original_cliente_razon_social
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
-        WHERE nc.reserva_id IS NOT NULL
+        WHERE (nc.reserva_id IS NOT NULL OR nc.group_id IS NOT NULL)
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.reconciliation_status = 'pendiente'
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
@@ -894,12 +895,12 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.id = ${ncId}
-          AND nc.reserva_id IS NOT NULL
+          AND (nc.reserva_id IS NOT NULL OR nc.group_id IS NOT NULL)
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
         LIMIT 1
       `);
       if (!initial.rows.length) {
-        return res.status(404).json({ error: "No se encontró una NC de reserva pendiente" });
+        return res.status(404).json({ error: "No se encontró una NC de reserva o grupo pendiente" });
       }
 
       // Query aliases avoid accidental field shadowing in the joined row.
@@ -911,6 +912,9 @@ export function registerBillingRoutes(app: Express) {
       `);
       const nc = initialNc.rows[0] as any;
       const original = initialOriginal.rows[0] as any;
+      if (nc?.group_id && !nc.reserva_id && original?.group_id === nc.group_id) {
+        return res.json(await recoverGroupCreditNote(ncId,(req as any).user));
+      }
       if (!nc || !original || !original.reserva_id) {
         return res.status(404).json({ error: "No se encontró la factura original de la NC" });
       }
@@ -1015,6 +1019,8 @@ export function registerBillingRoutes(app: Express) {
                  FROM sales_invoices nc
                  WHERE nc.nota_credito_id = si.id
                    AND nc.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB')
+                   AND nc.estado IN ('emitida','parcial','anulada')
+                   AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status='conciliada')
                ), '[]'::jsonb) AS credit_source_charge_amounts,
                orig.tipo_comprobante AS original_tipo,
                orig.numero           AS original_numero,
@@ -3116,6 +3122,11 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
+      if(original.group_id && !original.reserva_id){
+        const pendingGroup=await db.execute(sql`SELECT id FROM sales_invoices WHERE nota_credito_id=${id} AND group_id=${String(original.group_id)} AND tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB') AND reconciliation_status='pendiente' ORDER BY id LIMIT 1`);
+        if(pendingGroup.rows.length)return res.status(409).json({error:"Hay una Nota de Crédito del grupo pendiente. Usá Reintentar y conciliar en Facturación; no emitas otra NC.",pendingCreditNoteId:Number((pendingGroup.rows[0] as any).id),reconciliationStatus:"pendiente"});
+      }
+
       let sourceChargeAmounts: Record<string, number> = {};
       let sourceItemById = new Map<string, any>();
       let ncItems: any[] = [];
@@ -3170,6 +3181,8 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices
         WHERE nota_credito_id = ${original.id}
           AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
+          AND estado IN ('emitida','parcial','anulada')
+          AND (reconciliation_status IS NULL OR reconciliation_status='conciliada')
       `);
       const creditedBySource: Record<string, number> = {};
       let creditedWithNoSourceMap = 0;
@@ -3344,7 +3357,10 @@ export function registerBillingRoutes(app: Express) {
                 estado = ${nuevoEstado}
           WHERE id = ${id}
         `);
+        if (original.group_id) await tx.execute(sql`UPDATE sales_invoices SET reconciliation_status='conciliada',reconciliation_error=NULL,reconciliation_updated_at=NOW() WHERE id=${nc.id}`);
       });
+
+      if (original.group_id) Object.assign(nc,{reconciliationStatus:'conciliada',reconciliation_status:'conciliada'});
 
       // A reservation NC changes the fiscal amount and Folio balance only. It
       // must not create a cash outflow while its payments remain active.

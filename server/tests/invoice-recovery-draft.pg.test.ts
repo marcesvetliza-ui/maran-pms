@@ -333,6 +333,22 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
 
   beforeEach(() => configureRecoveredArca());
 
+  it("reintenta con la fecha fiscal persistida, incluso al día siguiente", async () => {
+    if(!pool)throw Error("Test DB required");
+    const suffix=randomUUID(), pv=8000+(parseInt(suffix.slice(0,6),16)%900);
+    const input={tipoComprobante:"NCB" as const,cliente:{razonSocial:"Synthetic",condicionIva:"Consumidor Final"},items:[{descripcion:"Prueba",cantidad:1,precioUnitario:100,alicuotaIva:"no_gravado" as const,subtotalNeto:0,subtotal:100}],reservaId:`date-${suffix}`,facturaOriginalId:777777,sourceChargeIds:["accommodation"],sourceChargeAmounts:{accommodation:100},puntoVentaOverride:pv,recoverableCreditNote:true};
+    global.fetch=vi.fn(async()=>new Response("<soap:Envelope><CbteNro>6</CbteNro></soap:Envelope>",{status:200})) as any;
+    try {
+      mocks.feCAESolicitar.mockRejectedValueOnce(new Error("simulated rejection"));
+      await expect(emitirFactura(input)).rejects.toThrow("simulated rejection");
+      const draft=(await pool.query("UPDATE sales_invoices SET fecha_emision='2026-08-01' WHERE reserva_id=$1 RETURNING id",[input.reservaId])).rows[0];
+      mocks.feCompConsultar.mockResolvedValueOnce(null);
+      mocks.feCAESolicitar.mockResolvedValueOnce({cae:"71234567890123",caeFechaVto:new Date("2026-09-10T12:00:00Z")});
+      await emitirFactura({...input,recoveryInvoiceId:draft.id});
+      expect(mocks.feCAESolicitar).toHaveBeenLastCalledWith(expect.objectContaining({fecha:"20260801",numero:7,puntoVenta:pv}),"homologacion");
+    }finally{await pool.query("DELETE FROM sales_invoices WHERE reserva_id=$1",[input.reservaId]);global.fetch=originalFetch;}
+  });
+
   it("serializa dos reanudaciones individuales y vincula una sola vez", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();

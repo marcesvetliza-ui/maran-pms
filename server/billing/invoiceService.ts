@@ -558,7 +558,7 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
     }
 
     // The fiscal dates must use the same Argentina calendar day stored on the invoice.
-    const fecha = getArgentinaToday().replace(/-/g, "");
+    const fecha = String(pendingInvoice?.fechaEmision || (pendingInvoice as any)?.fecha_emision || getArgentinaToday()).replace(/-/g, "");
 
     try {
       const { feCAESolicitar, feCompConsultar } = await import("./wsfevClient");

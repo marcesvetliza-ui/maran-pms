@@ -276,6 +276,7 @@ export default function BillingPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/companies"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/agencies"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/groups"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
       ]);
       toast({
@@ -410,7 +411,7 @@ export default function BillingPage() {
                       <div className="min-w-0">
                         <div className="font-medium">
                           {TIPO_LABELS[nc.tipo_comprobante]?.nombre || nc.tipo_comprobante} {padNum(nc.punto_venta, 4)}-{padNum(nc.numero, 8)}
-                          <span className="font-normal text-muted-foreground"> · Reserva #{nc.reserva_id}</span>
+                          <span className="font-normal text-muted-foreground"> · {nc.group_id ? `Grupo #${nc.group_id}` : `Reserva #${nc.reserva_id}`}</span>
                         </div>
                         <div className="text-muted-foreground mt-0.5">
                           Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}

@@ -247,6 +247,8 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
                FROM sales_invoices nc
                WHERE nc.nota_credito_id = si.id
                  AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
+                 AND nc.estado IN ('emitida','parcial','anulada')
+                 AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status='conciliada')
              ), '[]'::jsonb) AS credit_source_charge_amounts
       FROM sales_invoices si
       WHERE si.group_id = ${groupId}

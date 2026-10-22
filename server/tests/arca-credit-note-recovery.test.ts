@@ -62,3 +62,8 @@ describe("ARCA FECompConsultar — faithful ResultGet evidence", () => {
     await expect(feCompConsultar(request,"homologacion",expected)).rejects.toThrow();
   });
 });
+
+it("retains ARCA rejection observations without treating them as an authorization",()=>{
+ const rejected=authorizationFixture(99,1).replaceAll("<Resultado>A</Resultado>","<Resultado>R</Resultado>").replace("</FECAEDetResponse>","<Observaciones><Obs><Code>10197</Code><Msg>Falta comprobante asociado</Msg></Obs></Observaciones></FECAEDetResponse>");
+ expect(()=>parseAuthorizationResult(rejected,request as any,6)).toThrow('10197: Falta comprobante asociado');
+});

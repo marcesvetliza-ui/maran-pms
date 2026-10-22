@@ -88,7 +88,15 @@ export function parseAuthorizationResult(xml: string, req: FECAERequest, tipo: n
   const detail = details && one(details, "FECAEDetResponse");
   if (!header || !detail || one(result, "Errors")?.children.length ||
       field(header, "Resultado") !== "A" || field(detail, "Resultado") !== "A")
-    throw new Error("ARCA rechazó el comprobante o no confirmó su autorización.");
+    {
+      const errors=one(result,"Errors")?.children || [];
+      const observations=detail ? one(detail,"Observaciones")?.children || [] : [];
+      const reasons=[...errors,...observations].filter(n=>n.uri===WSFE && ["Err","Obs"].includes(n.name)).slice(0,5).map(n=>{
+        const code=one(n,"Code")?.text.trim(),message=one(n,"Msg")?.text.trim();
+        return message ? `${code ? code+": " : ""}${message.slice(0,500)}` : "";
+      }).filter(Boolean);
+      throw new Error(`ARCA rechazó el comprobante o no confirmó su autorización.${reasons.length ? " " + reasons.join("; ") : ""}`);
+    }
   if (Number(field(header, "PtoVta")) !== req.puntoVenta || Number(field(header, "CbteTipo")) !== tipo ||
       Number(field(detail, "CbteDesde")) !== req.numero || Number(field(detail, "CbteHasta")) !== req.numero)
     throw new Error("ARCA: autorización no coincide con la identidad fiscal enviada.");
