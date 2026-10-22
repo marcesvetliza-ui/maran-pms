@@ -1,3 +1,4 @@
+import { ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
 import { Fragment, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -36,9 +37,12 @@ const QUERY_KEY = ["/api/admin/role-permissions"];
 export default function AdminPermisosPage() {
   const { toast } = useToast();
   const [filter, setFilter] = useState("");
+  const [showAccommodationUsers, setShowAccommodationUsers] = useState(false);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery<PermissionsCatalogResponse>({ queryKey: QUERY_KEY });
+  const { data, isLoading } = useQuery<PermissionsCatalogResponse>({
+    queryKey: QUERY_KEY,
+  });
 
   const grantSet = useMemo(() => {
     const s = new Set<string>();
@@ -47,7 +51,10 @@ export default function AdminPermisosPage() {
   }, [data]);
 
   const sections = useMemo(() => {
-    const bySection = new Map<string, Array<{ resourceKey: string; label: string }>>();
+    const bySection = new Map<
+      string,
+      Array<{ resourceKey: string; label: string }>
+    >();
     for (const item of data?.catalog ?? []) {
       if (!bySection.has(item.section)) bySection.set(item.section, []);
       bySection.get(item.section)!.push(item);
@@ -59,24 +66,51 @@ export default function AdminPermisosPage() {
     const q = filter.trim().toLowerCase();
     if (!q) return sections;
     return sections
-      .map(([section, items]) => [
-        section,
-        items.filter((i) => i.label.toLowerCase().includes(q) || section.toLowerCase().includes(q)),
-      ] as [string, typeof items])
+      .map(
+        ([section, items]) =>
+          [
+            section,
+            items.filter(
+              (i) =>
+                i.label.toLowerCase().includes(q) ||
+                section.toLowerCase().includes(q),
+            ),
+          ] as [string, typeof items],
+      )
       .filter(([, items]) => items.length > 0);
   }, [sections, filter]);
 
   const toggleMutation = useMutation({
-    mutationFn: ({ role, resourceKey, grant }: { role: string; resourceKey: string; grant: boolean }) =>
-      apiRequest("POST", `/api/admin/role-permissions/${grant ? "grant" : "revoke"}`, { role, resourceKey }),
-    onMutate: ({ role, resourceKey }) => setPendingKey(`${role}:${resourceKey}`),
+    mutationFn: ({
+      role,
+      resourceKey,
+      grant,
+    }: {
+      role: string;
+      resourceKey: string;
+      grant: boolean;
+    }) =>
+      apiRequest(
+        "POST",
+        `/api/admin/role-permissions/${grant ? "grant" : "revoke"}`,
+        { role, resourceKey },
+      ),
+    onMutate: ({ role, resourceKey }) =>
+      setPendingKey(`${role}:${resourceKey}`),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ["/api/permissions/mine"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["/api/admin/accommodation-permissions"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["/api/reservation-edit-permission"],
+        }),
       ]);
     },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+    onError: (e: any) =>
+      toast({ title: "Error", description: e.message, variant: "destructive" }),
     onSettled: () => setPendingKey(null),
   });
 
@@ -89,17 +123,18 @@ export default function AdminPermisosPage() {
         <div>
           <h1 className="text-2xl font-bold">Permisos por Rol</h1>
           <p className="text-sm text-muted-foreground">
-            Qué puede ver y qué acciones puede realizar cada rol. Los cambios se aplican al instante.
+            Qué puede ver y qué acciones puede realizar cada rol. Los cambios se
+            aplican al instante.
           </p>
         </div>
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Para usar Revenue, habilitá el acceso al módulo y la consulta. Los permisos de eventos,
-        tarifas de competencia y configuración se asignan por separado.
+        Para usar Revenue, habilitá el acceso al módulo y la consulta. Los
+        permisos de eventos, tarifas de competencia y configuración se asignan
+        por separado.
       </p>
 
-      <AccommodationUserPermissions />
       <Input
         placeholder="Buscar sección o ítem…"
         value={filter}
@@ -120,9 +155,14 @@ export default function AdminPermisosPage() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b text-muted-foreground text-xs uppercase">
-                    <th className="text-left py-2 px-3 font-medium sticky left-0 bg-background z-10">Ítem</th>
+                    <th className="text-left py-2 px-3 font-medium sticky left-0 bg-background z-10">
+                      Ítem
+                    </th>
                     {roles.map((role) => (
-                      <th key={role} className="text-center py-2 px-2 font-medium whitespace-nowrap">
+                      <th
+                        key={role}
+                        className="text-center py-2 px-2 font-medium whitespace-nowrap"
+                      >
                         {ROLE_LABELS[role] ?? role}
                       </th>
                     ))}
@@ -132,31 +172,74 @@ export default function AdminPermisosPage() {
                   {filteredSections.map(([section, items]) => (
                     <Fragment key={section}>
                       <tr className="bg-muted/40">
-                        <td colSpan={roles.length + 1} className="py-1.5 px-3 font-semibold text-xs sticky left-0 bg-muted/40">
+                        <td
+                          colSpan={roles.length + 1}
+                          className="py-1.5 px-3 font-semibold text-xs sticky left-0 bg-muted/40"
+                        >
                           {section}
                         </td>
                       </tr>
                       {items.map((item) => (
-                        <tr key={item.resourceKey} className="border-b hover:bg-muted/20 transition-colors" data-testid={`row-permiso-${item.resourceKey}`}>
-                          <td className="py-2 px-3 sticky left-0 bg-background">{item.label}</td>
-                          {roles.map((role) => {
-                            const key = `${role}:${item.resourceKey}`;
-                            const checked = grantSet.has(key);
-                            const isPending = pendingKey === key && toggleMutation.isPending;
-                            return (
-                              <td key={role} className="text-center py-2 px-2">
-                                <Checkbox
-                                  checked={checked}
-                                  disabled={isPending}
-                                  onCheckedChange={(value) =>
-                                    toggleMutation.mutate({ role, resourceKey: item.resourceKey, grant: !!value })
+                        <Fragment key={item.resourceKey}>
+                          <tr
+                            className="border-b hover:bg-muted/20 transition-colors"
+                            data-testid={`row-permiso-${item.resourceKey}`}
+                          >
+                            <td className="py-2 px-3 sticky left-0 bg-background">
+                              {item.label}
+                              {item.resourceKey ===
+                                ACCOMMODATION_PERMISSION && (
+                                <button
+                                  className="block text-xs text-primary mt-1 hover:underline"
+                                  aria-expanded={showAccommodationUsers}
+                                  onClick={() =>
+                                    setShowAccommodationUsers(
+                                      !showAccommodationUsers,
+                                    )
                                   }
-                                  data-testid={`checkbox-permiso-${role}-${item.resourceKey}`}
-                                />
-                              </td>
-                            );
-                          })}
-                        </tr>
+                                >
+                                  Excepciones por usuario
+                                </button>
+                              )}
+                            </td>
+                            {roles.map((role) => {
+                              const key = `${role}:${item.resourceKey}`;
+                              const checked = grantSet.has(key);
+                              const isPending =
+                                pendingKey === key && toggleMutation.isPending;
+                              return (
+                                <td
+                                  key={role}
+                                  className="text-center py-2 px-2"
+                                >
+                                  <Checkbox
+                                    checked={checked}
+                                    disabled={isPending}
+                                    onCheckedChange={(value) =>
+                                      toggleMutation.mutate({
+                                        role,
+                                        resourceKey: item.resourceKey,
+                                        grant: !!value,
+                                      })
+                                    }
+                                    data-testid={`checkbox-permiso-${role}-${item.resourceKey}`}
+                                  />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                          {item.resourceKey === ACCOMMODATION_PERMISSION &&
+                            showAccommodationUsers && (
+                              <tr>
+                                <td
+                                  colSpan={roles.length + 1}
+                                  className="p-3 bg-muted/20"
+                                >
+                                  <AccommodationUserPermissions />
+                                </td>
+                              </tr>
+                            )}
+                        </Fragment>
                       ))}
                     </Fragment>
                   ))}

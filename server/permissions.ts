@@ -1,3 +1,4 @@
+import { ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db";
 import { rolePermissions, type SystemUserRole } from "@shared/schema";
@@ -333,6 +334,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * detectar faltantes.
  */
 export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: string }> = {
+  [ACCOMMODATION_PERMISSION]: { label: "Edición de folios de reservas", section: "API — Reservas" },
   "funding:read": { label: "Consultar financiación de Folio/SPA", section: "Financiación Folio/SPA" },
   "funding:write": { label: "Operar financiación de Folio/SPA", section: "Financiación Folio/SPA" },
   "funding:historical": { label: "Vincular cuentas y conciliar historia de Folio/SPA", section: "Financiación Folio/SPA" },
