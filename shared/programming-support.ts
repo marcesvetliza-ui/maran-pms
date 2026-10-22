@@ -1,3 +1,4 @@
+import type { OperationalFact } from "./programming-support-clarification";
 import { z } from "zod";
 export const supportCreateSchema = z
   .object({
@@ -108,6 +109,7 @@ export type SupportTicket = {
   reportId?: string;
   feedback?: Array<{requestId:string;reportId:string;outcome:"resolved"|"unresolved";createdAt:string}>;
   lastError: string | null;
+  clarification?: {facts:OperationalFact[];questions:string[];requestedAfterMessageCount?:number};
   messages?: SupportMessage[];
 };
 export const supportLabels: Record<SupportState, string> = {

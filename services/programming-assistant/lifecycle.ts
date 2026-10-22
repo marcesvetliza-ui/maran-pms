@@ -5,7 +5,7 @@
 export const CASE_TOKENS = 100000;
 export const AUTHOR_OUTPUT = 4200;
 export const AUDIT_OUTPUT = 3200;
-export type DiagnosisStage = "orientation" | "research" | "draft" | "validation" | "audit" | "correction" | "reaudit" | "finalize";
+export type DiagnosisStage = "clarification" | "orientation" | "research" | "draft" | "validation" | "audit" | "correction" | "reaudit" | "finalize";
 export type StageEvent = {
   stage: DiagnosisStage;
   outcome: "completed" | "approved" | "rejected" | "invalid" | "blocked" | "failed";
@@ -69,7 +69,7 @@ export class StageTelemetry {
 
 export function safeStageEvents(input: unknown): StageEvent[] {
   if(!Array.isArray(input))return [];
-  const stages=["orientation","research","draft","validation","audit","correction","reaudit","finalize"];
+  const stages=["clarification","orientation","research","draft","validation","audit","correction","reaudit","finalize"];
   const outcomes=["completed","approved","rejected","invalid","blocked","failed"];
   const reasons=["schema","provenance","claim","attribution","consistency","budget"];
   const numeric=(n:unknown)=>typeof n==="number" && Number.isFinite(n) && n>=0;

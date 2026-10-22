@@ -261,7 +261,8 @@ export default function ProgrammingSupport() {
               <Button
                 disabled={
                   busy ||
-                  ["queued", "investigating", "closed"].includes(ticket.status)
+                  ["queued", "investigating", "closed"].includes(ticket.status) ||
+                  (ticket.status==='needs_info' && !!ticket.clarification && (ticket.messages||[]).filter(m=>m.author==='user').length <= (ticket.clarification.requestedAfterMessageCount||0))
                 }
                 onClick={() =>
                   void send(`/${ticket.id}/analyze`, {
@@ -270,7 +271,7 @@ export default function ProgrammingSupport() {
                 }
               >
                 <RefreshCw className="mr-2 h-4 w-4" />
-                {ticket.report
+                {ticket.status==='needs_info'&&ticket.clarification ? "Continuar con la información agregada" : ticket.report
                   ? "Investigar otra vez"
                   : "Solicitar diagnóstico"}
               </Button>
@@ -278,6 +279,7 @@ export default function ProgrammingSupport() {
                 Al solicitarlo, se envía el contenido de la consulta al modelo
                 de OpenAI. El diagnóstico aparecerá acá.
               </p>
+              {ticket.status==='needs_info'&&ticket.clarification&&<section className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 space-y-2 dark:border-blue-900 dark:bg-blue-950/20"><h2 className="font-semibold">Necesito un dato para continuar</h2><p className="text-sm text-muted-foreground">Todavía no hay un diagnóstico. Respondé abajo en Agregar información y luego solicitá continuar.</p><ul className="list-disc pl-5 text-sm space-y-2">{ticket.clarification.questions.map((q,i)=><li key={i}>{q}</li>)}</ul></section>}
               {ticket.report && (
                 <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
                   <h2 className="text-lg font-semibold">
