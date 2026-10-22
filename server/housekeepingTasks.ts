@@ -58,7 +58,7 @@ async function audit(req: Request, id: string, action: string, details: any) {
 async function lockRoom(id: string) {
   const room = (
     await db.execute(
-      sql`SELECT id,status,is_virtual,is_active,room_number FROM rooms WHERE id=${id} FOR UPDATE`,
+      sql`SELECT id,status,is_virtual,is_active,room_number,housekeeping_service_date FROM rooms WHERE id=${id} FOR UPDATE`,
     )
   ).rows[0] as any;
   if (
@@ -415,6 +415,8 @@ export function registerHousekeepingTaskRoutes(app: Express) {
                   sql`SELECT id FROM reservations WHERE room_id=${room.id} AND status='checked_in' LIMIT 1`,
                 )
               ).rows.length > 0;
+            // Verifying yesterday's work must not renew today's occupied-room service.
+            if (action !== "inspect" || !occupied || room.housekeeping_service_date === getArgentinaToday())
             await storage.updateRoom(room.id, {
               status:
                 action === "start"

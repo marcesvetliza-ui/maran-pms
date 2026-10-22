@@ -423,6 +423,18 @@ describe.skipIf(!enabled)(
         (await api("POST", `/api/housekeeping/${t.id}/inspect`)).status,
       ).toBe(200);
     });
+    it("inspection of a previous service does not clear today's pending cleaning", async () => {
+      await occupied();
+      const t = await task();
+      await api("POST", `/api/housekeeping/${t.id}/start`);
+      await api("POST", `/api/housekeeping/${t.id}/complete`);
+      await pool.query("UPDATE rooms SET status='occupied',housekeeping_service_date='2020-01-01' WHERE id=$1", [id("room")]);
+      expect((await api("POST", `/api/housekeeping/${t.id}/inspect`)).status).toBe(200);
+      const room=await storage.getRoom(id("room"));
+      expect(room.status).toBe("occupied");
+      expect(room.housekeepingServiceDate).toBe("2020-01-01");
+      expect((await storage.getHousekeepingTask(t.id)).status).toBe("inspected");
+    });
     it("rolls back task and room state if audit persistence fails", async () => {
       const t = await task();
       await pool.query(

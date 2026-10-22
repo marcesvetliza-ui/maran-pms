@@ -699,15 +699,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRoom(room: InsertRoom): Promise<Room> {
-    const [created] = await db.insert(rooms).values({...room,bedConfigRevision:0} as any).returning();
+    const [created] = await db.insert(rooms).values({...room,bedConfigRevision:0,housekeepingServiceDate:room.status==="limpia_ocupada"?getArgentinaToday():null} as any).returning();
     return created;
   }
 
   async updateRoom(id: string, room: Partial<InsertRoom>): Promise<Room | undefined> {
     const safeUpdates: Record<string, any> = {};
     for (const [key, val] of Object.entries(room)) {
-      if (key !== "bedConfigRevision" && val !== undefined) safeUpdates[key] = val;
+      if (key !== "bedConfigRevision" && key !== "housekeepingServiceDate" && val !== undefined) safeUpdates[key] = val;
     }
+    if (safeUpdates.status) safeUpdates.housekeepingServiceDate = safeUpdates.status === "limpia_ocupada" ? getArgentinaToday() : null;
     if (Object.prototype.hasOwnProperty.call(safeUpdates,"bedConfig")) {
       safeUpdates.bedConfigRevision=sql`CASE WHEN ${rooms.bedConfig} IS DISTINCT FROM ${safeUpdates.bedConfig} THEN ${rooms.bedConfigRevision}+1 ELSE ${rooms.bedConfigRevision} END`;
     }

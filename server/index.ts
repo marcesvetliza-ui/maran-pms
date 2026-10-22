@@ -322,6 +322,9 @@ app.use((req, res, next) => {
       logger.warn("[startup] closeStaleOrders: " + err?.message);
     }
 
+    const { setupHousekeepingServiceDayScheduler } = await import("./housekeepingServiceDay");
+    setupHousekeepingServiceDayScheduler();
+
     try {
       const { setupNightAuditScheduler } = await import("./night-audit");
       setupNightAuditScheduler();

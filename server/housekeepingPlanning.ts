@@ -24,7 +24,7 @@ export async function loadHousekeepingPlanning(
     mode = date < today ? "past" : date > today ? "future" : "today";
   const [roomRows, requestRows, taskRows, report] = await Promise.all([
     db.execute(
-      sql`SELECT id,room_number,floor,status,bed_config,bed_config_revision,allowed_bed_configs,is_active FROM rooms WHERE COALESCE(is_virtual,false)=false AND room_number<>'REUB' ORDER BY floor,room_number`,
+      sql`SELECT id,room_number,floor,status,housekeeping_service_date,bed_config,bed_config_revision,allowed_bed_configs,is_active FROM rooms WHERE COALESCE(is_virtual,false)=false AND room_number<>'REUB' ORDER BY floor,room_number`,
     ),
     db.execute(sql`SELECT r.id,r.room_id,r.reservation_code,r.check_in_date,r.check_out_date,r.status,r.bed_type_id,r.bed_type_notes,r.number_of_guests,r.housekeeping_bed_preparation,r.housekeeping_preparation,b.code AS bed_code,b.name AS bed_name,concat(g.last_name,' ',g.first_name) AS guest_name
     FROM reservations r LEFT JOIN bed_types b ON b.id=r.bed_type_id LEFT JOIN guests g ON g.id=r.guest_id
@@ -115,6 +115,7 @@ export async function loadHousekeepingPlanning(
         floor: r.floor,
         active: r.is_active !== false,
         currentStatus: r.status,
+        lastServiceDate: r.housekeeping_service_date,
         currentBed: r.bed_config,
         currentBedRevision: r.bed_config_revision || 0,
         allowedBeds: r.allowed_bed_configs,

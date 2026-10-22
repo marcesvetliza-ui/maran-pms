@@ -112,6 +112,7 @@ export type PlanningRoom = {
   floor: number | null;
   active: boolean;
   currentStatus: string | null;
+  lastServiceDate?: string | null;
   currentBed: string | null;
   currentBedRevision: number;
   allowedBeds: string[] | null;
