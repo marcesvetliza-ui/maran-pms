@@ -177,7 +177,8 @@ export async function feCAESolicitar(
   const impIva   = (req.montoIva21 + req.montoIva105).toFixed(2);
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
   const cbtesAsocBlock = buildCbtesAsocBlock(req.cbteAsoc);
-  const serviceDates = req.tipo === "FA" || req.tipo === "FB" ? buildServiceDates(req.fecha) : "";
+  // All requests below declare Concepto=2 (services), including NC and ND.
+  const serviceDates = buildServiceDates(req.fecha);
 
   const envelope =
     `<?xml version="1.0" encoding="utf-8"?>` +
