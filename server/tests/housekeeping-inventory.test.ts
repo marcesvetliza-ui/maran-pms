@@ -1,6 +1,6 @@
 import express from 'express';
 import {describe,it,expect,vi} from 'vitest';
-const state=vi.hoisted(()=>({read:true,cost:false,items:[{id:'hk',costPrice:'20',currentStock:'4',category:{area:'housekeeping'}},{id:'spa',costPrice:'90',category:{area:'spa'}}]}));
+const state=vi.hoisted(()=>({read:true,cost:false,items:[{id:'dish',itemKind:'plato',category:{area:'housekeeping',name:'Eventos'}},{id:'event',itemKind:'venta_directa',category:{area:'events',name:'Eventos'}},{id:'hk',costPrice:'20',currentStock:'4',category:{area:'housekeeping'}},{id:'spa',costPrice:'90',category:{area:'spa'}}]}));
 vi.mock('../db-storage',()=>({storage:{getInventoryItems:async()=>state.items}}));
 vi.mock('../auth',()=>({requireAuth:(req:any,_res:any,next:any)=>{req.user={role:'housekeeping'};next();},requirePermission:()=>(_req:any,res:any,next:any)=>state.read?next():res.status(403).json({error:'denied'})}));
 vi.mock('../permissions',()=>({hasPermission:()=>state.cost}));

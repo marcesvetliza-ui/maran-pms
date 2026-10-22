@@ -2159,8 +2159,8 @@ export default function Housekeeping() {
           <HousekeepingStaffAvailability />
           <div className="mt-4 space-y-6">
             {/* ── Cards por mucama ── */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <h3 className="md:col-span-2 xl:col-span-3 text-sm font-semibold text-muted-foreground flex items-center gap-2">
                 <Users className="h-4 w-4" /> Personal asignado hoy
               </h3>
               {hkStaff.length === 0 && (
@@ -2172,7 +2172,7 @@ export default function Housekeeping() {
                 const staffTasks = (tasks ?? []).filter(t => t.assignedTo === staff.id);
                 const roleLabel: Record<string, string> = { housekeeping: "Mucama", gobernanta: "Gobernanta", responsable_area: "Resp. Área" };
                 return (
-                  <Card key={staff.id} className="border">
+                  <Card key={staff.id} className="rounded-xl shadow-sm border">
                     <CardContent className="p-4">
                       <div className="flex items-start gap-3">
                         <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">

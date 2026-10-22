@@ -1,3 +1,12 @@
+import {
+  Users,
+  Clock,
+  ClipboardList,
+  UserCheck,
+  CalendarOff,
+  UserX,
+  Pencil,
+} from "lucide-react";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, parseApiError, queryClient } from "@/lib/queryClient";
@@ -72,12 +81,22 @@ export function HousekeepingStaffAvailability() {
   }
   return (
     <section className="space-y-4 mt-4">
-      <h3 className="font-semibold">Disponibilidad del personal</h3>
+      <div className="flex items-center gap-3">
+        <span className="rounded-xl bg-primary/10 p-3 text-primary">
+          <Users className="h-5 w-5" />
+        </span>
+        <div>
+          <h3 className="text-lg font-semibold">Disponibilidad del personal</h3>
+          <p className="text-sm text-muted-foreground">
+            Organizá el equipo y los horarios de cada jornada.
+          </p>
+        </div>
+      </div>
       <p className="text-sm text-muted-foreground">
         Completá quién trabaja cada día. Cambiar la disponibilidad no modifica
         ni cancela tareas asignadas.
       </p>
-      <label className="block max-w-xs">
+      <label className="block max-w-xs text-sm font-medium">
         Fecha
         <input
           aria-label="Fecha de disponibilidad"
@@ -99,23 +118,70 @@ export function HousekeepingStaffAvailability() {
       {data.data?.length === 0 && (
         <p>No hay personal activo de Housekeeping.</p>
       )}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {data.data?.map((row) => (
-          <div className="rounded-md border p-4 space-y-2" key={row.userId}>
-            <h4 className="font-medium">{row.fullName}</h4>
-            <p>{row.status ? availabilityDescription(row) : "Sin completar"}</p>
-            <p className="text-sm">{row.taskCount || 0} tareas asignadas</p>
-            {row.status && row.status !== "working" && !!row.taskCount && (
-              <p className="text-sm text-amber-700 dark:text-amber-300">
-                Tiene tareas asignadas: revisá si corresponde reasignarlas.
+          <div
+            className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col"
+            key={row.userId}
+          >
+            <div
+              className={`h-1 ${row.status === "working" ? "bg-emerald-500" : row.status === "day_off" ? "bg-sky-500" : row.status === "absent" ? "bg-rose-500" : "bg-slate-300 dark:bg-slate-600"}`}
+            />
+            <div className="p-4 space-y-3 flex flex-col flex-1">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold">
+                  {row.fullName
+                    .split(" ")
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map((n) => n[0])
+                    .join("")}
+                </span>
+                <div className="min-w-0">
+                  <h4 className="font-semibold break-words">{row.fullName}</h4>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${row.status === "working" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : row.status === "day_off" ? "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200" : row.status === "absent" ? "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200" : "bg-muted text-muted-foreground"}`}
+                  >
+                    {row.status === "working" ? (
+                      <UserCheck className="h-3 w-3" />
+                    ) : row.status === "day_off" ? (
+                      <CalendarOff className="h-3 w-3" />
+                    ) : row.status === "absent" ? (
+                      <UserX className="h-3 w-3" />
+                    ) : null}
+                    {row.status
+                      ? availabilityLabels[row.status]
+                      : "Sin completar"}
+                  </span>
+                </div>
+              </div>
+              <p className="flex items-start gap-2 text-sm text-muted-foreground">
+                <Clock className="h-4 w-4 shrink-0 mt-0.5" />
+                {row.status
+                  ? availabilityDescription(row)
+                  : "Turno y horario pendientes"}
               </p>
-            )}
-            {row.notes && (
-              <p className="text-sm whitespace-pre-wrap">{row.notes}</p>
-            )}
-            <Button variant="outline" onClick={() => edit(row)}>
-              Completar · {row.fullName}
-            </Button>
+              <p className="flex items-center gap-2 text-sm">
+                <ClipboardList className="h-4 w-4 text-primary" />
+                {row.taskCount || 0} tareas asignadas
+              </p>
+              {row.status && row.status !== "working" && !!row.taskCount && (
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  Tiene tareas asignadas: revisá si corresponde reasignarlas.
+                </p>
+              )}
+              {row.notes && (
+                <p className="text-sm whitespace-pre-wrap">{row.notes}</p>
+              )}
+              <Button
+                variant="outline"
+                className="w-full mt-auto gap-2"
+                onClick={() => edit(row)}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Completar · {row.fullName}
+              </Button>
+            </div>
           </div>
         ))}
       </div>

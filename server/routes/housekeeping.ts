@@ -16,7 +16,7 @@ export function registerHousekeepingRoutes(app: Express) {
   registerHousekeepingDailyReport(app);
   app.get("/api/housekeeping/inventory", requireAuth, requirePermission('sidebar:/housekeeping'), async (req,res) => {
     try {
-      const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping');
+      const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping' && item.itemKind!=='plato');
       res.json(hasPermission(req.user!.role,'api:inventory:cost')?items:hideInventoryCosts(items));
     } catch { res.status(500).json({error:'No se pudo consultar el inventario de Housekeeping'}); }
   });

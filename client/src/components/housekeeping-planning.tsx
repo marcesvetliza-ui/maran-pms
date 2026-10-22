@@ -1,3 +1,12 @@
+import {
+  BedDouble,
+  CalendarDays,
+  LogIn,
+  LogOut,
+  Users,
+  ClipboardCheck,
+  Plus,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, parseApiError, queryClient } from "@/lib/queryClient";
@@ -121,12 +130,14 @@ export function HousekeepingPlanningView({
   const renderRequest = (r: PlanningRequest, room?: PlanningRoom) => (
     <article
       key={r.id}
-      className="rounded-md border p-3 text-sm space-y-1"
+      className={`rounded-xl border p-3 text-sm space-y-2 ${r.checkIn === date ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/25" : r.checkOut === date ? "border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/25" : "border-blue-100 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20"}`}
       aria-label={`Reserva ${r.reservationCode}`}
     >
       <div className="flex flex-wrap justify-between gap-2">
         <strong>{r.guestName}</strong>
-        <span className="font-medium">
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${r.checkIn === date ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200" : r.checkOut === date ? "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200" : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"}`}
+        >
           {r.checkIn === date
             ? "Ingreso"
             : r.checkOut === date
@@ -205,57 +216,73 @@ export function HousekeepingPlanningView({
   );
   return (
     <section className="space-y-4 pt-3" aria-label="Planificación por fecha">
-      <div className="flex flex-wrap gap-3 items-end">
-        <label className="text-sm font-medium">
-          Fecha de planificación
-          <input
-            type="date"
-            className={`${input} block mt-1`}
-            value={date}
-            onChange={(e) => {
-              setDate(e.target.value);
-              setConfirmation(null);
-            }}
-          />
-        </label>
-        <Button variant="outline" onClick={() => setDate(getArgentinaToday())}>
-          Hoy
-        </Button>
-        <label className="text-sm">
-          Piso
-          <select
-            className={`${input} block mt-1`}
-            value={floor}
-            onChange={(e) => setFloor(e.target.value)}
+      <div className="rounded-xl border bg-card p-4 shadow-sm space-y-4">
+        <div className="flex items-center gap-3">
+          <span className="rounded-lg bg-primary/10 p-2 text-primary">
+            <CalendarDays className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="font-semibold">Planificación por fecha</h2>
+            <p className="text-xs text-muted-foreground">
+              Movimientos, preparación de habitaciones y tareas del día.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3 items-end">
+          <label className="text-sm font-medium">
+            Fecha de planificación
+            <input
+              type="date"
+              className={`${input} block mt-1`}
+              value={date}
+              onChange={(e) => {
+                setDate(e.target.value);
+                setConfirmation(null);
+              }}
+            />
+          </label>
+          <Button
+            variant="outline"
+            onClick={() => setDate(getArgentinaToday())}
           >
-            <option value="all">Todos</option>
-            {[
-              ...new Set(
-                data?.rooms.map((r) => r.floor).filter((f) => f !== null),
-              ),
-            ]
-              .sort((a, b) => a! - b!)
-              .map((f) => (
-                <option key={f} value={String(f)}>
-                  Piso {f}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          Mostrar
-          <select
-            className={`${input} block mt-1`}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          >
-            <option value="all">Todas las habitaciones</option>
-            <option value="arrivals">Con ingresos</option>
-            <option value="departures">Con salidas</option>
-            <option value="tasks">Con tareas</option>
-            <option value="bed">Camaje a revisar</option>
-          </select>
-        </label>
+            Hoy
+          </Button>
+          <label className="text-sm">
+            Piso
+            <select
+              className={`${input} block mt-1`}
+              value={floor}
+              onChange={(e) => setFloor(e.target.value)}
+            >
+              <option value="all">Todos</option>
+              {[
+                ...new Set(
+                  data?.rooms.map((r) => r.floor).filter((f) => f !== null),
+                ),
+              ]
+                .sort((a, b) => a! - b!)
+                .map((f) => (
+                  <option key={f} value={String(f)}>
+                    Piso {f}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            Mostrar
+            <select
+              className={`${input} block mt-1`}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="all">Todas las habitaciones</option>
+              <option value="arrivals">Con ingresos</option>
+              <option value="departures">Con salidas</option>
+              <option value="tasks">Con tareas</option>
+              <option value="bed">Camaje a revisar</option>
+            </select>
+          </label>
+        </div>
       </div>
       {query.isLoading ? (
         <p role="status">Cargando planificación…</p>
@@ -269,7 +296,7 @@ export function HousekeepingPlanningView({
       ) : (
         data && (
           <>
-            <div className="rounded border p-3 text-sm bg-muted/30">
+            <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-blue-950 dark:border-blue-900 dark:bg-blue-950/25 dark:text-blue-100">
               <strong>
                 {data.mode === "future"
                   ? "Trabajo previsto"
@@ -312,10 +339,28 @@ export function HousekeepingPlanningView({
                   "Tareas finalizadas / programadas",
                   `${data.totals.completed} / ${data.totals.tasks}`,
                 ],
-              ].map(([label, value]) => (
-                <div key={label} className="border rounded p-3">
-                  <p className="text-xl font-bold">{value}</p>
-                  <p className="text-xs text-muted-foreground">{label}</p>
+              ].map(([label, value], index) => (
+                <div
+                  key={label}
+                  className="rounded-xl border bg-card p-4 shadow-sm flex items-center gap-3"
+                >
+                  <span
+                    className={`rounded-xl p-3 ${["bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300", "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300", "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300", "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300"][index]}`}
+                  >
+                    {index === 0 ? (
+                      <LogIn className="h-5 w-5" />
+                    ) : index === 1 ? (
+                      <LogOut className="h-5 w-5" />
+                    ) : index === 2 ? (
+                      <Users className="h-5 w-5" />
+                    ) : (
+                      <ClipboardCheck className="h-5 w-5" />
+                    )}
+                  </span>
+                  <div>
+                    <p className="text-2xl font-bold tabular-nums">{value}</p>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -348,11 +393,14 @@ export function HousekeepingPlanningView({
                 .map((room) => (
                   <section
                     key={room.id}
-                    className="rounded-lg border p-3 space-y-3"
+                    className="rounded-xl border bg-card shadow-sm overflow-hidden flex flex-col"
                     aria-label={`Habitación ${room.roomNumber}`}
                   >
-                    <header>
-                      <h3 className="font-bold text-lg">
+                    <header className="border-b bg-muted/30 p-4 space-y-2">
+                      <h3 className="font-bold text-lg flex items-center gap-2">
+                        <span className="rounded-lg bg-primary/10 p-2 text-primary">
+                          <BedDouble className="h-4 w-4" />
+                        </span>
                         Hab. {room.roomNumber}{" "}
                         {room.floor !== null && (
                           <small className="text-xs font-normal">
@@ -374,65 +422,68 @@ export function HousekeepingPlanningView({
                         </strong>
                       </p>
                     </header>
-                    {room.requests.map((r) => renderRequest(r, room))}
-                    {!room.requests.length && (
-                      <p className="text-xs text-muted-foreground">
-                        Sin movimientos de reserva para esta fecha.
-                      </p>
-                    )}
-                    {room.tasks.map((t) => (
-                      <article key={t.id} className="border-t pt-2 text-sm">
-                        <div className="flex flex-wrap justify-between gap-1">
-                          <strong>
-                            {taskLabels[t.taskType] || t.taskType}
-                          </strong>
-                          <span>{states[t.status] || t.status}</span>
-                        </div>
-                        <p>{t.staffName || "Sin asignar"}</p>
-                        {t.notes && (
-                          <p className="whitespace-pre-wrap break-words">
-                            {t.notes}
-                          </p>
-                        )}
-                        <p className="text-xs mt-1">
-                          Inicio:{" "}
-                          {t.startedAt
-                            ? formatHotelDateTime(t.startedAt, {
-                                includeSeconds: true,
-                              })
-                            : "Sin iniciar"}
-                          <br />
-                          Fin:{" "}
-                          {t.completedAt
-                            ? formatHotelDateTime(t.completedAt, {
-                                includeSeconds: true,
-                              })
-                            : "Sin finalizar"}
-                          <br />
-                          {t.completedAt
-                            ? "Duración real"
-                            : "Tiempo transcurrido"}
-                          :{" "}
-                          {durationLabel(
-                            taskDuration(t.startedAt, t.completedAt, now),
-                          )}
+                    <div className="p-4 space-y-3 flex-1">
+                      {room.requests.map((r) => renderRequest(r, room))}
+                      {!room.requests.length && (
+                        <p className="text-xs text-muted-foreground">
+                          Sin movimientos de reserva para esta fecha.
                         </p>
-                        {t.inspectedAt && (
-                          <p className="text-xs">
-                            Verificada {formatHotelDateTime(t.inspectedAt)}
+                      )}
+                      {room.tasks.map((t) => (
+                        <article key={t.id} className="border-t pt-2 text-sm">
+                          <div className="flex flex-wrap justify-between gap-1">
+                            <strong>
+                              {taskLabels[t.taskType] || t.taskType}
+                            </strong>
+                            <span>{states[t.status] || t.status}</span>
+                          </div>
+                          <p>{t.staffName || "Sin asignar"}</p>
+                          {t.notes && (
+                            <p className="whitespace-pre-wrap break-words">
+                              {t.notes}
+                            </p>
+                          )}
+                          <p className="text-xs mt-1">
+                            Inicio:{" "}
+                            {t.startedAt
+                              ? formatHotelDateTime(t.startedAt, {
+                                  includeSeconds: true,
+                                })
+                              : "Sin iniciar"}
+                            <br />
+                            Fin:{" "}
+                            {t.completedAt
+                              ? formatHotelDateTime(t.completedAt, {
+                                  includeSeconds: true,
+                                })
+                              : "Sin finalizar"}
+                            <br />
+                            {t.completedAt
+                              ? "Duración real"
+                              : "Tiempo transcurrido"}
+                            :{" "}
+                            {durationLabel(
+                              taskDuration(t.startedAt, t.completedAt, now),
+                            )}
                           </p>
-                        )}
-                      </article>
-                    ))}
-                    {data.mode !== "past" && room.active && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onCreateTask(room.id, date)}
-                      >
-                        Programar tarea · {formatDisplayDate(date)}
-                      </Button>
-                    )}
+                          {t.inspectedAt && (
+                            <p className="text-xs">
+                              Verificada {formatHotelDateTime(t.inspectedAt)}
+                            </p>
+                          )}
+                        </article>
+                      ))}
+                      {data.mode !== "past" && room.active && (
+                        <Button
+                          size="sm"
+                          className="w-full gap-2"
+                          onClick={() => onCreateTask(room.id, date)}
+                        >
+                          <Plus className="h-4 w-4" /> Programar tarea ·{" "}
+                          {formatDisplayDate(date)}
+                        </Button>
+                      )}
+                    </div>
                   </section>
                 ))}
             </div>
