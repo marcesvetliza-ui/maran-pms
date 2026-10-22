@@ -1,3 +1,4 @@
+import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
 import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
@@ -270,7 +271,7 @@ function RoomCard({
         </div>
         
         <div className="text-xs text-muted-foreground mb-2">
-          {config.label}
+          {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : config.label}
         </div>
         
         <HousekeepingPreparationControl hideTrigger controlledOpen={preparationOpen} onOpenChange={setPreparationOpen} roomId={room.id} roomNumber={room.roomNumber} />
@@ -1164,7 +1165,7 @@ function MobileRoomCard({
             <div className="flex flex-col gap-0.5">
               <div className={`flex items-center gap-1 text-sm font-medium ${config.className}`}>
                 <Icon className="h-4 w-4" />
-                {config.label}
+                {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : config.label}
               </div>
               <span className="text-xs text-muted-foreground">{room.roomType?.name || room.roomType?.code || "—"} · Piso {room.floor}</span>
             </div>
@@ -1450,6 +1451,7 @@ export default function Housekeeping() {
 
   const { data: rooms, isLoading: roomsLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
+    refetchInterval: 30000,
   });
 
   const today = getArgentinaToday();
@@ -2229,7 +2231,7 @@ export default function Housekeeping() {
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm">Hab. {room.roomNumber}</span>
                           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${statusColor[room.status] ?? "bg-muted text-muted-foreground"}`}>
-                            {statusLabel[room.status] ?? room.status}
+                            {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,today) ? "Ocupada · limpieza pendiente" : statusLabel[room.status] ?? room.status}
                           </span>
                           {checkoutRoomIds.has(room.id) && (
                             <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Checkout hoy</span>

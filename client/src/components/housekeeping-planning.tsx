@@ -1,3 +1,4 @@
+import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {
   BedDouble,
   CalendarDays,
@@ -410,7 +411,7 @@ export function HousekeepingPlanningView({
                       </h3>
                       <p className="text-xs text-muted-foreground">
                         Situación actual:{" "}
-                        {roomStates[room.currentStatus || ""] || "Sin dato"}
+                        {hasDailyHousekeepingPending(room.currentStatus,room.lastServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : roomStates[room.currentStatus || ""] || "Sin dato"}
                         {!room.active && " · Desactivada"}
                       </p>
                       <p className="text-sm">
