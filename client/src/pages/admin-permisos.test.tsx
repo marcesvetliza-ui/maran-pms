@@ -153,7 +153,7 @@ describe("pantalla de administración de permisos", () => {
       screen.queryByTestId("row-permiso-sidebar:/admin/permisos"),
     ).not.toBeInTheDocument();
   });
-  it("integra folios a la matriz y muestra excepciones sólo al desplegar la fila", async () => {
+  it("integra folios como una fila común sin panel ni excepciones individuales", async () => {
     const user = userEvent.setup();
     renderPage();
     const row = await screen.findByTestId(
@@ -165,12 +165,8 @@ describe("pantalla de administración de permisos", () => {
     expect(
       screen.queryByText("Lucía Espinosa · comercial"),
     ).not.toBeInTheDocument();
-    await user.click(
-      within(row).getByRole("button", { name: "Excepciones por usuario" }),
-    );
-    expect(
-      await screen.findByText("Lucía Espinosa · comercial"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("Excepciones por usuario")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Editar tarifas y noches de alojamiento/)).not.toBeInTheDocument();
     await user.click(
       within(row).getByTestId(
         "checkbox-permiso-reception-reservations:edit-accommodation",

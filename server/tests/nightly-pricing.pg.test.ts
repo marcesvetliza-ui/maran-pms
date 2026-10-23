@@ -125,21 +125,23 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     actor = "reception";
 
   });
-  it("hereda el acceso del hotel y aplica revocación individual también en preview y PATCH", async () => {
+  it("aplica el permiso por rol en preview y PATCH y retira la edición individual", async () => {
     actor = "reception";
     expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
     expect((await request(`${pathFor()}/preview`, rateBody())).status).toBe(200);
     expect((await request(`/api/admin/accommodation-permissions/${idFor("admin")}`, {allowed:true}, "PUT")).status).toBe(403);
     actor = "admin";
+    const { revokePermission, grantPermission } = await import("../permissions");
+    expect((await request(`/api/admin/accommodation-permissions/${idFor("admin")}`, {allowed:false}, "PUT")).status).toBe(410);
     try {
-      expect((await request(`/api/admin/accommodation-permissions/${idFor("admin")}`, {allowed:false}, "PUT")).status).toBe(204);
+      await revokePermission("admin", "reservations:edit-accommodation");
       expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(false);
       expect((await request(`${pathFor()}/preview`, rateBody())).status).toBe(403);
       expect((await request(`${pathFor()}/apply`, rateBody())).status).toBe(403);
       expect((await request(`/api/reservations/${editable}`, {totalRoomAmount:"1"}, "PATCH")).status).toBe(403);
       expect((await saved()).pricingRevision).toBe(0);
     } finally {
-      expect((await request(`/api/admin/accommodation-permissions/${idFor("admin")}`, {allowed:null}, "PUT")).status).toBe(204);
+      await grantPermission("admin", "reservations:edit-accommodation");
     }
     expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
   });

@@ -16,7 +16,7 @@ let pool: any, can: any, ensure: any, reload: any;
 const id = "folio-permission-" + randomUUID();
 let previous: any[] = [];
 describe.skipIf(!enabled)(
-  "Folio role matrix preserves individual permissions",
+  "Folio permission follows roles only",
   () => {
     beforeAll(async () => {
       ({ pool } = await import("../db"));
@@ -57,7 +57,7 @@ describe.skipIf(!enabled)(
         await pool.end();
       }
     });
-    it("changes editing independently of access to reservations and retains exceptions", async () => {
+    it("changes editing independently of module access and ignores legacy overrides", async () => {
       const user = { id, role: "comercial" };
       await pool.query(
         "INSERT INTO role_permissions(role,resource_key)VALUES($1,$2) ON CONFLICT DO NOTHING",
@@ -82,7 +82,7 @@ describe.skipIf(!enabled)(
         "INSERT INTO user_permission_overrides(user_id,resource_key,allowed)VALUES($1,$2,true)",
         [id, key],
       );
-      expect(await can(user)).toBe(true);
+      expect(await can(user)).toBe(false);
       await pool.query(
         "UPDATE user_permission_overrides SET allowed=false WHERE user_id=$1",
         [id],
@@ -92,7 +92,7 @@ describe.skipIf(!enabled)(
         ["comercial", key],
       );
       await reload();
-      expect(await can(user)).toBe(false);
+      expect(await can(user)).toBe(true);
     });
     it("does not restore revoked grants during repeated migration", async () => {
       await pool.query(
