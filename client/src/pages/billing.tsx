@@ -447,22 +447,21 @@ export default function BillingPage() {
                   <div className="relative isolate overflow-x-auto" data-testid="billing-invoices-scroll">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
+                        <tr className="border-b bg-muted text-xs text-muted-foreground">
                           <th className="px-3 py-2 text-left">Tipo / N°</th>
                           <th className="px-3 py-2 text-left">Origen</th>
                           <th className="px-3 py-2 text-left">Fecha</th>
                           <th className="px-3 py-2 text-left">Cliente</th>
                           <th className="px-3 py-2 text-right">Total</th>
                           <th className="px-3 py-2 text-left">CAE</th>
-                          <th className="px-3 py-2 text-left">Estado</th>
-                          <th scope="col" className="sticky right-0 z-20 min-w-[116px] border-l bg-background px-3 py-2 text-right">Acciones</th>
+                          <th scope="col" className="sticky right-0 z-20 bg-inherit px-3 py-2 text-left">Estado / Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {(invoices as any[]).map((f: any) => {
                           const tl = TIPO_LABELS[f.tipo_comprobante] ?? { nombre: f.tipo_comprobante, color: "bg-gray-100 text-gray-700" };
                           return (
-                            <tr key={f.id} className={`hover:bg-muted/20 ${f.estado === "anulada" ? "opacity-50" : ""}`} data-testid={`row-invoice-${f.id}`}>
+                            <tr key={f.id} className={`bg-card hover:bg-muted ${f.estado === "anulada" ? "opacity-50" : ""}`} data-testid={`row-invoice-${f.id}`}>
                               <td className="px-3 py-2">
                                 <div className="flex flex-col gap-0.5">
                                   <Badge variant="outline" className={`text-xs w-fit px-1.5 ${tl.color}`}>{tl.nombre}</Badge>
@@ -505,7 +504,9 @@ export default function BillingPage() {
                                 </div>
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
-                              <td className="px-3 py-2">
+                              <td className="sticky right-0 z-10 bg-inherit px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
+                                <div className="flex items-center gap-3">
+                                <div className="min-w-0">
                                 {f.center_settlement_status === "pending" ? (
                                   <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
                                 ) : isInvoiceReconciliationPending(f) ? (
@@ -526,9 +527,8 @@ export default function BillingPage() {
                                   <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Anulada</Badge>
                                 )}
                                 {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
-                              </td>
-                              <td className="sticky right-0 z-10 min-w-[116px] border-l bg-background px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
-                                <div className="flex items-center gap-1 justify-end">
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1">
                                   {f.center_settlement_status === "pending" && (
                                     <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
                                   )}
@@ -560,6 +560,7 @@ export default function BillingPage() {
                                       <XCircle className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
+                                </div>
                                 </div>
                               </td>
                             </tr>
