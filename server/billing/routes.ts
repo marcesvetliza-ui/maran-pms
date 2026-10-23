@@ -2067,7 +2067,7 @@ export function registerBillingRoutes(app: Express) {
             : await emitInvoice();
       const user = (req as any).user;
       let cashMovementError: string | undefined;
-      if (groupId) {
+      if (groupId && ["FA", "FB", "FC", "FT", "FM", "FMB"].includes(factura.tipoComprobante)) {
         try {
           await db.transaction(tx => ensureGroupFiscalCashInformation(tx, {
             id: factura.id,
