@@ -1,3 +1,4 @@
+import { useSpaPlanningMove } from "@/components/spa/use-spa-planning-move";
 import {useLocation} from "wouter";
 import { SpaFundingGate } from "@/components/spa/spa-funding-gate";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
@@ -780,6 +781,12 @@ export default function SpaPage() {
   });
 
   const activeCabins = cabins.filter((c) => c.isActive === "true");
+  const planningMove = useSpaPlanningMove({
+    planningDate: dateStr,
+    canEdit: hasPermission("api:spa:write"),
+    isSimple: appointment => treatments.some(t => t.id === appointment.treatmentId && !t.isCircuit),
+    cabinName: id => cabins.find(c => c.id === id)?.name || "Gabinete",
+  });
 
   const [selectedSpaGuest, setSelectedSpaGuest] = useState<{ id: string; firstName: string; lastName: string | null } | null>(null);
 
@@ -2057,6 +2064,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
             <Card className="flex-1 flex flex-col overflow-hidden">
               <CardHeader className="py-3 px-4">
                 <CardTitle className="text-base">Planning del Día - Gabinetes</CardTitle>
+                {hasPermission("api:spa:write") && <p className="text-xs text-muted-foreground">Arrastrá un turno simple para cambiar su hora o gabinete. Los circuitos se modifican desde Editar turno.</p>}
               </CardHeader>
               <CardContent className="flex-1 p-0 overflow-hidden">
                 <ScrollArea className="h-full">
@@ -2095,9 +2103,10 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                   const isPast = isBefore(parseISO(appointment.appointmentDate.slice(0, 10)), startOfDay(new Date()));
                                   
                                   return (
-                                    <td key={slotIdx} colSpan={colSpan} className="border-b border-r p-0.5 h-14">
+                                    <td key={slotIdx} colSpan={colSpan} className="border-b border-r p-0.5 h-14" {...planningMove.dropProps(cabin.id,time,colSpan)}>
                                       <div
-                                        className={`h-full rounded px-2 py-1 flex flex-col justify-center ${isPast ? "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 opacity-50 cursor-default" : `cursor-pointer ${appointmentStatusColors[appointment.status]} ${isCancelled ? "opacity-50 line-through" : ""}`}`}
+                                        {...planningMove.dragProps(appointment)}
+                                        className={`h-full rounded px-2 py-1 flex flex-col justify-center data-[spa-movable=true]:cursor-grab ${isPast ? "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 opacity-50 cursor-default" : `cursor-pointer ${appointmentStatusColors[appointment.status]} ${isCancelled ? "opacity-50 line-through" : ""}`}`}
                                         onClick={isPast ? undefined : () => setSelectedAppointment(appointment.parentAppointment || appointment)}
                                         title={`${appointment.displayedAsResource ? "Recurso del circuito · " : ""}${appointment.guestName} ${appointment.guestLastName || ""} - ${treatments.find(t => t.id === appointment.treatmentId)?.name || ""}`}
                                         data-testid={`appointment-${appointment.id}${appointment.displayedAsResource ? "-resource" : ""}`}
@@ -2130,7 +2139,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                 if (appointment && !isStart) return null;
                                 const isDatePast = isBefore(startOfDay(selectedDate), startOfDay(new Date()));
                                 return (
-                                  <td key={slotIdx} className={`border-b border-r p-0.5 h-14 ${isDatePast ? "bg-muted/20" : "cursor-pointer hover:bg-muted/50"}`} onClick={isDatePast ? undefined : () => handleCellClick(cabin.id, time)} data-testid={`cell-${cabin.id}-${time}`} />
+                                  <td key={slotIdx} {...planningMove.dropProps(cabin.id,time)} className={`border-b border-r p-0.5 h-14 ${isDatePast ? "bg-muted/20" : "cursor-pointer hover:bg-muted/50"}`} onClick={isDatePast ? undefined : () => handleCellClick(cabin.id, time)} data-testid={`cell-${cabin.id}-${time}`} />
                                 );
                               })}
                             </tr>
@@ -2632,6 +2641,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
         </DialogContent>
       </Dialog>
 
+      {planningMove.dialog}
       {/* Modal: % por Profesional */}
       <Dialog open={showProdDialog} onOpenChange={setShowProdDialog}>
         <DialogContent className="max-w-6xl w-[95vw] flex flex-col max-h-[90vh]">
