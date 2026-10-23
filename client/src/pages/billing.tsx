@@ -1315,12 +1315,18 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+      const groupCashInformationError = groupId && data.cashMovementError;
       const esNoFiscal = NON_FISCAL_TIPOS_SET.has(data.tipo_comprobante);
       toast({
-        title: esNoFiscal ? "Comprobante emitido" : "Factura emitida",
-        description: esNoFiscal
+        title: groupCashInformationError
+          ? "Factura emitida; registro informativo de Caja pendiente"
+          : esNoFiscal ? "Comprobante emitido" : "Factura emitida",
+        description: groupCashInformationError
+          ? `${data.cashMovementError}. No vuelvas a emitir la factura; el comprobante fiscal ya existe.`
+          : esNoFiscal
           ? `${TIPO_LABELS[data.tipo_comprobante]?.nombre ?? data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}`
           : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
+        variant: groupCashInformationError ? "destructive" : "default",
       });
       setEmitted(true);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);

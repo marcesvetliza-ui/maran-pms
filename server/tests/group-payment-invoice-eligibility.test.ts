@@ -10,9 +10,14 @@ const state = vi.hoisted(() => ({
 const mockEmitirFactura = vi.hoisted(() => vi.fn());
 const mockAssertGroupInvoiceAllocation = vi.hoisted(() => vi.fn());
 const mockGetGroup = vi.hoisted(() => vi.fn());
+const mockGroupFiscalCash = vi.hoisted(() => vi.fn());
+vi.mock("../billing/groupFiscalCash", () => ({
+  ensureGroupFiscalCashInformation: mockGroupFiscalCash,
+}));
 
 vi.mock("../db", () => ({
   db: {
+    transaction: vi.fn(async (callback: any) => callback({})),
     execute: vi.fn(async () => ({
       rows: state.dbRows ? (state.dbRows.shift() || []) : state.rows,
     })),
@@ -322,6 +327,11 @@ describe("Factura T group invoice HTTP eligibility", () => {
         groupPaymentId: PAYMENT_ID,
         cliente: expect.objectContaining({ dni: GUEST_DOCUMENT }),
       }));
+      expect(mockGroupFiscalCash).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ id: 501, groupId: GROUP_ID, tipoComprobante: "FT", montoTotal: "100.00" }),
+        "Admin",
+      );
     });
   });
 });
