@@ -12,7 +12,7 @@ import { formatInvoiceCreatedTime, isInvoiceReconciliationPending } from "@/lib/
 import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
-  FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
+  FileText, Plus, Eye, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
   FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -455,7 +455,7 @@ export default function BillingPage() {
                           <th className="px-3 py-2 text-right">Total</th>
                           <th className="px-3 py-2 text-left">CAE</th>
                           <th className="px-3 py-2 text-left">Estado</th>
-                          <th scope="col" className="sticky right-0 z-20 min-w-[240px] border-l bg-background px-3 py-2 text-right">Acciones</th>
+                          <th scope="col" className="sticky right-0 z-20 min-w-[116px] border-l bg-background px-3 py-2 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -527,17 +527,17 @@ export default function BillingPage() {
                                 )}
                                 {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
                               </td>
-                              <td className="sticky right-0 z-10 min-w-[240px] border-l bg-background px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
-                                <div className="flex flex-wrap gap-1 justify-end">
+                              <td className="sticky right-0 z-10 min-w-[116px] border-l bg-background px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
+                                <div className="flex items-center gap-1 justify-end">
                                   {f.center_settlement_status === "pending" && (
                                     <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
                                   )}
-                                  <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" aria-label="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
-                                    <Download className="w-3.5 h-3.5" /> PDF
+                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Ver / descargar comprobante" aria-label="Ver / descargar comprobante" data-testid={`btn-pdf-${f.id}`}>
+                                    <Eye className="w-3.5 h-3.5" />
                                   </Button>
                                   {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
-                                    <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setShowEdit(f.id)} title="Editar comprobante" aria-label="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
-                                      <Pencil className="w-3.5 h-3.5" /> Editar
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" aria-label="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
+                                      <Pencil className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
                                   {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && (
@@ -549,15 +549,15 @@ export default function BillingPage() {
                                   )}
                                   {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button
-                                      variant="outline"
+                                      variant="ghost"
                                       size="sm"
-                                      className="h-8 px-2 text-orange-600 hover:text-orange-700"
+                                      className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700"
                                       onClick={() => setShowNC(f.id)}
                                       title={f.estado === "parcial" ? "Emitir otra Nota de Crédito sobre el saldo pendiente" : "Emitir Nota de Crédito"}
                                       aria-label="Emitir Nota de Crédito"
                                       data-testid={`btn-nc-${f.id}`}
                                     >
-                                      <XCircle className="w-3.5 h-3.5" /> NC
+                                      <XCircle className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
                                 </div>
