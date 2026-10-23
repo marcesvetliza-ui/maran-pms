@@ -98,3 +98,31 @@ it("no presenta una factura directa pendiente como una nota de crédito", async 
   expect(await screen.findByText('Vinculación con el grupo pendiente')).toBeInTheDocument();
   expect(screen.getAllByText('No emitir otra NC')).toHaveLength(1);
 });
+
+it("recupera únicamente el registro de Caja y permite reintentar un fallo", async () => {
+  queryClient.clear(); toastMock.mockClear();
+  let pending=true, attempts=0;
+  const document={id:703,tipo_comprobante:'FA',punto_venta:5,numero:37,group_name:'Grupo sintético',monto_total:'121.00'};
+  const fetchMock=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{
+    const url=String(input);
+    if(url==='/api/billing/group-cash-information/pending')return jsonResponse(pending?[document]:[]);
+    if(url==='/api/billing/invoices/703/complete-cash-information'&&init?.method==='POST'){
+      attempts++;
+      if(attempts===1)return jsonResponse({error:'Falla temporal de Caja'},503);
+      pending=false;return jsonResponse({invoiceId:703,alreadyRecorded:false});
+    }
+    if(url==='/api/billing/config')return jsonResponse({arcaAmbiente:'homologacion'});
+    return jsonResponse([]);
+  });
+  vi.stubGlobal('fetch',fetchMock);
+  render(<QueryClientProvider client={queryClient}><BillingPage/></QueryClientProvider>);
+  const button=await screen.findByTestId('btn-complete-cash-information-703');
+  await userEvent.setup().click(button);
+  await waitFor(()=>expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({title:'Falla temporal de Caja',variant:'destructive'})));
+  expect(screen.getByTestId('btn-complete-cash-information-703')).toBeInTheDocument();
+  await userEvent.setup().click(screen.getByTestId('btn-complete-cash-information-703'));
+  await waitFor(()=>expect(screen.queryByTestId('btn-complete-cash-information-703')).not.toBeInTheDocument());
+  expect(attempts).toBe(2);
+  const posts=fetchMock.mock.calls.filter(([,init])=>init?.method==='POST');
+  expect(posts.map(([url])=>url)).toEqual(['/api/billing/invoices/703/complete-cash-information','/api/billing/invoices/703/complete-cash-information']);
+});

@@ -28,6 +28,6 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
   'CREATE SEQUENCE group_payments_receipt_number_seq'
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$BASE/schema.sql"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
-  "INSERT INTO role_permissions(role, resource_key) VALUES ('admin', 'api:billing:nc-reconciliation')"
+  "INSERT INTO role_permissions(role, resource_key) VALUES ('admin', 'api:billing:nc-reconciliation'), ('admin', 'api:cash:area-admin')"
 npx --no-install vitest run --config vitest.server.pg.config.ts \
   server/tests/group-credit-recovery.pg.test.ts

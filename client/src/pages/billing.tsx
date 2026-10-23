@@ -267,6 +267,29 @@ export default function BillingPage() {
     },
   });
 
+  const cashInformationKey = ["/api/billing/group-cash-information/pending"];
+  const { data: pendingCashInformation = [], isError: cashInformationFailed, refetch: refreshCashInformation } = useQuery<any[]>({
+    queryKey: cashInformationKey,
+    queryFn: async () => {
+      const response = await fetch(cashInformationKey[0], { credentials: "include" });
+      if (response.status === 403) return [];
+      if (!response.ok) throw new Error("No se pudieron consultar los registros informativos de Caja.");
+      return response.json();
+    },
+  });
+  const completeCashInformation = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/billing/invoices/${id}/complete-cash-information`),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: cashInformationKey }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts"] }),
+      ]);
+      toast({ title: "Registro informativo de Caja completado", description: "No se emitieron comprobantes ni se registraron cobros." });
+    },
+    onError: (error: Error) => toast({ title: parseApiError(error), variant: "destructive" }),
+  });
+
   const reconcileCreditNoteMutation = useMutation({
     mutationFn: (creditNoteId: number) => apiRequest("POST", `/api/billing/credit-notes/${creditNoteId}/reconcile`),
     onSuccess: async (response: Response) => {
@@ -392,10 +415,25 @@ export default function BillingPage() {
                 className="w-56 text-sm h-8"
                 data-testid="input-filtro-cliente"
               />
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="h-8">
+              <Button variant="outline" size="sm" onClick={() => { void refetch(); void refreshCashInformation(); }} className="h-8">
                 <RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualizar
               </Button>
             </div>
+
+            {cashInformationFailed && <p role="alert" className="mb-3 text-sm text-destructive">No se pudieron consultar los registros informativos de Caja. Tocá Actualizar para reintentar.</p>}
+            {pendingCashInformation.length > 0 && (
+              <Card className="mb-4 border-amber-300">
+                <CardHeader className="pb-2"><CardTitle className="text-sm">Registros informativos de Caja pendientes ({pendingCashInformation.length})</CardTitle>
+                  <p className="text-xs text-muted-foreground">Son comprobantes ya emitidos. Completar el registro no emite otra factura ni NC y no genera cobros ni devoluciones.</p>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {pendingCashInformation.map(document => <div key={document.id} className="flex flex-wrap items-center justify-between gap-2 border rounded-md p-2 text-xs">
+                    <div>{TIPO_LABELS[document.tipo_comprobante]?.nombre || document.tipo_comprobante} {padNum(document.punto_venta,4)}-{padNum(document.numero,8)} · {document.group_name || document.cliente_razon_social} · ${fPeso(document.monto_total)}</div>
+                    <Button variant="outline" size="sm" disabled={completeCashInformation.isPending} onClick={() => completeCashInformation.mutate(Number(document.id))} data-testid={`btn-complete-cash-information-${document.id}`}>Completar registro en Caja</Button>
+                  </div>)}
+                </CardContent>
+              </Card>
+            )}
 
             {(pendingCreditNotes as any[]).length > 0 && (
               <Card className="mb-4 border-amber-300 bg-amber-50/60 dark:bg-amber-950/20">
@@ -1315,6 +1353,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/group-cash-information/pending"] });
       const groupCashInformationError = groupId && data.cashMovementError;
       const esNoFiscal = NON_FISCAL_TIPOS_SET.has(data.tipo_comprobante);
       toast({

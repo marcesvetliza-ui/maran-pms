@@ -23,7 +23,7 @@ export async function ensureGroupFiscalCashInformation(
   tx: Transaction,
   document: GroupFiscalCashDocument,
   operator?: string,
-): Promise<void> {
+): Promise<boolean> {
   const isCredit = /^NC(A|B|C|T|M|MB)$/.test(document.tipoComprobante);
   const isInvoice = /^(FA|FB|FC|FT|FM|FMB)$/.test(document.tipoComprobante);
   const amount = Number(document.montoTotal);
@@ -41,7 +41,7 @@ export async function ensureGroupFiscalCashInformation(
       AND movement_type = 'informational' AND anulado = false
     LIMIT 1
   `);
-  if (existing.rows.length) return;
+  if (existing.rows.length) return false;
 
   const reference = `${document.tipoComprobante} ${String(document.puntoVenta).padStart(4, "0")}-${String(document.numero).padStart(8, "0")}`;
   const label = [
@@ -72,6 +72,6 @@ export async function ensureGroupFiscalCashInformation(
         nextval('cash_movements_receipt_number_seq'::regclass)::text
       )
     `);
-    return;
+    return true;
   }
 }

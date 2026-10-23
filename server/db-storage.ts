@@ -9257,24 +9257,21 @@ export class DatabaseStorage implements IStorage {
       }
 
       const { area, status, valueType, ...rest } = data;
-      const voucher: Partial<typeof giftVouchers.$inferInsert> = { ...rest };
+      const diffFields = (Object.keys(rest) as (keyof typeof rest)[])
+        .filter(field => rest[field] !== undefined && String((existing as any)[field] ?? "") !== String(rest[field] ?? ""));
+      // Opening the editor and saving unchanged is a successful no-op. Do not
+      // issue an empty UPDATE or insert an empty audit-events batch.
+      if (diffFields.length === 0) return existing;
+      const voucher = Object.fromEntries(diffFields.map(field => [field, rest[field]]));
       const [v] = await tx.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
-
-      const diffFields = Object.keys(rest) as (keyof typeof rest)[];
-      if (diffFields.length > 0) {
-        await tx.insert(giftVoucherEvents).values(
-          diffFields
-            .filter((field) => String((existing as any)[field] ?? "") !== String((rest as any)[field] ?? ""))
-            .map((field) => ({
-              voucherId: id,
-              eventType: "editado" as const,
-              fieldChanged: String(field),
-              oldValue: (existing as any)[field] == null ? null : String((existing as any)[field]),
-              newValue: (rest as any)[field] == null ? null : String((rest as any)[field]),
-              performedBy: performedBy ?? null,
-            })),
-        );
-      }
+      await tx.insert(giftVoucherEvents).values(diffFields.map(field => ({
+        voucherId: id,
+        eventType: "editado" as const,
+        fieldChanged: String(field),
+        oldValue: (existing as any)[field] == null ? null : String((existing as any)[field]),
+        newValue: (rest as any)[field] == null ? null : String(rest[field]),
+        performedBy: performedBy ?? null,
+      })));
       return v;
     });
   }

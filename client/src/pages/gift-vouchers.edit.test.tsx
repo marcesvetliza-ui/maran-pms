@@ -151,6 +151,15 @@ describe("Vouchers — editar", () => {
     });
   });
 
+  it("permite guardar los valores originales y cerrar el editor", async () => {
+    mockFetch([voucher({id:"v-unchanged"})]);
+    renderPage();
+    const user=await openEditDialog("v-unchanged");
+    await user.click(screen.getByTestId("button-save-edit"));
+    await waitFor(()=>expect(screen.queryByTestId("button-save-edit")).not.toBeInTheDocument());
+    expect(capturedPatchBody).toEqual({description:"Masaje descontracturante",beneficiaryName:"María Pérez",expiresAt:"2026-12-01",notes:"Nota original"});
+  });
+
   it("un voucher cancelado sólo permite editar las notas internas", async () => {
     const cancelled = voucher({ id: "v-cancelled", status: "cancelado", cancelReason: "Pedido de reembolso" });
     mockFetch([cancelled]);

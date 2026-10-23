@@ -331,6 +331,49 @@ describe.skipIf(!enabled)(
         await pool.query("DELETE FROM cash_shifts WHERE id=$1", [closedId]);
       }
     });
+    it("recovers missing informational records without fiscal issuance, payments or duplicate entries", async () => {
+      const invoicesBefore = [await row(original), await row(nc)];
+      const paymentsBefore = (await pool.query("SELECT * FROM group_payments WHERE group_id=$1",[group])).rows;
+      await pool.query("UPDATE sales_invoices SET modo_ficticio=false,cae=NULL WHERE id=$1",[original]);
+      expect((await api("POST", `/api/billing/invoices/${original}/complete-cash-information`)).status).toBe(409);
+      expect((await api("GET", "/api/billing/group-cash-information/pending")).body.some((r:any)=>r.id===original)).toBe(false);
+      await pool.query("UPDATE sales_invoices SET modo_ficticio=true WHERE id=$1",[original]);
+      const queue = await api("GET", "/api/billing/group-cash-information/pending");
+      expect(queue.status).toBe(200);
+      expect(queue.body.some((r:any)=>r.id===original)).toBe(true);
+      expect(queue.body.some((r:any)=>r.id===nc)).toBe(false);
+      expect((await api("POST", `/api/billing/invoices/${nc}/complete-cash-information`)).status).toBe(409);
+      const results=await Promise.all([1,2].map(()=>api("POST", `/api/billing/invoices/${original}/complete-cash-information`)));
+      expect(results.map(r=>r.status)).toEqual([200,200]);
+      expect(results.filter(r=>r.body.alreadyRecorded)).toHaveLength(1);
+      expect(await cashRows()).toHaveLength(1);
+      expect((await cashRows())[0]).toMatchObject({source_type:"comprobante_grupo",movement_type:"informational",payment_id:null});
+      expect([await row(original),await row(nc)]).toEqual(invoicesBefore);
+      expect((await pool.query("SELECT * FROM group_payments WHERE group_id=$1",[group])).rows).toEqual(paymentsBefore);
+      expect(authorize).not.toHaveBeenCalled();
+      expect((await api("GET", "/api/billing/group-cash-information/pending")).body.some((r:any)=>r.id===original)).toBe(false);
+      await pool.query("UPDATE sales_invoices SET estado='emitida',cae='12345678901234',reconciliation_status='conciliada' WHERE id=$1",[nc]);
+      expect((await api("GET", "/api/billing/group-cash-information/pending")).body.some((r:any)=>r.id===nc)).toBe(true);
+      expect((await api("POST", `/api/billing/invoices/${nc}/complete-cash-information`)).status).toBe(200);
+      expect(await cashRows()).toHaveLength(2);
+      expect(authorize).not.toHaveBeenCalled();
+    });
+    it("retains failed informational registrations in the queue and enforces permissions", async () => {
+      actor="none";expect((await api("POST", `/api/billing/invoices/${original}/complete-cash-information`)).status).toBe(401);
+      actor="housekeeping";expect((await api("GET", "/api/billing/group-cash-information/pending")).status).toBe(403);
+      expect((await api("POST", `/api/billing/invoices/${original}/complete-cash-information`)).status).toBe(403);
+      actor="admin";
+      const trigger="fail_info_"+randomUUID().replaceAll("-", "");
+      await pool.query(`CREATE FUNCTION ${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.source_type='comprobante_grupo' AND NEW.source_id='${original}' THEN RAISE EXCEPTION 'synthetic info failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER ${trigger} BEFORE INSERT ON cash_movements FOR EACH ROW EXECUTE FUNCTION ${trigger}()`);
+      try {
+        expect((await api("POST", `/api/billing/invoices/${original}/complete-cash-information`)).status).toBe(503);
+        expect(await cashRows()).toHaveLength(0);
+        expect((await api("GET", "/api/billing/group-cash-information/pending")).body.some((r:any)=>r.id===original)).toBe(true);
+      } finally {await pool.query(`DROP TRIGGER ${trigger} ON cash_movements; DROP FUNCTION ${trigger}()`);}
+      expect((await api("POST", `/api/billing/invoices/${original}/complete-cash-information`)).status).toBe(200);
+      expect(await cashRows()).toHaveLength(1);
+      expect(authorize).not.toHaveBeenCalled();
+    });
     it("lists the group pending NC outside date filters and recovers it through the real endpoint", async () => {
       const queue = await api(
         "GET",

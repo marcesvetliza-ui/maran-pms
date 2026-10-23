@@ -1,3 +1,4 @@
+import { registerGroupFiscalCashRecoveryRoutes } from "./groupFiscalCashRecovery";
 import { recoverGroupCreditNote } from "./groupCreditRecovery";
 import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
 import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
@@ -581,6 +582,7 @@ async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise
 }
 
 export function registerBillingRoutes(app: Express) {
+  registerGroupFiscalCashRecoveryRoutes(app);
   registerArcaCredentialDiagnosticRoutes(app);
 
   // GET /api/billing/config
