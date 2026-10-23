@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import { recoverGroupCreditNote } from "../billing/groupCreditRecovery";
+import { ensureGroupFiscalCashInformation } from "../billing/groupFiscalCash";
 const enabled =
   !!process.env.DATABASE_URL &&
   process.env.ALLOW_DESTRUCTIVE_PG_TESTS === "true";
@@ -37,6 +38,11 @@ async function api(method: string, path: string, body?: any) {
 }
 const row = async (id: number) =>
   (await pool.query("SELECT * FROM sales_invoices WHERE id=$1", [id])).rows[0];
+const cashRows = async () =>
+  (await pool.query(
+    "SELECT * FROM cash_movements WHERE source_id = ANY($1::text[]) AND source_type IN ('nota_credito','comprobante_grupo') ORDER BY source_id",
+    [[String(original), String(nc)]],
+  )).rows;
 const authorize = vi.fn(async (input: any) => {
   await pool.query(
     "UPDATE sales_invoices SET estado='emitida',cae='12345678901234' WHERE id=$1",
@@ -104,6 +110,10 @@ describe.skipIf(!enabled)(
     });
     beforeEach(async () => {
       actor = "admin";
+      await pool.query(
+        "DELETE FROM cash_movements WHERE source_id = ANY($1::text[]) AND source_type IN ('nota_credito','comprobante_grupo')",
+        [[String(original), String(nc)]],
+      );
       await pool.query("DELETE FROM group_payments WHERE group_id=$1", [group]);
       await pool.query(
         "INSERT INTO group_payments(id,group_id,amount,method,date,invoice_ref)VALUES($1,$1,12154800,'cash',NOW(),$2)",
@@ -128,6 +138,10 @@ describe.skipIf(!enabled)(
         await new Promise<void>((r) => server.close(() => r()));
       }
       if (pool) {
+        await pool.query(
+          "DELETE FROM cash_movements WHERE source_id = ANY($1::text[]) AND source_type IN ('nota_credito','comprobante_grupo')",
+          [[String(original), String(nc)]],
+        );
         await pool.query("DELETE FROM audit_logs WHERE entity_id=$1", [
           String(nc),
         ]);
@@ -181,12 +195,23 @@ describe.skipIf(!enabled)(
         reconciliation_status: "conciliada",
         reconciliation_error: null,
       });
+      expect(await cashRows()).toEqual([expect.objectContaining({
+        area: "recepcion",
+        source_type: "nota_credito",
+        source_id: String(nc),
+        movement_type: "informational",
+        amount: "12154800.00",
+        receipt_type: "NCA",
+        payment_method: "nc",
+        payment_id: null,
+      })]);
       await recoverGroupCreditNote(
         nc,
         { username: "Synthetic" },
         authorize as any,
       );
       expect(authorize).toHaveBeenCalledTimes(1);
+      expect(await cashRows()).toHaveLength(1);
       expect(
         (
           await pool.query("SELECT * FROM audit_logs WHERE entity_id=$1", [
@@ -208,6 +233,7 @@ describe.skipIf(!enabled)(
       ).rejects.toThrow("ARCA unavailable");
       expect(await row(original)).toEqual(before);
       expect((await row(nc)).reconciliation_status).toBe("pendiente");
+      expect(await cashRows()).toHaveLength(0);
       await expect(
         recoverGroupCreditNote(nc, {}, vi.fn(async () => ({})) as any),
       ).rejects.toThrow("autorización");
@@ -221,6 +247,7 @@ describe.skipIf(!enabled)(
       await recoverGroupCreditNote(nc, {}, authorize as any);
       expect(authorize).not.toHaveBeenCalled();
       expect((await row(original)).monto_acreditado).toBe("12154800.00");
+      expect(await cashRows()).toHaveLength(1);
     });
     it("serializes concurrent retries", async () => {
       await Promise.all([
@@ -229,6 +256,7 @@ describe.skipIf(!enabled)(
       ]);
       expect(authorize).toHaveBeenCalledTimes(1);
       expect((await row(original)).monto_acreditado).toBe("12154800.00");
+      expect(await cashRows()).toHaveLength(1);
     });
     it("rejects inconsistent maps before contacting provider", async () => {
       await pool.query(
@@ -254,6 +282,7 @@ describe.skipIf(!enabled)(
           estado: "emitida",
           reconciliation_status: "pendiente",
         });
+        expect(await cashRows()).toHaveLength(0);
       } finally {
         await pool.query(
           `DROP TRIGGER ${trigger} ON audit_logs; DROP FUNCTION ${trigger}()`,
@@ -262,6 +291,45 @@ describe.skipIf(!enabled)(
       await recoverGroupCreditNote(nc, {}, authorize as any);
       expect(authorize).toHaveBeenCalledTimes(1);
       expect((await row(nc)).reconciliation_status).toBe("conciliada");
+      expect(await cashRows()).toHaveLength(1);
+    });
+    it("records a replacement invoice once in the active Reception shift without collecting again or changing closed history", async () => {
+      const { db } = await import("../db");
+      const { storage } = await import("../db-storage");
+      const current = await storage.getOrCreateActiveTurno("recepcion");
+      const closedId = randomUUID();
+      await pool.query(
+        "INSERT INTO cash_shifts(id,area,shift_number,status,opened_at,closed_at) VALUES($1,'recepcion',99,'closed','2000-01-01','2000-01-02')",
+        [closedId],
+      );
+      const closedBefore = (await pool.query("SELECT * FROM cash_shifts WHERE id=$1", [closedId])).rows[0];
+      const paymentsBefore = (await pool.query("SELECT * FROM group_payments WHERE group_id=$1", [group])).rows;
+      try {
+        await recoverGroupCreditNote(nc, {}, authorize as any);
+        const document = {
+          id: original, groupId: group, tipoComprobante: "FA", puntoVenta: 5,
+          numero: 37, montoTotal: "12154800.00", clienteRazonSocial: "Synthetic Customer",
+        };
+        await Promise.all([
+          db.transaction(tx => ensureGroupFiscalCashInformation(tx, document, "Synthetic")),
+          db.transaction(tx => ensureGroupFiscalCashInformation(tx, document, "Synthetic")),
+        ]);
+        const movements = await cashRows();
+        expect(movements).toHaveLength(2);
+        expect(movements.every((m: any) => m.movement_type === "informational" && m.shift_id === current.id && m.payment_id === null)).toBe(true);
+        expect(movements.find((m: any) => m.source_type === "comprobante_grupo")).toMatchObject({
+          amount: "12154800.00", payment_method: "factura_grupo", receipt_type: "FA",
+          source_label: expect.stringContaining("FA 0005-00000037"),
+        });
+        expect(movements.filter((m: any) => m.movement_type !== "informational").reduce((sum: number, m: any) => sum + Number(m.amount), 0)).toBe(0);
+        const paymentsAfter = (await pool.query("SELECT * FROM group_payments WHERE group_id=$1", [group])).rows;
+        expect(paymentsAfter.map((p: any) => ({ ...p, invoice_nc_ref: null })))
+          .toEqual(paymentsBefore.map((p: any) => ({ ...p, invoice_nc_ref: null })));
+        expect((await pool.query("SELECT * FROM cash_shifts WHERE id=$1", [closedId])).rows[0]).toEqual(closedBefore);
+        expect((await pool.query("SELECT id FROM cash_movements WHERE shift_id=$1", [closedId])).rows).toHaveLength(0);
+      } finally {
+        await pool.query("DELETE FROM cash_shifts WHERE id=$1", [closedId]);
+      }
     });
     it("lists the group pending NC outside date filters and recovers it through the real endpoint", async () => {
       const queue = await api(

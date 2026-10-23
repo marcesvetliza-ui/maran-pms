@@ -1,6 +1,18 @@
 import {describe,it,expect} from 'vitest';
 import {informationalSummary} from './cash-informational-summary';
 describe('Resumen informativo de caja',()=>{
+ it('muestra la NC y la refacturación grupal separadas del cobro original',()=>{
+  const rows=[
+   {paymentMethod:'efectivo',amount:'12154800.00',movementType:'income'},
+   {paymentMethod:'nc',amount:'12154800.00',movementType:'informational'},
+   {paymentMethod:'factura_grupo',amount:'12154800.00',movementType:'informational'},
+  ];
+  const result=informationalSummary(rows,method=>method);
+  expect(result.nc).toMatchObject({count:1,total:12154800});
+  expect(result.factura_grupo).toMatchObject({count:1,total:12154800});
+  expect(result.efectivo).toBeUndefined();
+  expect(rows.filter(row=>row.movementType!=='informational').reduce((sum,row)=>sum+Number(row.amount),0)).toBe(12154800);
+ });
  it('separa NC y cuenta corriente sin sumar cobros ni anulados',()=>{
   const rows=[
    {paymentMethod:'nc',amount:'390000',movementType:'informational'},

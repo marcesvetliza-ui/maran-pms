@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
+import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
 import { withFinancialScopeLock } from "../nightlyPricingGuard";
 import {
   emitirFactura,
@@ -199,6 +200,16 @@ export async function recoverGroupCreditNote(
         await prior(tx, Number(original.id), ncId),
       );
       const newCredited = check.credited + check.credit;
+      await ensureGroupFiscalCashInformation(tx, {
+        id: Number(nc.id),
+        groupId: String(original.group_id),
+        tipoComprobante: nc.tipo_comprobante,
+        puntoVenta: Number(nc.punto_venta),
+        numero: Number(nc.numero),
+        montoTotal: nc.monto_total,
+        clienteRazonSocial: nc.cliente_razon_social,
+        originalReference: `${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}`,
+      }, user.fullName || user.username);
       await tx.execute(
         sql`UPDATE sales_invoices SET monto_acreditado=${(newCredited / 100).toFixed(2)},estado=${newCredited === check.total ? "anulada" : "parcial"},nota_credito_id=${ncId} WHERE id=${Number(original.id)}`,
       );

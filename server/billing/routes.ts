@@ -1,4 +1,5 @@
 import { recoverGroupCreditNote } from "./groupCreditRecovery";
+import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
 import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
 import {creditNoteAccountMovement} from './creditNoteAccountMovement';
@@ -2066,6 +2067,27 @@ export function registerBillingRoutes(app: Express) {
             : await emitInvoice();
       const user = (req as any).user;
       let cashMovementError: string | undefined;
+      if (groupId && ["FA", "FB", "FC", "FT", "FM", "FMB"].includes(factura.tipoComprobante)) {
+        try {
+          await db.transaction(tx => ensureGroupFiscalCashInformation(tx, {
+            id: factura.id,
+            groupId,
+            tipoComprobante: factura.tipoComprobante,
+            puntoVenta: factura.puntoVenta,
+            numero: factura.numero,
+            montoTotal: factura.montoTotal,
+            clienteRazonSocial: factura.clienteRazonSocial,
+          }, user?.fullName || user?.username));
+        } catch (error: any) {
+          // ARCA has already authorized the document. Keep its identity and
+          // report the missing information; retrying must not emit it again.
+          cashMovementError = error?.message || "No se pudo registrar el comprobante informativo del grupo en Caja";
+          await audit(req, "update", "sales_invoices",
+            `Factura de grupo ${factura.id} emitida; registro informativo de Caja pendiente`,
+            { entityType: "sales_invoice", entityId: String(factura.id), details: { error: cashMovementError } },
+          ).catch(() => undefined);
+        }
+      }
       const invoiceTotalForSettlement = parseFloat(String(
         (factura as any).montoTotal ?? (factura as any).monto_total ?? "0",
       ));
@@ -3358,6 +3380,18 @@ export function registerBillingRoutes(app: Express) {
       const nuevoAcreditado = Math.min(montoTotal, montoYaAcreditado + montoNC);
       const nuevoEstado = nuevoAcreditado >= montoTotal - 0.009 ? "anulada" : "parcial";
       await db.transaction(async (tx) => {
+        if (original.group_id) {
+          await ensureGroupFiscalCashInformation(tx, {
+            id: Number(nc.id),
+            groupId: String(original.group_id),
+            tipoComprobante: nc.tipoComprobante,
+            puntoVenta: nc.puntoVenta,
+            numero: nc.numero,
+            montoTotal: nc.montoTotal,
+            clienteRazonSocial: original.cliente_razon_social,
+            originalReference: `${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}`,
+          }, user?.fullName || user?.username);
+        }
         await tx.execute(sql`
           UPDATE sales_invoices
             SET nota_credito_id = ${nc.id},
@@ -3375,9 +3409,9 @@ export function registerBillingRoutes(app: Express) {
       // Non-reservation NCs are informative-only in Caja: emitting a NC never
       // moves cash by itself (any real refund is its own separate movement,
       // e.g. payment_void below) — it just needs to be visible for control.
-      // Group NCs have no área of their own (grupos are billed by punto de
-      // venta, not área) — same pos_configs lookup as the ND site below.
-      if (!original.reserva_id) {
+      // Group NCs were recorded transactionally above in Reception. Only
+      // other non-reservation modules use their POS area here.
+      if (!original.reserva_id && !original.group_id) {
         try {
           const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
           const pvArea = (pvRow.rows[0] as any)?.area || (original.group_id ? "recepcion" : "restaurant");

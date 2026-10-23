@@ -188,6 +188,7 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   transferencia: "Transferencia",
   no_fiscal: "Sin cargo",
   nc: "Nota de Crédito",
+  factura_grupo: "Factura de grupo",
   nd: "Nota de Débito",
   compensacion: "Compensación",
   echeq: "eCheq",
@@ -197,7 +198,7 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   retencion_iva: "Retención IVA",
 };
 
-const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal", "nc", "nd", "compensacion"]);
+const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal", "nc", "nd", "compensacion", "factura_grupo"]);
 
 const AREA_COLORS: Record<string, string> = {
   // Los turnos reales se guardan con area="recepcion" (español) — "reception"

@@ -8,6 +8,10 @@ const state = vi.hoisted(() => ({
   emittedCalls: [] as any[],
   emitirError: null as string | null,
 }));
+const groupFiscalCash = vi.hoisted(() => vi.fn());
+vi.mock("../billing/groupFiscalCash", () => ({
+  ensureGroupFiscalCashInformation: groupFiscalCash,
+}));
 
 vi.mock("../db", () => ({
   db: {
@@ -738,14 +742,14 @@ describe("group-payment credit notes", () => {
     expect(state.emittedCalls[0].items[0].groupCompositionSources).toEqual([
       expect.objectContaining(compositionSources[1]),
     ]);
-    // Un grupo no tiene área propia (se factura por punto de venta), así
-    // que la NC cae en "recepcion" como el resto de los comprobantes de
-    // grupo — informativa, sigue sin mover plata por sí misma.
+    // Group fiscal evidence shares the idempotent, transactional writer with
+    // recovery; the generic monetary cash writer must not run.
     const { storage } = await import("../db-storage");
-    expect(storage.registerCashMovement).toHaveBeenCalledTimes(1);
-    expect(storage.registerCashMovement).toHaveBeenCalledWith(
-      "recepcion", "nota_credito", "90", expect.stringContaining("NCB-00000015"),
-      "nc", "30.00", "informational", expect.anything(), expect.anything(),
+    expect(storage.registerCashMovement).not.toHaveBeenCalled();
+    expect(groupFiscalCash).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: 90, groupId: "group-1", tipoComprobante: "NCB", montoTotal: "30.00" }),
+      "Admin",
     );
   });
 
