@@ -12,6 +12,11 @@ export function financialConsistencyIssues(report:SupportDiagnosis) {
   const scope=/\b(?:codigo|test|tests|prueba|pruebas|mock|mocks|simulad[ao]|escenario)\b/.test(sentence);
   const actualMoney=/no (?:existe|hubo|hay|ocurrio|se produjo|se registro)\s+(?:un[ao]?\s+)?(?:doble cobro|cobros? duplicad[oa]s?|doble factur\w*|facturas? duplicad[oa]s?)|no se (?:cobro|facturo) dos veces/.test(sentence);
   const cannotConfirm=/no (?:se )?(?:puede|podemos|permite|logra)[^.!?]{0,55}(?:afirmar|confirmar|concluir|determinar)|no (?:debe|corresponde)[^.!?]{0,40}(?:afirmar|interpretar|suponer)|sin (?:poder )?confirmar/.test(sentence);
+  // Do not treat alternatives ("en proceso o emitida") as completed issuance.
+  const completedOther=/otro proceso (?:completo|emitio|facturo)|otra operacion (?:completo|emitio|facturo)|otra factura (?:ya (?:esta|fue|ha sido) emitida|termino de emitirse|se emitio|fue emitida)/.test(sentence);
+  const definitiveFromError=/(?:error|mensaje|rechazo|saldo)[^.!?]{0,80}(?:indica|significa|demuestra|prueba)/.test(sentence);
+  const conditional=/\b(?:podria|puede deberse|posible|hipotesis|supongamos)\b/.test(sentence);
+  if(completedOther && definitiveFromError && !cannotConfirm && !conditional)issues.push({field:field.field,code:'RESERVED_CAPACITY_AS_COMPLETED_INVOICE',guidance:'El rechazo sólo indica capacidad fiscal insuficiente, que puede estar consumida o reservada por autorización pendiente. No inferir emisión completada de otra factura ni un cobro; revisar estados y la misma operación.'});
   if(actualMoney && !scope && !cannotConfirm)issues.push({field:field.field,code:'UNVERIFIED_OPERATIONAL_OUTCOME',guidance:'El asistente no consultó registros operativos. No afirmar que no hubo doble cobro/factura en el caso concreto. Distinguir protección del código de resultado observado y explicar cómo revisar comprobantes y Caja.'});
   const fiscalReal=/\bemision(?: fiscal)? real\b|\bfactura real\b/.test(sentence);
   const negatedReal=/\bno\b[^.!?]{0,55}(?:emision(?: fiscal)? real|factura real)|sin[^.!?]{0,40}(?:emision(?: fiscal)? real|factura real)/.test(sentence);

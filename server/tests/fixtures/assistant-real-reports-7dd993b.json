@@ -1,0 +1,304 @@
+{
+  "kind": "archived-synthetic-reports",
+  "sourceRevision": "7dd993bab98b4604d0656269b55ab6cbeccc0b11",
+  "originalSha256": "0fda2cfcc21bc45a26441cd88a2d18b815f1f219508cc95eda68904be575f27e",
+  "model": "gpt-4.1-mini",
+  "case": {
+    "id": "synthetic-concurrent-invoice",
+    "title": "Dos operadores facturan la misma reserva",
+    "module": "facturacion",
+    "actual": "Dos operadores intentan facturar la misma reserva. Uno emite y el otro recibe “el cargo ya no tiene saldo suficiente para facturar”.",
+    "expected": "Explicar qué significa, si hubo duplicación y qué debe verificar el operador. Diferenciar protección del código de hechos operativos desconocidos, sin emitir ni cobrar.",
+    "steps": "Ambos abren la misma reserva y solicitan facturar el mismo cargo.",
+    "reference": "",
+    "page": "",
+    "version": "7dd993bab98b4604d0656269b55ab6cbeccc0b11",
+    "environment": "synthetic-evaluation",
+    "status": "received",
+    "createdAt": "2026-10-17T00:00:00Z",
+    "updatedAt": "2026-10-17T00:00:00Z",
+    "createdBy": "synthetic",
+    "report": null,
+    "lastError": null,
+    "messages": []
+  },
+  "runs": [
+    {
+      "run": 1,
+      "originalProtocolPassed": true,
+      "report": {
+        "summary": "El código protege contra que dos operadores facturen el mismo cargo al mismo tiempo mediante un bloqueo por advisory lock y verificaciones en la base de datos, lo que impide duplicar consumo de capacidad fiscal reservada o consumida.",
+        "certainty": "sustentado_en_codigo",
+        "cause": "El código en el servidor usa un advisory lock (líneas 9-21 en server/billing/invoiceAdvisoryLock.ts) para serializar la operación de facturación que afecta a una reserva. Esto impide que dos solicitudes simultáneas emitan facturas que consuman la misma capacidad fiscal de los cargos facturables. Además, la consulta de facturas previas (líneas 1623-1656 en server/billing/routes.ts) considera estados 'emitida', 'parcial' y 'autorizacion_pendiente' para sumar cantidades ya facturadas o reservadas. Si ya hay una factura en estado autorizado o en autorización pendiente que cubre los cargos, una segunda factura recibe un error 409 con mensaje que indica \"el cargo ya no tiene saldo suficiente para facturar\". En el cliente (client/src/components/PrefacturaDialog.tsx, líneas 1675-1694) se atrapa este rechazo y hay un intento de descarte condicionado del intento de facturación por medio de hasClaim validando la existencia real del reclamo, pero no se elimina la intención si el estado no lo permite. Las pruebas (server/tests/folio-invoice-concurrency.test.ts, líneas 219-237 y 256-283) contienen un test que simula dos facturas simultáneas para un mismo cargo que resulta en una factura exitosa (201) y otra rechazada (409), validando que sólo una factura consume la capacidad. Más aún, se verifica que una factura en estado 'autorizacion_pendiente' también consume capacidad y bloquea otra factura en 409, indicando reserva de capacidad durante autorización.",
+        "proposal": "El mensaje \"el cargo ya no tiene saldo suficiente para facturar\" significa que la capacidad fiscal para facturar ese cargo ya está consumida o reservada por otra factura, emitida o pendiente de autorización. No implica necesariamente que la factura haya terminado de emitirse o cobrarse, solo que existe una operación que se la apropió. El operador que reciba este mensaje debe verificar en la interfaz la existencia de la factura emitida o en autorización pendiente para esa reserva y cargo. Puede revisar el listado de comprobantes emitidos y su estado, además de la operación en curso si está autorizada o pendiente. No debe intentar emitir una factura duplicada ni cobrar dos veces el mismo cargo, y debe esperar a que el proceso anterior concluya o sea descartado. La protección la brinda el código a nivel de servidor para evitar la duplicación, pero hechos operativos como cancelaciones de facturas o problemas en autorización pueden requerir revisión manual adicional. Se recomienda que el operador consulte los comprobantes y registros de Caja para confirmar qué facturas están asociadas a la reserva y sus pagos, sin asumir que un rechazo por saldo indica un cobro duplicado o emitido definitivo. El sistema previene la doble facturación con bloqueo y control de estados, no hace cobros automáticos con la emisión. Para manejo del error en cliente, se informa y mantiene la intención pendiente en algunos casos para intentar reintentos o descartar la operación segura, evitando pérdidas o duplicación de operaciones.",
+        "proposedTests": [
+          "Verificar en ambiente de pruebas que dos usuarios concurrentes que intentan facturar el mismo cargo simultáneamente reciben un 201 para uno y 409 para el otro con mensaje adecuado.",
+          "Confirmar que el mensaje de error 409 en cliente aparece cuando hay una factura en estado 'autorizacion_pendiente', y que el intento de facturación queda pendiente para reintentos o descarte.",
+          "Revisar la interfaz de operación para que permita al usuario consultar comprobantes emitidos, autorizaciones pendientes y pagos aplicados a la reserva afectada.",
+          "Comprobar que el advisory lock impide procesos simultáneos igualitarios que consuman la misma capacidad facturable antes de emitir."
+        ],
+        "questions": [],
+        "dataRepair": "",
+        "limitations": [
+          "La explicación se limita a la protección contra duplicación concurrente; no aborda casos operativos de cancelación, revisiones de cobros reales o remanentes.",
+          "No se dispone de evidencia del manejo detallado en la interfaz del operador para la consulta de comprobantes y pagos en este flujo específico.",
+          "No se verificó con registros reales del hotel ni en base productiva la situación concreta descrita, sólo código y tests de simulación.",
+          "El test usa simulaciones y mocks que no garantizan la integración total con el sistema de pagos real.",
+          "La evidencia de interfaz citada corresponde a: Prefactura de Recepción. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+          "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+          "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+        ],
+        "evidence": [
+          {
+            "path": "server/billing/invoiceAdvisoryLock.ts",
+            "start": 9,
+            "end": 21,
+            "explanation": "Implementa un advisory lock con pg_advisory_lock que serializa la ejecución del proceso completo de facturación para evitar concurrencia que cause duplicación de uso de capacidad fiscal."
+          },
+          {
+            "path": "server/billing/routes.ts",
+            "start": 1623,
+            "end": 1656,
+            "explanation": "Consulta de facturas previas para la misma reserva, que incluye estados 'emitida', 'parcial' y 'autorizacion_pendiente', para conocer la capacidad ya consumida o reservada y evitar consumo dobles."
+          },
+          {
+            "path": "server/tests/folio-invoice-concurrency.test.ts",
+            "start": 219,
+            "end": 237,
+            "explanation": "Test que simula dos facturas simultáneas sobre el mismo cargo, donde sólo una se emite (status 201) y la otra recibe rechazo 409 con mensaje indicando falta de saldo suficiente, confirmando la protección concurrente.",
+            "assertionFragments": [
+              {
+                "start": 234,
+                "end": 234,
+                "code": "234:       expect([first.status, second.status].sort()).toEqual([201, 409]);\r",
+                "partial": false
+              },
+              {
+                "start": 235,
+                "end": 235,
+                "code": "235:       expect(state.emitted).toHaveLength(1);\r",
+                "partial": false
+              },
+              {
+                "start": 236,
+                "end": 236,
+                "code": "236:       expect(state.releaseCalls).toBe(2);\r",
+                "partial": false
+              }
+            ]
+          },
+          {
+            "path": "server/tests/folio-invoice-concurrency.test.ts",
+            "start": 256,
+            "end": 283,
+            "explanation": "Test verifica que una factura en estado 'autorizacion_pendiente' implica reserva de capacidad, haciendo que una segunda factura similar reciba rechazo 409 por capacidad ya reservada.",
+            "assertionFragments": [
+              {
+                "start": 277,
+                "end": 277,
+                "code": "277:       expect(response.status).toBe(409);\r",
+                "partial": false
+              },
+              {
+                "start": 278,
+                "end": 280,
+                "code": "278:       await expect(response.json()).resolves.toMatchObject({\r\n279:         error: expect.stringMatching(/saldo suficiente/i),\r\n280:       });\r",
+                "partial": false
+              },
+              {
+                "start": 282,
+                "end": 282,
+                "code": "282:     expect(state.emitted).toHaveLength(0);\r",
+                "partial": false
+              }
+            ]
+          },
+          {
+            "path": "client/src/components/PrefacturaDialog.tsx",
+            "start": 1675,
+            "end": 1694,
+            "explanation": "Captura el error resultante de la emisión de factura; intenta descartar la factura rechazada sólo si el error es válido y no existe un reclamo activo, para evitar pérdida accidental de intención de facturación."
+          }
+        ],
+        "validationStatus": "complete"
+      }
+    },
+    {
+      "run": 2,
+      "originalProtocolPassed": true,
+      "report": {
+        "summary": "El sistema previene que dos operadores facturen simultáneamente la misma reserva mediante un bloqueo de sesión (advisory lock) específico por reserva y mediante verificación del saldo facturable consumido o reservado por facturas emitidas, parciales o en estado de autorización pendiente. Cuando el segundo operador intenta facturar el cargo ya consumido o reservado por la factura del primero, recibe un error 409 con el mensaje \"el cargo ya no tiene saldo suficiente para facturar\". Este rechazo significa que el sistema bloqueó la duplicación de consumo fiscal, pero no garantiza que se haya emitido y cobrado una única factura definitiva porque puede haber autorizaciones pendientes. El operador debe verificar los comprobantes emitidos, estados fiscal y de autorizaciones y los pagos registrados en Caja para confirmar la situación real. En el cliente, el catch de la Prefactura maneja el error 409 intentando descartar la operación localmente cuando no quedó reclamada en el servidor, permitiendo un reintento limpio. Las pruebas simuladas con Promise.all confirman que sólo una de dos solicitudes simultáneas recibe código 201 (éxito) y la otra un 409, sin emitir dos facturas consumiendo el mismo cargo. Esta lógica es protección concurrente, no una garantía operativa absoluta de facturación única o cobro único. Falta verificar registros operativos reales para confirmación definitiva de la situación en casos concretos.",
+        "certainty": "sustentado_en_codigo",
+        "cause": "Dos operadores intentan facturar la misma reserva simultáneamente. El sistema utiliza bloqueos (pg_advisory_lock) por clave derivada de la reserva para serializar la emisión de facturas y consulta todas las facturas anteriores en estados 'emitida', 'parcial' y 'autorizacion_pendiente' para calcular la capacidad fiscal ya consumida o reservada. Si esa capacidad ya fue consumida o reservada por otra factura (emitida o en autorización pendiente), se rechaza la nueva factura con error 409 y mensaje \"el cargo ya no tiene saldo suficiente para facturar\". Esta protección impide consumos concurrentes de la misma capacidad fiscal, evitando duplicaciones de facturación simultánea.\n\nEl manejo del error en el cliente incluye un intento de descarte de la factura rechazada cuando el servidor confirma que no hay reclamo pendiente para la operación, para permitir reintentos limpios por parte del operador. La prueba unitaria leída simula esta concurrencia y verifica que sólo una factura se emite y la otra se bloquea con 409, las llamadas al bloqueo se liberan correctamente y se conserva el estado esperado.\n\nSin embargo, la presencia del error no demuestra que la factura rechazada fue realmente emitida o cobrada, porque puede existir una autorización pendiente de consumición de esa capacidad, o bien registros del cliente o del servidor posteriormente descartados. La concurrencia y bloqueo es una protección del sistema, no una confirmación de cobros o emisión definitiva.",
+        "proposal": "Explicar a los operadores que el mensaje \"el cargo ya no tiene saldo suficiente para facturar\" indica que el sistema bloqueó la facturación duplicada de la misma capacidad fiscal. No significa necesariamente que la factura del otro operador fue emitida y cobrada, sólo que la capacidad ya está reservada o consumida por una factura emitida, parcial o en autorización pendiente.\n\nSe debe verificar el estado real de la factura para esa reserva consultando:\n- Comprobantes emitidos y su estado fiscal ('emitida', 'parcial', 'autorizacion_pendiente').\n- Si existe autorización pendiente que consuma capacidad fiscal pero no completó emisión.\n- Pagos aplicados y saldos en Caja para confirmar cobros efectivos.\n\nEn el cliente, el rechazo 409 activa el manejo que intenta descartar la operación local para permitir reintentos ordenados.\n\nNo se debe emitir ni cobrar otra factura hasta confirmar que esa capacidad fiscal está libre.\n\nSe recomienda informar que el bloqueo serializa pero no garantiza un único resultado definitivo sobre cobros o estados reales, por lo que la revisión operativa posterior es necesaria para confirmar la situación.\n\nFinalmente, no mezclar casos de facturación de grupos o SPA pues la protección es específica para reservas individuales.",
+        "proposedTests": [
+          "Realizar dos solicitudes simultáneas de facturación para la misma reserva y verificar que sólo una termine con estado 201 y la otra con 409, comprobando que sólo una factura consume el cargo.",
+          "Simular una factura existente en estado 'autorizacion_pendiente' para una reserva y solicitar una nueva factura, confirmando rechazo 409 que reserva la capacidad mientras la autorización esté pendiente.",
+          "Verificar en la interfaz cliente que el error 409 activa el código que intenta descartar la factura localmente y permite reintentos posteriores limpia la operación anterior.",
+          "Comprobar que se libera el bloqueo advisoriolock tras la finalización de las llamadas, permitiendo facturaciones posteriores sin bloqueo muerto."
+        ],
+        "questions": [
+          "¿Qué pasos concretos usan los operadores para verificar el estado de las facturas y pagos tras recibir este error?",
+          "¿Existen logs o registros operativos de comprobantes y pagos que confirmen qué facturas fueron emitidas y cobradas para la reserva afectada?",
+          "¿Se utiliza el mismo sistema de bloqueo para todos los tipos de reserva y facturación involucrados en el hotel?"
+        ],
+        "dataRepair": "",
+        "limitations": [
+          "No se dispone de registros operativos reales ni logs que confirmen la situación concreta en la base de datos del hotel.",
+          "La concurrencia y bloqueo son protección concurrente; no aseguran una única factura emitida o cobro único sin confirmación operativa.",
+          "El análisis no abarca circuitos de facturación de grupos o SPA que podrían tener lógicas distintas.",
+          "La evidencia de interfaz citada corresponde a: Prefactura de Recepción. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+          "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+          "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+        ],
+        "evidence": [
+          {
+            "path": "server/billing/routes.ts",
+            "start": 1615,
+            "end": 1673,
+            "explanation": "Se lee la consulta a la base que filtra facturas anteriores para la reserva en estados emitida, parcial y autorizacion_pendiente, sumando montos ya consumidos o reservados para impedir duplicación."
+          },
+          {
+            "path": "server/billing/invoiceAdvisoryLock.ts",
+            "start": 9,
+            "end": 21,
+            "explanation": "El código implementa bloqueo por clave derivada de la reserva para serializar la emisión de factura, evitando concurrencia que consuma el mismo cargo."
+          },
+          {
+            "path": "server/tests/folio-invoice-concurrency.test.ts",
+            "start": 219,
+            "end": 237,
+            "explanation": "Prueba simula dos facturaciones paralelas y verifica que solo una recibe status 201 y la otra 409, confirmando el bloqueo y rechazo a duplicar consumo.",
+            "assertionFragments": [
+              {
+                "start": 234,
+                "end": 234,
+                "code": "234:       expect([first.status, second.status].sort()).toEqual([201, 409]);\r",
+                "partial": false
+              },
+              {
+                "start": 235,
+                "end": 235,
+                "code": "235:       expect(state.emitted).toHaveLength(1);\r",
+                "partial": false
+              },
+              {
+                "start": 236,
+                "end": 236,
+                "code": "236:       expect(state.releaseCalls).toBe(2);\r",
+                "partial": false
+              }
+            ]
+          },
+          {
+            "path": "server/tests/folio-invoice-concurrency.test.ts",
+            "start": 256,
+            "end": 283,
+            "explanation": "Test verifica que una factura en autorizacion_pendiente también reserva capacidad y la nueva solicitud para la misma reserva se rechaza con error 409.",
+            "assertionFragments": [
+              {
+                "start": 277,
+                "end": 277,
+                "code": "277:       expect(response.status).toBe(409);\r",
+                "partial": false
+              },
+              {
+                "start": 278,
+                "end": 280,
+                "code": "278:       await expect(response.json()).resolves.toMatchObject({\r\n279:         error: expect.stringMatching(/saldo suficiente/i),\r\n280:       });\r",
+                "partial": false
+              },
+              {
+                "start": 282,
+                "end": 282,
+                "code": "282:     expect(state.emitted).toHaveLength(0);\r",
+                "partial": false
+              }
+            ]
+          },
+          {
+            "path": "client/src/components/PrefacturaDialog.tsx",
+            "start": 1673,
+            "end": 1698,
+            "explanation": "Manejo en cliente del catch del endpoint de facturación que intenta descartar la operación rechazada si no existe reclamo en servidor, normalizando la operación para permitir reintentos."
+          }
+        ],
+        "validationStatus": "complete"
+      }
+    },
+    {
+      "run": 3,
+      "originalProtocolPassed": true,
+      "report": {
+        "summary": "El código protege contra la facturación concurrente del mismo cargo por medio de un bloqueo por sesión a nivel de base (pg_advisory_lock) que garantiza que sólo una factura pueda consumar la capacidad facturable por reserva a la vez. Si dos operadores intentan facturar simultáneamente el mismo cargo, uno obtiene la emisión exitosa, el otro recibe un error 409 con mensaje \"El cargo seleccionado ya no tiene saldo suficiente para facturar\". Esto significa que la capacidad facturable para ese cargo está reservada o consumida, aunque no necesariamente que la factura previa haya concluido con cobro o emisión definitiva.",
+        "certainty": "sustentado_en_codigo",
+        "cause": "Al enviarse dos solicitudes simultáneas para facturar el mismo cargo, el mecanismo de bloqueo asegura que sólo la primera operación consume la capacidad facturable del cargo, reservándola o consumiéndola. La segunda operación, al intentar descontar saldo ya reservado o consumido, recibe un rechazo con error 409 y mensaje sobre saldo insuficiente. La comprobación se realiza en el backend al verificar facturas previas en estados 'emitida', 'parcial' y 'autorizacion_pendiente' que consumen la capacidad facturable y bloquean el saldo. Además, el test automatizado confirma que en una concurrencia sólo una factura se emite y la otra falla con 409.",
+        "proposal": "Informar al operador que el mensaje indica que otra facturación concurrente ha reservado o consumido la capacidad del cargo, por eso no pudo facturar. La protección impide emitir dos facturas para la misma capacidad simultáneamente, pero no garantiza que la factura previa haya sido cobrada o concluida operativamente. Recomendar verificar en el sistema de comprobantes y caja qué facturas existen vinculadas a la reserva y su estado, para valorar si hay facturas pendientes o autorizaciones. En la interfaz de Prefactura se muestra el error y se intenta descartar el intento fallido cuando corresponde. No se deben crear facturas nuevas duplicadas, sino corroborar la operación existente, conservando la identidad de liquidación para evitar pérdidas o cobros dobles.",
+        "proposedTests": [
+          "Realizar dos solicitudes de facturación simultáneas sobre el mismo cargo y verificar que una se emite con estado 201 y la otra rechaza con 409 y mensaje sobre saldo insuficiente.",
+          "Simular entrada con facturas en estado 'autorizacion_pendiente' y confirmar que bloquean la capacidad para facturar otra vez.",
+          "Verificar en la interfaz que el error se muestra apropiadamente y se intenta descartar la factura rechazada manteniendo la operación segura para reintentos.",
+          "Revisar en la base de datos y en la consulta de comprobantes que sólo existe una factura facturada o en autorización para el mismo cargo tras conflictos concurrentes."
+        ],
+        "questions": [],
+        "dataRepair": "",
+        "limitations": [
+          "La protección asegura que no se emita la misma factura dos veces al mismo tiempo, pero no garantiza que la factura ya emitida haya sido cobrada o finalizada operativamente.",
+          "El mensaje 409 sólo indica falta de saldo (capacidad) de facturación para el cargo, no cuántos cobros o facturas parciales existen realmente en el sistema de caja.",
+          "No hay información en el código leído sobre a qué pantalla o mecanismo de interfaz corresponde la visualización del error, sólo el manejo genérico en PrefacturaDialog.",
+          "Las pruebas leídas se ejecutan con mocks y no validan la sincronización con caja real ni la concurrencia completa en producción.",
+          "La evidencia de interfaz citada corresponde a: Prefactura de Recepción. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+          "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+          "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+        ],
+        "evidence": [
+          {
+            "path": "server/billing/routes.ts",
+            "start": 1615,
+            "end": 1690,
+            "explanation": "Esta sección muestra la comprobación de saldo facturable contra facturas existentes en estados emitida, parcial y autorizacion_pendiente que consumen la capacidad. En caso de saldo insuficiente se lanza un error FolioInvoiceValidationError con código 409 y mensaje 'El cargo seleccionado ya no tiene saldo suficiente para facturar'. Esto es la base del mensaje recibido por el operador."
+          },
+          {
+            "path": "server/billing/invoiceAdvisoryLock.ts",
+            "start": 6,
+            "end": 22,
+            "explanation": "Implementación del mecanismo de bloqueo a nivel de base de datos con pg_advisory_lock que evita que se invoquen operaciones concurrentes que puedan consumir la misma capacidad de facturación para una reserva. Esto serializa la facturación para evitar duplicados o capacidad sobrevendida."
+          },
+          {
+            "path": "server/tests/folio-invoice-concurrency.test.ts",
+            "start": 216,
+            "end": 246,
+            "explanation": "Test que simula dos facturaciones simultáneas para la misma reserva y cargo, muestra que una factura se emite (201) y la otra falla con error 409 y mensaje sobre saldo insuficiente, confirmando que la protección funciona para concurrencia.",
+            "assertionFragments": [
+              {
+                "start": 234,
+                "end": 234,
+                "code": "234:       expect([first.status, second.status].sort()).toEqual([201, 409]);\r",
+                "partial": false
+              },
+              {
+                "start": 235,
+                "end": 235,
+                "code": "235:       expect(state.emitted).toHaveLength(1);\r",
+                "partial": false
+              },
+              {
+                "start": 236,
+                "end": 236,
+                "code": "236:       expect(state.releaseCalls).toBe(2);\r",
+                "partial": false
+              }
+            ]
+          },
+          {
+            "path": "client/src/components/PrefacturaDialog.tsx",
+            "start": 1673,
+            "end": 1698,
+            "explanation": "Se captura el error del backend al intentar facturar y se intenta descartar la factura rechazada si corresponde, para permitir reintentos seguros manteniendo la identidad de la operación y evitar duplicados incorrectos."
+          }
+        ],
+        "validationStatus": "complete"
+      }
+    }
+  ]
+}

@@ -1,5 +1,9 @@
 # Primera iteración de evaluación del piloto — 16/10/2026
 
+Seguimiento del cierre con corrección y reauditoría:
+[recorrido completo y evaluación real repetible](programming-assistant-complete-validation.md).
+Este documento conserva los resultados históricos de aquella iteración.
+
 Alcance: Xenia/demo, rama `fix/assistant-diagnostic-format`. No incorporar a main.
 El asistente conserva únicamente herramientas de lectura de código: no ejecuta
 pruebas ni operaciones y no recibe acceso a la base del hotel.

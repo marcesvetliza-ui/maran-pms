@@ -13,6 +13,8 @@
     "test:postgres": "if [ -z \"$DATABASE_URL\" ]; then echo 'DATABASE_URL es obligatoria para las pruebas PostgreSQL. Use una base de desarrollo/pruebas migrada, nunca producción.' >&2; exit 1; fi; vitest run --config vitest.server.pg.config.ts",
     "db:migrate:ci": "tsx script/ci-migrate.ts",
     "test:watch": "vitest",
+    "test:assistant": "vitest run --config vitest.assistant.config.ts",
+    "eval:assistant": "tsx services/programming-assistant/evaluate.ts",
     "lint:dates": "bash script/check-date-patterns.sh",
     "test:dates": "bash script/test-check-date-patterns.sh",
     "test:e2e:timezone": "if [ -z \"$DATABASE_URL\" ]; then echo 'DATABASE_URL es obligatoria para la prueba E2E de zona horaria.' >&2; exit 1; fi; playwright test --config playwright.timezone.config.ts",

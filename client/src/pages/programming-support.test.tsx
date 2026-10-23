@@ -48,3 +48,29 @@ it('shows the cited screen and exact assertion fragments without claiming test e
  expect(screen.getByText(/24: expect\(isRoomAvailableForInterval/)).toBeInTheDocument();
  expect(state.request).not.toHaveBeenCalled();
 });
+
+it('shows internal incomplete validation without asking the operator for missing facts',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'case-partial',title:'Validación pendiente',status:'validation_incomplete',version:'a'.repeat(40),
+   report:{summary:'Revisión parcial: falta completar la validación.',certainty:'hipotesis',validationStatus:'incomplete',
+     cause:'',proposal:'Completar revisión',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]},
+   actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-10-17T12:00:00Z',messages:[]}];
+ render(<ProgrammingSupport/>);
+ await user.click(screen.getByRole('button',{name:/Validación pendiente/}));
+ expect(screen.getAllByText('Validación inconclusa').length).toBeGreaterThan(0);
+ expect(screen.queryByText('Información necesaria para continuar')).not.toBeInTheDocument();
+ expect(state.request).not.toHaveBeenCalled();
+});
+
+it('presents an operational question without a diagnosis and requires a saved reply before continuing',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'case-one',title:'NC con error',status:'needs_info',version:'a'.repeat(40),report:null,clarification:{facts:['exact_error'],questions:['¿Qué mensaje exacto aparece?'],requestedAfterMessageCount:0},actual:'Apareció un error al emitir NC',expected:'Anular factura',updatedAt:'2026-10-22T12:00:00Z',messages:[]}];
+ const {rerender}=render(<ProgrammingSupport/>);
+ await user.click(screen.getByRole('button',{name:/NC con error/}));
+ expect(screen.getByText('Necesito un dato para continuar')).toBeInTheDocument();expect(screen.getByText('¿Qué mensaje exacto aparece?')).toBeInTheDocument();expect(screen.queryByText('Diagnóstico y propuesta')).not.toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Continuar con la información agregada'})).toBeDisabled();
+ state.cases=[{...state.cases[0],messages:[{id:'answer',author:'user',text:'Error 10049',createdAt:'2026-10-22T12:01:00Z'}]}];
+ rerender(<ProgrammingSupport/>);
+ expect(screen.getByRole('button',{name:'Continuar con la información agregada'})).toBeEnabled();
+ expect(state.request).not.toHaveBeenCalled();
+});

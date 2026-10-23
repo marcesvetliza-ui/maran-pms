@@ -4,7 +4,8 @@ import type {SupportDiagnosis} from '../../shared/programming-support';
 export function partialDiagnosis(draft:SupportDiagnosis):SupportDiagnosis {
   return {
     ...draft,
-    certainty:'falta_informacion',
+    validationStatus:'incomplete',
+    certainty:'hipotesis',
     summary:'Revisión parcial: no se completó la validación final del diagnóstico. Se conservan las referencias consultadas, pero no se publica una conclusión ni una instrucción operativa sin esa revisión.',
     cause:'',
     proposal:'Completar la revisión de la evidencia antes de decidir un cambio u operación.',

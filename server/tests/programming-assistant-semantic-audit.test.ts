@@ -1,6 +1,6 @@
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
-import {auditDiagnosis,diagnosisStatements} from '../../services/programming-assistant/semantic-audit';
+import {auditDiagnosis,diagnosisStatements,auditReport} from '../../services/programming-assistant/semantic-audit';
 import {diagnose} from '../../services/programming-assistant/diagnose';
 import {financialConsistencyIssues} from '../../services/programming-assistant/consistency';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
@@ -18,7 +18,7 @@ it('sends the entire report to an isolated, read-only review context',async()=>{
   expect(request.messages).toHaveLength(2);expect(request.messages.map((m:any)=>m.role)).toEqual(['system','user']);
   expect(request.tools).toBeUndefined();
   const payload=JSON.parse(request.messages[1].content);
-  expect(payload.diagnosis).toEqual(diagnosisStatements(report()));
+  expect(payload.diagnosis).toEqual(auditReport(report()));
   expect(payload.capabilities).toMatchObject({testsExecuted:false,operationalDatabaseAccess:false});
   expect(payload.evidence.citedCode[0].content).toContain('saldo suficiente para facturar');
   return response(rejection);
@@ -48,7 +48,7 @@ it('does not bypass an independent rejection even when the old phrase rules miss
   writer++;return response(report(),1000);
  }}}};
  await expect(diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({code:'evidence_semantic_rejected'});
- expect(audits).toBe(2);expect(writer).toBe(3);
+ expect(audits).toBe(2);expect(writer).toBe(2);
 });
 it('requires a corrected full report and a new passing audit, counting both calls in the token budget',async()=>{
  const source=await setup();const corrected=report('Consultar comprobantes y Caja para conocer el resultado real; recuperar la misma operación si sigue pendiente, sin crear otra.');
@@ -56,17 +56,21 @@ it('requires a corrected full report and a new passing audit, counting both call
  const client={chat:{completions:{create:async(request:any)=>{
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response(audits===1?rejection:{approved:true,issues:[]});}
   writer++;
-  if(writer===3)expect(JSON.parse(request.messages.at(-1).content).semanticIssues[0].quote).toBe(unsafe);
-  return response(writer<3?report():corrected,1000);
+  if(writer===2){
+   const payload=JSON.parse(request.messages.find((m:any)=>m.role==='user').content);
+   expect(payload.semanticIssues[0].statementId).toBe("proposal_1_1");
+   expect(payload.diagnosis.statements.find((s:any)=>s.id==="proposal_1_1").text).toBe(unsafe);
+  }
+  return response(writer<2?report():corrected,1000);
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(result.report.proposal).toBe(corrected.proposal);expect(result.tokens).toBe(4000);expect(result.semanticAudits).toBe(2);
+ expect(result.report.proposal).toBe(corrected.proposal);expect(result.tokens).toBe(3000);expect(result.semanticAudits).toBe(2);
 });
 it('does not publish the unaudited recommendation when the audit response exceeds budget',async()=>{
  const source=await setup();
  const client={chat:{completions:{create:async(request:any)=>request.response_format.json_schema.name==='maran_diagnosis_audit'?response({approved:true,issues:[]},100001):response(report(),1000)}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(result.report.certainty).toBe('falta_informacion');expect(result.report.summary).toContain('Revisión parcial');
+ expect(result.report.validationStatus).toBe('incomplete');expect(result.report.summary).toContain('Revisión parcial');
  expect(JSON.stringify(result.report)).not.toContain(unsafe);expect(result.report.cause).toBe('');
  expect(result.report.evidence[0].explanation).toContain('no constituye una conclusión validada');
 });
@@ -92,13 +96,13 @@ it.each([
  }}}};
  await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:reason,auditTokens:500,message:'No se pudo verificar la evidencia en la auditoría de coherencia.'});
 });
-it('completes final validation on compact evidence after an expensive research prompt',async()=>{
+it('completes coverage in the mandatory audit without another expensive author pass',async()=>{
  const source=await setup();const safe=report('Consultar comprobantes y Caja para conocer los cobros reales.');
  let writer=0,audits=0;
  const client={chat:{completions:{create:async(request:any)=>{
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response({approved:true,issues:[]});}
   writer++;
-  if(writer===1)return {...response(safe,65000),usage:{total_tokens:65000,prompt_tokens:22000}};
+  if(writer===1)return {...response(safe,40000),usage:{total_tokens:40000,prompt_tokens:22000}};
   expect(request.messages.filter((m:any)=>m.role==='tool')).toHaveLength(0);
   expect(request.messages.filter((m:any)=>m.role==='user')).toHaveLength(1);
   const payload=JSON.parse(request.messages[1].content);
@@ -111,9 +115,9 @@ it('completes final validation on compact evidence after an expensive research p
   return response(safe,5000);
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(result.report.proposal).toBe(safe.proposal);
+ expect(result.report.proposal,JSON.stringify(result.stages)).toBe(safe.proposal);
  expect(result.partialReason).toBeUndefined();
- expect(result.tokens).toBe(70500);expect(writer).toBe(2);expect(audits).toBe(1);
+ expect(result.tokens).toBe(40500);expect(writer).toBe(1);expect(audits).toBe(1);
 });
 it('sends the same string limits to OpenAI that the local validator enforces',async()=>{
  const source=await setup();const draft=report();draft.summary='x'.repeat(800);
@@ -135,7 +139,7 @@ it.each(['problem','correction'] as const)('rejects oversized %s without silentl
   code:'evidence_audit_invalid',auditReason:'invalid_schema',auditSchemaIssues:[{path:`issues.item.${field}`,code:'too_big'}],
  });
 });
-it.each([true,false])('audits a provenance-checked draft directly when another author pass cannot fit (approved=%s)',async approved=>{
+it.each([true,false])('does not start an audit without a reserve for correction and re-audit (would approve=%s)',async approved=>{
  const source=await setup();
  const refs=[
   ['server/billing/routes.ts',1664,1684],
@@ -157,7 +161,7 @@ it.each([true,false])('audits a provenance-checked draft directly when another a
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){
    audits++;
    const payload=JSON.parse(request.messages[1].content);
-   expect(payload.diagnosis).toEqual(diagnosisStatements(draft));
+    expect(payload.diagnosis).toEqual(auditReport(draft));
    expect(payload.evidence.coverageChecklist.length).toBeGreaterThan(0);
    expect(payload.evidence.citedCode).toHaveLength(5);
    expect(request.tools).toBeUndefined();
@@ -167,15 +171,11 @@ it.each([true,false])('audits a provenance-checked draft directly when another a
   return {...response(draft,67097),usage:{total_tokens:67097,prompt_tokens:22000}};
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(writer).toBe(1);expect(audits).toBe(1);expect(result.tokens).toBe(68597);
- if(approved){
-  expect(result.report.proposal).toBe(draft.proposal);
-  expect(result.partialReason).toBeUndefined();
- }else{
-  expect(result.partialReason).toBe('closure_budget');
-  expect(result.report.proposal).not.toBe(draft.proposal);
-  expect(result.report.summary).toContain('Revisión parcial');
- }
+ expect(writer).toBe(1);expect(audits).toBe(0);expect(result.tokens).toBe(67097);
+ expect(result.partialReason).toBe('correction_reserve');
+ expect(result.report.validationStatus).toBe('incomplete');
+ expect(result.report.proposal).not.toBe(draft.proposal);
+ expect(result.report.summary).toContain('Revisión parcial');
 });
 it('preserves all report text and array boundaries when numbering Unicode fragments',()=>{
  const draft=report();draft.summary='  Texto con tildes, comillas “exactas” y emoji 🧾.\n'.repeat(50);

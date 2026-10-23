@@ -1,0 +1,68 @@
+{
+  "sourceRevision": "6c8496369019d890396c622480587bf7d1fcc002",
+  "provenance": "Exact last draft of blocked run 1 in the first patched real evaluation. Fixed synthetic case; no operational records.",
+  "spent": 50372,
+  "promptTokens": 9748,
+  "report": {
+    "summary": "El mensaje “el cargo ya no tiene saldo suficiente para facturar” indica que una de las dos facturaciones simultáneas está consumiendo o reservando la capacidad fiscal de la reserva, bloqueando la otra. El sistema usa un cerrojo de reserva serializado para evitar que dos facturas consuman el mismo cargo simultáneamente, lo que protege contra duplicaciones. El rechazo con código 409 no implica que exista una factura emitida y cobrada definitiva en otro proceso, sino que la capacidad fiscal está ocupada por una factura en estado emitida, parcial o autorización pendiente.",
+    "certainty": "sustentado_en_codigo",
+    "cause": "El código implementa un advisory lock transaccional por reserva (server/billing/invoiceAdvisoryLock.ts líneas 9-22 y server/routes/manual-charge-actions.ts líneas 101-112) para serializar operaciones de facturación y evitar que dos procesos operen sobre los mismos cargos al mismo tiempo. En el endpoint POST /api/billing/invoices (server/billing/routes.ts líneas 1615-1673) se consulta la existencia de facturas con estado emitida, parcial o autorización pendiente que consumen o reservan la capacidad fiscal para validar y rechazar la nueva emisión si el saldo es insuficiente. El test en server/tests/folio-invoice-concurrency.test.ts (líneas 219-283) simula dos facturaciones simultáneas y verifica que solo una factura es emitida y la otra recibe un error 409 con mensaje de saldo insuficiente, mostrando la serialización efectiva del proceso. En el cliente (client/src/components/PrefacturaDialog.tsx líneas 1670-1698 y client/src/lib/prefactura-submission.ts líneas 1-74) se captura el rechazo y se intenta descartar la operación con verificación remota para evitar repetirla, mostrando el mensaje de error al operador.",
+    "proposal": "El operador debe interpretar que el mensaje indica bloqueo de capacidad fiscal para el cargo por uso o reserva en otra factura en proceso, sin que esto implique necesariamente una factura emitida, cobro realizado o finalizado. Se aconseja: 1) Verificar que no existan facturas definitivas o en autorización para la reserva y cargo; 2) Revisar la misma operación en curso, sin crear nuevas facturas mientras exista capacidad consumida o reservada; 3) Consultar los comprobantes y pagos aplicados para confirmar estados concretos; 4) Entender que el bloqueo es una medida de control para evitar operaciones concurrentes y duplicadas pero no indica cierre ni cobro efectivo. No se debe asumir ni crear facturas duplicadas por reintentos sin verificar estado de la operación previa.",
+    "proposedTests": [
+      "Simular facturación concurrente para la misma reserva y confirmar una emisión exitosa y un rechazo 409 por capacidad insuficiente.",
+      "Verificar en base de datos estados de facturas emitida, parcial o autorización pendiente para la reserva y cargo afectados.",
+      "En cliente, validar que el manejo del error 409 muestre mensaje y se gestione correctamente la posible repetición o descarte de la operación de facturación."
+    ],
+    "questions": [],
+    "dataRepair": "",
+    "limitations": [
+      "El análisis no cubre la revisión operacional de pagos aplicados ni su correspondiente conciliación con facturación.",
+      "El entorno de pruebas es una simulación con mocks que no ejecuta procesos reales de caja o cobro para confirmar la ausencia de duplicados ni cobros.",
+      "No se considera el posible efecto de grupos, SPA u otros circuitos en la capacidad fiscal o el bloqueo para esta reserva."
+    ],
+    "evidence": [
+      {
+        "path": "server/billing/routes.ts",
+        "start": 1615,
+        "end": 1673,
+        "explanation": "Consulta de facturas emitidas, parciales o con autorización pendiente que consumen o reservan capacidad fiscal antes de emitir nueva factura."
+      },
+      {
+        "path": "server/billing/routes.ts",
+        "start": 1051,
+        "end": 1071,
+        "explanation": "Validaciones básicas y control previo para emisión fiscal, con chequeos en detalle para facturar."
+      },
+      {
+        "path": "server/tests/folio-invoice-concurrency.test.ts",
+        "start": 219,
+        "end": 283,
+        "explanation": "Prueba simulada que verifica la serialización en la emisión para evitar duplicados, con un caso que da 201 y otro 409."
+      },
+      {
+        "path": "server/billing/invoiceAdvisoryLock.ts",
+        "start": 9,
+        "end": 22,
+        "explanation": "Lock transaccional con pg_advisory_lock para serializar facturación por reserva y evitar simultaneidad de emisiones sobre el mismo cargo."
+      },
+      {
+        "path": "client/src/components/PrefacturaDialog.tsx",
+        "start": 1670,
+        "end": 1698,
+        "explanation": "Captura y manejo del error de facturación en cliente con intento de descarte remotos y muestra de mensajes al operador."
+      },
+      {
+        "path": "client/src/lib/prefactura-submission.ts",
+        "start": 1,
+        "end": 74,
+        "explanation": "Gestión local de intentos y reintentos de prefactura, con almacenamiento, emisión y descartes basados en errores y estados."
+      },
+      {
+        "path": "server/routes/manual-charge-actions.ts",
+        "start": 101,
+        "end": 112,
+        "explanation": "Lock advisory específico sobre reserva para evitar condiciones de carrera en facturación y consumo duplicado de cargos fiscales."
+      }
+    ]
+  }
+}

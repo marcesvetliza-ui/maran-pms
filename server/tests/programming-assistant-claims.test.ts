@@ -1,6 +1,6 @@
 // These protocol tests isolate the earlier stages. Semantic review has its own
 // tests with explicit reject/approve responses and independent request checks.
-vi.mock('../../services/programming-assistant/semantic-audit',()=>({auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
+vi.mock('../../services/programming-assistant/semantic-audit',async(importOriginal)=>({...await importOriginal<typeof import("../../services/programming-assistant/semantic-audit")>(),auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
 import {it,expect,vi} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
 import {validateReportClaims} from '../../services/programming-assistant/claim-validation';
@@ -65,7 +65,8 @@ it('lets correction cite the right route and the actual tested pure function bef
   return {choices:[{message:{role:'assistant',content:JSON.stringify(current===0?wrong:corrected)}}]};
  }}}};
  const result=await diagnose({version:s.version} as SupportTicket,s,{apiKey:'unused',model:'mock'},client as any);
- expect(requests).toBe(3);expect(result.report.summary).toBe(corrected.summary);
+ expect(requests).toBe(2);expect(result.report.summary).toBe(corrected.summary);
+ expect(result.semanticAudits).toBe(1);
 });
 
 it('does not treat descriptive nouns as code symbols or require assertions for proposed work',async()=>{

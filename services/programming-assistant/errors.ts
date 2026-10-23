@@ -108,7 +108,7 @@ export function investigationMetrics(error: unknown) {
 /** Fixed reason labels only: never log the reviewer text or source payload. */
 export function auditFailureReason(error: unknown) {
   const reason = (error as {auditReason?:unknown} | null)?.auditReason;
-  return typeof reason === "string" && ["output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch", "invalid_reference"].includes(reason) ? reason : undefined;
+  return typeof reason === "string" && ["semantic_rejected", "output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch", "invalid_reference"].includes(reason) ? reason : undefined;
 }
 
 export function auditSchemaFailureDetails(error: unknown) {
@@ -117,4 +117,15 @@ export function auditSchemaFailureDetails(error: unknown) {
   const allowedPaths=/^(approved|issues)(\.item)?(\.(field|quote|statementId|problem|correction))?$/;
   const allowedCodes=["too_small","too_big","invalid_type","invalid_value","invalid_enum_value","unrecognized_keys"];
   return issues.slice(0,4).filter(issue=>issue && typeof issue.path==='string' && allowedPaths.test(issue.path) && allowedCodes.includes(issue.code)).map(({path,code})=>({path,code}));
+}
+
+/** No quotes, diagnosis text, correction prose, case contents or source text. */
+export function semanticFailureDetails(error:unknown){
+ const entries=(error as any)?.semanticRejections;
+ if(!Array.isArray(entries))return undefined;
+ const fields=["summary","cause","proposal","certainty","limitations","proposedTests","questions","dataRepair","evidence"];
+ return entries.slice(0,2).filter(e=>[1,2].includes(e?.audit)).map(e=>({audit:e.audit,
+  statements:Array.isArray(e.statements)?e.statements.slice(0,4).filter((s:unknown)=>typeof s==='string'&&/^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/.test(s)):[],
+  fields:Array.isArray(e.fields)?[...new Set(e.fields.filter((f:unknown)=>fields.includes(String(f))))]:[],
+ }));
 }

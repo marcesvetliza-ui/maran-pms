@@ -44,8 +44,9 @@ export function compactContext(messages: OpenAI.Chat.Completions.ChatCompletionM
 }
 
 export function reserveClosure(tokens: number, contextCharacters: number, measuredPromptTokens: number) {
-  // Reserve draft, coverage review and a separate semantic audit.
-  // Allow space for tools/schema and the draft added to that second request.
-  const prompt = Math.max(Math.ceil(contextCharacters / 3) + 4000, measuredPromptTokens);
-  return tokens + 2 * (prompt + 4200) + 4200 + 12000 >= 100000;
+  // Stop exploration early enough for a draft, audit, correction and re-audit.
+  // Closure uses bounded evidence instead of replaying this research transcript.
+  // The concrete cycle is priced again once a provenance-checked draft exists.
+  const prompt = Math.min(14000, Math.max(Math.ceil(contextCharacters / 2) + 512, measuredPromptTokens));
+  return (tokens>=25000 && measuredPromptTokens>=20000) || tokens + 2 * (prompt + 4200) + 2 * 12000 >= 100000;
 }

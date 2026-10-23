@@ -1,4 +1,5 @@
-import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails } from "./errors";
+import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails, semanticFailureDetails } from "./errors";
+import {safeStageEvents} from "./lifecycle";
 import {dailyInvestigationLimit} from "./budget";
 import express from "express";
 import pg from "pg";
@@ -209,6 +210,9 @@ export async function createService(
             error: `Límite del piloto: ${dailyLimit} investigaciones en las últimas 24 horas. Los reintentos también cuentan; la disponibilidad se recupera al salir los intentos anteriores de esa ventana.`,
           });
         }
+        if(ticket.status==='needs_info' && ticket.clarification && (ticket.messages||[]).filter(m=>m.author==='user').length <= (ticket.clarification.requestedAfterMessageCount||0)){
+          await client.query("ROLLBACK");return res.status(409).json({error:"Agregá la información solicitada antes de continuar la investigación."});
+        }
         ticket.version = config.version;
         ticket.report = null;
         ticket.status = "queued";
@@ -302,15 +306,24 @@ export async function createService(
             { apiKey: config.apiKey!, model: config.model },
           );
           console.info("Investigación del asistente completada", {
-            caseId:ticket.id, model:config.model,
+            caseId:ticket.id, model:config.model, revision:config.version, resultKind:result.clarification?"clarification":"diagnosis",
             tokens:result.tokens, calls:result.calls, semanticAudits:result.semanticAudits || 0,
             readFileCount:result.readFiles.length,
             certainty:result.report.certainty,
             partialReason:result.partialReason,
+            stages:safeStageEvents(result.stages),
           });
-          ticket.report = result.report;
-          ticket.reportId = randomUUID();
-          ticket.status = diagnosisState(result.report);
+          if(result.clarification){
+            ticket.clarification={...result.clarification,requestedAfterMessageCount:(ticket.messages||[]).filter(m=>m.author==="user").length};
+            ticket.report=null;
+            delete ticket.reportId;
+            ticket.status="needs_info";
+          } else {
+            delete ticket.clarification;
+            ticket.report = result.report;
+            ticket.reportId = randomUUID();
+            ticket.status = diagnosisState(result.report);
+          }
           ticket.lastError = null;
         } catch (error) {
           const failure = diagnosisFailure(error);
@@ -318,9 +331,12 @@ export async function createService(
             caseId: ticket.id,
             code: failure.code,
             model: config.model,
+            revision:config.version,
+            semanticReview:semanticFailureDetails(error),
             investigation: investigationMetrics(error),
             auditReason: auditFailureReason(error),
             auditSchemaIssues: auditSchemaFailureDetails(error),
+            stages:safeStageEvents((error as {stages?:unknown})?.stages),
           });
           ticket.status = "failed";
           ticket.lastError = failure.message;
@@ -333,6 +349,7 @@ export async function createService(
         if (
           saved.rowCount &&
           ticket.report &&
+          ticket.report.validationStatus !== "incomplete" &&
           ticket.status !== "failed" &&
           config.notification
         )

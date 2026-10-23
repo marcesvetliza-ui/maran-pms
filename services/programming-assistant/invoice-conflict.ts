@@ -6,7 +6,7 @@ export async function orientInvoiceConflict(source:CodeSource) {
  const reads:Awaited<ReturnType<CodeSource['read']>>[]=[];
  const anchors=[
   {path:'server/billing/routes.ts',term:'app.post("/api/billing/invoices"',before:0,after:20},
-  {path:'server/billing/routes.ts',term:'El cargo seleccionado ya no tiene saldo suficiente',before:17,after:10},
+  {path:'server/billing/routes.ts',term:'El cargo seleccionado ya no tiene saldo suficiente',before:65,after:10},
   {path:'client/src/components/PrefacturaDialog.tsx',term:'const completed = await submission.current!.run',before:5,after:20},
   {path:'client/src/components/PrefacturaDialog.tsx',term:'setSubmitError(err.message',before:20,after:5},
  ];
@@ -26,13 +26,15 @@ export async function orientInvoiceConflict(source:CodeSource) {
   reads.push(await source.read(path,1,80));
   const matches=await source.search('Promise.all',path);
   for(const match of matches.matches.slice(0,2))reads.push(await source.read(path,Math.max(1,match.line-5),match.line+25));
+  const pending=await source.search('reserves source capacity while an authorization-pending',path);
+  for(const match of pending.matches.slice(0,1))reads.push(await source.read(path,match.line,match.line+31));
  }
  return reads;
 }
 export const invoiceConflictChecklist=[
- 'Explicar qué valida el error de saldo antes de emitir; citar el bloqueo y seguir sus llamadas si se afirma seguridad concurrente.',
- 'Separar factura de cobro: leer el orden de emisión y pagos en el cliente/helper. Un 409 no demuestra cuántos cobros hay en el caso real; sin registros operativos, decirlo explícitamente y proponer consulta de comprobantes y Caja sin repetir operaciones.',
- 'Revisar el catch de Prefactura y explicar qué ve el operador y qué puede verificar después del rechazo.',
- 'Buscar y leer pruebas existentes antes de recomendar crearlas. Si el test leído ya contiene Promise.all, estados 201/409 y una emisión, describir esas aserciones como leídas, sin decir que se ejecutaron ni que prueban Caja real. Revisar mocks y distinguir HTTP simulado de PostgreSQL real.',
- 'No extender la conclusión a Grupos, SPA u otros circuitos no necesarios. No presentar paymentId como requisito si el caso no lo informó.',
+ 'Capacidad por importe y estados fiscales: contrastar decisionBrief; citar el lock si se afirma serialización.',
+ 'Separar factura de cobro: contrastar orden emisión/pagos; sin registros operativos, consultar comprobantes y Caja sin repetir operaciones.',
+ 'Catch de Prefactura: explicar mensaje, descarte condicionado e identidad según las ramas leídas.',
+ 'Tests: identificar mocks y aserciones ya existentes, leídos pero no ejecutados; proponer sólo comprobaciones adicionales útiles.',
+ 'Alcance: reserva e interfaz identificadas; responder la consulta sin extender a otros circuitos ni pedir datos técnicos investigables.',
 ];
