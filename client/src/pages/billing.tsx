@@ -307,7 +307,7 @@ export default function BillingPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="w-full min-w-0 p-4 sm:p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -444,7 +444,7 @@ export default function BillingPage() {
                 ) : (invoices as any[]).length === 0 ? (
                   <div className="p-8 text-center text-muted-foreground">No hay comprobantes en el período seleccionado</div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="relative isolate overflow-x-auto" data-testid="billing-invoices-scroll">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
@@ -455,7 +455,7 @@ export default function BillingPage() {
                           <th className="px-3 py-2 text-right">Total</th>
                           <th className="px-3 py-2 text-left">CAE</th>
                           <th className="px-3 py-2 text-left">Estado</th>
-                          <th className="px-3 py-2"></th>
+                          <th scope="col" className="sticky right-0 z-20 min-w-[240px] border-l bg-background px-3 py-2 text-right">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -527,17 +527,17 @@ export default function BillingPage() {
                                 )}
                                 {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
                               </td>
-                              <td className="px-3 py-2">
-                                <div className="flex gap-1 justify-end">
+                              <td className="sticky right-0 z-10 min-w-[240px] border-l bg-background px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
+                                <div className="flex flex-wrap gap-1 justify-end">
                                   {f.center_settlement_status === "pending" && (
                                     <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
                                   )}
-                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
-                                    <Download className="w-3.5 h-3.5" />
+                                  <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" aria-label="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
+                                    <Download className="w-3.5 h-3.5" /> PDF
                                   </Button>
                                   {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
-                                      <Pencil className="w-3.5 h-3.5" />
+                                    <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => setShowEdit(f.id)} title="Editar comprobante" aria-label="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
+                                      <Pencil className="w-3.5 h-3.5" /> Editar
                                     </Button>
                                   )}
                                   {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && (
@@ -549,14 +549,15 @@ export default function BillingPage() {
                                   )}
                                   {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button
-                                      variant="ghost"
+                                      variant="outline"
                                       size="sm"
-                                      className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700"
+                                      className="h-8 px-2 text-orange-600 hover:text-orange-700"
                                       onClick={() => setShowNC(f.id)}
                                       title={f.estado === "parcial" ? "Emitir otra Nota de Crédito sobre el saldo pendiente" : "Emitir Nota de Crédito"}
+                                      aria-label="Emitir Nota de Crédito"
                                       data-testid={`btn-nc-${f.id}`}
                                     >
-                                      <XCircle className="w-3.5 h-3.5" />
+                                      <XCircle className="w-3.5 h-3.5" /> NC
                                     </Button>
                                   )}
                                 </div>
