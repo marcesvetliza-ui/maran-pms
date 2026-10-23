@@ -29,6 +29,16 @@ describe("Reservation detail — group personal extras payment", () => {
     queryClient.clear();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url === `/api/reservations/${GROUP_RESERVATION.id}`) {
+        return new Response(JSON.stringify(GROUP_RESERVATION), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url === "/api/reservation-edit-permission") {
+        return new Response(JSON.stringify({ canEdit: false }), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
       if (url.endsWith("/charges?includeAnulados=true")) {
         return new Response(JSON.stringify([
           { id: "charge-extra-1", description: "Minibar", category: "minibar", amount: "75", status: "pending" },
@@ -60,6 +70,7 @@ describe("Reservation detail — group personal extras payment", () => {
     );
     await user.click(await screen.findByTestId("tab-folio"));
     expect(await screen.findByTestId("group-personal-extras-warning")).toHaveTextContent("no se aceptan pagos de alojamiento");
+    expect(fetch).toHaveBeenCalledWith(`/api/reservations/${GROUP_RESERVATION.id}`, { credentials: "include" });
     await user.click(screen.getByTestId("button-add-payment"));
     expect(screen.getByTestId("input-payment-amount-0")).toHaveValue(75);
 
