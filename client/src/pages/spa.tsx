@@ -999,10 +999,6 @@ export default function SpaPage() {
         guestPhone: "", guestEmail: "", appointmentDate: dateStr,
         startTime: "", reservationId: "", notes: "",
       });
-      setTimeout(() => printComandaTermica(createdApt), 300);
-      if (createdApt.settlementType === "voucher") {
-        setTimeout(() => window.open(`/api/spa/accounts/${createdApt.accountId}/receipt-pdf`, "_blank"), 500);
-      }
     },
     onError: (error: Error) => {
       toast({ title: parseApiError(error), variant: "destructive" });
