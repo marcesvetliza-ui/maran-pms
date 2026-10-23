@@ -1535,6 +1535,7 @@ export function registerGroupsRoutes(app: Express) {
           return exposeInvoiceReconciliation({
             ...invoice,
             groupReconciliationLinked: Boolean(invoice.groupPaymentId),
+            directGroupReconciliationLinked: invoice.groupId === req.params.groupId && linkedRows.some((row) => row.invoice.id === invoice.id),
             groupComposition: Object.keys(sourceAmounts).length > 0
               ? buildGroupInvoiceComposition(
                   persistedSources.length > 0 ? persistedSources : compositionSources,

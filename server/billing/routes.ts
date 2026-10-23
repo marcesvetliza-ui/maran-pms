@@ -833,6 +833,10 @@ export function registerBillingRoutes(app: Express) {
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
                EXISTS (
+                 SELECT 1 FROM group_invoices gi
+                 WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
+               ) AS direct_group_reconciliation_linked,
+               EXISTS (
                  SELECT 1
                  FROM group_payments gp
                  WHERE gp.invoice_id = si.id
@@ -1031,6 +1035,10 @@ export function registerBillingRoutes(app: Express) {
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
+               EXISTS (
+                 SELECT 1 FROM group_invoices gi
+                 WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
+               ) AS direct_group_reconciliation_linked,
                EXISTS (
                  SELECT 1
                  FROM group_payments gp

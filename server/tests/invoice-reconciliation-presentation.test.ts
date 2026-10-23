@@ -51,3 +51,18 @@ describe("estado visible de conciliación de facturas", () => {
     });
   });
 });
+describe("factura directa vinculada al resumen del grupo", () => {
+  const direct = {tipo_comprobante:"FA",estado:"emitida",group_id:"g-1",reconciliation_status:"pendiente",group_payment_intent:null,direct_group_reconciliation_linked:true};
+  it("resuelve el pendiente histórico sólo con evidencia del vínculo directo", () => {
+    expect(exposeInvoiceReconciliation(direct).reconciliation_status).toBe("conciliada");
+    expect(exposeInvoiceReconciliation({...direct,direct_group_reconciliation_linked:false}).reconciliation_status).toBe("pendiente");
+  });
+  it.each(["NCA","NDA"])("no convierte %s en conciliada por estar vinculada", tipo_comprobante => {
+    expect(exposeInvoiceReconciliation({...direct,tipo_comprobante}).reconciliation_status).toBe("pendiente");
+  });
+  it("no oculta autorización ni cobro pendientes ni acepta un flag textual", () => {
+    for (const changes of [{estado:"autorizacion_pendiente"},{group_id:null},{group_payment_intent:{endpoint:"/payment"}},{group_payment_id:"p-1"},{direct_group_reconciliation_linked:"true"}]) {
+      expect(exposeInvoiceReconciliation({...direct,...changes}).reconciliation_status).toBe("pendiente");
+    }
+  });
+});

@@ -83,3 +83,18 @@ describe("cola de reintentos ARCA", () => {
     expect(pendingRequestCount).toBeGreaterThanOrEqual(2);
   });
 });
+it("no presenta una factura directa pendiente como una nota de crédito", async () => {
+  queryClient.clear();
+  vi.stubGlobal("fetch",vi.fn(async(input:RequestInfo|URL)=>{
+    const url=String(input);
+    if(url.startsWith('/api/billing/invoices?'))return jsonResponse([
+      {id:701,tipo_comprobante:'FA',punto_venta:5,numero:37,estado:'emitida',group_id:'synthetic',monto_total:'121.00',reconciliation_status:'pendiente'},
+      {id:702,tipo_comprobante:'NCA',punto_venta:5,numero:1,estado:'emitida',group_id:'synthetic',monto_total:'121.00',reconciliation_status:'pendiente'},
+    ]);
+    if(url==='/api/billing/config')return jsonResponse({arcaAmbiente:'homologacion'});
+    return jsonResponse([]);
+  }));
+  render(<QueryClientProvider client={queryClient}><BillingPage/></QueryClientProvider>);
+  expect(await screen.findByText('Vinculación con el grupo pendiente')).toBeInTheDocument();
+  expect(screen.getAllByText('No emitir otra NC')).toHaveLength(1);
+});
