@@ -71,7 +71,7 @@ export async function orientInvestigation(
     ? [await source.traceEndpoint("/api/inventory/recipe-stock-preview", { includeTests: !errorFlow })]
     : roomMove ? [await source.traceEndpoint("/api/reservations/:id", { method: "PATCH", includeTests: false })] : [];
   if (roomMove) {
-    for (const symbol of ["checkOverbooking", "updateReservation"]) {
+    for (const symbol of ["checkOverbooking", "updateReservation", "updateReservationPricingLocked"]) {
       const code = await source.inspectSymbol(symbol, {maxDefinitions:1,maxTests:0,lines:140});
       workflowReads.push(...code.definitions);
     }
