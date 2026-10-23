@@ -419,8 +419,29 @@ export async function assertGroupInvoiceAllocation(
     throw Object.assign(new Error("La factura grupal debe indicar el importe de cada concepto facturado."), { status: 400 });
   }
   const requestedTotal = requested.reduce((sum, [, amount]) => sum + amount, 0);
-  if (requestedTotal !== cents(invoiceTotal)) {
-    throw Object.assign(new Error("Los importes por concepto no coinciden exactamente con el total del comprobante."), { status: 400 });
+  const invoiceTotalCents = cents(invoiceTotal);
+  if (requestedTotal !== invoiceTotalCents) {
+    // The usual trigger: the invoice's concepts (e.g. "Detallados") still
+    // include lines — Cochera, Cocktail, otros cargos — that the selected
+    // receptor (empresa/agencia) is not configured to cover (p. ej. "Solo
+    // alojamiento"), so those concepts have no fiscal source backing them.
+    // The other common cause is a concept amount edited by hand in the
+    // composición grid without matching what's actually available.
+    const diffCents = invoiceTotalCents - requestedTotal;
+    const comprobanteLabel = money(invoiceTotalCents).toFixed(2);
+    const disponibleLabel = money(requestedTotal).toFixed(2);
+    const diffLabel = money(Math.abs(diffCents)).toFixed(2);
+    const diffPhrase = diffCents > 0
+      ? `faltan $${diffLabel} sin respaldo fiscal disponible`
+      : `sobran $${diffLabel} asignados de más`;
+    throw Object.assign(
+      new Error(
+        `El comprobante suma $${comprobanteLabel} pero los conceptos seleccionados solo cubren $${disponibleLabel} (${diffPhrase}). ` +
+        `Revisá si la empresa/agencia está configurada para cubrir solo una parte del grupo (p. ej. "Solo alojamiento") ` +
+        `o si algún importe de la Composición del comprobante fue editado a mano.`
+      ),
+      { status: 400 },
+    );
   }
 
   const snapshot = await getGroupInvoiceSnapshot(groupId);

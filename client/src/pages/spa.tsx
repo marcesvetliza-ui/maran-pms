@@ -936,53 +936,62 @@ export default function SpaPage() {
       setGeneratingFromSale(null);
 
       if (!createdApt.settlementType && createdApt.accountId) {
-        const linkedReservation = variables.reservationId
-          ? allReservations.find((reservation) => reservation.id === variables.reservationId)
-          : null;
-        const linkedCompany = linkedReservation?.companyId
-          ? companies.find((company) => company.id === linkedReservation.companyId)
-          : null;
-        const spaGuest = variables.guestId
-          ? spaClients.find((client) => client.id === variables.guestId)
-          : null;
-        const reservationGuest = linkedReservation?.guest;
-        const fullName = `${variables.guestLastName || ""} ${variables.guestName}`.trim();
-        const recipientName = linkedCompany?.razonSocial
-          || linkedCompany?.nombreFantasia
-          || spaGuest?.razonSocial
-          || fullName;
+        if (import.meta.env.VITE_SPA_FUNDING_UI === "true") {
+          // Las vías financieras legacy SPA quedan bloqueadas para todas las
+          // cuentas (ver docs/spa-module-cutover-20261016.md): completar la
+          // factura se hace desde el folio del turno, que ya usa el motor
+          // nuevo (SpaFundingGate), nunca navegando a /operaciones/emitir-comprobante.
+          setSelectedAppointment(createdApt);
+          setIsFolioOpen(true);
+        } else {
+          const linkedReservation = variables.reservationId
+            ? allReservations.find((reservation) => reservation.id === variables.reservationId)
+            : null;
+          const linkedCompany = linkedReservation?.companyId
+            ? companies.find((company) => company.id === linkedReservation.companyId)
+            : null;
+          const spaGuest = variables.guestId
+            ? spaClients.find((client) => client.id === variables.guestId)
+            : null;
+          const reservationGuest = linkedReservation?.guest;
+          const fullName = `${variables.guestLastName || ""} ${variables.guestName}`.trim();
+          const recipientName = linkedCompany?.razonSocial
+            || linkedCompany?.nombreFantasia
+            || spaGuest?.razonSocial
+            || fullName;
 
-        const receiptContext: PendingSpaInvoice = {
-          accountId: createdApt.accountId,
-          initialValues: {
-            razonSocial: recipientName,
-            cuit: linkedCompany?.cuilCuit || spaGuest?.cuilCuit || reservationGuest?.cuilCuit || undefined,
-            dni: reservationGuest?.documentNumber || undefined,
-            condicionIva: linkedCompany?.condicionIva || reservationGuest?.vatCondition || "Consumidor Final",
-            domicilio: linkedCompany?.domicilio || linkedCompany?.direccion || reservationGuest?.direccion || "",
-            items: (createdApt.accountItems || []).map((item) => ({
-              descripcion: item.description,
-              precioUnitario: parseFloat(item.amount),
-            })),
-          },
-          billingEntityType: linkedCompany ? "company" : undefined,
-          billingEntityId: linkedCompany?.id,
-          recipientProfile: linkedCompany
-            ? { type: "company", id: linkedCompany.id }
-            : reservationGuest?.id
-              ? {
-                  type: "guest",
-                  id: reservationGuest.id,
-                  firstName: reservationGuest.firstName,
-                  lastName: reservationGuest.lastName,
-                }
-              : undefined,
-        };
-        try {
-          sessionStorage.setItem('spa-receipt-'+createdApt.accountId, JSON.stringify(receiptContext));
-          navigateToReceipt('/operaciones/emitir-comprobante?spaAccountId='+encodeURIComponent(createdApt.accountId));
-        } catch {
-          setPendingSpaInvoice(receiptContext);
+          const receiptContext: PendingSpaInvoice = {
+            accountId: createdApt.accountId,
+            initialValues: {
+              razonSocial: recipientName,
+              cuit: linkedCompany?.cuilCuit || spaGuest?.cuilCuit || reservationGuest?.cuilCuit || undefined,
+              dni: reservationGuest?.documentNumber || undefined,
+              condicionIva: linkedCompany?.condicionIva || reservationGuest?.vatCondition || "Consumidor Final",
+              domicilio: linkedCompany?.domicilio || linkedCompany?.direccion || reservationGuest?.direccion || "",
+              items: (createdApt.accountItems || []).map((item) => ({
+                descripcion: item.description,
+                precioUnitario: parseFloat(item.amount),
+              })),
+            },
+            billingEntityType: linkedCompany ? "company" : undefined,
+            billingEntityId: linkedCompany?.id,
+            recipientProfile: linkedCompany
+              ? { type: "company", id: linkedCompany.id }
+              : reservationGuest?.id
+                ? {
+                    type: "guest",
+                    id: reservationGuest.id,
+                    firstName: reservationGuest.firstName,
+                    lastName: reservationGuest.lastName,
+                  }
+                : undefined,
+          };
+          try {
+            sessionStorage.setItem('spa-receipt-'+createdApt.accountId, JSON.stringify(receiptContext));
+            navigateToReceipt('/operaciones/emitir-comprobante?spaAccountId='+encodeURIComponent(createdApt.accountId));
+          } catch {
+            setPendingSpaInvoice(receiptContext);
+          }
         }
       }
 

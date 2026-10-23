@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -18,6 +18,7 @@ import {
   Printer,
   Ban,
   Eye,
+  Pencil,
   MoreHorizontal,
   Link as LinkIcon,
 } from "lucide-react";
@@ -460,6 +461,149 @@ function MarkUsedDialog({
   );
 }
 
+// ── Edit Dialog ────────────────────────────────────────────────────────────────
+
+const EDITABLE_WHILE_ACTIVE_STATUSES: Status[] = ["activo", "activo_facturado"];
+
+function EditVoucherDialog({
+  voucher,
+  onClose,
+}: {
+  voucher: GiftVoucher | null;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const [description, setDescription] = useState("");
+  const [beneficiaryName, setBeneficiaryName] = useState("");
+  const [expiresAt, setExpiresAt] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    if (voucher) {
+      setDescription(voucher.description ?? "");
+      setBeneficiaryName(voucher.beneficiaryName ?? "");
+      setExpiresAt(voucher.expiresAt ?? "");
+      setNotes(voucher.notes ?? "");
+    }
+  }, [voucher]);
+
+  // Mismo criterio que storage.updateGiftVoucher: descripción, beneficiario y
+  // vencimiento sólo se editan mientras el voucher sigue activo — una vez
+  // usado/vencido/cancelado reflejan un hecho ya consumado.
+  const locked = voucher ? !EDITABLE_WHILE_ACTIVE_STATUSES.includes(voucher.status as Status) : false;
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const payload: Record<string, any> = { notes: notes.trim() || null };
+      if (!locked) {
+        payload.description = description.trim();
+        payload.beneficiaryName = beneficiaryName.trim() || null;
+        payload.expiresAt = expiresAt || null;
+      }
+      const res = await apiRequest("PATCH", `/api/gift-vouchers/${voucher!.id}`, payload);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Error al editar el voucher");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/gift-vouchers"] });
+      toast({ title: "Voucher actualizado" });
+      onClose();
+    },
+    onError: (err: any) => toast({ title: err?.message || "Error al editar el voucher", variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={!!voucher} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="h-5 w-5 text-primary" />
+            Editar Voucher
+          </DialogTitle>
+        </DialogHeader>
+
+        {voucher && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-mono font-semibold">{voucher.voucherCode}</span>
+              <StatusBadge status={voucher.status as Status} />
+            </div>
+
+            {locked && (
+              <p className="text-xs text-muted-foreground bg-muted rounded-md px-3 py-2">
+                El voucher ya está "{STATUS_CONFIG[voucher.status as Status]?.label ?? voucher.status}" — sólo se
+                pueden editar las notas internas. La descripción, el beneficiario y el vencimiento quedan fijos
+                porque reflejan un hecho ya consumado del voucher.
+              </p>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">Descripción del servicio/beneficio</Label>
+              <Input
+                id="edit-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={locked}
+                data-testid="input-edit-description"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-beneficiary">Beneficiario</Label>
+              <Input
+                id="edit-beneficiary"
+                value={beneficiaryName}
+                onChange={(e) => setBeneficiaryName(e.target.value)}
+                placeholder="A nombre de quién es el regalo"
+                disabled={locked}
+                data-testid="input-edit-beneficiary"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-expires">Fecha de vencimiento</Label>
+              <Input
+                id="edit-expires"
+                type="date"
+                value={expiresAt}
+                onChange={(e) => setExpiresAt(e.target.value)}
+                disabled={locked}
+                data-testid="input-edit-expires"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-notes">Notas internas</Label>
+              <Textarea
+                id="edit-notes"
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Observaciones..."
+                data-testid="input-edit-notes"
+              />
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} data-testid="button-cancel-edit">Cancelar</Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending || (!locked && !description.trim())}
+            data-testid="button-save-edit"
+          >
+            {mutation.isPending ? "Guardando..." : "Guardar cambios"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Print Voucher ──────────────────────────────────────────────────────────────
 
 function printVoucher(v: GiftVoucher) {
@@ -802,6 +946,7 @@ export default function GiftVouchersPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [selectedForUse, setSelectedForUse] = useState<GiftVoucher | null>(null);
   const [selectedForDetail, setSelectedForDetail] = useState<GiftVoucher | null>(null);
+  const [selectedForEdit, setSelectedForEdit] = useState<GiftVoucher | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GiftVoucher | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
@@ -1005,6 +1150,9 @@ export default function GiftVouchersPage() {
                             <DropdownMenuItem onClick={() => setSelectedForDetail(v)}>
                               <Eye className="h-4 w-4 mr-2" /> Ver detalle
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setSelectedForEdit(v)} data-testid={`button-edit-${v.id}`}>
+                              <Pencil className="h-4 w-4 mr-2" /> Editar voucher
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => printVoucher(v)}>
                               <Printer className="h-4 w-4 mr-2" /> Imprimir voucher
                             </DropdownMenuItem>
@@ -1040,6 +1188,7 @@ export default function GiftVouchersPage() {
       <CreateVoucherDialog open={showCreate} onClose={() => setShowCreate(false)} />
       <MarkUsedDialog voucher={selectedForUse} onClose={() => setSelectedForUse(null)} />
       <DetailDialog voucher={selectedForDetail} onClose={() => setSelectedForDetail(null)} />
+      <EditVoucherDialog voucher={selectedForEdit} onClose={() => setSelectedForEdit(null)} />
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(v) => { if (!v) { setDeleteTarget(null); setCancelReason(""); } }}>
         <AlertDialogContent>
