@@ -1617,11 +1617,11 @@ export async function runMigrations() {
   // Incremental schema additions — each wrapped in an 8s timeout so a hung
   // DDL lock in Railway/PgBouncer never prevents the app from starting.
   const T = 8_000;
-  await withTimeout("reservations.nightly_pricing", T, () => db.execute(sql`
-    ALTER TABLE reservations ADD COLUMN IF NOT EXISTS pricing_scheme text NOT NULL DEFAULT 'legacy';
-    ALTER TABLE reservations ADD COLUMN IF NOT EXISTS pricing_revision integer NOT NULL DEFAULT 0;
-    ALTER TABLE reservations ADD COLUMN IF NOT EXISTS nightly_pricing jsonb;
-  `));
+  await withTimeout("reservations.nightly_pricing", T, () => db.execute(sql.raw([
+    addColumnWithoutRerunNotice("reservations", "pricing_scheme", "text NOT NULL DEFAULT 'legacy'"),
+    addColumnWithoutRerunNotice("reservations", "pricing_revision", "integer NOT NULL DEFAULT 0"),
+    addColumnWithoutRerunNotice("reservations", "nightly_pricing", "jsonb"),
+  ].join(";\n"))));
   await withTimeout("payments.request_identity", T, () =>
     pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL)
   );
@@ -4970,8 +4970,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE purchase_invoices ADD COLUMN special_details jsonb`)));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN housekeeping_preparation jsonb`)));
-  await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS housekeeping_bed_preparation jsonb`);
-  await db.execute(sql`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS bed_config_revision integer NOT NULL DEFAULT 0`);
+  await db.execute(sql.raw(addColumnWithoutRerunNotice("reservations", "housekeeping_bed_preparation", "jsonb")));
+  await db.execute(sql.raw(addColumnWithoutRerunNotice("rooms", "bed_config_revision", "integer NOT NULL DEFAULT 0")));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE recipes ADD COLUMN is_active text NOT NULL DEFAULT 'true'`)));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN purchase_enabled boolean NOT NULL DEFAULT true`)));
   const financialSchema = await verifyFinancialSchema();
@@ -5012,7 +5012,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await ensureRevenueManagementSchema();
   const { ensureAccommodationPermissionsSchema } = await import("./accommodationPermissions");
   await ensureAccommodationPermissionsSchema();
-  await db.execute(sql`CREATE TABLE IF NOT EXISTS housekeeping_staff_availability (
+  await db.execute(sql.raw(createTableWithoutRerunNotice("housekeeping_staff_availability", `CREATE TABLE housekeeping_staff_availability (
  user_id varchar NOT NULL REFERENCES system_users(id),
  scheduled_date text NOT NULL,
  status text NOT NULL CHECK (status IN ('working','day_off','absent')),
@@ -5024,6 +5024,6 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
  updated_at timestamptz NOT NULL DEFAULT NOW(),
  PRIMARY KEY(user_id,scheduled_date)
 );
-`);
+`)));
   logger.info("Migraciones incrementales completadas.");
 }
