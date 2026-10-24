@@ -96,7 +96,7 @@ describe("Special dates communication workflow", () => {
       screen.getByRole("checkbox", { name: "Seleccionar María Pérez" }),
     );
     expect(
-      screen.getByRole("button", { name: "Preparar 1 emails" }),
+      screen.getByRole("button", { name: "Preparar 1 email" }),
     ).toBeEnabled();
     fireEvent.change(screen.getByLabelText("Mes"), { target: { value: "3" } });
     expect(
@@ -129,7 +129,7 @@ describe("Special dates communication workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Email" }));
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Confirmar envío de 1 correos",
+        name: "Confirmar envío de 1 correo",
       }),
     );
     await waitFor(() =>
@@ -180,7 +180,7 @@ describe("Special dates communication workflow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Email" }));
     expect(
       await screen.findByRole("button", {
-        name: "Confirmar envío de 1 correos",
+        name: "Confirmar envío de 1 correo",
       }),
     ).toBeDisabled();
   });

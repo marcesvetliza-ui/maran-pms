@@ -1,3 +1,4 @@
+import "./hospitality-special-dates.css";
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Cake, Mail, MessageCircle, History, Save, Copy } from "lucide-react";
@@ -149,7 +150,7 @@ export function HospitalitySpecialDates() {
       toast({
         title: data.alreadyConfirmed
           ? "El lote ya estaba confirmado"
-          : `${data.queued} correos en cola`,
+          : `${data.queued} ${data.queued === 1 ? "correo" : "correos"} en cola`,
         description: data.alreadyConfirmed
           ? "No se crearon nuevos envíos. Revisá el resultado en la lista."
           : data.skipped?.length
@@ -218,10 +219,12 @@ export function HospitalitySpecialDates() {
     setExclusion(null);
   };
   return (
-    <section className="space-y-4" aria-label="Fechas especiales">
-      <div className="rounded-xl border bg-card p-4 space-y-3">
-        <div className="flex gap-3 items-center">
-          <Cake className="h-6 w-6 text-primary" />
+    <section className="birthday-page space-y-5" aria-label="Fechas especiales">
+      <div className="birthday-panel birthday-header">
+        <div className="birthday-heading">
+          <span className="birthday-heading-icon">
+            <Cake className="h-6 w-6" />
+          </span>
           <div>
             <h2 className="font-semibold text-lg">Cumpleaños de huéspedes</h2>
             <p className="text-sm text-muted-foreground">
@@ -230,7 +233,13 @@ export function HospitalitySpecialDates() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-3 items-end">
+        <div className="birthday-overview" aria-label="Resumen del mes">
+          <span>{list.data?.guests.length || 0} cumpleaños</span>
+          <span>
+            {list.data?.guests.filter(contacted).length || 0} contactados
+          </span>
+        </div>
+        <div className="birthday-filters">
           <label className="text-sm">
             Mes
             <select
@@ -287,11 +296,11 @@ export function HospitalitySpecialDates() {
           </label>
         </div>
       </div>
-      <details className="rounded-xl border bg-card p-4">
+      <details className="birthday-panel birthday-editor">
         <summary className="cursor-pointer font-medium">
           Mensaje de cumpleaños · editar asunto, beneficio y condiciones
         </summary>
-        <div className="mt-4 space-y-3">
+        <div className="birthday-editor-fields mt-4 space-y-4">
           {settings.isError ? (
             <p role="alert">
               No se pudo cargar el mensaje.{" "}
@@ -378,7 +387,7 @@ export function HospitalitySpecialDates() {
           {list.data.emailReady.reason} Podés preparar mensajes y usar WhatsApp.
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="birthday-selection-toolbar">
         <Button
           variant="outline"
           onClick={() =>
@@ -402,9 +411,10 @@ export function HospitalitySpecialDates() {
           onClick={() => prepare.mutate(selected)}
         >
           <Mail className="h-4 w-4 mr-2" />
-          Preparar {selected.length} emails
+          Preparar {selected.length}{" "}
+          {selected.length === 1 ? "email" : "emails"}
         </Button>
-        <span className="text-xs text-muted-foreground">
+        <span className="birthday-selection-note">
           Hasta 250 por lote. Se revisan antes de confirmar.
         </span>
       </div>
@@ -418,8 +428,8 @@ export function HospitalitySpecialDates() {
           </Button>
         </div>
       ) : (
-        <div className="rounded-xl border overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="birthday-list">
+          <table className="birthday-table">
             <thead className="bg-muted/40">
               <tr>
                 {[
@@ -427,7 +437,7 @@ export function HospitalitySpecialDates() {
                   "Huésped",
                   "Cumpleaños",
                   "Contacto",
-                  "Estado del año",
+                  "Seguimiento",
                   "Acciones",
                 ].map((text, i) => (
                   <th key={i} className="p-3 text-left">
@@ -438,7 +448,7 @@ export function HospitalitySpecialDates() {
             </thead>
             <tbody>
               {!rows.length && (
-                <tr>
+                <tr className="birthday-empty-row">
                   <td
                     colSpan={6}
                     className="p-8 text-center text-muted-foreground"
@@ -448,8 +458,8 @@ export function HospitalitySpecialDates() {
                 </tr>
               )}
               {rows.map((g) => (
-                <tr key={g.id} className="border-t align-top">
-                  <td className="p-3">
+                <tr key={g.id} className="birthday-guest-row">
+                  <td className="birthday-selection">
                     <input
                       type="checkbox"
                       aria-label={`Seleccionar ${g.firstName} ${g.lastName}`}
@@ -464,58 +474,77 @@ export function HospitalitySpecialDates() {
                       }
                     />
                   </td>
-                  <td className="p-3 font-medium">
-                    {g.lastName} {g.firstName}
+                  <td className="birthday-name">
+                    <div className="birthday-guest-identity">
+                      <span className="birthday-avatar" aria-hidden="true">
+                        {g.firstName[0]}
+                        {g.lastName[0]}
+                      </span>
+                      <span>
+                        {g.lastName} {g.firstName}
+                      </span>
+                    </div>
                   </td>
-                  <td className="p-3 whitespace-nowrap">{date(g.birthday)}</td>
-                  <td className="p-3">
+                  <td className="birthday-date" data-label="Cumpleaños">
+                    <span>{date(g.birthday)}</span>
+                  </td>
+                  <td
+                    className="birthday-contact"
+                    data-label="Datos de contacto"
+                  >
                     <p>{g.phone || "Sin teléfono"}</p>
                     <p className={!g.validEmail ? "text-muted-foreground" : ""}>
                       {g.email || "Sin correo"}
                       {g.email && !g.validEmail ? " · revisar dirección" : ""}
                     </p>
                   </td>
-                  <td className="p-3">
+                  <td className="birthday-followup" data-label="Seguimiento">
                     {g.excluded ? (
                       <>
-                        <p className="font-semibold">No recibe promociones</p>
+                        <p className="birthday-state" data-state="excluded">
+                          No recibe promociones
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {g.exclusionReason}
                         </p>
                       </>
                     ) : !g.contacts.length ? (
-                      <p>
+                      <p className="birthday-state" data-state="pending">
                         {g.validEmail && !g.emailAvailable
                           ? "Correo ya registrado este año"
                           : "Pendiente"}
                       </p>
                     ) : (
                       g.contacts.map((c) => (
-                        <div key={c.id} className="mb-2">
-                          <p
-                            className={
-                              c.status === "unknown"
-                                ? "font-semibold text-amber-700"
-                                : ""
-                            }
-                          >
-                            {c.channel === "email" ? "Email" : "WhatsApp"} ·{" "}
-                            {statuses[c.status] || c.status}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {c.actorName} ·{" "}
-                            {formatHotelDateTime(c.finishedAt || c.createdAt)}
+                        <div key={c.id} className="birthday-contact-record">
+                          <div className="birthday-contact-status">
+                            <span className="birthday-channel">
+                              {c.channel === "email" ? "Email" : "WhatsApp"}
+                            </span>
+                            <span
+                              className="birthday-state"
+                              data-state={c.status}
+                            >
+                              {statuses[c.status] || c.status}
+                            </span>
+                          </div>
+                          <p className="birthday-contact-meta">
+                            <span>{c.actorName}</span>
+                            <time>
+                              {formatHotelDateTime(c.finishedAt || c.createdAt)}
+                            </time>
                           </p>
                           {c.error && <p className="text-xs">{c.error}</p>}
                         </div>
                       ))
                     )}
                   </td>
-                  <td className="p-3">
-                    <div className="flex flex-wrap gap-1">
+                  <td className="birthday-row-actions">
+                    <div className="birthday-actions">
                       <Button
                         size="sm"
                         variant="outline"
+                        aria-label="WhatsApp / copiar"
                         disabled={g.excluded || dirty || !settings.data}
                         onClick={() => {
                           setMessage("");
@@ -530,7 +559,7 @@ export function HospitalitySpecialDates() {
                         }}
                       >
                         <MessageCircle className="h-3 w-3 mr-1" />
-                        WhatsApp / copiar
+                        <span>WhatsApp</span>
                       </Button>
                       <Button
                         size="sm"
@@ -590,26 +619,33 @@ export function HospitalitySpecialDates() {
           if (!value && !confirm.isPending) setPreview(null);
         }}
       >
-        <DialogContent className="max-w-3xl max-h-[90dvh] flex flex-col">
+        <DialogContent className="birthday-dialog birthday-preview-dialog max-w-3xl max-h-[90dvh] flex flex-col">
           <DialogHeader>
             <DialogTitle>Revisar envío de cumpleaños</DialogTitle>
             <DialogDescription>
-              {preview?.messages.length} correos individuales. Cada destinatario
-              sólo recibe su mensaje. No se envía nada hasta confirmar.
+              {preview?.messages.length}{" "}
+              {preview?.messages.length === 1
+                ? "correo individual"
+                : "correos individuales"}
+              . Cada destinatario sólo recibe su mensaje. No se envía nada hasta
+              confirmar.
             </DialogDescription>
           </DialogHeader>
-          <div className="overflow-y-auto min-h-0 space-y-3">
+          <div className="birthday-dialog-scroll overflow-y-auto min-h-0 space-y-3">
             {preview?.messages.map((m, index) => (
               <details
                 key={m.guestId}
                 open={index === 0}
-                className="rounded border p-3"
+                className="birthday-preview-details"
               >
-                <summary className="cursor-pointer">
-                  {m.name} · {m.recipient}
+                <summary className="birthday-recipient">
+                  <strong>{m.name}</strong>
+                  <span>{m.recipient}</span>
                 </summary>
-                <p className="font-medium mt-2">{m.subject}</p>
-                <p className="whitespace-pre-wrap text-sm mt-2">{m.body}</p>
+                <div className="birthday-email-paper">
+                  <p className="birthday-email-subject">{m.subject}</p>
+                  <p className="whitespace-pre-wrap">{m.body}</p>
+                </div>
               </details>
             ))}
             {!!preview?.skipped.length && (
@@ -629,7 +665,7 @@ export function HospitalitySpecialDates() {
             )}
             {!list.data?.emailReady.ok && <p>{list.data?.emailReady.reason}</p>}
           </div>
-          <DialogFooter>
+          <DialogFooter className="birthday-dialog-footer">
             <Button
               variant="outline"
               disabled={confirm.isPending}
@@ -645,7 +681,8 @@ export function HospitalitySpecialDates() {
               }
               onClick={() => confirm.mutate()}
             >
-              Confirmar envío de {preview?.messages.length || 0} correos
+              Confirmar envío de {preview?.messages.length || 0}{" "}
+              {preview?.messages.length === 1 ? "correo" : "correos"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -656,7 +693,7 @@ export function HospitalitySpecialDates() {
           if (!value && !mark.isPending) setWhatsapp(null);
         }}
       >
-        <DialogContent className="max-w-xl">
+        <DialogContent className="birthday-dialog birthday-message-dialog max-w-xl">
           <DialogHeader>
             <DialogTitle>Mensaje para {whatsapp?.guest.firstName}</DialogTitle>
             <DialogDescription>
@@ -690,7 +727,7 @@ export function HospitalitySpecialDates() {
               }
             />
           </label>
-          <div className="flex gap-2">
+          <div className="birthday-message-actions">
             <Button variant="outline" onClick={() => void copy(whatsapp!.body)}>
               <Copy className="h-4 w-4 mr-2" />
               Copiar mensaje
@@ -723,7 +760,7 @@ export function HospitalitySpecialDates() {
               {message}
             </p>
           )}
-          <DialogFooter>
+          <DialogFooter className="birthday-dialog-footer">
             <Button
               variant="outline"
               onClick={() => setWhatsapp(null)}
@@ -759,7 +796,7 @@ export function HospitalitySpecialDates() {
           if (!value && !suppress.isPending) setExclusion(null);
         }}
       >
-        <DialogContent>
+        <DialogContent className="birthday-dialog birthday-preference-dialog">
           <DialogHeader>
             <DialogTitle>
               {exclusion?.blocked
@@ -790,7 +827,7 @@ export function HospitalitySpecialDates() {
               {message}
             </p>
           )}
-          <DialogFooter>
+          <DialogFooter className="birthday-dialog-footer">
             <Button
               variant="outline"
               disabled={suppress.isPending}
@@ -813,7 +850,7 @@ export function HospitalitySpecialDates() {
           if (!value) setHistory(null);
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[85dvh] flex flex-col">
+        <DialogContent className="birthday-dialog birthday-history-dialog max-w-2xl max-h-[85dvh] flex flex-col">
           <DialogHeader>
             <DialogTitle>
               Historial · {history?.firstName} {history?.lastName}
@@ -822,7 +859,7 @@ export function HospitalitySpecialDates() {
               Contactos y resultados por año, canal y operador.
             </DialogDescription>
           </DialogHeader>
-          <div className="overflow-y-auto min-h-0 space-y-3">
+          <div className="birthday-dialog-scroll overflow-y-auto min-h-0 space-y-3">
             {log.isLoading ? (
               <p>Cargando historial…</p>
             ) : log.isError ? (
@@ -831,16 +868,21 @@ export function HospitalitySpecialDates() {
               <p>Sin contactos registrados.</p>
             ) : (
               log.data.map((item, i) => (
-                <div key={i} className="border rounded p-3 text-sm">
-                  <p className="font-medium">
-                    {item.campaign_year} ·{" "}
-                    {item.channel === "email" ? "Email" : "WhatsApp"} ·{" "}
-                    {statuses[item.status] || item.status}
-                  </p>
-                  <p>
-                    {item.recipient} · {item.actor_name} ·{" "}
-                    {formatHotelDateTime(item.created_at)}
-                  </p>
+                <div key={i} className="birthday-history-entry">
+                  <div className="birthday-history-heading">
+                    <span>
+                      {item.campaign_year} ·{" "}
+                      {item.channel === "email" ? "Email" : "WhatsApp"}
+                    </span>
+                    <span className="birthday-state" data-state={item.status}>
+                      {statuses[item.status] || item.status}
+                    </span>
+                  </div>
+                  <p>{item.recipient}</p>
+                  <div className="birthday-contact-meta">
+                    <span>{item.actor_name}</span>
+                    <time>{formatHotelDateTime(item.created_at)}</time>
+                  </div>
                   {item.details?.body && (
                     <details>
                       <summary className="cursor-pointer">
