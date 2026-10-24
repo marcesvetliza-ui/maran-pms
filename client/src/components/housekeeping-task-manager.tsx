@@ -5,6 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest, parseApiError, queryClient } from "@/lib/queryClient";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatDisplayDate } from "@shared/date-display";
+import type { PlanningTask } from "@shared/housekeepingPlanning";
 import type { RoomWithType, HousekeepingTaskWithRoom } from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ const priorities: Record<string, string> = {
   high: "Alta",
   urgent: "Urgente",
 };
+export type TaskEditor = Pick<PlanningTask, "id" | "roomId" | "scheduledDate" | "assignedTo" | "taskType" | "priority" | "notes">;
 const input = "w-full rounded-md border bg-background p-2 text-sm";
 export function HousekeepingTaskManager({
   rooms,
@@ -46,6 +48,7 @@ export function HousekeepingTaskManager({
   onOpenChange,
   initialRoomIds,
   initialDate,
+  initialTask,
 }: {
   rooms: RoomWithType[];
   staff: { id: string; fullName: string }[];
@@ -53,11 +56,12 @@ export function HousekeepingTaskManager({
   onOpenChange: (open: boolean) => void;
   initialRoomIds: string[];
   initialDate?: string;
+  initialTask?: TaskEditor | null;
 }) {
   const { toast } = useToast();
   const [date, setDate] = useState(getArgentinaToday),
     [filter, setFilter] = useState("all");
-  const [editing, setEditing] = useState<HousekeepingTaskWithRoom | null>(null);
+  const [editing, setEditing] = useState<TaskEditor | null>(null);
   const [selected, setSelected] = useState<string[]>([]),
     [search, setSearch] = useState("");
   const [form, setForm] = useState({
@@ -70,10 +74,10 @@ export function HousekeepingTaskManager({
   const availability = useStaffAvailability(form.scheduledDate);
   const selectedAvailability = availability.data?.find(v=>v.userId===form.assignedTo);
   const [message, setMessage] = useState("");
-  const requestedEdit = useRef<HousekeepingTaskWithRoom | null>(null);
+  const requestedEdit = useRef<TaskEditor | null>(null);
   useEffect(() => {
     if (open) {
-      const task = requestedEdit.current;
+      const task = initialTask || requestedEdit.current;
       requestedEdit.current = null;
       setEditing(task);
       setSelected(task ? [task.roomId] : initialRoomIds);
@@ -119,6 +123,7 @@ export function HousekeepingTaskManager({
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
+      void queryClient.invalidateQueries({ queryKey: ["/api/housekeeping/planning"] });
       onOpenChange(false);
       toast({
         title: editing ? "Tarea actualizada" : "Tareas creadas",
@@ -142,6 +147,7 @@ export function HousekeepingTaskManager({
         variant: "destructive",
       }),
   });
+  const singleRoom = !!editing || initialRoomIds.length === 1;
   const available = rooms
     .filter(isOperationalInventoryRoom)
     .filter((r) =>
@@ -305,12 +311,12 @@ export function HousekeepingTaskManager({
         >
           <DialogHeader>
             <DialogTitle>
-              {editing ? "Editar tarea pendiente" : "Crear y asignar tareas"}
+              {editing ? "Editar tarea pendiente" : singleRoom ? "Crear tarea para esta habitación" : "Crear y asignar tareas"}
             </DialogTitle>
             <DialogDescription>
               {editing
                 ? "Conserva el historial y cambia sólo los datos de la tarea pendiente."
-                : "Se creará una tarea por habitación. Revisá la fecha y la selección antes de guardar."}
+                : singleRoom ? "La habitación queda fija. Completá fecha, responsable e instrucciones antes de guardar." : "Se creará una tarea por habitación. Revisá la fecha y la selección antes de guardar."}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto space-y-4 px-1">
@@ -380,7 +386,7 @@ export function HousekeepingTaskManager({
             </div>
             <fieldset className="border rounded p-3">
               <legend>Habitaciones · {selected.length} seleccionadas</legend>
-              {!editing && (
+              {!singleRoom && (
                 <>
                   <label>
                     Buscar habitación o piso
@@ -418,13 +424,13 @@ export function HousekeepingTaskManager({
               )}
               <div className="max-h-48 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {available
-                  .filter((r) => !editing || selected.includes(r.id))
+                  .filter((r) => !singleRoom || selected.includes(r.id))
                   .map((r) => (
                     <label
                       key={r.id}
                       className="flex gap-2 items-center border rounded p-2 text-sm"
                     >
-                      <input
+                      {!singleRoom && <input
                         type="checkbox"
                         checked={selected.includes(r.id)}
                         disabled={!!editing}
@@ -435,7 +441,7 @@ export function HousekeepingTaskManager({
                               : previous.filter((id) => id !== r.id),
                           )
                         }
-                      />
+                      />}
                       Hab. {r.roomNumber} · Piso {r.floor}
                     </label>
                   ))}
@@ -482,7 +488,7 @@ export function HousekeepingTaskManager({
                 ? "Guardando…"
                 : editing
                   ? "Guardar tarea"
-                  : `Crear ${selected.length} tareas`}
+                  : selected.length === 1 ? "Crear tarea" : `Crear ${selected.length} tareas`}
             </Button>
           </DialogFooter>
         </DialogContent>

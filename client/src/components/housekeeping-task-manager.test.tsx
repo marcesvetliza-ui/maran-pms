@@ -30,7 +30,7 @@ const rooms: any = [
 const staff = [{ id: "worker", fullName: "Mucama de prueba" }],
   initial: string[] = [];
 let tasks: any[] = [];
-function Harness({initialDate}:{initialDate?:string}={}) {
+function Harness({initialDate, roomIds=initial, initialTask}:{initialDate?:string; roomIds?:string[]; initialTask?:any}={}) {
   const [open, setOpen] = useState(false);
   return (
     <QueryClientProvider client={queryClient}>
@@ -39,7 +39,8 @@ function Harness({initialDate}:{initialDate?:string}={}) {
         staff={staff}
         open={open}
         onOpenChange={setOpen}
-        initialRoomIds={initial}
+        initialRoomIds={roomIds}
+        initialTask={initialTask}
         initialDate={initialDate}
       />
     </QueryClientProvider>
@@ -222,4 +223,26 @@ it("advierte franco al asignar sin ocultar la excepción", async () => {
   fireEvent.change(screen.getByLabelText('Responsable'),{target:{value:'worker'}});
   expect(screen.getByRole('alert')).toHaveTextContent('Franco');
   expect(screen.getByRole('alert')).toHaveTextContent('Franco acordado');
+});
+
+it("individual entry fixes the room and cannot add another room", async () => {
+  render(<Harness roomIds={["r1"]} initialDate="2095-02-02" />);
+  fireEvent.click(screen.getByRole("button", {name:"Crear y asignar tareas"}));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Crear tarea para esta habitación");
+  expect(screen.queryByLabelText("Buscar habitación o piso")).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog")).toHaveTextContent("Hab. 201");
+  expect(screen.getByRole("dialog")).not.toHaveTextContent("Hab. 301");
+  fireEvent.click(screen.getByRole("button", {name:"Crear tarea"}));
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith("POST", "/api/housekeeping/bulk", expect.objectContaining({roomIds:["r1"], scheduledDate:"2095-02-02"})));
+});
+it("opens an existing planning task with its values and updates its identity", async () => {
+  render(<Harness initialTask={{id:"existing",roomId:"r2",scheduledDate:"2095-02-02",assignedTo:"worker",taskType:"deep_clean",priority:"urgent",notes:"Desde planificación"}} />);
+  fireEvent.click(screen.getByRole("button", {name:"Crear y asignar tareas"}));
+  expect(screen.getByLabelText("Instrucciones")).toHaveValue("Desde planificación");
+  expect(screen.getByLabelText("Tipo de tarea")).toHaveValue("deep_clean");
+  expect(screen.getByLabelText("Prioridad")).toHaveValue("urgent");
+  fireEvent.click(screen.getByRole("button", {name:"Guardar tarea"}));
+  await waitFor(() => expect(apiRequest).toHaveBeenCalledWith("PATCH", "/api/housekeeping/existing", expect.objectContaining({scheduledDate:"2095-02-02",priority:"urgent"})));
+  expect(vi.mocked(apiRequest).mock.calls.some(([method])=>method==="POST")).toBe(false);
 });

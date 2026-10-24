@@ -21,6 +21,7 @@ import {
   type HousekeepingPlanning,
   type PlanningRequest,
   type PlanningRoom,
+  type PlanningTask,
 } from "@shared/housekeepingPlanning";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,8 +61,10 @@ const roomStates: Record<string, string> = {
 };
 export function HousekeepingPlanningView({
   onCreateTask,
+  onEditTask,
 }: {
-  onCreateTask: (roomId: string, date: string) => void;
+  onCreateTask: (roomId: string | null, date: string) => void;
+  onEditTask?: (task: PlanningTask) => void;
 }) {
   const { toast } = useToast();
   const [date, setDate] = useState(getArgentinaToday),
@@ -228,6 +231,11 @@ export function HousekeepingPlanningView({
             </p>
           </div>
         </div>
+        {data && data.mode !== "past" && (
+          <Button onClick={() => onCreateTask(null, date)} className="gap-2">
+            <Plus className="h-4 w-4" /> Crear y asignar tareas
+          </Button>
+        )}
         <div className="flex flex-wrap gap-3 items-end">
           <label className="text-sm font-medium">
             Fecha de planificación
@@ -437,7 +445,8 @@ export function HousekeepingPlanningView({
                             </strong>
                             <span>{states[t.status] || t.status}</span>
                           </div>
-                          <p>{t.staffName || "Sin asignar"}</p>
+                          <p>{t.staffName || "Sin asignar"} · Prioridad {{low: "Baja", normal: "Normal", high: "Alta", urgent: "Urgente"}[t.priority] || t.priority}</p>
+                          {t.status === "pending" && onEditTask && <Button size="sm" variant="outline" onClick={() => onEditTask(t)}>Editar o reasignar tarea</Button>}
                           {t.notes && (
                             <p className="whitespace-pre-wrap break-words">
                               {t.notes}
@@ -473,16 +482,6 @@ export function HousekeepingPlanningView({
                           )}
                         </article>
                       ))}
-                      {data.mode !== "past" && room.active && (
-                        <Button
-                          size="sm"
-                          className="w-full gap-2"
-                          onClick={() => onCreateTask(room.id, date)}
-                        >
-                          <Plus className="h-4 w-4" /> Programar tarea ·{" "}
-                          {formatDisplayDate(date)}
-                        </Button>
-                      )}
                     </div>
                   </section>
                 ))}

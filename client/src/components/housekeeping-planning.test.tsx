@@ -110,10 +110,10 @@ describe("Planificación de Housekeeping", () => {
     );
     expect(screen.getByText(/10 min 12 s/)).toBeInTheDocument();
   });
-  it("passes the selected date when scheduling a room task", async () => {
+  it("opens bulk scheduling once with the selected date", async () => {
     const callback = await setup();
-    fireEvent.click(screen.getByRole("button", { name: /Programar tarea/ }));
-    expect(callback).toHaveBeenCalledWith("room", future);
+    fireEvent.click(screen.getByRole("button", { name: "Crear y asignar tareas" }));
+    expect(callback).toHaveBeenCalledWith(null, future);
   });
   it("shows historical records with no preparation or scheduling actions", async () => {
     mode = "past";
@@ -123,7 +123,7 @@ describe("Planificación de Housekeeping", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/no reconstruyen cómo estaba/)).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Programar tarea/ }),
+      screen.queryByRole("button", { name: "Crear y asignar tareas" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Confirmar camaje preparado" }),
@@ -169,4 +169,16 @@ describe("Planificación de Housekeeping", () => {
       vi.mocked(apiRequest).mock.calls.every(([method]) => method === "GET"),
     ).toBe(true);
   });
+});
+
+it("edits only pending tasks from their planning card", async () => {
+  const edit = vi.fn();
+  const pending = {...fixture.rooms[0].tasks[0], id:"pending-task", status:"pending", priority:"high"};
+  vi.mocked(apiRequest).mockImplementation(async () => new Response(JSON.stringify({...fixture, rooms:[{...fixture.rooms[0],tasks:[pending, fixture.rooms[0].tasks[0]]}]})));
+  render(<QueryClientProvider client={queryClient}><HousekeepingPlanningView onCreateTask={vi.fn()} onEditTask={edit}/></QueryClientProvider>);
+  const button = await screen.findByRole("button", {name:"Editar o reasignar tarea"});
+  expect(screen.getAllByRole("button", {name:"Editar o reasignar tarea"})).toHaveLength(1);
+  expect(screen.getByText(/Prioridad Alta/)).toBeInTheDocument();
+  fireEvent.click(button);
+  expect(edit).toHaveBeenCalledWith(pending);
 });

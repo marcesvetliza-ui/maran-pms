@@ -2,7 +2,7 @@ import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-ava
 import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
 import {HousekeepingPlanningView} from "@/components/housekeeping-planning";
-import {HousekeepingTaskManager} from "@/components/housekeeping-task-manager";
+import {type TaskEditor, HousekeepingTaskManager} from "@/components/housekeeping-task-manager";
 import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
 import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
@@ -1420,6 +1420,7 @@ export default function Housekeeping() {
   const isSupervisor = hasPermission("api:housekeeping:supervisor-view");
   const isMucama = !isSupervisor;
   const [taskPlannerOpen,setTaskPlannerOpen]=useState(false);
+  const [plannerTask,setPlannerTask]=useState<TaskEditor | null>(null);
   const [plannerRooms,setPlannerRooms]=useState<string[]>([]);
   const [plannerDate,setPlannerDate]=useState<string|undefined>(undefined);
   const [floorFilter, setFloorFilter] = useState<string>("all");
@@ -1854,7 +1855,7 @@ export default function Housekeeping() {
         <h1 className="text-2xl font-bold" data-testid="text-page-title">Housekeeping</h1>
       </div>
 
-      {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} initialDate={plannerDate} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value){setPlannerRooms([]);setPlannerDate(undefined);}}}/>}
+      {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} initialDate={plannerDate} initialTask={plannerTask} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value){setPlannerRooms([]);setPlannerDate(undefined);setPlannerTask(null);}}}/>}
       <Tabs defaultValue="rooms">
         <TabsList className="flex h-auto flex-wrap justify-start gap-1">
           <TabsTrigger value="rooms">Habitaciones · Hoy</TabsTrigger>
@@ -1890,7 +1891,7 @@ export default function Housekeeping() {
           <TabsTrigger value="inventory" data-testid="tab-housekeeping-inventory" className="gap-1"><Boxes className="h-4 w-4" />Inventario Housekeeping</TabsTrigger>
         </TabsList>
 
-        {isSupervisor&&<TabsContent value="planning"><HousekeepingPlanningView onCreateTask={(roomId,date)=>{setPlannerRooms([roomId]);setPlannerDate(date);setTaskPlannerOpen(true);}}/></TabsContent>}
+        {isSupervisor&&<TabsContent value="planning"><HousekeepingPlanningView onCreateTask={(roomId,date)=>{setPlannerRooms(roomId ? [roomId] : []);setPlannerTask(null);setPlannerDate(date);setTaskPlannerOpen(true);}} onEditTask={task=>{setPlannerTask(task);setPlannerRooms([task.roomId]);setPlannerDate(task.scheduledDate);setTaskPlannerOpen(true);}}/></TabsContent>}
         <TabsContent value="inventory"><HousekeepingInventory /></TabsContent>
 
         <TabsContent value="rooms">
