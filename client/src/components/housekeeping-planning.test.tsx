@@ -182,3 +182,14 @@ it("edits only pending tasks from their planning card", async () => {
   fireEvent.click(button);
   expect(edit).toHaveBeenCalledWith(pending);
 });
+
+it("shows late checkout time as a forecast and refreshes changed times", async () => {
+  let time="15:00";
+  vi.mocked(apiRequest).mockImplementation(async ()=> new Response(JSON.stringify({...fixture, rooms:[{...fixture.rooms[0],requests:[{...request,checkOut:future,lateCheckOut:true,lateCheckOutTime:time}]}]})));
+  await setup();
+  expect(screen.getByText(/Late check-out · 15:00/)).toBeInTheDocument();
+  expect(screen.getByText(/no libera la habitación hasta el checkout efectivo/)).toBeInTheDocument();
+  time="16:00";
+  await queryClient.invalidateQueries({queryKey:["/api/housekeeping/planning"]});
+  expect(await screen.findByText(/Late check-out · 16:00/)).toBeInTheDocument();
+});

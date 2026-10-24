@@ -199,6 +199,16 @@ describe.skipIf(!enabled)(
           (await api("GET", `/api/housekeeping/planning?date=${d}`)).status,
         ).toBe(400);
     });
+    it("reflects a same-day late checkout change without changing occupancy", async () => {
+      await pool.query("UPDATE reservations SET late_check_out=true,late_check_out_time='15:00' WHERE id=$1",[id("departure")]);
+      const first=await selected();
+      expect(first.rooms.flatMap((r:any)=>r.requests).find((r:any)=>r.id===id("departure"))).toMatchObject({lateCheckOut:true,lateCheckOutTime:"15:00"});
+      await pool.query("UPDATE reservations SET late_check_out_time='16:00' WHERE id=$1",[id("departure")]);
+      const second=await selected();
+      expect(second.rooms.flatMap((r:any)=>r.requests).find((r:any)=>r.id===id("departure"))).toMatchObject({lateCheckOut:true,lateCheckOutTime:"16:00"});
+      expect((await storage.getRoom(id("room"))).status).toBe("dirty");
+      await pool.query("UPDATE reservations SET late_check_out=false,late_check_out_time=NULL WHERE id=$1",[id("departure")]);
+    });
     it("shows future requests, turnover, actual bed and tasks without projecting a future cleaning state", async () => {
       const data = await selected();
       expect(data.mode).toBe("future");

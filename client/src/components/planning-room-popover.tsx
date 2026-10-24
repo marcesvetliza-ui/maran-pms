@@ -8,8 +8,6 @@ interface RoomPopoverProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onEditBedConfig: (data: { roomId: string; roomNumber: string; current: string; allowed?: BedConfig[] | null }) => void;
-  onUpdateStatus: (data: { roomId: string; status: string }) => void;
-  isPendingStatusUpdate: boolean;
   maintenanceAlertRoomIds: Set<string>;
   maintenanceConflictRoomIds?: Set<string>;
 }
@@ -19,8 +17,6 @@ export function RoomPopover({
   open,
   onOpenChange,
   onEditBedConfig,
-  onUpdateStatus,
-  isPendingStatusUpdate,
   maintenanceAlertRoomIds,
   maintenanceConflictRoomIds,
 }: RoomPopoverProps) {
@@ -92,30 +88,8 @@ export function RoomPopover({
         </div>
         <div className="px-3 py-2">
           <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Estado de habitación</p>
-          <div className="flex flex-col gap-1">
-            {ROOM_STATUS_OPTIONS.map((opt) => {
-              const isActive = room.status === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  className={`flex items-center gap-2 text-xs px-2 py-1 rounded transition-colors text-left ${isActive ? "bg-primary/10 font-semibold" : "hover:bg-muted/60"}`}
-                  onClick={() => {
-                    if (!isActive) {
-                      onUpdateStatus({ roomId: room.id, status: opt.value });
-                    } else {
-                      onOpenChange(false);
-                    }
-                  }}
-                  disabled={isPendingStatusUpdate}
-                  data-testid={`button-status-${opt.value}-${room.id}`}
-                >
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dot}`} />
-                  {opt.label}
-                  {isActive && <span className="ml-auto text-primary">✓</span>}
-                </button>
-              );
-            })}
-          </div>
+          <p className="text-sm font-medium">{ROOM_STATUS_OPTIONS.find(option => option.value === room.status)?.label || room.status}</p>
+          <p className="mt-1 text-xs text-muted-foreground">La limpieza se gestiona desde Housekeeping.</p>
         </div>
       </PopoverContent>
     </Popover>

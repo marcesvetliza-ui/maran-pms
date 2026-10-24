@@ -236,23 +236,6 @@ export default function PlanningPage() {
     },
   });
 
-  const updateRoomStatusMutation = useMutation({
-    mutationFn: async ({ roomId, status }: { roomId: string; status: string }) => {
-      const res = await apiRequest("PATCH", `/api/rooms/${roomId}`, { status });
-      return res.json();
-    },
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      setRoomPopoverOpen(null);
-      const opt = ROOM_STATUS_OPTIONS.find(o => o.value === vars.status);
-      toast({ title: `Estado actualizado: ${opt?.label ?? vars.status}` });
-    },
-    onError: () => {
-      toast({ title: "Error al actualizar estado", variant: "destructive" });
-    },
-  });
-
   const { data: maintenanceBlockDialogBlocks = [], isLoading: maintenanceBlockDialogLoading } = useQuery<
     Array<{ id: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }>
   >({
@@ -1225,8 +1208,6 @@ export default function PlanningPage() {
                                 open={roomPopoverOpen === room.id}
                                 onOpenChange={(o) => setRoomPopoverOpen(o ? room.id : null)}
                                 onEditBedConfig={setEditingBedConfig}
-                                onUpdateStatus={({ roomId, status }) => updateRoomStatusMutation.mutate({ roomId, status })}
-                                isPendingStatusUpdate={updateRoomStatusMutation.isPending}
                                 maintenanceAlertRoomIds={maintenanceAlertRoomIds}
                                 maintenanceConflictRoomIds={maintenanceConflictRoomIds}
                               />

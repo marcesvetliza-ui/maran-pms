@@ -153,6 +153,12 @@ export function HousekeepingPlanningView({
         {r.reservationCode} · {formatDisplayDate(r.checkIn)} →{" "}
         {formatDisplayDate(r.checkOut)} · {r.numberOfGuests ?? "—"} personas
       </p>
+      {r.checkOut === date && r.lateCheckOut && (
+        <p className="rounded-md bg-amber-100 p-2 font-semibold text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          Late check-out · {r.lateCheckOutTime || "Horario por confirmar"}
+          <span className="block text-xs font-normal">Salida prevista: no libera la habitación hasta el checkout efectivo.</span>
+        </p>
+      )}
       <p>
         <span className="font-medium">Camaje requerido:</span>{" "}
         {r.bedTypeName || "Sin especificar"}

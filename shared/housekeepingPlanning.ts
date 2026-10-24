@@ -94,6 +94,8 @@ export type PlanningRequest = {
   guestName: string;
   checkIn: string;
   checkOut: string;
+  lateCheckOut?: boolean;
+  lateCheckOutTime?: string | null;
   status: string;
   bedTypeId: string | null;
   bedTypeCode: string | null;
