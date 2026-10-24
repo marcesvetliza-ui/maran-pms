@@ -64,3 +64,16 @@ corrección de limpieza que quedaría sin confirmar al navegar.
 Prueba local de navegador con APIs simuladas: camaje pendiente, acceso global a
 bloqueos, fallo de consulta sin escritura y reservas superpuestas con cancelación
 sin escritura. Sin cambios en datos operativos ni llamadas fiscales.
+
+## Ocupación hasta checkout efectivo
+
+La verificación previa al despliegue detectó dos automatismos anteriores que
+contradecían esta regla. Night Audit ya no cierra estadías ingresadas por fecha
+vencida y saldo cero. Un nuevo check-in tampoco cierra al huésped anterior por
+haber llegado su fecha prevista: requiere primero registrar su checkout.
+Los no-shows de reservas sin ingreso conservan su tratamiento existente.
+
+Regresión: check-in con otra estadía ingresada (salida pasada/hoy/futura),
+check-in que no marca como limpia una habitación sucia y ejecución de Night
+Audit real sobre PostgreSQL local dentro de una transacción revertida, con
+estadía vencida de saldo cero y No mover. No se enviaron correos.

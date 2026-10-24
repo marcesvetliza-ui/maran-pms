@@ -929,7 +929,6 @@ export function registerReservationsRoutes(app: Express) {
 
       // Verificar si hay OTRA reserva en checked_in actualmente para esta habitación
       // (no usar room.status === "occupied" porque puede quedar desactualizado)
-      const todayForCheck = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const allRes = await storage.getReservations();
       const otherCheckedIn = allRes.find(
         r => r.id !== req.params.id && r.roomId === reservation.roomId && r.status === "checked_in"
@@ -940,32 +939,10 @@ export function registerReservationsRoutes(app: Express) {
           : "Huésped desconocido";
         const checkOut = (otherCheckedIn as any).checkOutDate ?? "?";
 
-        // Si la reserva bloqueante tiene checkout vencido (ya pasó) O es HOY, auto-cerrarla y continuar.
-        // Checkout hoy significa que el huésped debe salir antes del horario de check-in del nuevo huésped.
-        const isOverdue = checkOut !== "?" && checkOut <= todayForCheck;
-        if (isOverdue) {
-          console.warn(`[check-in] Reserva vencida detectada en hab ${room.roomNumber}: ${otherCheckedIn.id} (${(otherCheckedIn as any).reservationCode ?? ""}) — ${guestName} — salida ${checkOut}. Auto-checkout forzado.`);
-          try {
-            await db.update(reservations).set({ status: "checked_out" } as any).where(eq(reservations.id, otherCheckedIn.id));
-            if (room.id) {
-              await db.update(rooms).set({ status: "dirty" } as any).where(eq(rooms.id, room.id));
-            }
-          } catch (autoErr: any) {
-            console.error(`[check-in] Error auto-checkout vencida: ${autoErr.message}`);
-          }
-          // Continuar con el check-in normalmente
-        } else {
-          console.warn(`[check-in] Bloqueado: hab ${room.roomNumber} ocupada por ${otherCheckedIn.id} (${(otherCheckedIn as any).reservationCode ?? ""}) — ${guestName} — salida ${checkOut}`);
-          return res.status(400).json({
-            error: `La habitación ${room.roomNumber} está ocupada por otro huésped`,
-            detail: {
-              reservationId: otherCheckedIn.id,
-              reservationCode: (otherCheckedIn as any).reservationCode,
-              guest: guestName,
-              checkOut,
-            }
-          });
-        }
+        return res.status(400).json({
+          error: `La habitación ${room.roomNumber} está ocupada por otro huésped. Registrá su checkout efectivo antes de ingresar otra estadía.`,
+          detail: {reservationId:otherCheckedIn.id,reservationCode:(otherCheckedIn as any).reservationCode,guest:guestName,checkOut},
+        });
       }
 
       await storage.updateReservation(req.params.id, { status: "checked_in" });

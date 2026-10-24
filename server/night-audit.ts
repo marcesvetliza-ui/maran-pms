@@ -165,49 +165,18 @@ async function runNightAuditUnlocked(options: {
     const foliosConSaldo = folioDetail.filter((f) => f.hasBalance);
 
     // ============================================================
-    // PASO 1.5 — Auto-cierre de reservas vencidas
-    // checked_in con checkOutDate <= ayer y saldo = 0 → checked_out automático
+    // PASO 1.5 — Reservas sin ingreso
+    // Una estadía ingresada permanece ocupada hasta el checkout efectivo.
     // confirmed/pending/tentative con checkOutDate < ayer → no-show → cancelado
     // ============================================================
-    let autoCerradasCount = 0;
     let autoNoShowCount = 0;
     const noShowDetails: Array<{ reservationId: string; reservationCode: string }> = [];
     try {
       if (reportingOnlyRerun) {
-        naLog("Rerun manual: solo reporte; se omiten cierres y no-show automáticos");
+        naLog("Rerun manual: solo reporte; se omiten no-show automáticos");
       } else {
-      // Buscar checked_in con checkout vencido
-      const overdueCheckedIn = await db
-        .select({
-          id: reservations.id,
-          roomId: reservations.roomId,
-          reservationCode: reservations.reservationCode,
-          totalRoomAmount: reservations.totalRoomAmount,
-          finalRatePerNight: reservations.finalRatePerNight,
-          nights: reservations.nights,
-        })
-        .from(reservations)
-        .where(and(
-          eq(reservations.status, "checked_in"),
-          lte(reservations.checkOutDate, auditDate),
-        ));
-
-      if (overdueCheckedIn.length > 0) {
-        const overdueSummaries = await loadReservationOperationalSummaries(overdueCheckedIn);
-
-        for (const r of overdueCheckedIn) {
-          const balance = overdueSummaries.get(r.id)?.operationalFolioBalance ?? 0;
-          if (balance <= 0.01) {
-            await db.update(reservations).set({ status: "checked_out" } as any).where(eq(reservations.id, r.id));
-            if (r.roomId) {
-              await db.update(rooms).set({ status: "dirty" } as any).where(eq(rooms.id, r.roomId));
-            }
-            autoCerradasCount++;
-          }
-        }
-        naLog(`Auto-cierre: ${autoCerradasCount} reservas checked_in vencidas cerradas (${overdueCheckedIn.length - autoCerradasCount} con saldo pendiente)`);
-      }
-
+      // Checkout dates and zero balances are reporting data, not proof of departure.
+      // Daily Housekeeping renewal handles service needs without closing stays.
       // No-shows: confirmed/pending/tentative con checkout vencido (más de 1 día)
       // Se marcan como "no_show" para distinguirlas de cancelaciones voluntarias.
       // Reservas ya marcadas manualmente como no_show se saltean.
@@ -229,7 +198,7 @@ async function runNightAuditUnlocked(options: {
       }
       }
     } catch (autoErr: any) {
-      naLog(`Error en auto-cierre de vencidas: ${autoErr.message}`);
+      naLog(`Error al procesar no-shows: ${autoErr.message}`);
       errors.push(`Auto-cierre: ${autoErr.message}`);
     }
 
