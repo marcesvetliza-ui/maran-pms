@@ -1,3 +1,4 @@
+import "./housekeeping.css";
 import {loadHousekeepingBlockConflicts} from "@/lib/housekeeping-block-conflicts";
 import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
@@ -173,21 +174,17 @@ function RoomCard({
   const taskWithNote = tasks.find(t => t.notes && (t.status === "pending" || t.status === "in_progress"));
   
   return (
-    <Card className={`${config.bgClass} border transition-all`}>
-      <CardContent className="p-3">
-        <button className="mb-2 flex items-center gap-1 text-xs text-primary" onClick={()=>onEditBedConfig(room.id,room.bedConfig||"")} aria-label={`Cambiar camaje físico de habitación ${room.roomNumber}`}>
-          <Bed className="h-3.5 w-3.5" /> Camaje físico: {room.bedConfig ? getBedConfigLabel(room.bedConfig) : "Sin registrar"}
-        </button>
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-lg">{room.roomNumber}</span>
-            <Icon className={`h-4 w-4 ${config.className}`} />
+    <Card className="hk-room-card" data-status={room.status} data-testid={`hk-room-card-${room.id}`}>
+      <CardContent className="hk-room-content">
+        <div className="hk-room-heading">
+          <div className="hk-room-identity">
+            <span className="hk-room-number">{room.roomNumber}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="hk-room-tools">
             {hasNotes && (
               <MessageSquare className="h-3 w-3 text-muted-foreground" />
             )}
-            <Badge variant="outline" className="text-xs">
+            <Badge variant="outline" className="max-w-20 truncate text-xs" title={room.roomType?.name || room.roomType?.code || "Tipo sin registrar"}>
               {room.roomType?.code || "N/A"}
             </Badge>
             <Popover>
@@ -195,13 +192,14 @@ function RoomCard({
                 <Button 
                   size="icon" 
                   variant="ghost" 
-                  className="h-6 w-6"
+                  className="h-8 w-8 shrink-0"
+                  aria-label={`Opciones de habitación ${room.roomNumber}`}
                   data-testid={`button-room-menu-${room.id}`}
                 >
                   <MoreHorizontal className="h-3 w-3" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-48 p-2" align="end">
+              <PopoverContent className="hk-room-popover w-64 max-w-[calc(100vw-2rem)] p-2" align="end">
                 <div className="space-y-1">
                   <Button 
                     size="sm" 
@@ -265,15 +263,21 @@ function RoomCard({
           </div>
         </div>
         
-        <div className="text-xs text-muted-foreground mb-2">
-          {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : config.label}
+        <div className="hk-room-status">
+          <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${config.className}`} /><span>
+          {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : config.label}</span>
         </div>
+        <button className="hk-room-camaje" onClick={()=>onEditBedConfig(room.id,room.bedConfig||"")} aria-label={`Cambiar camaje físico de habitación ${room.roomNumber}`}>
+          <Bed className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0"><span className="hk-room-camaje-label">Camaje físico</span><span className="hk-room-camaje-value">{room.bedConfig ? getBedConfigLabel(room.bedConfig) : "Sin registrar"}</span></span>
+          <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
         
         <HousekeepingPreparationControl hideTrigger controlledOpen={preparationOpen} onOpenChange={setPreparationOpen} roomId={room.id} roomNumber={room.roomNumber} />
         {pendingTasks.length > 0 ? (
-          <div className="space-y-1">
+          <div className="hk-room-task-list">
             {pendingTasks.map(task => (
-              <div key={task.id} className="flex items-center justify-between gap-1">
+              <div key={task.id} className="hk-room-task-row">
                 <Badge className={`${taskStatusConfig[task.status as TaskStatus].className} text-xs`}>
                   {taskTypeLabels[task.taskType as TaskType] || task.taskType}
                 </Badge>
@@ -303,7 +307,8 @@ function RoomCard({
             ))}
           </div>
         ) : (
-          <div className="flex gap-1 flex-wrap">
+          <div className="hk-room-actions">
+            {["maintenance","oos"].includes(room.status) && <Button size="sm" variant="outline" onClick={()=>onOpenDetails(room.id)}><MessageSquare className="h-4 w-4" />Ver detalles</Button>}
             {room.status === "dirty" && (
               <>
                 <Button 
@@ -390,11 +395,11 @@ function RoomCard({
         )}
         {taskWithNote?.notes && (
           <div
-            className="flex items-start gap-1 mt-1 text-xs text-muted-foreground italic"
+            className="hk-room-note"
             title={taskWithNote.notes}
           >
             <MessageSquare className="h-3 w-3 shrink-0 mt-0.5" />
-            <span className="line-clamp-1">{taskWithNote.notes}</span>
+            <span>{taskWithNote.notes}</span>
           </div>
         )}
       </CardContent>
@@ -1308,7 +1313,7 @@ function MobileRoomCard({
         {canManage&&<div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
           <span className="text-xs text-muted-foreground w-full mb-0.5">Cambiar estado:</span>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Disponible — Hab. ${room.roomNumber}`,
               description: "¿Marcar esta habitación como disponible?",
@@ -1321,7 +1326,7 @@ function MobileRoomCard({
             Disponible
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Limpia ocupada — Hab. ${room.roomNumber}`,
               description: "¿Marcar esta habitación como limpia con huésped?",
@@ -1334,7 +1339,7 @@ function MobileRoomCard({
             Limpia ocup.
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `No molestar — Hab. ${room.roomNumber}`,
               description: "¿Activar estado No molestar?",
@@ -1347,7 +1352,7 @@ function MobileRoomCard({
             No molestar
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Sucia — Hab. ${room.roomNumber}`,
               description: "¿Marcar esta habitación como sucia?",
@@ -1360,7 +1365,7 @@ function MobileRoomCard({
             Sucia
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Mantenimiento — Hab. ${room.roomNumber}`,
               description: "Se abrirá el formulario para reportar una avería. El bloqueo se define por separado.",
@@ -1826,7 +1831,7 @@ export default function Housekeeping() {
         <div className="grid grid-cols-4 gap-4">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}
         </div>
-        <div className="grid grid-cols-7 gap-3">
+        <div className="hk-room-grid">
           {Array(14).fill(0).map((_, i) => <Skeleton key={i} className="h-32" />)}
         </div>
       </div>
@@ -1834,7 +1839,7 @@ export default function Housekeeping() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="housekeeping-page p-4 sm:p-6 space-y-5">
       {updateRoomStatusMutation.dialog}
       <div className="flex items-center gap-2">
         <ClipboardCheck className="h-6 w-6 text-muted-foreground" />
@@ -2111,7 +2116,7 @@ export default function Housekeeping() {
                   <Clock className="h-4 w-4 text-muted-foreground" />
                   Piso {floor}
                 </h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="hk-room-grid">
                   {floorRooms
                     .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber))
                     .map(room => (
