@@ -1,3 +1,4 @@
+import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
 import { useState, useEffect } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { useLocation } from "wouter";
@@ -168,6 +169,7 @@ function RoomDropdownMenu({
   onMaintenance,
   onToggleActive,
   canManage,
+  canCorrectStatus,
 }: {
   room: RoomWithType;
   onEdit: () => void;
@@ -175,6 +177,7 @@ function RoomDropdownMenu({
   onMaintenance: () => void;
   onToggleActive: () => void;
   canManage: boolean;
+  canCorrectStatus: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -191,7 +194,7 @@ function RoomDropdownMenu({
           </DropdownMenuItem>
         )}
         {canManage && <DropdownMenuSeparator />}
-        {room.isActive !== false && (
+        {room.isActive !== false && canCorrectStatus && (
           <>
             <DropdownMenuItem onClick={() => onStatus("available")}>
               <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
@@ -217,11 +220,14 @@ function RoomDropdownMenu({
               <Ban className="mr-2 h-4 w-4 text-purple-600" />
               No molestar
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={onMaintenance}>
-              <Wrench className="mr-2 h-4 w-4 text-orange-500" />
-              Reportar a Mantenimiento
-            </DropdownMenuItem>
+
           </>
+        )}
+        {room.isActive !== false && (
+          <DropdownMenuItem onClick={onMaintenance}>
+            <Wrench className="mr-2 h-4 w-4 text-orange-500" />
+            Reportar a Mantenimiento
+          </DropdownMenuItem>
         )}
         {canManage && (
           <>
@@ -297,7 +303,8 @@ function RoomFormDialog({
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertRoom>) => {
       if (isEditing) {
-        return apiRequest("PATCH", `/api/rooms/${room.id}`, data);
+        const {status: _status, ...roomData}=data;
+        return apiRequest("PATCH", `/api/rooms/${room.id}`, roomData);
       }
       return apiRequest("POST", "/api/rooms", data);
     },
@@ -429,6 +436,7 @@ function RoomFormDialog({
               <Label htmlFor="status">Estado</Label>
               <Select
                 value={formData.status}
+                disabled={isEditing}
                 onValueChange={(value) => setFormData({ ...formData, status: value as RoomStatus })}
               >
                 <SelectTrigger data-testid="select-status">
@@ -443,6 +451,7 @@ function RoomFormDialog({
                   <SelectItem value="oos">Fuera de Servicio</SelectItem>
                 </SelectContent>
               </Select>
+              {isEditing && <p className="text-xs text-muted-foreground">El estado se corrige desde Housekeeping, con motivo e historial.</p>}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas</Label>
@@ -1042,16 +1051,7 @@ export default function RoomsPage() {
     }
   }
 
-  const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: RoomStatus }) => {
-      return apiRequest("PATCH", `/api/rooms/${id}`, { status });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Estado actualizado", description: "El estado de la habitación ha sido actualizado." });
-    },
-  });
+  const updateStatusMutation = useRoomStatusCorrection(rooms || []);
 
   const toggleRoomActiveMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
@@ -1137,6 +1137,7 @@ export default function RoomsPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      {updateStatusMutation.dialog}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight" data-testid="text-rooms-title">
@@ -1352,10 +1353,11 @@ export default function RoomsPage() {
                                 <RoomDropdownMenu
                                   room={room}
                                   onEdit={() => handleEditRoom(room)}
-                                  onStatus={(s) => updateStatusMutation.mutate({ id: room.id, status: s })}
+                                  onStatus={(s) => updateStatusMutation.mutate({ roomId: room.id, status: s })}
                                   onMaintenance={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
                                   onToggleActive={() => toggleRoomActiveMutation.mutate({ id: room.id, isActive: room.isActive === false })}
                                   canManage={canManage}
+                                  canCorrectStatus={hasPermission("sidebar:/housekeeping") && hasPermission("api:housekeeping:supervisor-view")}
                                 />
                               </div>
                               <CardDescription className="text-xs">{room.roomType?.name || "Sin tipo"}</CardDescription>
@@ -1466,10 +1468,11 @@ export default function RoomsPage() {
                       <RoomDropdownMenu
                         room={room}
                         onEdit={() => handleEditRoom(room)}
-                        onStatus={(s) => updateStatusMutation.mutate({ id: room.id, status: s })}
+                        onStatus={(s) => updateStatusMutation.mutate({ roomId: room.id, status: s })}
                         onMaintenance={() => { setMaintenanceTarget(room); setMaintenanceDescription(""); }}
                         onToggleActive={() => toggleRoomActiveMutation.mutate({ id: room.id, isActive: room.isActive === false })}
                         canManage={canManage}
+                                  canCorrectStatus={hasPermission("sidebar:/housekeeping") && hasPermission("api:housekeeping:supervisor-view")}
                       />
                     </TableCell>
                   </TableRow>

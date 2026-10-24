@@ -10,7 +10,6 @@ import { pipeline } from "node:stream/promises";
 import { Transform, type Writable } from "node:stream";
 import { storage, getArgentinaToday } from "../db-storage";
 import { audit } from "../audit";
-import { hasPermission } from "../permissions";
 import { requirePermission } from "../auth";
 import { db } from "../db";
 import { reservations, rooms as roomsTable, guests, guestPreferences, charges, payments, hospitalityAlerts, reservationCompanions, roomTypes as roomTypesTable, bedTypes } from "@shared/schema";
@@ -934,12 +933,12 @@ export function registerRoomsRoutes(app: Express) {
       if (Object.prototype.hasOwnProperty.call(req.body, "status")) {
         const current = await storage.getRoom(req.params.id);
         if (!current) return res.status(404).json({ error: "Room not found" });
-        if (req.body.status !== current.status &&
-            !hasPermission(req.user!.role, "api:housekeeping:supervisor-view")) {
+        if (req.body.status !== current.status) {
           return res.status(403).json({ error: "El estado de limpieza se gestiona desde Housekeeping por supervisión." });
         }
       }
-      const room = await storage.updateRoom(req.params.id, req.body);
+      const { status: _status, ...roomData } = req.body;
+      const room = await storage.updateRoom(req.params.id, roomData);
       if (!room) {
         return res.status(404).json({ error: "Room not found" });
       }

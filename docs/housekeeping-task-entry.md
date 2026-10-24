@@ -20,9 +20,10 @@ Validación: pruebas de componentes de Housekeeping, TypeScript y compilación.
 ## Revisión de estados y salidas
 
 El planning de Recepción muestra el estado sin ofrecer botones de cambio. El
-endpoint genérico de edición de habitaciones exige además supervisión de
-Housekeeping cuando se intenta cambiar realmente el estado; los formularios
-que envían el mismo estado pueden seguir editando otros datos.
+endpoint genérico de edición de habitaciones rechaza cambios de estado incluso
+para supervisión: las correcciones usan el endpoint de Housekeeping con sus
+controles y auditoría. Si llega el mismo estado se omite de la escritura para no
+pisar un cambio concurrente ni renovar la fecha de limpieza.
 
 La planificación de Housekeeping muestra el late check-out y su hora junto a
 la salida prevista. Se obtiene de la reserva actual en cada consulta y conserva
@@ -30,3 +31,16 @@ el refresco periódico existente (30 segundos); no implica checkout ni modifica
 la prioridad de tareas automáticamente.
 
 La renovación diaria recuperada se documenta en housekeeping-daily-service.md.
+
+## Correcciones excepcionales
+
+Habitaciones y Housekeeping comparten un diálogo con motivo obligatorio de
+hasta 500 caracteres y comparación del estado original. Cancelar no escribe;
+un conflicto conserva el motivo para revisión. El servidor exige supervisión y
+acceso a Housekeeping, registra usuario, motivo y estados antes/después en la
+misma transacción, y conserva la protección de tareas en curso.
+
+Corregir limpieza no registra un check-in: un cuarto vacío no puede marcarse
+ocupado. Limpiar un cuarto con estadía ingresada conserva su ocupación; marcarlo
+sucio también mantiene la ocupación. Las acciones normales de iniciar/finalizar
+una tarea conservan su flujo y no piden este motivo excepcional.

@@ -310,18 +310,24 @@ export function registerHousekeepingTaskRoutes(app: Express) {
             "inspected",
           ])
           .parse(req.body?.status);
+        const reason = z.string().trim().min(1, "Indicá el motivo de la corrección.").max(500).safeParse(req.body?.reason);
+        if (!reason.success) return res.status(400).json({error:"Indicá un motivo de entre 1 y 500 caracteres."});
         const saved = await withDatabaseTransaction(async () => {
           const before = await lockRoom(req.params.roomId);
+          if (req.body.expectedStatus !== undefined && req.body.expectedStatus !== before.status)
+            fail("El estado de la habitación cambió. Actualizá antes de corregirlo.");
           const occupied =
             (
               await db.execute(
                 sql`SELECT id FROM reservations WHERE room_id=${before.id} AND status='checked_in' LIMIT 1`,
               )
             ).rows.length > 0;
+          if (!occupied && ["occupied", "limpia_ocupada", "no_molestar"].includes(status))
+            fail("No hay una estadía ingresada. Esta corrección no registra un check-in.");
           const finalStatus =
             occupied && ["available", "inspected"].includes(status)
               ? "limpia_ocupada"
-              : status;
+              : occupied && status === "dirty" ? "occupied" : status;
           if (
             ["available", "inspected", "limpia_ocupada"].includes(finalStatus)
           ) {
@@ -339,6 +345,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
           await audit(req, before.id, "room_status", {
             before: before.status,
             after: finalStatus,
+            reason: reason.data,
           });
           return room;
         });

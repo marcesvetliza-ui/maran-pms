@@ -165,7 +165,7 @@ describe.skipIf(!enabled)(
       expect(
         (
           await api("PATCH", `/api/housekeeping/room/${id("room")}/status`, {
-            status: "available",
+            status: "available", reason: "Corrección de prueba",
           })
         ).status,
       ).toBe(403);
@@ -373,13 +373,34 @@ describe.skipIf(!enabled)(
         expect((await storage.getRoom(id("room"))).status).toBe(status);
       },
     );
+    it("requires a reason and saves it with the manual correction", async () => {
+      const path=`/api/housekeeping/room/${id("room")}/status`;
+      expect((await api("PATCH",path,{status:"available"})).status).toBe(400);
+      expect((await api("PATCH",path,{status:"available",reason:"   "})).status).toBe(400);
+      expect((await api("PATCH",path,{status:"available",reason:"Revisión presencial",expectedStatus:"occupied"})).status).toBe(409);
+      expect((await api("PATCH",path,{status:"available",reason:"Revisión presencial",expectedStatus:"dirty"})).status).toBe(200);
+      const log=await pool.query("SELECT details FROM audit_logs WHERE entity_id=$1 AND action='room_status' ORDER BY timestamp DESC LIMIT 1",[id("room")]);
+      expect(JSON.parse(log.rows[0].details)).toMatchObject({reason:"Revisión presencial",before:"dirty",after:"available"});
+    });
+    it("manual corrections preserve the entered stay and No mover", async () => {
+      await occupied();
+      const marker=(await storage.getReservation(id("reservation"))).housekeepingPreparation;
+      const path=`/api/housekeeping/room/${id("room")}/status`;
+      expect((await api("PATCH",path,{status:"available",expectedStatus:"dirty",reason:"Revisión de limpieza"})).body.status).toBe("limpia_ocupada");
+      expect((await api("PATCH",path,{status:"dirty",expectedStatus:"limpia_ocupada",reason:"Requiere repaso"})).body.status).toBe("occupied");
+      expect((await storage.getReservation(id("reservation"))).status).toBe("checked_in");
+      expect((await storage.getReservation(id("reservation"))).housekeepingPreparation).toEqual(marker);
+    });
+    it("does not create occupancy through manual cleaning correction", async () => {
+      expect((await api("PATCH",`/api/housekeeping/room/${id("room")}/status`,{status:"limpia_ocupada",reason:"Prueba"})).status).toBe(409);
+    });
     it("requires completion through the task instead of silently changing a running room to clean", async () => {
       const t = await task();
       await api("POST", `/api/housekeeping/${t.id}/start`);
       expect(
         (
           await api("PATCH", `/api/housekeeping/room/${id("room")}/status`, {
-            status: "available",
+            status: "available", reason: "Corrección de prueba",
           })
         ).status,
       ).toBe(409);

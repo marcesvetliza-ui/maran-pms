@@ -1,3 +1,4 @@
+import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
 import { formatDisplayDate } from "@shared/date-display";
@@ -1587,18 +1588,7 @@ export default function Housekeeping() {
     },
   });
 
-  const updateRoomStatusMutation = useMutation({
-    mutationFn: ({ roomId, status }: { roomId: string; status: RoomStatus }) => 
-      apiRequest("PATCH", `/api/housekeeping/room/${roomId}/status`, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Estado actualizado" });
-    },
-    onError: (error: Error) => {
-      toast({ title: "No se pudo confirmar el cambio", description: parseApiError(error), variant: "destructive" });
-    },
-  });
+  const updateRoomStatusMutation = useRoomStatusCorrection(rooms || []);
 
   const createTaskMutation = useMutation({
     mutationFn: (data: { roomId: string; taskType: string; priority: string; notes?: string; scheduledDate: string }) => 
@@ -1852,6 +1842,7 @@ export default function Housekeeping() {
 
   return (
     <div className="p-6 space-y-4">
+      {updateRoomStatusMutation.dialog}
       <div className="flex items-center gap-2">
         <ClipboardCheck className="h-6 w-6 text-muted-foreground" />
         <h1 className="text-2xl font-bold" data-testid="text-page-title">Housekeeping</h1>

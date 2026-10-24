@@ -94,10 +94,10 @@ describe("rooms routes — migradas a requirePermission", () => {
       expect((await patch({status:"dirty",notes:"Cambio de datos"})).status).toBe(200);
       expect((await patch({notes:"Sin estado"})).status).toBe(200);
     });
-    it("retains exceptional changes for authorized supervision", async () => {
+    it("requires even supervisors to use the audited Housekeeping endpoint", async () => {
       permissionsState.granted.add("jefe_recepcion:api:housekeeping:supervisor-view");
       app = await startApp("jefe_recepcion");
-      expect((await patch({status:"available"})).status).toBe(200);
+      expect((await patch({status:"available"})).status).toBe(403);
     });
   });
 
