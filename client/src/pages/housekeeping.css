@@ -13,7 +13,7 @@
   border: 1px solid hsl(var(--border));
   border-top: 3px solid var(--hk-accent);
   border-radius: 14px;
-  background: hsl(var(--background));
+  background: color-mix(in srgb, var(--hk-accent) 10%, hsl(var(--background)));
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.04);
 }
 .hk-room-card[data-status="available"], .hk-room-card[data-status="inspected"] { --hk-accent: #22a46f; }
@@ -23,6 +23,7 @@
 .hk-room-card[data-status="maintenance"] { --hk-accent: #e36c78; }
 .hk-room-card[data-status="limpia_ocupada"] { --hk-accent: #20a695; }
 .hk-room-card[data-status="no_molestar"] { --hk-accent: #a07bd4; }
+.dark .hk-room-card { background: color-mix(in srgb, var(--hk-accent) 16%, hsl(var(--background))); }
 .hk-room-content {
   display: flex;
   flex-direction: column;
