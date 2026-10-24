@@ -1,3 +1,4 @@
+import {HousekeepingBedSummary} from "./housekeeping-bed-summary";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {
   BedDouble,
@@ -7,6 +8,7 @@ import {
   Users,
   ClipboardCheck,
   Plus,
+  Lock,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -63,8 +65,10 @@ const roomStates: Record<string, string> = {
 export function HousekeepingPlanningView({
   onCreateTask,
   onEditTask,
+  onManageBlocks,
 }: {
   onCreateTask: (roomId: string | null, date: string) => void;
+  onManageBlocks?: (date: string) => void;
   onEditTask?: (task: PlanningTask) => void;
 }) {
   const { toast } = useToast();
@@ -159,11 +163,7 @@ export function HousekeepingPlanningView({
           <span className="block text-xs font-normal">Salida prevista: no libera la habitación hasta el checkout efectivo.</span>
         </p>
       )}
-      <p>
-        <span className="font-medium">Camaje requerido:</span>{" "}
-        {r.bedTypeName || "Sin especificar"}
-        {r.bedTypeNotes && <> · {r.bedTypeNotes}</>}
-      </p>
+      <HousekeepingBedSummary request={r} />
       <p
         className={
           r.comparison === "different"
@@ -194,20 +194,6 @@ export function HousekeepingPlanningView({
           {o.text}
         </p>
       ))}
-      {r.bedPreparation && (
-        <p
-          className={
-            r.preparationCurrent
-              ? "text-green-700 dark:text-green-300"
-              : "text-amber-700 dark:text-amber-300"
-          }
-        >
-          {r.preparationCurrent
-            ? "Preparación confirmada"
-            : "Confirmación anterior: requiere revisión"}{" "}
-          · {formatHotelDateTime(r.bedPreparation.confirmedAt)}
-        </p>
-      )}
       {room && room.active && data?.mode !== "past" && (
         <Button
           size="sm"
@@ -243,6 +229,7 @@ export function HousekeepingPlanningView({
             <Plus className="h-4 w-4" /> Crear y asignar tareas
           </Button>
         )}
+        {onManageBlocks && <Button variant="outline" className="gap-2" onClick={()=>onManageBlocks(date)}><Lock className="h-4 w-4" />Bloqueos por fechas</Button>}
         <div className="flex flex-wrap gap-3 items-end">
           <label className="text-sm font-medium">
             Fecha de planificación

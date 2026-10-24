@@ -193,3 +193,11 @@ it("shows late checkout time as a forecast and refreshes changed times", async (
   await queryClient.invalidateQueries({queryKey:["/api/housekeeping/planning"]});
   expect(await screen.findByText(/Late check-out · 16:00/)).toBeInTheDocument();
 });
+
+it("opens centralized date blocks for the selected planning date", async () => {
+  const blocks=vi.fn();
+  render(<QueryClientProvider client={queryClient}><HousekeepingPlanningView onCreateTask={vi.fn()} onManageBlocks={blocks}/></QueryClientProvider>);
+  fireEvent.change(screen.getByLabelText("Fecha de planificación"),{target:{value:future}});
+  fireEvent.click(await screen.findByRole("button",{name:"Bloqueos por fechas"}));
+  expect(blocks).toHaveBeenCalledWith(future);
+});

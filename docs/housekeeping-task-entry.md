@@ -44,3 +44,23 @@ Corregir limpieza no registra un check-in: un cuarto vacío no puede marcarse
 ocupado. Limpiar un cuarto con estadía ingresada conserva su ocupación; marcarlo
 sucio también mantiene la ocupación. Las acciones normales de iniciar/finalizar
 una tarea conservan su flujo y no piden este motivo excepcional.
+
+## Cierre de presentación y bloqueos
+
+Los bloqueos se gestionan desde un acceso general de Planificación por fecha,
+con selección de habitación, alta, edición y eliminación. Se retiran del modal
+operativo de detalles/notas. Se conserva la confirmación de reservas
+superpuestas y se detiene el guardado cuando falla la consulta de conflictos.
+Crear un bloqueo requiere motivo. Retirar uno no promete liberar una habitación
+ocupada ni retirar otros bloqueos.
+
+El camaje distingue la solicitud de la reserva, el estado físico actual y la
+preparación confirmada para esa reserva. Una confirmación obsoleta se marca para
+revisión; una solicitud no se presenta como trabajo realizado. En la tarjeta
+diaria el camaje físico es visible y se puede abrir su edición directamente.
+Reportar una avería abre la orden de mantenimiento sin efectuar primero una
+corrección de limpieza que quedaría sin confirmar al navegar.
+
+Prueba local de navegador con APIs simuladas: camaje pendiente, acceso global a
+bloqueos, fallo de consulta sin escritura y reservas superpuestas con cancelación
+sin escritura. Sin cambios en datos operativos ni llamadas fiscales.
