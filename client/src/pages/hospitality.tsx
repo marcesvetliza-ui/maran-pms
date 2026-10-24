@@ -1,3 +1,4 @@
+import {HospitalitySpecialDates} from "@/components/hospitality-special-dates";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -1250,6 +1251,8 @@ function HistoryTab() {
 
 // ========== MAIN PAGE ==========
 export default function HospitalityPage() {
+  const {hasPermission}=useAuth();
+  const canCampaign=hasPermission("api:hospitality:campaigns");
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-3">
@@ -1261,13 +1264,15 @@ export default function HospitalityPage() {
       </div>
 
       <Tabs defaultValue="dashboard">
-        <TabsList className="grid w-full max-w-2xl grid-cols-4" data-testid="hospitality-tabs">
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1" data-testid="hospitality-tabs">
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="preferences" data-testid="tab-preferences">Preferencias</TabsTrigger>
           <TabsTrigger value="stay-notes" data-testid="tab-stay-notes">Notas de Estadía</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">Historial</TabsTrigger>
+          {canCampaign&&<TabsTrigger value="special-dates" data-testid="tab-special-dates">Fechas especiales</TabsTrigger>}
         </TabsList>
 
+        {canCampaign&&<TabsContent value="special-dates" className="mt-6"><HospitalitySpecialDates/></TabsContent>}
         <TabsContent value="dashboard" className="mt-6">
           <DashboardTab />
         </TabsContent>

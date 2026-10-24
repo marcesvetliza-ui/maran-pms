@@ -190,6 +190,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * que cualquier resourceKey agregado después del seed inicial.
  */
 export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
+  "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
   // conexiones y mapeos (crear/editar/borrar/sincronizar catálogo).
   "api:channex:config": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
@@ -439,6 +440,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:reports:export-pdf": { label: "Exportar informe a PDF", section: "API — Reportes" },
   "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
 
+  "api:hospitality:campaigns": {label:"Fechas especiales: contactos, mensajes y envíos",section:"API — Hospitalidad"},
   "api:revenue:read": { label: "Ver tablero, Pace, demanda, competencia y sugerencias", section: "Revenue Management" },
   "api:revenue:events-write": { label: "Agregar, modificar y eliminar eventos de demanda", section: "Revenue Management" },
   "api:revenue:competitor-write": { label: "Agregar, modificar y eliminar tarifas de competencia", section: "Revenue Management" },
