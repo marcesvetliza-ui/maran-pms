@@ -48,6 +48,7 @@ import { registerRoomsRoutes } from "./routes/rooms";
 import { registerRevenueRoutes } from "./routes/revenue";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
 import { audit } from "./audit";
+import { kitchenPrintingKey, kitchenPrintingSchema, readKitchenPrinting } from "../shared/kitchen-printing";
 import { registerGuestsRoutes } from "./routes/guests";
 import { registerReservationsRoutes } from "./routes/reservations";
 import { registerReservationWaitlistRoutes } from "./routes/reservationWaitlist";
@@ -870,6 +871,25 @@ export async function registerRoutes(
   });
 
   // System Settings
+  app.get("/api/kitchen-printing/settings", requireAuth, requireRole(["admin"]), async (_req, res) => {
+    try {
+      const setting = await storage.getSystemSetting(kitchenPrintingKey);
+      res.json(readKitchenPrinting(setting?.value));
+    } catch {
+      res.status(500).json({ error: "No se pudo consultar la impresión de comandas" });
+    }
+  });
+  app.put("/api/kitchen-printing/settings", requireAuth, requireRole(["admin"]), async (req, res) => {
+    const parsed = kitchenPrintingSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Configuración inválida" });
+    try {
+      await storage.upsertSystemSetting({ key: kitchenPrintingKey, value: JSON.stringify(parsed.data), category: "printing", updatedBy: req.user!.id, updatedAt: new Date() });
+      await audit(req, "update", "settings", `Impresión de comandas: ${JSON.stringify(parsed.data)}`);
+      res.json(parsed.data);
+    } catch {
+      res.status(500).json({ error: "No se pudo guardar la impresión de comandas" });
+    }
+  });
   app.get("/api/admin/settings", async (req, res) => {
     try {
       const category = req.query.category as string | undefined;
@@ -896,6 +916,7 @@ export async function registerRoutes(
   });
 
   app.put("/api/admin/settings", async (req, res) => {
+    if (req.body?.key === kitchenPrintingKey) return res.status(400).json({ error: "Utilizá Configuración → Impresión de comandas" });
     try {
       const { key, value, category, description, updatedBy } = req.body;
       if (!key || value === undefined || value === null) {
@@ -920,6 +941,7 @@ export async function registerRoutes(
   });
 
   app.delete("/api/admin/settings/:key", async (req, res) => {
+    if (req.params.key === kitchenPrintingKey) return res.status(400).json({ error: "Utilizá Configuración → Impresión de comandas" });
     try {
       await storage.deleteSystemSetting(req.params.key);
       res.status(204).send();
