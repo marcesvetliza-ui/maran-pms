@@ -62,3 +62,25 @@ Casos: lectura sin caja; receptor/tipo incompatible; pagos parciales y divididos
 transferencia con descuento; voucher concurrente, respuesta perdida y recarga;
 fallo de stock con rollback; factura posterior con los mismos recibos.
 Los emisores de pruebas son simulados. No se usan turnos, pagos ni ARCA reales.
+
+## Catálogo de cargos adicionales
+
+Agregar cargo busca por nombre (sin distinguir tildes) y filtra Todos / Restaurant /
+SPA. Usa el menú activo y disponible de Restaurant, los tratamientos SPA activos
+con precio, y artículos de venta directa de ambas áreas. Los artículos ya
+representados por un producto del menú no se duplican en el selector.
+
+Los precios de menú/tratamiento se completan y verifican nuevamente en servidor;
+un cambio de precio obliga a volver a seleccionar. Inventario sólo tiene costo:
+para un artículo sin precio de venta se solicita el importe, sin usar su costo
+como precio. Cargo manual queda separado y no vincula productos ni stock.
+
+Los consumos nuevos conservan su fuente de catálogo en el comando. El servidor
+usa el nombre real; para Restaurant expande la receta, subrecetas, cantidades y
+merma con el planificador existente, o su vínculo de venta directa. Un plato sin
+receta/vínculo válido se rechaza con explicación. El depósito se resuelve con la
+misma regla de Restaurant. El plan queda persistido por cargo y el cierre reutiliza
+ese mismo trabajo; reintentar o facturar después no consume otra vez.
+
+Este flujo agrega consumos nuevos; no importa ni vuelve a cobrar comandas que ya
+estén registradas en Restaurant.

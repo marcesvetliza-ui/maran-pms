@@ -1,14 +1,15 @@
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { PoolClient } from "pg";
-import { consumeStockLines } from "../../../inventoryStockEngine";
+import { resolveSpaCatalogCharge } from "./catalog";
+import { consumeStockLines, type ConsumptionLine } from "../../../inventoryStockEngine";
 import { FundingError, hash, identifier, moneyMethods, number, requirePermission, stableId, type Actor } from "../contracts";
 import { SqlFundingAdapter } from "../adapters";
 import type { PaymentFundingService } from "../service";
 
 const cents=z.number().int().positive().max(9999999999);
 export const spaAccountCommand=z.discriminatedUnion("action",[
- z.object({action:z.literal("add-charge"),description:z.string().trim().min(1).max(300),quantity:z.number().int().positive().max(9999),unitCents:cents,inventoryItemId:z.string().min(1).optional()}).strict(),
+ z.object({action:z.literal("add-charge"),description:z.string().trim().min(1).max(300),quantity:z.number().int().positive().max(9999),unitCents:cents,inventoryItemId:z.string().min(1).optional(),catalogItem:z.object({source:z.enum(["restaurant","spa","inventory"]),id:z.string().min(1)}).strict().optional()}).strict(),
  z.object({action:z.literal("void-charge"),itemId:z.string().min(1),reason:z.string().trim().min(3).max(500)}).strict(),
  z.object({action:z.literal("payment"),amountCents:cents,method:z.enum(moneyMethods),shiftId:z.string().min(1),notes:z.string().trim().max(500).default("")}).strict(),
  z.object({action:z.literal("room-transfer"),reservationId:z.string().min(1),expectedCents:cents,reason:z.string().trim().min(3).max(500)}).strict(),
@@ -46,11 +47,10 @@ async function syncAccount(service:PaymentFundingService,c:PoolClient,id:string,
  await c.query(`UPDATE ${s}.folios SET total_charges=$2 WHERE id=$1`,[folio.id,total]);
  await adapter.refreshFolio(c,{kind:"spa",id});
 }
-async function productConsumption(c:PoolClient,s:string,itemId:string,productId:string,quantity:number,actor:Actor) {
+async function productConsumption(c:PoolClient,s:string,itemId:string,lines:ConsumptionLine[],actor:Actor) {
  const old=(await c.query("SHOW search_path")).rows[0].search_path;
  await c.query("SELECT set_config('search_path',$1,true)",[`${s},public`]);
  try {
-  const lines=[{itemId:productId,quantity}];
   await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`inventory-consumption:spa_account_item:${itemId}`]);
   await c.query(`INSERT INTO ${s}.inventory_consumption_jobs(source_type,source_id,lines,actor) VALUES('spa_account_item',$1,$2,$3)`,[itemId,JSON.stringify(lines),actor.id]);
   await c.query("SAVEPOINT spa_product_stock");
@@ -84,17 +84,16 @@ export async function executeSpaAccountCommand(service:PaymentFundingService,id:
   if(request.action==="add-charge") {
    const subtotal=request.quantity*request.unitCents;
    if(!Number.isSafeInteger(subtotal)||subtotal>9999999999) throw new FundingError("INVALID_AMOUNT","El importe del cargo supera el límite.",422);
-   if(request.inventoryItemId && !(await c.query(`SELECT i.id FROM ${s}.inventory_items i JOIN ${s}.item_categories cat ON cat.id=i.category_id
-    WHERE i.id=$1 AND i.is_active='true' AND i.item_kind='venta_directa' AND cat.area='spa' AND cat.is_active='true'
-     AND COALESCE(i.iva_rate,'21')='21' FOR SHARE OF i,cat`,[request.inventoryItemId])).rowCount)
-    throw new FundingError("INVALID_PRODUCT","Seleccioná un producto activo del catálogo SPA, con IVA 21%.",422);
+   if(request.inventoryItemId&&request.catalogItem)throw new FundingError("INVALID_PRODUCT","Elegí un único origen de catálogo.",422);
+   const catalog=request.catalogItem??(request.inventoryItemId?{source:"inventory" as const,id:request.inventoryItemId}:null);
+   const selected=catalog?await resolveSpaCatalogCharge(c,catalog.source,catalog.id,request.quantity,request.unitCents,schema):null;
    await invalidateDrafts(service,c,id,commandId,actor);
    const itemId=stableId(`spa-item:${id}:${commandId}`);
    await c.query(`INSERT INTO ${s}.spa_account_items(id,account_id,description,quantity,unit_price,subtotal,item_type,inventory_item_id,created_at)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())`,[itemId,id,request.description,request.quantity,request.unitCents/100,subtotal/100,request.inventoryItemId?"product":"extra",request.inventoryItemId??null]);
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,now())`,[itemId,id,selected?.description??request.description,request.quantity,request.unitCents/100,subtotal/100,selected?"product":"extra",selected?.inventoryItemId??null]);
    await c.query(`INSERT INTO ${s}.folio_movements(id,folio_id,type,amount,description,source_type,source_id,registered_by)
-    VALUES($1,$2,'charge',$3,$4,'spa_item',$5,$6)`,[stableId(`${commandId}:charge`),folio.id,subtotal/100,request.description,itemId,actor.id]);
-   if(request.inventoryItemId) await productConsumption(c,s,itemId,request.inventoryItemId,request.quantity,actor);
+    VALUES($1,$2,'charge',$3,$4,'spa_item',$5,$6)`,[stableId(`${commandId}:charge`),folio.id,subtotal/100,selected?.description??request.description,itemId,actor.id]);
+   if(selected) await productConsumption(c,s,itemId,selected.lines,actor);
    await syncAccount(service,c,id,s);
    result={...result,itemId};
   } else if(request.action==="void-charge") {

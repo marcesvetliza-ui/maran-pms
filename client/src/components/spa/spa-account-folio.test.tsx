@@ -13,7 +13,7 @@ beforeEach(()=>{
   items:[{id:"treatment",description:"Masaje integral",quantity:1,unitPrice:85000,subtotal:85000,itemType:"treatment",inventoryItemId:null}],payments:[],movements:[],operations:[],invoices:[],events:[]};
  vi.stubGlobal("fetch",vi.fn(async(url:string,init?:RequestInit)=>{
   const body=init?.body?JSON.parse(String(init.body)):undefined;calls.push({url,body});
-  if(url.endsWith("/product-catalog"))return ok([{id:"cream",name:"Crema"}]);
+  if(url.endsWith("/product-catalog"))return ok([{id:"cream",source:"inventory",area:"spa",name:"Crema",priceCents:null},{id:"soda",source:"restaurant",area:"restaurant",name:"Gaseosa limón",priceCents:250000}]);
   if(url.endsWith("/collection-shifts"))return ok([{id:"shift",label:"Mi caja"}]);
   if(url.endsWith("/room-targets"))return ok([{id:"reservation",roomNumber:"806",firstName:"Otro",lastName:"Huésped"}]);
   if(url.endsWith("/account")){
@@ -36,12 +36,12 @@ it("opens the account with charges, payments and balance before any billing step
 it("adds a product with a stable command, integer cents, quantity and inventory identity",async()=>{
  mount();await screen.findByText("Masaje integral");
  await userEvent.click(screen.getByRole("button",{name:"Agregar cargo"}));
- await userEvent.selectOptions(await screen.findByLabelText("Producto del cargo"),"cream");
+ await userEvent.selectOptions(await screen.findByLabelText("Producto del cargo"),"inventory:cream");
  await userEvent.clear(screen.getByLabelText("Cantidad"));await userEvent.type(screen.getByLabelText("Cantidad"),"2");
  await userEvent.type(screen.getByLabelText("Precio unitario"),"1250,50");
  await userEvent.click(screen.getByRole("button",{name:"Guardar cargo"}));
  await waitFor(()=>expect(calls.some(c=>c.body?.request.action==="add-charge")).toBe(true));
- expect(calls.find(c=>c.body)?.body).toEqual({commandId:expect.any(String),request:{action:"add-charge",description:"Crema",quantity:2,unitCents:125050,inventoryItemId:"cream"}});
+ expect(calls.find(c=>c.body)?.body).toEqual({commandId:expect.any(String),request:{action:"add-charge",description:"Crema",quantity:2,unitCents:125050,catalogItem:{source:"inventory",id:"cream"}}});
 });
 it("a lost payment response keeps the identical command on retry and after reopening",async()=>{
  const mounted=mount();await screen.findByText("Masaje integral");
@@ -93,4 +93,21 @@ it("a room charge cancelled in Reception stays closed in SPA and displays the ca
  await userEvent.click(screen.getByRole("tab",{name:"Historial"}));
  expect(screen.getByText(/Error de carga/)).toBeInTheDocument();
  expect(calls.filter(c=>c.body)).toHaveLength(0);
+});
+
+it('searches Restaurant by name, fills its sale price and shows the selected quantity subtotal',async()=>{
+ mount();await screen.findByText('Masaje integral');await userEvent.click(screen.getByRole('button',{name:'Agregar cargo'}));
+ await userEvent.type(await screen.findByLabelText('Buscar producto'),'limon');
+ await userEvent.selectOptions(screen.getByLabelText('Área del catálogo'),'restaurant');
+ expect(screen.queryByRole('option',{name:/Crema/})).not.toBeInTheDocument();
+ await userEvent.selectOptions(screen.getByLabelText('Producto del cargo'),'restaurant:soda');
+ expect(screen.getByLabelText('Precio unitario')).toHaveValue('2500.00');expect(screen.getByLabelText('Precio unitario')).toHaveAttribute('readonly');
+ await userEvent.clear(screen.getByLabelText('Cantidad'));await userEvent.type(screen.getByLabelText('Cantidad'),'2');expect(screen.getByText(/^\$\s*5\.000,00$/)).toBeInTheDocument();
+ await userEvent.click(screen.getByRole('button',{name:'Guardar cargo'}));await waitFor(()=>expect(calls.some(c=>c.body)).toBe(true));
+ expect(calls.find(c=>c.body)?.body.request).toEqual({action:'add-charge',description:'Gaseosa limón',quantity:2,unitCents:250000,catalogItem:{source:'restaurant',id:'soda'}});
+});
+it('keeps a deliberate manual charge separate from a catalog identity',async()=>{
+ mount();await screen.findByText('Masaje integral');await userEvent.click(screen.getByRole('button',{name:'Agregar cargo'}));
+ await userEvent.click(screen.getByRole('button',{name:'Cargo manual'}));await userEvent.type(screen.getByLabelText('Descripción'),'Extra acordado');await userEvent.type(screen.getByLabelText('Precio unitario'),'300');await userEvent.click(screen.getByRole('button',{name:'Guardar cargo'}));
+ await waitFor(()=>expect(calls.some(c=>c.body)).toBe(true));expect(calls.find(c=>c.body)?.body.request).toEqual({action:'add-charge',description:'Extra acordado',quantity:1,unitCents:30000});
 });

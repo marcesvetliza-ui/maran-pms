@@ -14,6 +14,7 @@ import { enrollAllSpaAccounts, enrollSpaAccount, scheduleSpaEnrollment } from ".
 import { getSpaRecipient, saveSpaRecipient } from "./recipient";
 import { executeSpaAccountCommand, spaAccountView } from "./account";
 import { applySpaPreferences } from "./preferences";
+import { spaChargeCatalog } from "./catalog";
 import { issueSpaVoucher } from "./voucher";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
@@ -109,9 +110,7 @@ export function mountOperationalSpaFunding(app:Express,options:{
  app.get("/api/payment-funding/spa/:accountId/product-catalog",options.authenticate,async(req,res)=>{
    try {
      requirePermission(actor(req),"funding:read");
-     res.json({ok:true,data:(await options.pool.query(`SELECT i.id,i.name FROM ${s}.inventory_items i JOIN ${s}.item_categories cat ON cat.id=i.category_id
-       WHERE i.is_active='true' AND i.item_kind='venta_directa' AND cat.area='spa' AND cat.is_active='true'
-        AND COALESCE(i.iva_rate,'21')='21' ORDER BY i.name,i.id`)).rows});
+     res.json({ok:true,data:await spaChargeCatalog(options.pool,schema)});
    }catch(error){fundingErrorResponse(res,error);}
  });
  app.get("/api/payment-funding/recipients/:guestId",options.authenticate,async(req,res)=>{

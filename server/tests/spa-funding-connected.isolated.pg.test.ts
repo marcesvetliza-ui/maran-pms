@@ -162,6 +162,7 @@ it("account browser: charge, void, room transfer and history use the same accoun
  await browserExpect(page.getByText("Tratamiento sintético",{exact:true})).toBeVisible();
  await browserExpect(page.getByRole("button",{name:"Revisar factura",exact:true})).toHaveCount(0);
  await page.getByRole("button",{name:"Agregar cargo",exact:true}).click();
+ await page.getByRole("button",{name:"Cargo manual",exact:true}).click();
  await page.getByLabel("Descripción",{exact:true}).fill("Extra de prueba UI");
  await page.getByLabel("Precio unitario",{exact:true}).fill("5000");
  await page.getByRole("button",{name:"Guardar cargo",exact:true}).click();
@@ -299,4 +300,23 @@ it('browser reviews without a cash shift, then issues and recovers one real loca
  expect((await pool.query("SELECT count(*)::int AS n FROM funding_demo.sales_invoices WHERE spa_account_id=$1 AND tipo_comprobante='cierre_spa'",[id])).rows[0].n).toBe(1);
  expect((await pool.query('SELECT count(*)::int AS n FROM funding_demo.spa_payments WHERE account_id=$1',[id])).rows[0].n).toBe(2);
  await page.close();
+},60000);
+it('browser adds a searchable Restaurant product with its sale price and closes without duplicate stock',async()=>{
+ const id=`spa-catalog-browser-${randomUUID()}`,scope=await seedSyntheticScope(service,id,'spa',{partial:true}),p=randomUUID(),m=randomUUID();
+ await pool.query('DELETE FROM payment_funding.documents WHERE scope_id=$1',[id]);await pool.query('DELETE FROM payment_funding.receipts WHERE scope_id=$1',[id]);
+ await pool.query("DELETE FROM funding_demo.folio_movements WHERE folio_id=$1 AND type='payment'",[`${id}:folio`]);await pool.query('DELETE FROM funding_demo.cash_movements WHERE payment_id IN (SELECT id FROM funding_demo.spa_payments WHERE account_id=$1)',[id]);await pool.query('DELETE FROM funding_demo.spa_payments WHERE account_id=$1',[id]);
+ await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1,total_paid=0 WHERE id=$1",[id]);await pool.query("UPDATE funding_demo.folios SET status='open',total_payments=0,balance=total_charges WHERE entity_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','Catálogo UI','consumidor_final','30111222')",[id]);await pool.query('INSERT INTO funding_demo.spa_treatments(id) VALUES($1)',[id]);await pool.query("INSERT INTO funding_demo.spa_appointments(id,guest_id,treatment_id,status) VALUES($1,$1,$1,'confirmed')",[id]);
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind) VALUES($1,'Gaseosa stock','true','unidad',10,100,'venta_directa')",[p]);await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[p]);await pool.query('INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,10,now())',[p]);await pool.query("INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())",[p]);await pool.query("INSERT INTO funding_demo.menu_items(id,name,price,inventory_item_id) VALUES($1,'Gaseosa limón UI',2500,$2)",[m,p]);
+ scenarios.push({id,title:'Catálogo Restaurant'});
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),errors:string[]=[],n=emissions;page.on('pageerror',e=>errors.push(e.message));
+ await page.goto(`${base}/connected-client.html`);await page.getByLabel('Escenario',{exact:true}).selectOption(id);await page.getByRole('button',{name:'Agregar cargo',exact:true}).click();
+ await page.getByLabel('Buscar producto',{exact:true}).fill('limon UI');await page.getByLabel('Área del catálogo',{exact:true}).selectOption('restaurant');await page.getByLabel('Producto del cargo',{exact:true}).selectOption(`restaurant:${m}`);
+ await browserExpect(page.getByLabel('Precio unitario',{exact:true})).toHaveValue('2500.00');await page.getByLabel('Cantidad',{exact:true}).fill('2');
+ await page.screenshot({path:'/tmp/spa-catalog-desktop.png',fullPage:true});await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);await page.screenshot({path:'/tmp/spa-catalog-mobile.png',fullPage:true});
+ await page.getByRole('button',{name:'Guardar cargo',exact:true}).click();await browserExpect(page.getByText('Gaseosa limón UI',{exact:true})).toBeVisible();
+ expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(8);
+ await page.getByRole('button',{name:'Ir a facturación',exact:true}).click();await page.getByLabel('Tipo de comprobante',{exact:true}).selectOption('cierre_spa');await page.getByLabel('Caja SPA del cobro',{exact:true}).selectOption(`${id}:shift`);await page.getByRole('button',{name:'Revisar comprobante',exact:true}).click();await page.getByRole('button',{name:'Confirmar cobro y emitir voucher',exact:true}).click();await browserExpect(page.getByText('Cuenta cerrada',{exact:true})).toBeVisible();
+ expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(8);expect(emissions).toBe(n);expect(errors).toEqual([]);await page.close();
 },60000);

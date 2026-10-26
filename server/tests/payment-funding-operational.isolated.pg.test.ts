@@ -577,9 +577,9 @@ it("out-of-stock product remains a saved charge with a pending consumption and n
  expect((await pool.query("SELECT 1 FROM funding_demo.stock_movements WHERE source_id=$1",[result.body.data.itemId])).rowCount).toBe(0);
  expect((await http(`/spa/${id}/account`)).body.data.totalCents).toBe(9510000);
 });
-it("SPA catalog rejects products from other areas or unsupported tax categories",async()=>{
+it("SPA catalog rejects unrelated areas or unsupported tax categories",async()=>{
  const f=await emptyAccount(),id=f.scope.id,p=randomUUID();
- await pool.query("INSERT INTO funding_demo.item_categories VALUES($1,'restaurant','true')",[p]);
+ await pool.query("INSERT INTO funding_demo.item_categories VALUES($1,'housekeeping','true')",[p]);
  await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind,category_id) VALUES($1,'Solo restaurant','true','unidad',5,1,'venta_directa',$1)",[p]);
  const request={action:"add-charge",description:"Producto inválido",quantity:1,unitCents:10000,inventoryItemId:p};
  expect((await accountCommand(id,request)).body.error.code).toBe("INVALID_PRODUCT");
@@ -1002,4 +1002,55 @@ it('stock failure rolls back voucher, cash, payment, discounts and account close
  const result=await http(`/spa/${id}/voucher`,request);expect(result.status).not.toBe(200);
  expect(await financialCounts(f.scope)).toEqual(before);
  const view=(await http(`/spa/${id}/account`)).body.data;expect(view.status).toBe('open');expect(view.totalCents).toBe(9500000);expect(view.invoices).toHaveLength(0);
+});
+
+async function catalogStock(unit='unidad',stock=10){
+ const p=randomUUID();await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind) VALUES($1,'Stock catálogo','true',$2,$3,50,'venta_directa')",[p,unit,stock]);
+ await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[p]);await pool.query('INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,$2,now())',[p,stock]);
+ await pool.query("INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())",[p]);return p;
+}
+it('Restaurant catalog uses sale prices, server names and the original stock; retries and later voucher do not consume twice',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,p=await catalogStock(),m=randomUUID();
+ await pool.query("INSERT INTO funding_demo.menu_items(id,name,price,inventory_item_id) VALUES($1,'Gaseosa limón',2500,$2)",[m,p]);
+ const catalog=(await http(`/spa/${id}/product-catalog`)).body.data;
+ expect(catalog).toContainEqual({id:m,name:'Gaseosa limón',source:'restaurant',area:'restaurant',priceCents:250000});
+ expect(catalog.some((r:any)=>r.source==='inventory'&&r.id===p)).toBe(false);
+ expect((await accountCommand(id,{action:'add-charge',description:'Desvío de precio',quantity:1,unitCents:1,catalogItem:{source:'inventory',id:p}})).body.error.code).toBe('INVALID_PRODUCT');
+ const request={action:'add-charge',description:'Nombre manipulado',quantity:2,unitCents:250000,catalogItem:{source:'restaurant',id:m}},cmd=randomUUID();
+ const result=await accountCommand(id,request,cmd);expect(result.status,JSON.stringify(result.body)).toBe(200);expect((await accountCommand(id,request,cmd)).status).toBe(200);
+ const item=(await pool.query('SELECT * FROM funding_demo.spa_account_items WHERE id=$1',[result.body.data.itemId])).rows[0];expect(item.description).toBe('Gaseosa limón');expect(Number(item.subtotal)).toBe(5000);expect(item.inventory_item_id).toBe(p);
+ expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(8);
+ const voucher={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:10000000,shiftId:`${id}:shift`}]};
+ expect((await http(`/spa/${id}/voucher`,voucher)).status).toBe(200);
+ expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(8);
+});
+it('a Restaurant recipe consumes its ingredient quantities and merma rather than a fictitious dish stock',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,p=await catalogStock('g',1000),m=randomUUID(),recipe=randomUUID(),mirror=randomUUID();
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind) VALUES($1,'Espejo plato','true','unidad',0,0,'plato')",[mirror]);
+ await pool.query("INSERT INTO funding_demo.menu_items(id,name,price,inventory_item_id) VALUES($1,'Preparación',5000,$2)",[m,mirror]);
+ await pool.query('INSERT INTO funding_demo.recipes(id,menu_item_id) VALUES($1,$2)',[recipe,m]);await pool.query("INSERT INTO funding_demo.recipe_ingredients(id,recipe_id,inventory_item_id,ingredient_name,quantity,unit,merma) VALUES($1,$2,$3,'Insumo',200,'g',20)",[randomUUID(),recipe,p]);
+ const result=await accountCommand(id,{action:'add-charge',description:'Preparación',quantity:2,unitCents:500000,catalogItem:{source:'restaurant',id:m}});expect(result.status,JSON.stringify(result.body)).toBe(200);
+ expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(500);
+ const voucher={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:10500000,shiftId:`${id}:shift`}]};
+ expect((await http(`/spa/${id}/voucher`,voucher)).status).toBe(200);expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(500);
+});
+it('stale prices, unavailable products and dishes without stock links cannot create partial charges',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,m=randomUUID(),before=await financialCounts(f.scope);
+ await pool.query("INSERT INTO funding_demo.menu_items(id,name,price) VALUES($1,'Sin vínculo',3000)",[m]);
+ const request={action:'add-charge',description:'Sin vínculo',quantity:1,unitCents:300000,catalogItem:{source:'restaurant',id:m}};
+ expect((await accountCommand(id,request)).body.error.code).toBe('INVALID_PRODUCT');
+ const p=await catalogStock();await pool.query('UPDATE funding_demo.menu_items SET inventory_item_id=$2 WHERE id=$1',[m,p]);
+ expect((await accountCommand(id,{...request,unitCents:1})).body.error.code).toBe('CATALOG_PRICE_CHANGED');
+ await pool.query("UPDATE funding_demo.menu_items SET is_available='false' WHERE id=$1",[m]);
+ expect((await accountCommand(id,request)).body.error.code).toBe('INVALID_PRODUCT');expect((await http(`/spa/${id}/product-catalog`)).body.data.some((r:any)=>r.id===m)).toBe(false);
+ expect((await http(`/spa/${id}/account`)).body.data.totalCents).toBe(9500000);expect(await financialCounts(f.scope)).toEqual(before);
+});
+it('SPA catalog includes additional treatments with their sale price and persists their own supply plan',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,t=randomUUID(),p=await catalogStock('ml',100);
+ await pool.query("INSERT INTO funding_demo.spa_treatments(id,name,price) VALUES($1,'Tratamiento adicional',10000)",[t]);await pool.query("INSERT INTO funding_demo.treatment_supplies VALUES($1,$2,$3,5,'ml')",[randomUUID(),t,p]);
+ expect((await http(`/spa/${id}/product-catalog`)).body.data).toContainEqual({id:t,name:'Tratamiento adicional',source:'spa',area:'spa',priceCents:1000000});
+ const r=await accountCommand(id,{action:'add-charge',description:'Tratamiento adicional',quantity:2,unitCents:1000000,catalogItem:{source:'spa',id:t}});expect(r.status,JSON.stringify(r.body)).toBe(200);
+ expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(90);
+ const voucher={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:11500000,shiftId:`${id}:shift`}]};
+ expect((await http(`/spa/${id}/voucher`,voucher)).status).toBe(200);expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(90);
 });

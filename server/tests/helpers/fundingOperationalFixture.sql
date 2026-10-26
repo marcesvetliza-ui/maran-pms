@@ -88,3 +88,7 @@ ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS credit_reapplic
 CREATE TABLE IF NOT EXISTS funding_demo.reservation_changelog(id bigserial PRIMARY KEY,reservation_id text,fecha timestamp DEFAULT now(),operador text,tipo text,descripcion text);
 
 CREATE TABLE IF NOT EXISTS funding_demo.invoice_counters(tipo_comprobante text,punto_venta int,ultimo_numero int,PRIMARY KEY(tipo_comprobante,punto_venta));
+ALTER TABLE funding_demo.spa_treatments ADD COLUMN IF NOT EXISTS name text,ADD COLUMN IF NOT EXISTS price numeric,ADD COLUMN IF NOT EXISTS is_active text DEFAULT 'true';
+CREATE TABLE IF NOT EXISTS funding_demo.menu_items(id text PRIMARY KEY,name text,price numeric,is_active text DEFAULT 'true',is_available text DEFAULT 'true',inventory_item_id text);
+CREATE TABLE IF NOT EXISTS funding_demo.recipes(id text PRIMARY KEY,menu_item_id text,is_active text DEFAULT 'true',production_yield numeric,production_unit text,output_inventory_item_id text);
+CREATE TABLE IF NOT EXISTS funding_demo.recipe_ingredients(id text PRIMARY KEY,recipe_id text,inventory_item_id text,sub_recipe_id text,ingredient_name text,quantity numeric,unit text,unit_cost numeric,warehouse_id text,merma numeric);

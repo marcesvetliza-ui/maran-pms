@@ -51,6 +51,8 @@ export function createFirstSpaClose(schema="public"): FirstSpaClose {
      await consume("spa_account",accountId,supplies.map(r=>({itemId:r.inventory_item_id,quantity:Number(r.quantity),unit:r.unit})));
      const products=(await c.query(`SELECT * FROM ${s}.spa_account_items WHERE account_id=$1 AND item_type='product' ORDER BY id FOR UPDATE`,[accountId])).rows;
      for(const row of products) {
+       const job=(await c.query(`SELECT lines FROM ${s}.inventory_consumption_jobs WHERE source_type='spa_account_item' AND source_id=$1 FOR UPDATE`,[row.id])).rows[0];
+       if(job){await consume("spa_account_item",row.id,job.lines);continue;}
        if(!row.inventory_item_id || !Number.isSafeInteger(row.quantity) || row.quantity<=0)
          throw new FundingError("INVENTORY_REVIEW_REQUIRED","Producto sin identidad o cantidad válida.");
        await consume("spa_account_item",row.id,[{itemId:row.inventory_item_id,quantity:row.quantity}]);
