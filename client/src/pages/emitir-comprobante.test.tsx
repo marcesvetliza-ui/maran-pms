@@ -13,6 +13,7 @@ import { queryClient } from "@/lib/queryClient";
  * construyan los motores de Venta/Compra/Movimiento sobre esta base.
  */
 
+vi.mock('@/components/spa/spa-receipt-workspace',()=>({SpaReceiptWorkspace:({accountId}:{accountId:string})=><p>Cuenta SPA conectada: {accountId}</p>}));
 let mockRole = "admin";
 // Mismos roles que api:emitir-comprobante:* en server/permissions.ts.
 const AREA_RESOURCE_ROLES: Record<string, string[]> = {
@@ -384,4 +385,10 @@ describe("EmitirComprobantePage — selección Área / Operación / Tipo", () =>
     expect(within(areaSelect).getByText("Alojamiento")).toBeInTheDocument();
     expect(areaSelect).toBeDisabled();
   });
+});
+
+it('opens the managed SPA account from its URL after reload without a session-storage snapshot',()=>{
+ vi.stubEnv('VITE_SPA_FUNDING_UI','true');window.history.replaceState({},'', '/operaciones/emitir-comprobante?spaAccountId=source-account');
+ sessionStorage.clear();try {renderPage();expect(screen.getByText('Cuenta SPA conectada: source-account')).toBeInTheDocument();expect(screen.queryByTestId('select-tipo')).not.toBeInTheDocument();}
+ finally {vi.unstubAllEnvs();window.history.replaceState({},'', '/');}
 });

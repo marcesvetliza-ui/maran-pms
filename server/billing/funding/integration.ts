@@ -6,7 +6,7 @@ import { SqlFundingAdapter, type FirstSpaClose } from "./adapters";
 import { PaymentFundingService } from "./service";
 import { FundingStore } from "./store";
 import { registerPaymentFundingRoutes, fundingErrorResponse } from "./routes";
-import { legacyFundingScopes, lockLegacyFundingScopes, releaseAfterLegacyResponse } from "./legacyFence";
+import { legacyFundingScopes, lockLegacyFundingScopes, releaseAfterLegacyResponse, isSpaOperationalRequest } from "./legacyFence";
 
 /** Mount BEFORE legacy billing/SPA/payment routes. No default enable, DDL or
  * implicit production connection. Caller provides trusted auth, fiscal gateway
@@ -23,7 +23,7 @@ export function mountPaymentFunding(app:Express,options:{
     spa:new SqlFundingAdapter("spa",schema,options.firstSpaClose),
   },options.fiscal);
   const fence:RequestHandler=async(req,res,next)=>{
-    if (["GET","HEAD","OPTIONS"].includes(req.method) || req.path.startsWith("/payment-funding/")) return next();
+    if (["GET","HEAD","OPTIONS"].includes(req.method) || req.path.startsWith("/payment-funding/") || isSpaOperationalRequest(req)) return next();
     const c=await options.pool.connect();
     let released=false;
     const release=async()=>{

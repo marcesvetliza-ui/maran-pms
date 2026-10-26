@@ -86,3 +86,5 @@ ALTER TABLE funding_demo.sales_invoices ADD COLUMN IF NOT EXISTS credit_reapplic
  ADD COLUMN IF NOT EXISTS reconciliation_updated_at timestamp;
 
 CREATE TABLE IF NOT EXISTS funding_demo.reservation_changelog(id bigserial PRIMARY KEY,reservation_id text,fecha timestamp DEFAULT now(),operador text,tipo text,descripcion text);
+
+CREATE TABLE IF NOT EXISTS funding_demo.invoice_counters(tipo_comprobante text,punto_venta int,ultimo_numero int,PRIMARY KEY(tipo_comprobante,punto_venta));

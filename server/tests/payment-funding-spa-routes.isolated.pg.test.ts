@@ -40,6 +40,15 @@ async function snapshot(accountId:string) {
 }
 beforeAll(async()=>{
   await installSyntheticSchema(pool);
+  await pool.query(`CREATE TABLE IF NOT EXISTS funding_demo.spa_appointments(id text PRIMARY KEY,guest_id text,treatment_id text,status text);
+  ALTER TABLE funding_demo.spa_appointments
+   ADD COLUMN IF NOT EXISTS cabin_id text, ADD COLUMN IF NOT EXISTS professional_id text,
+   ADD COLUMN IF NOT EXISTS guest_name text, ADD COLUMN IF NOT EXISTS guest_last_name text,
+   ADD COLUMN IF NOT EXISTS guest_phone text, ADD COLUMN IF NOT EXISTS guest_email text,
+   ADD COLUMN IF NOT EXISTS reservation_id text, ADD COLUMN IF NOT EXISTS appointment_date date,
+   ADD COLUMN IF NOT EXISTS start_time text, ADD COLUMN IF NOT EXISTS end_time text,
+   ADD COLUMN IF NOT EXISTS notes text, ADD COLUMN IF NOT EXISTS created_at timestamp,
+   ADD COLUMN IF NOT EXISTS sold_treatment_sale_id text`);
   await pool.query(`
     ALTER TABLE funding_demo.spa_account_items ADD COLUMN IF NOT EXISTS quantity int NOT NULL DEFAULT 1;
     ALTER TABLE funding_demo.spa_account_items ADD COLUMN IF NOT EXISTS unit_price numeric(10,2) NOT NULL DEFAULT 95000;
@@ -137,7 +146,7 @@ describe("real SPA routes behind the opt-in funding fence",()=>{
       ["POST",`spa/accounts/${s.id}/nc`,{}],
       ["PATCH",`spa/accounts/${s.id}/reset-nc`,{}],
       ["PATCH",`spa/payments/${s.id}:S1/anular`,{reason:"Synthetic"}],
-      ["PATCH",`spa/appointments/${s.id}:appointment`,{status:"completed"}],
+      ["PATCH",`spa/appointments/${s.id}:appointment`,{status:"completed",reservationId:"must-not-pass"}],
       ["POST","spa/accounts",{appointmentId:`${s.id}:appointment`,guestName:"Duplicate"}],
       ["POST",`admin/spa/fiscal-drafts/${invoiceId}/resolve`,{action:"discard"}],
       ["POST",`folios/${s.id}:folio/movements`,{type:"charge",amount:"1",description:"Legacy charge"}],
@@ -256,4 +265,14 @@ describe("real SPA routes behind the opt-in funding fence",()=>{
       });
     } finally {proceed();await written;await response;spy.mockRestore();}
   });
+});
+
+it('operational appointment actions reach their own validators while adopted financial scope stays unchanged',async()=>{
+ const {s}=await scope(),before=await snapshot(s.id),appointmentId=`${s.id}:missing-appointment`;
+ await pool.query('UPDATE funding_demo.spa_accounts SET appointment_id=$2 WHERE id=$1',[s.id,appointmentId]);
+ const status=await fetch(`${base}/api/spa/appointments/${appointmentId}`,{method:'PATCH',headers,body:JSON.stringify({status:'in_progress'})});
+ expect(status.status,await status.clone().text()).toBe(404);
+ const move=await fetch(`${base}/api/spa/appointments/${appointmentId}/move`,{method:'POST',headers,body:'{}'});
+ expect(move.status).toBe(400);
+ const after=await snapshot(s.id);expect(after.receipts).toEqual(before.receipts);expect(after.payments).toEqual(before.payments);expect(after.operations).toEqual(before.operations);
 });

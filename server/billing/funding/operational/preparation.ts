@@ -34,7 +34,10 @@ export async function prepareSpaDocument(service: PaymentFundingService, account
    const condition=String(g.vat_condition??"").trim().toLowerCase().replace(/[\s-]+/g,"_");
    if(!["responsable_inscripto","exento","consumidor_final","no_responsable","monotributo","monotributista","no_categorizado"].includes(condition))
      throw new FundingError("FISCAL_PREPARATION_REQUIRED","Falta una condición IVA válida en la ficha.");
-   const tipo=[1,4].includes(resolveCondicionIvaReceptorId(condition))?"FA":"FB";
+   const inferredTipo=[1,4].includes(resolveCondicionIvaReceptorId(condition))?"FA":"FB";
+   const tipo=preferences?.receiptType??inferredTipo;
+   if(!["FA","FB"].includes(tipo)) throw new FundingError("INVALID_RECEIPT_TYPE","El voucher se registra por su operación no fiscal.",422);
+   if(tipo!==inferredTipo) throw new FundingError("INVALID_RECEIPT_TYPE","El comprobante elegido no corresponde a la condición IVA del receptor. Revisá el tipo o la ficha fiscal.",422);
    const recipient={id:g.id,razonSocial:[g.first_name,g.last_name].filter(Boolean).join(" "),
      cuit:g.cuil_cuit||undefined,dni:g.document_number||undefined,documentType:g.document_type||undefined,
      condicionIva:condition,domicilio:g.direccion||g.address||undefined};

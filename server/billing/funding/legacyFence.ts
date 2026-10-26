@@ -2,6 +2,17 @@ import type { Request, Response } from "express";
 import type { PoolClient } from "pg";
 import { FundingError, identifier, type Scope } from "./contracts";
 
+/** Operational actions have their own auth, availability and stock checks.
+ * Never exempt identity, treatment, room settlement, cancellation or payments. */
+export function isSpaOperationalRequest(req:Pick<Request,"method"|"path"|"body">) {
+ if(req.method==="POST"&&/^\/spa\/appointments\/[^/]+\/move$/.test(req.path))return true;
+ if(req.method!=="PATCH"||!/^\/spa\/appointments\/[^/]+$/.test(req.path))return false;
+ const body=req.body;
+ return !!body&&typeof body==="object"&&!Array.isArray(body)&&Object.keys(body).length>0
+  &&Object.keys(body).every(key=>["status","notes"].includes(key))
+  &&(body.status===undefined||["confirmed","in_progress","completed"].includes(body.status));
+}
+
 /** Resolve persisted owners, never a browser-supplied assertion of ownership. */
 export async function legacyFundingScopes(c:PoolClient,req:Request,schema:string):Promise<Scope[]> {
   const s=identifier(schema),scopes:Scope[]=[];

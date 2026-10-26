@@ -944,12 +944,7 @@ export default function SpaPage() {
 
       if (!createdApt.settlementType && createdApt.accountId) {
         if (import.meta.env.VITE_SPA_FUNDING_UI === "true") {
-          // Las vías financieras legacy SPA quedan bloqueadas para todas las
-          // cuentas (ver docs/spa-module-cutover-20261016.md): completar la
-          // factura se hace desde el folio del turno, que ya usa el motor
-          // nuevo (SpaFundingGate), nunca navegando a /operaciones/emitir-comprobante.
-          setSelectedAppointment(createdApt);
-          setIsFolioOpen(true);
+          navigateToReceipt('/operaciones/emitir-comprobante?spaAccountId='+encodeURIComponent(createdApt.accountId));
         } else {
           const linkedReservation = variables.reservationId
             ? allReservations.find((reservation) => reservation.id === variables.reservationId)
@@ -3518,6 +3513,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 enabled={import.meta.env.VITE_SPA_FUNDING_UI === "true"}
                 userId={user?.id ?? ""} canWrite={!!user && hasPermission("funding:write")}
                 canAdopt={!!user && hasPermission("funding:historical")}
+                onBilling={() => { setIsFolioOpen(false); navigateToReceipt('/operaciones/emitir-comprobante?spaAccountId='+encodeURIComponent(selectedAccount.id)); }}
                 onCompleted={() => {
                   void queryClient.invalidateQueries({ queryKey: ["/api/spa/accounts/by-appointment"] });
                   void queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });

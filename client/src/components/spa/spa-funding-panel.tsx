@@ -26,7 +26,7 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   onPrepareDocument?: () => Promise<string>;
   recipientEditor?: ReactNode;
   operational?: boolean;
-  prefactura?: {applications:FundingRequest["applications"];collections:FundingRequest["newCollections"];selectionKey:string;valid:boolean;children:ReactNode};
+  prefactura?: {applications:FundingRequest["applications"];collections:FundingRequest["newCollections"];selectionKey:string;valid:boolean;reviewValid?:boolean;review?:ReactNode;children:ReactNode};
 }) {
   const key = fundingJournalKey(userId, accountId);
   const [projection, setProjection] = useState<FundingProjection>();
@@ -34,6 +34,9 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   const [pendingId, setPendingId] = useState<string>();
   const [rejectedPlanId, setRejectedPlanId] = useState<string>();
   const [preview, setPreview] = useState<FundingPreview>();
+  const [reviewed, setReviewed] = useState(false);
+  const reviewRef = useRef<HTMLDivElement>(null);
+  useEffect(()=>{if(reviewed)reviewRef.current?.scrollIntoView?.({behavior:"smooth",block:"start"});},[reviewed]);
   const [documentId, setDocumentId] = useState("");
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [newAmount, setNewAmount] = useState("");
@@ -106,7 +109,7 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   const active = pendingId || projection?.operations.find(item => !terminal(item))?.id;
   const locked = busy || !!active || !canWrite || fatalJournal.current;
   const resetPreview = () => setPreview(undefined);
-  useEffect(()=>setPreview(undefined),[prefactura?.selectionKey]);
+  useEffect(()=>{setPreview(undefined);setReviewed(false);},[prefactura?.selectionKey]);
   async function prepareDocument() {
     if (locked || !onPrepareDocument) return;
     const id = await onPrepareDocument();
@@ -119,6 +122,10 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
   }
   async function prepare() {
     if (!projection || locked) return;
+    setReviewed(true);
+    // Reading the proposed receipt must remain possible without a cash shift.
+    // No document, payment or fiscal operation is created in this branch.
+    if(prefactura&&!prefactura.valid)return;
     let selectedDocument = prefactura?await prepareDocument():documentId || (operational ? projection.documents.find(doc => doc.status === "draft")?.id : "");
     if (operational && !selectedDocument) selectedDocument = await prepareDocument();
     if (!selectedDocument) throw new Error("No se pudo preparar la factura. Revisá los datos del cliente.");
@@ -164,7 +171,7 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
     await refresh();
   }
   async function confirm() {
-    if (!preview || locked) return;
+    if (!preview || locked || (prefactura&&!prefactura.valid)) return;
     const confirmation = persistFundingConfirmation(key, preview);
     setPendingId(confirmation.operationId);
     let next = await reservePlan(confirmation);
@@ -256,13 +263,14 @@ export function SpaFundingPanel({ accountId, userId, canWrite, collectionShifts 
       </fieldset> : operational ? <p className="text-sm">Para registrar el pago, abrí tu caja SPA desde Caja.</p> : <p className="text-sm">Sin turno abierto verificado: el cobro de dinero nuevo está deshabilitado.</p>)}
       </>}
       {!canWrite && <p className="text-sm">Sólo consulta. No tenés permiso para confirmar operaciones.</p>}
-      <Button disabled={locked || (!!prefactura&&!prefactura.valid) || (!operational && !documentId)} onClick={() => void run(prepare)}>{operational ? "Revisar factura" : "Previsualizar financiación"}</Button>
+      <Button disabled={locked || (!!prefactura&&!(prefactura.reviewValid??prefactura.valid)) || (!operational && !documentId)} onClick={() => void run(prepare)}>{operational ? "Revisar factura" : "Previsualizar financiación"}</Button>
+      {reviewed&&prefactura?.review&&<div ref={reviewRef}>{prefactura.review}</div>}
       {preview && <div className="space-y-2 rounded border p-3">
         {prefactura&&projection.documents.filter(d=>d.id===documentId).map(d=><p key={d.id}>Facturar a: {String((d.snapshot.recipient as any)?.razonSocial??"")} · {String(d.snapshot.tipo??"")}</p>)}
         <p>Importe a facturar: <strong>{fundingMoney(preview.totalCents)}</strong></p>
         <p>{preview.fundingMode === "existing_only" ? "Cubierto por pagos registrados." : "Incluye el pago indicado."}</p>
         {preview.paymentMethods.map((row,index) => <p key={`${row.method}:${index}`}>{fundingMethodLabels[row.method]}: {fundingMoney(row.amountCents)}</p>)}
-        <Button disabled={locked} onClick={() => void run(confirm)}>{prefactura?"Registrar y emitir":operational ? "Confirmar y emitir factura" : "Confirmar y reservar fondos"}</Button>
+        <Button disabled={locked||!!prefactura&&!prefactura.valid} onClick={() => void run(confirm)}>{prefactura?"Registrar y emitir":operational ? "Confirmar y emitir factura" : "Confirmar y reservar fondos"}</Button>
       </div>}
       {rejectedPlanId && <Button disabled={busy || !canWrite} onClick={() => void run(reviseRejectedPlan)}>Revisar selección rechazada</Button>}
       {(active || operation) && <div className="space-y-2 rounded border p-3">

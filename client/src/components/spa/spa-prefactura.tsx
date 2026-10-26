@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { SpaFundingRecipientEditor } from "./spa-funding-recipient";
+import { SpaVoucherConfirmation, readSpaVoucherJournal } from "./spa-voucher-confirmation";
 import { SpaFundingPanel } from "./spa-funding-panel";
 
 const ivaLabels:Record<string,string>={consumidor_final:"Consumidor final",responsable_inscripto:"Responsable inscripto",exento:"Exento",monotributo:"Monotributo",monotributista:"Monotributo",no_responsable:"No responsable",no_categorizado:"No categorizado"};
@@ -20,11 +21,13 @@ export function SpaPrefactura(props:{accountId:string;userId:string;canWrite:boo
 function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onCompleted,onRoomTransfer}:{
  accountId:string;userId:string;canWrite:boolean;account:SpaAccountView;refreshAccount:()=>Promise<unknown>;onCompleted?:()=>void;onRoomTransfer?:()=>void;
 }) {
- const initial=spaPrefacturaSettingsSchema.safeParse(account.preferences);
+ const journal=readSpaVoucherJournal(userId,accountId);
+ const initial=spaPrefacturaSettingsSchema.safeParse(journal&&journal!=="damaged"?journal.settings:account.preferences);
  const [kind,setKind]=useState<SpaPrefacturaSettings["recipientKind"]>(initial.success?initial.data.recipientKind:"client");
  const [recipientId,setRecipientId]=useState(initial.success?initial.data.recipientId??"":""),[guestName,setGuestName]=useState("");
  const [discount,setDiscount]=useState(initial.success?initial.data.discount:null);
  const [discountValue,setDiscountValue]=useState(initial.success&&initial.data.discount?String(initial.data.discount.value):"");
+ const [receiptType,setReceiptType]=useState<SpaPrefacturaSettings["receiptType"]>(initial.success&&(account.status==="open"||!!journal)?initial.data.receiptType:undefined);
  const [notes,setNotes]=useState(initial.success?initial.data.notes:"");
  const [revision,setRevision]=useState(0),[shift,setShift]=useState("");
  const [savingTransfer,setSavingTransfer]=useState(false),[transferError,setTransferError]=useState("");
@@ -62,15 +65,20 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
  }catch{if(required)problem=problem||"Completá los importes de las formas de pago.";}
  if(required&&(!effectiveShift||shifts.isError))problem=problem||"Abrí tu caja SPA desde Caja para registrar el cobro.";
  if(preparedCents!==required)problem=problem||"Los importes de cobro deben sumar el nuevo cobro requerido.";
- const settings:SpaPrefacturaSettings={recipientKind:kind,...(kind!=="client"?{recipientId}:{}),discount:selectedDiscount,notes};
+ const settings:SpaPrefacturaSettings={...(receiptType?{receiptType}:{}),recipientKind:kind,...(kind!=="client"?{recipientId}:{}),discount:selectedDiscount,notes};
  const selectedCompany=context.data?.companies.find(c=>c.id===recipientId);
  const person=kind==="guest"?candidate.data:profile.data;
  const recipient=kind==="company"?{name:selectedCompany?.name??"",document:selectedCompany?.cuit??"",condition:selectedCompany?.vatCondition??"",address:selectedCompany?.address??""}:
   {name:[person?.firstName,person?.lastName].filter(Boolean).join(" "),document:person?.cuit||person?.documentNumber||"",condition:person?.vatCondition??"",address:person?.address??""};
  const condition=recipient.condition.trim().toLowerCase().replace(/[\s-]+/g,"_");
- const tipo=["responsable_inscripto","exento"].includes(condition)?"Factura A":"Factura B";
+ const inferredTipo=["responsable_inscripto","exento"].includes(condition)?"FA":"FB";
+ const effectiveType=receiptType??inferredTipo;
+ const tipo=effectiveType==="cierre_spa"?"Voucher SPA — no fiscal":effectiveType==="FA"?"Factura A":"Factura B";
+ const typeProblem=effectiveType!=="cierre_spa"&&effectiveType!==inferredTipo?"El tipo elegido no corresponde a la condición IVA. Revisá el comprobante o los datos fiscales.":effectiveType==="cierre_spa"&&context.data&&context.data.voucherPoint==null?"Revisá la configuración del punto de venta SPA antes de emitir el voucher.":"";
+ const [voucherPending,setVoucherPending]=useState(()=>readSpaVoucherJournal(userId,accountId)!==null);
+ const [voucherBusy,setVoucherBusy]=useState(false);
  const active=projection.data?.operations.some(o=>!["applied","aborted"].includes(o.status));
- const locked=!canWrite||!!active||account.operations.some(o=>!["applied","aborted"].includes(o.status))||savingTransfer;
+ const locked=!canWrite||!!active||account.operations.some(o=>!["applied","aborted"].includes(o.status))||savingTransfer||voucherPending||voucherBusy;
  const selectionKey=JSON.stringify({settings,applications,collections});
  const prepareAttempt=useRef<{selectionKey:string;body:unknown}|null>(null);
  function printSummary() {
@@ -84,21 +92,24 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
    ...rows.map(r=>`${fundingMethodLabels[r.method]}: ${r.value}`),`Observaciones: ${notes}`,"","Prefactura — no es un comprobante fiscal."].join("\n");
   win.document.body.append(title,text);win.focus();win.print();
  }
- return <div className="space-y-4">
-  <h3 className="text-xl font-semibold">Prefactura SPA <span className="text-sm font-normal text-muted-foreground">— {account.guestName}</span></h3>
-  <SpaFundingPanel key={`${userId}:${accountId}:${revision}`} accountId={accountId} userId={userId} canWrite={canWrite} operational collectionShifts={shifts.data??[]} onCompleted={onCompleted}
-   onPrepareDocument={async()=>{
-    if(!prepareAttempt.current||prepareAttempt.current.selectionKey!==selectionKey)prepareAttempt.current={selectionKey,body:{requestId:crypto.randomUUID(),expectedVersion:account.chargeVersion,settings}};
-    try {const prepared=await fundingApi.prepareDocument(accountId,prepareAttempt.current.body);prepareAttempt.current=null;await refreshAccount();return prepared.documentId;}
-    catch(e){await refreshAccount();throw e;}
-   }}
-   prefactura={{applications,collections,selectionKey,valid:!problem&&!context.isError&&!!context.data&&!!projection.data&&(kind==="client"||!!recipientId),children:<>
+ const reviewContent=<section aria-label="Revisión del comprobante SPA" className="space-y-3 rounded-lg border bg-muted/20 p-4">
+  <h4 className="font-semibold">Revisión · {tipo}</h4><p>{recipient.name||account.guestName}{recipient.document&&` · ${recipient.document}`}</p>
+  {ordinary.map(i=><p key={i.id} className="flex justify-between gap-3"><span>{i.description} × {i.quantity}</span><strong>{fundingMoney(Math.round(i.subtotal*100))}</strong></p>)}
+  <p className="flex justify-between"><span>Descuento</span><strong>−{fundingMoney(discountCents)}</strong></p>
+  <p className="flex justify-between border-t pt-2 text-lg"><span>Total del comprobante</span><strong>{fundingMoney(total)}</strong></p>
+  <p>Pagos anteriores: {fundingMoney(applied)} · Nuevo cobro: {fundingMoney(required)}</p>
+  {notes&&<p>Observaciones: {notes}</p>}
+  {typeProblem&&<p role="alert" className="text-destructive">{typeProblem}</p>}
+  {problem&&<p className="text-destructive">{problem} Podés revisar el comprobante; para confirmar el cobro debés resolver este punto.</p>}
+  <p className="text-sm text-muted-foreground">Esta revisión no cobra ni emite. {effectiveType==="cierre_spa"?"El voucher no tiene validez fiscal.":"La factura se autoriza únicamente al confirmar."}</p>
+ </section>;
+ const formContent=<>
     <fieldset disabled={locked} className="space-y-3 rounded-lg border bg-muted/20 p-4"><legend className="px-1 text-sm font-semibold">IDENTIDAD Y COMPROBANTE</legend>
      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <label>Facturar a<select aria-label="Facturar a" className="block w-full rounded border bg-background p-2" value={kind} onChange={e=>{setKind(e.target.value as typeof kind);setRecipientId("");}}><option value="client">Cliente SPA</option><option value="guest">Huésped</option><option value="company">Empresa</option></select></label>
       <label>Razón social / Nombre<Input readOnly value={recipient.name}/></label><label>DNI / CUIT<Input readOnly value={recipient.document}/></label><label>Condición IVA<Input readOnly value={ivaLabels[condition]||recipient.condition}/></label>
-      <label className="sm:col-span-2">Domicilio<Input readOnly value={recipient.address}/></label><label>Tipo de comprobante<Input readOnly value={tipo}/></label>
-      <label>Punto de venta<Input readOnly value={context.data?`PV ${String(context.data.point).padStart(4,"0")} — ${context.data.environment==="homologacion"?"Homologación":"Electrónico"}`:"Cargando…"}/></label>
+      <label className="sm:col-span-2">Domicilio<Input readOnly value={recipient.address}/></label><label>Tipo de comprobante<select aria-label="Tipo de comprobante" className="block min-h-10 w-full rounded border bg-background p-2" value={effectiveType} onChange={e=>setReceiptType(e.target.value as SpaPrefacturaSettings["receiptType"])}><option value="FA">Factura A</option><option value="FB">Factura B</option><option value="cierre_spa" disabled={account.status!=="open"}>Voucher SPA — no fiscal</option></select></label>
+      <label>Punto de venta<Input readOnly value={context.data&&(effectiveType!=="cierre_spa"||context.data.voucherPoint!=null)?`PV ${String(effectiveType==="cierre_spa"?context.data.voucherPoint:context.data.point).padStart(4,"0")} — ${effectiveType==="cierre_spa"?"No fiscal":context.data.environment==="homologacion"?"Homologación":"Electrónico"}`:context.data?"Revisar punto de venta SPA":"Cargando…"}/></label>
       <label>Condición de venta<Input readOnly value="Contado"/></label>
      </div>
      {context.isError&&<p role="alert">No se pudieron consultar las empresas y el punto de venta.</p>}
@@ -119,6 +130,7 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
      {!!required&&shifts.data&&shifts.data.length>1&&<label className="block">Caja SPA<select aria-label="Caja SPA del cobro" className="block w-full rounded border bg-background p-2" value={shift} onChange={e=>setShift(e.target.value)}><option value="">Seleccionar caja</option>{shifts.data.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></label>}
     </fieldset>
     <label className="block">Referencia / Observaciones del comprobante<Input value={notes} disabled={locked} onChange={e=>setNotes(e.target.value)}/></label>
+    {typeProblem&&<p role="alert" className="text-destructive">{typeProblem}</p>}
     {problem&&<p role="alert" className="text-destructive">{problem}</p>}
     {transferError&&<p role="alert" className="text-destructive">{transferError}</p>}
     <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={printSummary}>Imprimir resumen</Button>{onRoomTransfer&&<Button variant="outline" disabled={locked||account.paidCents>0||!discountValid} onClick={async()=>{
@@ -129,6 +141,17 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
      }catch(e){await refreshAccount();setTransferError((e as Error).message);}
      finally{transferring.current=false;setSavingTransfer(false);}
     }}>Cargar a habitación</Button>}</div>
-   </>}}/>
+   </>;
+ return <div className="space-y-4">
+  <h3 className="text-xl font-semibold">Prefactura SPA <span className="text-sm font-normal text-muted-foreground">— {account.guestName}</span></h3>
+  {effectiveType==="cierre_spa"||voucherPending?<SpaVoucherConfirmation accountId={accountId} userId={userId} canWrite={canWrite} valid={!problem&&!typeProblem&&discountValid&&!!projection.data&&!!context.data&&!active} selectionKey={selectionKey} settings={settings} expectedVersion={account.chargeVersion} collections={collections} review={reviewContent} form={formContent} onPending={setVoucherPending} onBusy={setVoucherBusy} onCompleted={()=>{void refreshAccount();onCompleted?.();}}/>:<>
+  <SpaFundingPanel key={`${userId}:${accountId}:${revision}`} accountId={accountId} userId={userId} canWrite={canWrite&&!voucherPending} operational collectionShifts={shifts.data??[]} onCompleted={onCompleted}
+   onPrepareDocument={async()=>{
+    if(!prepareAttempt.current||prepareAttempt.current.selectionKey!==selectionKey)prepareAttempt.current={selectionKey,body:{requestId:crypto.randomUUID(),expectedVersion:account.chargeVersion,settings}};
+    try {const prepared=await fundingApi.prepareDocument(accountId,prepareAttempt.current.body);prepareAttempt.current=null;await refreshAccount();return prepared.documentId;}
+    catch(e){await refreshAccount();throw e;}
+   }}
+   prefactura={{applications,collections,selectionKey,review:reviewContent,reviewValid:discountValid&&!context.isError&&!!context.data&&!!projection.data,valid:!typeProblem&&!problem&&!context.isError&&!!context.data&&!!projection.data&&(kind==="client"||!!recipientId),children:formContent}}/>
+  </>}
  </div>;
 }

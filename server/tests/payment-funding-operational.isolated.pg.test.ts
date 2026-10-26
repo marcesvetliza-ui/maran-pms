@@ -950,3 +950,56 @@ it("Reception corrections preserve existing discount offsets and their gross fol
  expect(Number(cached.total_charges)).toBe(270000);expect(Number(cached.total_payments)).toBe(180000);expect(Number(cached.balance)).toBe(90000);
  const next=await http(`/reservations/${f.id}/payment-corrections/preview`,{...request,paymentId:`${f.id}:debit`});expect(next.body.data.debtAfterCents).toBe(24300000);
 });
+
+it('rejects a fiscal type incompatible with the persisted recipient without preparing a document',async()=>{
+ const f=await emptyAccount(),before=await financialCounts(f.scope),n=sends;
+ const result=await http(`/spa/${f.scope.id}/prepare-document`,await prefactura(f.scope.id,{receiptType:'FA'}));
+ expect(result.status).toBe(422);expect(result.body.error.code).toBe('INVALID_RECEIPT_TYPE');
+ expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
+});
+it('issues an atomic non-fiscal voucher, replays the same identity and later invoices the same receipts',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,n=sends;
+ const request={...await prefactura(id,{receiptType:'cierre_spa',notes:'Voucher sintético'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:5000000,shiftId:`${id}:shift`},{rowId:'card',method:'tarjeta_debito',amountCents:4500000,shiftId:`${id}:shift`}]};
+ const issued=await http(`/spa/${id}/voucher`,request);expect(issued.status,JSON.stringify(issued.body)).toBe(200);
+ const replay=await http(`/spa/${id}/voucher`,request);expect(replay.body).toEqual(issued.body);expect(sends).toBe(n);
+ const invoice=(await pool.query('SELECT * FROM funding_demo.sales_invoices WHERE id=$1',[issued.body.data.invoiceId])).rows[0];
+ expect(invoice.tipo_comprobante).toBe('cierre_spa');expect(invoice.cae).toBeNull();expect(invoice.punto_venta).toBe(3);
+ expect((await financialCounts(f.scope)).payments).toBe(2);
+ const view=(await http(`/spa/${id}/account`)).body.data;expect(view.status).toBe('closed');expect(view.balanceCents).toBe(0);expect(view.canInvoice).toBe(true);
+ const second=await http(`/spa/${id}/voucher`,{...request,requestId:randomUUID()});expect(second.status).toBe(409);
+ const fiscal=await http(`/spa/${id}/prepare-document`,await prefactura(id,{receiptType:'FB'}));expect(fiscal.status,JSON.stringify(fiscal.body)).toBe(200);
+ const receipts=(await service.scope(f.scope,actor)).receipts;
+ const plan={scope:f.scope,documentId:fiscal.body.data.documentId,applications:receipts.map((r:any)=>({receiptId:r.id,amountCents:r.freeCents})),newCollections:[]};
+ const preview=await http('/previews',plan);expect(preview.status).toBe(200);
+ const operationId=randomUUID();expect((await http('/operations',{operationId,previewHash:preview.body.data.previewHash,request:plan})).status).toBe(200);
+ expect((await http(`/operations/${operationId}/authorize`,{})).status).toBe(202);
+ expect((await http(`/operations/${operationId}/finalize`,{})).status).toBe(200);
+ expect((await financialCounts(f.scope)).payments).toBe(2);expect(sends).toBe(n+1);
+});
+it('a voucher with a closed shift, stale charges, wrong sum or read-only actor creates no payment or receipt',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,before=await financialCounts(f.scope),n=sends;
+ const request={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'new',method:'efectivo',amountCents:9500000,shiftId:'missing-shift'}]};
+ expect((await http(`/spa/${id}/voucher`,request)).body.error.code).toBe('SHIFT_CLOSED');
+ expect((await http(`/spa/${id}/voucher`,{...request,expectedVersion:'0'.repeat(64)})).body.error.code).toBe('PREVIEW_STALE');
+ expect((await http(`/spa/${id}/voucher`,{...request,newCollections:[]})).body.error.code).toBe('FUNDING_TOTAL_MISMATCH');
+ expect((await http(`/spa/${id}/voucher`,request,{'x-role':'reader'})).status).toBe(403);
+ expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
+});
+it('concurrent voucher confirmations with different identities produce one receipt and one collection',async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ const request={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:9500000,shiftId:`${id}:shift`}]};
+ const results=await Promise.all([request,{...request,requestId:randomUUID()}].map(r=>http(`/spa/${id}/voucher`,r)));
+ expect(results.map(r=>r.status).sort()).toEqual([200,409]);expect((await financialCounts(f.scope)).payments).toBe(1);
+ expect(Number((await pool.query("SELECT count(*) FROM funding_demo.sales_invoices WHERE spa_account_id=$1 AND tipo_comprobante='cierre_spa'",[id])).rows[0].count)).toBe(1);
+});
+it('stock failure rolls back voucher, cash, payment, discounts and account close together',async()=>{
+ const f=await emptyAccount(),id=f.scope.id,before=await financialCounts(f.scope);
+ await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price) VALUES($1,'Sin stock voucher','true','ml',1,1)",[id]);
+ await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[id]);await pool.query("INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,1,now())",[id]);
+ await pool.query("INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())",[id]);
+ await pool.query("INSERT INTO funding_demo.treatment_supplies VALUES($1,$1,$1,2,'ml')",[id]);
+ const request={...await prefactura(id,{receiptType:'cierre_spa',discount:{type:'percent',value:10,reason:'Descuento sintético'}}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:8550000,shiftId:`${id}:shift`}]};
+ const result=await http(`/spa/${id}/voucher`,request);expect(result.status).not.toBe(200);
+ expect(await financialCounts(f.scope)).toEqual(before);
+ const view=(await http(`/spa/${id}/account`)).body.data;expect(view.status).toBe('open');expect(view.totalCents).toBe(9500000);expect(view.invoices).toHaveLength(0);
+});

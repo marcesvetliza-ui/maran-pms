@@ -16,10 +16,11 @@ beforeEach(()=>{
   const body=init?.body?JSON.parse(String(init.body)):undefined;calls.push({url,body});
   if(url.endsWith('/account'))return ok({id:scope.id,chargeVersion:'a'.repeat(64),preferences:null,guestName:'Cliente SPA',status:'open',totalCents:9500000,paidCents:unpaid?0:covered?9500000:500000,balanceCents:unpaid?9500000:covered?0:9000000,readOnly:false,canInvoice:true,transferred:null,
    items:[{id:'item',description:'Masaje SPA',quantity:1,unitPrice:95000,subtotal:95000,itemType:'treatment',inventoryItemId:null}],payments:[],movements:[],events:[],operations:[],invoices:[]});
-  if(url.endsWith('/prefactura-context'))return ok({environment:'homologacion',point:5,companies:[{id:'company',name:'Empresa RI',cuit:'20301234567',vatCondition:'responsable_inscripto',address:'Domicilio empresa'}]});
+  if(url.endsWith('/prefactura-context'))return ok({environment:'homologacion',point:5,voucherPoint:23,companies:[{id:'company',name:'Empresa RI',cuit:'20301234567',vatCondition:'responsable_inscripto',address:'Domicilio empresa'}]});
   if(url.endsWith('/recipient'))return ok({guestId:'customer',kind:'guest',firstName:'Cliente',lastName:'SPA',documentType:'DNI',documentNumber:'30111222',vatCondition:'consumidor_final',cuit:'',address:'Domicilio',editable:true});
   if(url.endsWith('/collection-shifts'))return noShift?new Response('Unavailable',{status:503}):ok([{id:'shift',label:'Mi caja SPA'}]);
   if(url.includes('/scopes/'))return ok({scope,debtCents:unpaid?9500000:covered?0:9000000,receipts:unpaid?[]:[{id:'r1',sourcePaymentId:'p1',method:'tarjeta_debito',amountCents:covered?9500000:500000,appliedCents:0,heldCents:0,freeCents:covered?9500000:500000,version:1}],documents:document?[document]:[],operations:operation?[operation]:[],rectifications:[]});
+  if(url.endsWith('/voucher'))return ok({invoiceId:'voucher-1',totalCents:9500000});
   if(url.endsWith('/prefactura-options'))return ok({saved:true});
   if(url.endsWith('/prepare-document')){
    if(deny)return new Response(JSON.stringify({ok:false,error:{code:'FISCAL_PREPARATION_REQUIRED',message:'Falta CUIT en la empresa.'}}),{status:409});
@@ -47,7 +48,7 @@ it('opens a source-filled prefactura without preparing, collecting or issuing au
 it('company, discount, two payment methods and an advance are sent in exact cents then emitted through the existing finalizer',async()=>{
  const done=vi.fn();mount(true,done);await screen.findByLabelText('Monto del cobro 1');
  await userEvent.selectOptions(screen.getByLabelText('Facturar a'),'company');await userEvent.selectOptions(screen.getByLabelText('Empresa a facturar'),'company');
- expect(screen.getByLabelText('Tipo de comprobante')).toHaveValue('Factura A');
+ expect(screen.getByLabelText('Tipo de comprobante')).toHaveValue('FA');
  await userEvent.click(screen.getByRole('button',{name:'Agregar descuento'}));await userEvent.type(screen.getByLabelText('Motivo del descuento'),'Beneficio');
  await waitFor(()=>expect(screen.getByLabelText('Monto del cobro 1')).toHaveValue('80500.00'));
  await userEvent.clear(screen.getByLabelText('Monto del cobro 1'));await userEvent.type(screen.getByLabelText('Monto del cobro 1'),'50000');
@@ -65,7 +66,7 @@ it('company, discount, two payment methods and an advance are sent in exact cent
 });
 it('rejects a mismatch in payment sums before preparing a document',async()=>{
  mount();const amount=await screen.findByLabelText('Monto del cobro 1');await userEvent.clear(amount);await userEvent.type(amount,'1');
- expect(screen.getByRole('button',{name:'Revisar factura'})).toBeDisabled();expect(calls.filter(c=>c.body)).toHaveLength(0);
+ await userEvent.click(screen.getByRole('button',{name:'Revisar factura'}));expect(await screen.findByRole('region',{name:'Revisión del comprobante SPA'})).toBeInTheDocument();expect(screen.queryByRole('button',{name:'Registrar y emitir'})).not.toBeInTheDocument();expect(calls.filter(c=>c.body)).toHaveLength(0);
 });
 it('a fully paid account can use its original receipts without an open cash shift',async()=>{
  covered=true;noShift=true;mount();const review=await screen.findByRole('button',{name:'Revisar factura'});
@@ -88,4 +89,27 @@ it('room charging saves the chosen discount first without requiring a cash shift
  await waitFor(()=>expect(transfer).toHaveBeenCalledOnce());
  expect(calls.find(c=>c.url.endsWith('/prefactura-options'))!.body.settings).toMatchObject({recipientKind:'client',discount:{type:'percent',value:10,reason:'Beneficio habitación'}});
  expect(calls.some(c=>c.url.endsWith('/prepare-document')||c.url.endsWith('/operations'))).toBe(false);
+});
+
+it('reviews an unpaid invoice with no open cash shift without writing or authorizing',async()=>{
+ unpaid=true;noShift=true;mount();await screen.findByLabelText('Monto del cobro 1');
+ await userEvent.click(screen.getByRole('button',{name:'Revisar factura'}));
+ expect(await screen.findByRole('region',{name:'Revisión del comprobante SPA'})).toHaveTextContent('95.000');
+ expect(screen.queryByRole('button',{name:'Registrar y emitir'})).not.toBeInTheDocument();expect(calls.filter(c=>c.body)).toHaveLength(0);
+});
+it('chooses a non-fiscal voucher and confirms only the outstanding collection, without fiscal requests',async()=>{
+ const done=vi.fn();mount(true,done);await screen.findByLabelText('Monto del cobro 1');
+ await userEvent.selectOptions(screen.getByLabelText('Tipo de comprobante'),'cierre_spa');
+ await userEvent.click(screen.getByRole('button',{name:'Revisar comprobante'}));
+ expect(calls.filter(c=>c.body)).toHaveLength(0);
+ await userEvent.click(screen.getByRole('button',{name:'Confirmar cobro y emitir voucher'}));
+ await waitFor(()=>expect(done).toHaveBeenCalledOnce());
+ const request=calls.find(c=>c.url.endsWith('/voucher'))!.body;
+ expect(request.settings.receiptType).toBe('cierre_spa');expect(request.newCollections).toEqual([{rowId:'new-collection',method:'efectivo',amountCents:9000000,shiftId:'shift'}]);
+ expect(calls.some(c=>c.url.endsWith('/prepare-document')||c.url.endsWith('/operations')||c.url.endsWith('/authorize'))).toBe(false);
+});
+it('shows an incompatible fiscal type without preparing or collecting',async()=>{
+ mount();await screen.findByLabelText('Monto del cobro 1');await userEvent.selectOptions(screen.getByLabelText('Tipo de comprobante'),'FA');
+ await userEvent.click(screen.getByRole('button',{name:'Revisar factura'}));
+ expect(await screen.findByRole('region',{name:'Revisión del comprobante SPA'})).toHaveTextContent('no corresponde');expect(calls.filter(c=>c.body)).toHaveLength(0);
 });

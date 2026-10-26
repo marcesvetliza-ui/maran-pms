@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fundingApi, FundingApiError, fundingMoney, fundingMethodLabels, fundingMethods, pesosToCents, centsToInput } from "@/lib/paymentFunding";
+import { readSpaVoucherJournal } from "./spa-voucher-confirmation";
 import { SpaFundingConnectedPanel } from "./spa-funding-connected-panel";
 
 const paymentLabels:Record<string,string>={cash:"Efectivo",debit_card:"Débito",credit_card:"Crédito",transfer:"Transferencia",mercadopago:"Mercado Pago"};
@@ -20,8 +21,8 @@ function readAccountCommand(key:string) {
  }catch{return {pending:null,damaged:true};}
 }
 
-export function SpaAccountFolio({accountId,userId,canWrite,onCompleted}:{accountId:string;userId:string;canWrite:boolean;onCompleted?:()=>void}) {
- const [tab,setTab]=useState("account"),[form,setForm]=useState<"charge"|"payment"|"transfer"|"void"|null>(null);
+export function SpaAccountFolio({accountId,userId,canWrite,onCompleted,onBilling,initialTab="account"}:{accountId:string;userId:string;canWrite:boolean;onCompleted?:()=>void;onBilling?:()=>void;initialTab?:"account"|"billing"}) {
+ const [tab,setTab]=useState<string>(initialTab),[form,setForm]=useState<"charge"|"payment"|"transfer"|"void"|null>(null);
  const [description,setDescription]=useState(""),[quantity,setQuantity]=useState("1"),[price,setPrice]=useState(""),[product,setProduct]=useState("");
  const [amount,setAmount]=useState(""),[method,setMethod]=useState<typeof fundingMethods[number]>("efectivo"),[shift,setShift]=useState("");
  const [target,setTarget]=useState(""),[reason,setReason]=useState(""),[itemId,setItemId]=useState("");
@@ -34,9 +35,10 @@ export function SpaAccountFolio({accountId,userId,canWrite,onCompleted}:{account
  const shifts=useQuery({queryKey:["/api/payment-funding/spa",accountId,"collection-shifts",userId],queryFn:()=>fundingApi.collectionShifts(accountId),enabled:form==="payment",retry:false});
  const rooms=useQuery({queryKey:["spa-account-room-targets",accountId],queryFn:()=>fundingApi.roomTargets(accountId),enabled:form==="transfer",retry:false});
  const catalog=useQuery({queryKey:["spa-account-products",accountId],queryFn:()=>fundingApi.productCatalog(accountId),enabled:form==="charge",retry:false});
- const data=account.data,locked=busy||!canWrite||!!data?.readOnly||!!pending||journal.damaged;
+ const voucherPending=readSpaVoucherJournal(userId,accountId)!==null;
+ const data=account.data,locked=voucherPending||busy||!canWrite||!!data?.readOnly||!!pending||journal.damaged;
  async function send(request:unknown,retry=false) {
-  if(inFlight.current||!canWrite||journal.damaged)return;
+  if(inFlight.current||!canWrite||journal.damaged||voucherPending)return;
   inFlight.current=true;
   setBusy(true);setError("");
   try {
@@ -61,11 +63,12 @@ export function SpaAccountFolio({accountId,userId,canWrite,onCompleted}:{account
  if(account.isError||!data)return <div role="alert"><p>{account.error?.message||"No se pudo cargar la cuenta."}</p><Button variant="outline" onClick={()=>void account.refetch()}>Volver a cargar</Button></div>;
  return <div className="space-y-4">
   <div className="flex flex-wrap gap-2 border-b pb-3" role="tablist" aria-label="Folio SPA">
-   {[["account","Cuenta"],["billing","Facturación"],["history","Historial"]].map(([value,label])=><Button key={value} role="tab" aria-selected={tab===value} variant={tab===value?"default":"outline"} onClick={()=>{setTab(value);setForm(null);}}>{label}</Button>)}
+   {[["account","Cuenta"],["billing","Facturación"],["history","Historial"]].map(([value,label])=><Button key={value} role="tab" aria-selected={tab===value} variant={tab===value?"default":"outline"} onClick={()=>{if(value==="billing"&&onBilling){onBilling();return;}setTab(value);setForm(null);}}>{label}</Button>)}
   </div>
+  {voucherPending&&<p role="alert">Hay un voucher pendiente. Abrí Facturación para consultar el mismo intento antes de registrar nuevos movimientos.</p>}
   {error&&<p role="alert" className="text-destructive">{error}</p>}
   {journal.damaged&&<p role="alert" className="text-destructive">No se pudo leer una acción pendiente. Solicitá revisión antes de registrar nuevos movimientos.</p>}
-  {pending&&<div className="rounded border p-3"><p>Hay una acción pendiente de confirmar.</p><Button disabled={busy||!canWrite} onClick={()=>void send(null,true)}>Reintentar la misma acción</Button></div>}
+  {pending&&<div className="rounded border p-3"><p>Hay una acción pendiente de confirmar.</p><Button disabled={busy||!canWrite||voucherPending} onClick={()=>void send(null,true)}>Reintentar la misma acción</Button></div>}
   {tab==="account"&&<>
    <div className="rounded border bg-muted/30 p-3"><p className="font-medium">{data.guestName}</p><p className="text-sm">{data.transferred?.cancelled?"Cargo anulado desde Recepción · el turno se mantiene":data.transferred?`Cuenta trasladada a Hab. ${data.transferred.roomNumber}`:data.status==="open"?"Cuenta abierta":"Cuenta cerrada"}</p></div>
    <section className="rounded-lg border"><div className="flex items-center justify-between gap-2 bg-muted/40 p-3"><h3 className="font-semibold">Tratamientos / Productos / Cargos adicionales</h3><Button size="sm" variant="outline" disabled={locked} onClick={()=>open("charge")}>Agregar cargo</Button></div>
@@ -84,10 +87,10 @@ export function SpaAccountFolio({accountId,userId,canWrite,onCompleted}:{account
     {form==="void"&&<><h4 className="font-semibold">Anular cargo: {data.items.find(i=>i.id===itemId)?.description}</h4><label className="block">Motivo de anulación<Input value={reason} disabled={locked} onChange={e=>setReason(e.target.value)}/></label><Button variant="destructive" disabled={locked||reason.trim().length<3} onClick={()=>void send({action:"void-charge",itemId,reason})}>Confirmar anulación del cargo</Button></>}
     <Button variant="ghost" disabled={busy||!!pending} onClick={()=>setForm(null)}>Cancelar</Button>
    </div>}
-   <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" disabled={locked||data.paidCents>0||data.totalCents===0} onClick={()=>open("transfer")}>Transferir a habitación</Button><Button disabled={!data.canInvoice||busy||!!pending||journal.damaged} onClick={()=>setTab("billing")}>Ir a facturación</Button></div>
+   <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" disabled={locked||data.paidCents>0||data.totalCents===0} onClick={()=>open("transfer")}>Transferir a habitación</Button><Button disabled={(!data.canInvoice&&!voucherPending)||busy||!!pending||journal.damaged} onClick={()=>onBilling?onBilling():setTab("billing")}>Ir a facturación</Button></div>
    {data.paidCents>0&&!data.readOnly&&<p className="text-xs text-muted-foreground">La transferencia completa a habitación está disponible para cuentas sin pagos.</p>}
   </>}
-  {tab==="billing"&&(data.canInvoice?<><Button variant="ghost" onClick={()=>setTab("account")}>Volver a la cuenta</Button><SpaFundingConnectedPanel accountId={accountId} userId={userId} canWrite={canWrite&&!pending&&!journal.damaged} onRoomTransfer={()=>{void account.refetch().then(()=>{setTab("account");open("transfer");});}} onCompleted={()=>{void account.refetch();onCompleted?.();setTab("account");}}/></>:<p>{data.transferred?.cancelled?"El cargo fue anulado desde Recepción; no vuelve a generar saldo en SPA.":data.transferred?`La cuenta se factura desde Recepción, Hab. ${data.transferred.roomNumber}.`:"Los comprobantes de esta cuenta se conservan en el historial."}</p>)}
+  {tab==="billing"&&((data.canInvoice||voucherPending)?<><Button variant="ghost" onClick={()=>setTab("account")}>Volver a la cuenta</Button><SpaFundingConnectedPanel accountId={accountId} userId={userId} canWrite={canWrite&&!pending&&!journal.damaged} onRoomTransfer={()=>{void account.refetch().then(()=>{setTab("account");open("transfer");});}} onCompleted={()=>{void account.refetch();onCompleted?.();setTab("account");}}/></>:<p>{data.transferred?.cancelled?"El cargo fue anulado desde Recepción; no vuelve a generar saldo en SPA.":data.transferred?`La cuenta se factura desde Recepción, Hab. ${data.transferred.roomNumber}.`:"Los comprobantes de esta cuenta se conservan en el historial."}</p>)}
   {tab==="history"&&<div className="space-y-3"><h3 className="font-semibold">Movimientos de la cuenta</h3>{data.movements.map(m=><div key={m.id} className="flex flex-wrap justify-between gap-2 rounded border p-3"><div><p>{movementLabels[m.type]||m.type} · {m.description}</p><p className="text-xs text-muted-foreground">{date(m.createdAt)}</p></div><strong>{fundingMoney(Math.round(m.amount*100))}</strong></div>)}{data.events.map((e,i)=><p key={i} className="text-sm">{date(e.createdAt)} · {actionLabels[e.action]||e.action}{e.reason&&` · ${e.reason}`}</p>)}{data.invoices.map(i=><div key={i.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-3"><span>{i.type} {i.point}-{i.number} · {fundingMoney(i.amountCents)} · {i.status}</span><a className="text-primary underline" href={`/api/billing/invoices/${encodeURIComponent(i.id)}/pdf`} target="_blank" rel="noreferrer">Ver comprobante</a></div>)}{data.operations.map(o=><p key={o.id} className="text-sm">Facturación · {o.status==="applied"?"Finalizada":o.status==="aborted"?"Cancelada":"Pendiente"}</p>)}{!data.movements.length&&!data.events.length&&!data.invoices.length&&<p>Sin movimientos adicionales.</p>}</div>}
  </div>;
 }

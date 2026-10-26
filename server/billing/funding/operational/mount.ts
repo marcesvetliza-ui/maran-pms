@@ -14,6 +14,7 @@ import { enrollAllSpaAccounts, enrollSpaAccount, scheduleSpaEnrollment } from ".
 import { getSpaRecipient, saveSpaRecipient } from "./recipient";
 import { executeSpaAccountCommand, spaAccountView } from "./account";
 import { applySpaPreferences } from "./preferences";
+import { issueSpaVoucher } from "./voucher";
 
 /** Call immediately after the application's auth gate, BEFORE every legacy
  * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
@@ -72,8 +73,9 @@ export function mountOperationalSpaFunding(app:Express,options:{
    try {
      requirePermission(actor(req),"funding:read");
      const config=(await options.pool.query(`SELECT arca_ambiente AS environment,punto_venta_homolog AS point FROM ${s}.billing_config ORDER BY id LIMIT 1`)).rows[0];
+     const voucherPoints=(await options.pool.query(`SELECT DISTINCT numero FROM ${s}.pos_configs WHERE area='spa' AND activo=true AND tipo='electronico' ORDER BY numero`)).rows;
      const companies=(await options.pool.query(`SELECT id,razon_social AS name,cuil_cuit AS cuit,condicion_iva AS "vatCondition",direccion AS address FROM ${s}.companies ORDER BY razon_social,id`)).rows;
-     res.json({ok:true,data:{...config,companies}});
+     res.json({ok:true,data:{...config,voucherPoint:voucherPoints.length===1?voucherPoints[0].numero:null,companies}});
    }catch(error){fundingErrorResponse(res,error);}
  });
  app.post("/api/payment-funding/spa/:accountId/prefactura-options",options.authenticate,async(req,res)=>{
@@ -82,6 +84,10 @@ export function mountOperationalSpaFunding(app:Express,options:{
      await service.store.transaction({kind:"spa",id:req.params.accountId},null,c=>applySpaPreferences(service,c,req.params.accountId,req.body,who,schema));
      res.json({ok:true,data:{saved:true}});
    }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/voucher",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await issueSpaVoucher(service,req.params.accountId,req.body,actor(req),schema)});}
+   catch(error){fundingErrorResponse(res,error);}
  });
  app.get("/api/payment-funding/spa/:accountId/account",options.authenticate,async(req,res)=>{
    try {res.json({ok:true,data:await spaAccountView(service,req.params.accountId,actor(req),schema)});}

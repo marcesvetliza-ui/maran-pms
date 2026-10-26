@@ -1,3 +1,4 @@
+import { SpaReceiptWorkspace } from "@/components/spa/spa-receipt-workspace";
 import {SpecialPurchaseForm} from '@/components/special-purchase-form';
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -143,6 +144,13 @@ function tiposParaSeleccion(operacion: Operacion, area: AreaId | ""): { value: s
 }
 
 export default function EmitirComprobantePage() {
+  const managedSpaAccountId = import.meta.env.VITE_SPA_FUNDING_UI === "true"
+    ? new URLSearchParams(window.location.search).get("spaAccountId") : null;
+  if (managedSpaAccountId) return <SpaReceiptWorkspace key={managedSpaAccountId} accountId={managedSpaAccountId}/>;
+  return <ComprobanteSelectionPage/>;
+}
+
+function ComprobanteSelectionPage() {
   const { hasPermission } = useAuth();
   const [spaContext,setSpaContext] = useState<any>(() => {
     const id=new URLSearchParams(window.location.search).get('spaAccountId');

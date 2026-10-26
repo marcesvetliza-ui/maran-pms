@@ -171,7 +171,10 @@ it("account browser: charge, void, room transfer and history use the same accoun
  await page.getByRole("button",{name:"Confirmar anulación del cargo",exact:true}).click();
  await browserExpect(page.getByText("Extra de prueba UI",{exact:true})).toHaveCount(0);
  await page.screenshot({path:"/workspace/entregables/spa-account-desktop.png",fullPage:true});
- await page.getByRole("button",{name:"Transferir a habitación",exact:true}).click();
+ await page.getByRole('tab',{name:'Facturación',exact:true}).click();
+ await page.getByRole('button',{name:'Agregar descuento',exact:true}).click();
+ await page.getByLabel('Motivo del descuento',{exact:true}).fill('Beneficio habitación UI');
+ await page.getByRole('button',{name:'Cargar a habitación',exact:true}).click();
  await page.getByLabel("Habitación de destino",{exact:true}).selectOption(target);
  await page.getByLabel("Motivo de transferencia",{exact:true}).fill("Solicitado por el cliente UI");
  await page.getByRole("button",{name:"Confirmar transferencia a habitación",exact:true}).click();
@@ -183,6 +186,7 @@ it("account browser: charge, void, room transfer and history use the same accoun
  await page.screenshot({path:"/workspace/entregables/spa-account-mobile.png",fullPage:true});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth)).toBe(false);
  expect((await pool.query("SELECT 1 FROM funding_demo.charges WHERE reservation_id=$1",[target])).rowCount).toBe(1);
+ expect(Number((await pool.query('SELECT amount FROM funding_demo.charges WHERE reservation_id=$1',[target])).rows[0].amount)).toBe(85500);
  expect((await pool.query("SELECT 1 FROM funding_demo.spa_payments WHERE account_id=$1",[id])).rowCount).toBe(0);
  expect((await pool.query("SELECT 1 FROM funding_demo.sales_invoices WHERE spa_account_id=$1",[id])).rowCount).toBe(0);
  expect(emissions).toBe(n);expect((await service.scope(scope,{id:"review",permissions:["funding:read"]})).operations).toHaveLength(0);
@@ -205,7 +209,7 @@ it("prefactura browser: company, discount, advance, split methods, printable sum
  await page.getByRole('tab',{name:'Facturación',exact:true}).click();
  await page.getByLabel('Facturar a',{exact:true}).selectOption('company');
  await page.getByLabel('Empresa a facturar',{exact:true}).selectOption(companyId);
- await browserExpect(page.getByLabel('Tipo de comprobante',{exact:true})).toHaveValue('Factura A');
+ await browserExpect(page.getByLabel('Tipo de comprobante',{exact:true})).toHaveValue('FA');
  await page.getByRole('button',{name:'Agregar descuento',exact:true}).click();
  await page.getByLabel('Motivo del descuento',{exact:true}).fill('Beneficio efectivo');
  await browserExpect(page.getByLabel('Monto del cobro 1',{exact:true})).toHaveValue('80500.00');
@@ -264,5 +268,35 @@ it("Reception browser explicitly restores NC coverage and recovers the same corr
  expect(Number((await pool.query('SELECT balance FROM funding_demo.folios WHERE id=$1',[folio])).rows[0].balance)).toBe(90000);
  expect((await pool.query("SELECT * FROM payment_funding.events WHERE event_key=$1",[`reservation-correction:${requests[0].operationId}`])).rows).toHaveLength(1);
  expect((await pool.query("SELECT * FROM funding_demo.cash_movements WHERE payment_id=$1 AND movement_type='expense'",[`${id}:card`])).rows).toHaveLength(0);
+ await page.close();
+},60000);
+
+it('browser reviews without a cash shift, then issues and recovers one real local voucher without fiscal calls',async()=>{
+ const id=`spa-voucher-browser-${randomUUID()}`,scope=await seedSyntheticScope(service,id,'spa',{partial:true});
+ await pool.query('DELETE FROM payment_funding.documents WHERE scope_id=$1',[id]);
+ await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1 WHERE id=$1",[id]);
+ await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
+ await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+ await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','Voucher UI','consumidor_final','30111222')",[id]);
+ await pool.query('INSERT INTO funding_demo.spa_treatments VALUES($1)',[id]);await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
+ scenarios.push({id,title:'Voucher UI'});
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),n=emissions,requests:any[]=[],errors:string[]=[];
+ page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()==='POST')requests.push({url:r.url(),body:r.postDataJSON()});});
+ await page.route('**/collection-shifts',r=>r.fulfill({json:{ok:true,data:[]}}));
+ await page.goto(`${base}/connected-client.html`);await page.getByLabel('Escenario',{exact:true}).selectOption(id);await page.getByRole('tab',{name:'Facturación',exact:true}).click();
+ await page.getByRole('button',{name:'Revisar factura',exact:true}).click();await browserExpect(page.getByRole('region',{name:'Revisión del comprobante SPA'})).toBeVisible();
+ expect(requests).toHaveLength(0);await browserExpect(page.getByRole('button',{name:'Registrar y emitir',exact:true})).toHaveCount(0);
+ await page.unroute('**/collection-shifts');await page.reload();await page.getByLabel('Escenario',{exact:true}).selectOption(id);await page.getByRole('tab',{name:'Facturación',exact:true}).click();
+ await page.getByLabel('Tipo de comprobante',{exact:true}).selectOption('cierre_spa');await page.getByLabel('Caja SPA del cobro',{exact:true}).selectOption(`${id}:shift`);
+ await page.getByRole('button',{name:'Revisar comprobante',exact:true}).click();await page.setViewportSize({width:390,height:844});
+ await page.screenshot({path:'/tmp/spa-voucher-review-mobile.png',fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth)).toBe(false);
+ let lose=true;await page.route('**/voucher',async route=>{const response=await route.fetch();if(lose){lose=false;await route.abort('failed');}else await route.fulfill({response});});
+ await page.getByRole('button',{name:'Confirmar cobro y emitir voucher',exact:true}).click();await browserExpect(page.getByRole('button',{name:'Consultar el mismo voucher',exact:true})).toBeVisible();
+ await page.reload();await page.getByLabel('Escenario',{exact:true}).selectOption(id);await page.getByRole('tab',{name:'Facturación',exact:true}).click();
+ await page.getByRole('button',{name:'Consultar el mismo voucher',exact:true}).click();await browserExpect(page.getByRole('tab',{name:'Cuenta',exact:true})).toHaveAttribute('aria-selected','true');
+ const posted=requests.filter(r=>r.url.endsWith('/voucher'));expect(posted).toHaveLength(2);expect(posted[0].body).toEqual(posted[1].body);
+ expect(emissions).toBe(n);expect(errors).toEqual([]);
+ expect((await pool.query("SELECT count(*)::int AS n FROM funding_demo.sales_invoices WHERE spa_account_id=$1 AND tipo_comprobante='cierre_spa'",[id])).rows[0].n).toBe(1);
+ expect((await pool.query('SELECT count(*)::int AS n FROM funding_demo.spa_payments WHERE account_id=$1',[id])).rows[0].n).toBe(2);
  await page.close();
 },60000);
