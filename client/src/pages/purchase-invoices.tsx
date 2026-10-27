@@ -1,3 +1,4 @@
+import { matchesIssuer } from "@/lib/issuer-search";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import { formatDisplayDate } from "@shared/date-display";
 import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
@@ -1086,7 +1087,7 @@ export function InvoiceDialog({
                       <input
                         type="text"
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="Buscar proveedor..."
+                        placeholder="Buscar proveedor por nombre o CUIT..."
                         value={supplierDropdownOpen
                           ? supplierSearch
                           : form.supplierId
@@ -1102,7 +1103,7 @@ export function InvoiceDialog({
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
                           {[...suppliers]
-                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
                             .slice(0, 60)
                             .map((s) => (
@@ -1118,7 +1119,7 @@ export function InvoiceDialog({
                                 <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
                               </div>
                             ))}
-                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                          {suppliers.filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch)).length === 0 && (
                             <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
                           )}
                         </div>
@@ -1574,7 +1575,7 @@ export function InvoiceDialog({
                       <input
                         type="text"
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="Buscar proveedor..."
+                        placeholder="Buscar proveedor por nombre o CUIT..."
                         value={supplierDropdownOpen
                           ? supplierSearch
                           : form.supplierId
@@ -1590,7 +1591,7 @@ export function InvoiceDialog({
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
                           {[...suppliers]
-                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
                             .slice(0, 60)
                             .map((s) => (
@@ -1606,7 +1607,7 @@ export function InvoiceDialog({
                                 <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
                               </div>
                             ))}
-                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                          {suppliers.filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch)).length === 0 && (
                             <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
                           )}
                         </div>
@@ -2577,7 +2578,7 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
           <div className="flex items-center gap-3 shrink-0 flex-wrap">
             <Input
               type="search"
-              placeholder="Buscar proveedor..."
+              placeholder="Buscar proveedor por nombre o CUIT..."
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               className="h-8 text-sm w-52"
