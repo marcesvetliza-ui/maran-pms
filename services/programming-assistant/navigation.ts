@@ -1,3 +1,4 @@
+import {creditNoteRecoveryChecklist,orientCreditNoteRecovery} from "./credit-note-recovery";
 import {orientInvoiceConflict,invoiceConflictChecklist} from "./invoice-conflict";
 import { CodeSource } from "./source";
 import type { SupportTicket } from "../../shared/programming-support";
@@ -11,7 +12,8 @@ export async function orientInvestigation(
   const text =
     `${ticket.module} ${ticket.title} ${ticket.actual} ${ticket.expected} ${ticket.steps} ${ticket.messages?.map((m) => m.text).join(" ") || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const roomMove = /cambi|modific|asigna|move|change/.test(text) && /habitacion|room/.test(text) && /reserva|reservation|disponib|superpuest|overlap/.test(text);
-  const invoiceConflict=!["grupos","spa","restaurant","inventario"].includes(ticket.module) && /factur|comprobante/.test(text) && /saldo (?:in)?suficiente|dos personas|dos operadores|dos sesiones|al mismo tiempo|concurrent|simultane/.test(text);
+  const creditNoteRecovery=!["spa","restaurant","inventario","compras"].includes(ticket.module) && !/\bspa\b|restaurant/.test(text) && /\bgrupos?\b|\breservas?\b/.test(text) && /nota[s]? de credito|\bnc\b|credit.note/.test(text) && /pendiente|concili|reconcil/.test(text);
+  const invoiceConflict=!creditNoteRecovery && !["grupos","spa","restaurant","inventario"].includes(ticket.module) && /factur|comprobante/.test(text) && /saldo (?:in)?suficiente|dos personas|dos operadores|dos sesiones|al mismo tiempo|concurrent|simultane/.test(text);
   const discount = /descuento|discount/.test(text);
   // Users describe invoice amounts and item costs without saying "compra".
   // This is a navigation hint, not a conclusion about the invoice or its behavior.
@@ -98,11 +100,13 @@ export async function orientInvestigation(
     const use=uses.matches.find(match=>!match.path.includes(".test."));
     if(use)workflowReads.push(await source.read(use.path,Math.max(1,use.line-4),use.line+4));
   }
+  if(creditNoteRecovery)workflowReads.push(...await orientCreditNoteRecovery(source));
+  const coverageChecklist=creditNoteRecovery ? creditNoteRecoveryChecklist : invoiceConflict && !purchases ? invoiceConflictChecklist : [];
   if(invoiceConflict && !purchases)workflowReads.push(...await orientInvoiceConflict(source));
   return {
-    decisionBrief:await buildDecisionBrief(source,invoiceConflict && !purchases ? invoiceConflictChecklist : [],workflowReads),
-    coverageChecklist:invoiceConflict && !purchases ? invoiceConflictChecklist : [],
-    investigationFocus: errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : roomMove ? "Seguir el PATCH de la reserva, checkOverbooking y updateReservation. Distinguir pruebas de función pura de integración: nombrar exactamente la función probada y citar su aserción, sin atribuirla a checkOverbooking ni al PATCH por semejanza. Leer el catch de la pantalla: diferenciar un texto fijo del detalle enviado por el servidor y verificar qué cierra la edición en éxito o error. Explicar las comparaciones de fechas que permiten egreso/ingreso el mismo día. Si faltan pruebas del cambio de habitación, buscarlas sin inferir que no existen. No expandir automáticamente otras operaciones cercanas." : invoiceConflict && !purchases ? invoiceConflictChecklist.join(" ") : undefined,
+    decisionBrief:await buildDecisionBrief(source,coverageChecklist,workflowReads),
+    coverageChecklist,
+    investigationFocus: creditNoteRecovery ? creditNoteRecoveryChecklist.join(" ") : errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : roomMove ? "Seguir el PATCH de la reserva, checkOverbooking y updateReservation. Distinguir pruebas de función pura de integración: nombrar exactamente la función probada y citar su aserción, sin atribuirla a checkOverbooking ni al PATCH por semejanza. Leer el catch de la pantalla: diferenciar un texto fijo del detalle enviado por el servidor y verificar qué cierra la edición en éxito o error. Explicar las comparaciones de fechas que permiten egreso/ingreso el mismo día. Si faltan pruebas del cambio de habitación, buscarlas sin inferir que no existen. No expandir automáticamente otras operaciones cercanas." : invoiceConflict && !purchases ? invoiceConflictChecklist.join(" ") : undefined,
     endpointContext,
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,

@@ -367,7 +367,7 @@ export async function diagnose(
         });
         continue;
       }
-      const claimErrors=await validateReportClaims(report,source);
+      const claimErrors=await validateReportClaims(report,source,orientation.coverageChecklist);
       if(claimErrors.length) {
         telemetry.record("validation","invalid",validating,0,tokens,{reason:"claim",issueCount:claimErrors.length});
         if(claimCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: las citas del endpoint o las aserciones de pruebas no respaldan el diagnóstico."),{code:"evidence_claim_mismatch"});

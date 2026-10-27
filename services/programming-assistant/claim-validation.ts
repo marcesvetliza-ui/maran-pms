@@ -1,3 +1,4 @@
+import {isCreditNoteRecoveryCoverage} from "./credit-note-recovery";
 import type {SupportDiagnosis} from '../../shared/programming-support';
 import type {CodeSource} from './source';
 const norm=(text:string)=>text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -5,8 +6,24 @@ const escape=(text:string)=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const operationalTest=(path:string)=>(path.includes('/tests/')||path.includes('.test.'))&&!/programming-(assistant|diagnosis|support)/.test(path);
 
 /** Checks explicit, mechanically verifiable claims. Not a general proof of prose. */
-export async function validateReportClaims(report:SupportDiagnosis,source:CodeSource) {
+export async function validateReportClaims(report:SupportDiagnosis,source:CodeSource,coverage:readonly string[] = []) {
  const issues:Array<Record<string,unknown>>=[];
+ // Coverage is derived from the case, not the author's labels. A grounded
+ // explanation of this recovery must cite the handler and the screen involved.
+ if(isCreditNoteRecoveryCoverage(coverage)){
+  let backend=false,screen=false;
+  for(const ref of report.evidence){
+   if(ref.path==="server/billing/routes.ts"){
+    const route=await source.routeAt(ref);
+    backend ||= !!route && route.method==="POST" && route.endpoint==="/api/billing/credit-notes/:id/reconcile" && route.containsRange;
+   }
+   if(ref.path==="client/src/pages/billing.tsx"){
+    const read=await source.read(ref.path,ref.start,Math.min(ref.end,ref.start+159));
+    screen ||= read.content.includes("Reintentar y conciliar");
+   }
+  }
+  if(!backend || !screen)issues.push({field:"evidence",code:"RECOVERY_WORKFLOW_NOT_SUPPORTED",missing:{backend:!backend,screen:!screen},guidance:"La conclusión sobre una NC pendiente debe contrastarse y citarse contra el handler real de recuperación y la acción de Facturación. Los guards para borrar pagos, reemplazar facturas o las referencias de Caja de Restaurant no demuestran esa conciliación. Usar las lecturas verificadas de orientación, investigar lo que falte antes de concluir; cambiar sólo la certeza no respalda el circuito ni autoriza otra operación. No inventar la causa del incidente."});
+ }
  const endpoints=[...new Set([...`${report.summary}\n${report.cause}`.matchAll(/\/api\/[A-Za-z0-9_/:.-]+/g)].map(match=>match[0].replace(/[.,]+$/,'')))];
  const tests:Array<{path:string;content:string}>=[];
  for(let index=0;index<report.evidence.length;index++) {
