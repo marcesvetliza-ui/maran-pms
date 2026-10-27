@@ -19,8 +19,8 @@ async function jsonGet(path: string) {
 }
 export type ReservationNightlyPricingHandle = { openStay: () => void };
 export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHandle, {
-  reservationId: string; role?: string; onLegacyEdit?: () => void;
-}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }, ref) {
+  reservationId: string; role?: string; onLegacyEdit?: () => void; onApplied?: () => void;
+}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit, onApplied }, ref) {
   const { toast } = useToast();
   const key = ["/api/reservations", reservationId, "nightly-pricing"];
   const state = useQuery<State>({ queryKey: key, queryFn: () => jsonGet(`/api/reservations/${reservationId}/nightly-pricing`), staleTime: 0, refetchOnMount: "always" });
@@ -91,6 +91,7 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       void queryClient.invalidateQueries({ queryKey: ["/api/reservation-changelog", reservationId] });
       void queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId, "changelog"] });
       setMode(null); setSelected([]);
+      onApplied?.();
       toast({ title: "Alojamiento actualizado", description: "El detalle y el total se guardaron con motivo e historial. No se modificaron los cobros." });
     },
     onError: (e: Error) => { setError(e.message); setPreview(null); void state.refetch(); },

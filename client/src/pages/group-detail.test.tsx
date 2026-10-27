@@ -126,6 +126,11 @@ describe("Pago Grupal dialog entry-point modes", () => {
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/reservation-edit-permission")) return jsonResponse({ canEdit: true });
+      if (url.endsWith(`/api/reservations/${RESERVATION_ID}/nightly-pricing`)) return jsonResponse({
+        reservation: groupFixtureForTest.reservations[0], blocked: null,
+        fiscal: { state: "pendiente", coveredCents: 0, pendingCents: 18500000 },
+      });
       if (url.endsWith(`/api/groups/${GROUP_ID}/folio`)) return jsonResponse(FOLIO_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/master-folio`)) return jsonResponse(MASTER_FOLIO_FIXTURE);
       if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(INVOICE_SNAPSHOT_FIXTURE);
@@ -149,6 +154,26 @@ describe("Pago Grupal dialog entry-point modes", () => {
     }));
 
     apiRequestMock.mockImplementation(async () => jsonResponse({ success: true }));
+  });
+
+  it("uses the nightly editor from Groups and saves only schedules through the legacy route", async () => {
+    groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0],
+      pricingScheme: "nightly_v1", finalRatePerNight: "92500.00", totalRoomAmount: "185000.00", pricingRevision: 0,
+      checkInDate: "2026-10-28", checkOutDate: "2026-10-30", nights: 2,
+      nightlyPricing: [
+        { date: "2026-10-28", rateCents: 9000000, discountCents: 0 },
+        { date: "2026-10-29", rateCents: 9500000, discountCents: 0 },
+      ],
+    }] };
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByTestId("tab-reservations"));
+    await user.click(await screen.findByTestId(`button-edit-rate-${RESERVATION_ID}`));
+    expect(await screen.findByTestId("nightly-pricing-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("input-editing-rate")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Editar tarifas" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Guardar horarios" }));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", `/api/groups/${GROUP_ID}/reservations/${RESERVATION_ID}/rate`, expect.objectContaining({ finalRatePerNight: "" })));
   });
 
   it("guarda early check-in con hora y conserva late check-out al editar tarifa", async () => {

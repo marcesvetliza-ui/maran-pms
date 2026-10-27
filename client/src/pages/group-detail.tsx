@@ -1,3 +1,4 @@
+import { ReservationNightlyPricing } from "@/components/reservation-nightly-pricing";
 import { GroupOccupantDialog } from "@/components/group-occupant-dialog";
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
@@ -5335,7 +5336,7 @@ export default function GroupDetailPage() {
       )}
 
       <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingEarlyCheckin(false); setEditingEarlyCheckinTime(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className={editingRateRes?.pricingScheme === "nightly_v1" ? "max-w-4xl max-h-[90dvh] overflow-y-auto" : "max-w-sm"}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="h-4 w-4" />
@@ -5346,6 +5347,12 @@ export default function GroupDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {editingRateRes?.pricingScheme === "nightly_v1" ? (
+              <ReservationNightlyPricing reservationId={editingRateRes.id} onApplied={() => {
+                void queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+                void queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+              }} />
+            ) : (
             <div>
               <Label htmlFor="editing-rate">Tarifa por noche ($)</Label>
               <Input
@@ -5360,6 +5367,7 @@ export default function GroupDetailPage() {
                 className="mt-1"
               />
             </div>
+            )}
             <div className="rounded-lg border p-3 space-y-3">
               <div className="flex items-center gap-3">
                 <Checkbox id="early-checkin" checked={editingEarlyCheckin}
@@ -5415,7 +5423,7 @@ export default function GroupDetailPage() {
                 if (!editingRateRes) return;
                 updateRateMutation.mutate({
                   reservationId: editingRateRes.id,
-                  rate: editingRate,
+                  rate: editingRateRes.pricingScheme === "nightly_v1" ? "" : editingRate,
                   earlyCheckIn: editingEarlyCheckin,
                   earlyCheckInTime: editingEarlyCheckinTime,
                   lateCheckOut: editingLateCheckout,
@@ -5425,7 +5433,7 @@ export default function GroupDetailPage() {
               disabled={updateRateMutation.isPending}
               data-testid="button-save-rate"
             >
-              {updateRateMutation.isPending ? "Guardando..." : "Guardar cambios"}
+              {updateRateMutation.isPending ? "Guardando..." : editingRateRes?.pricingScheme === "nightly_v1" ? "Guardar horarios" : "Guardar cambios"}
             </Button>
           </DialogFooter>
         </DialogContent>
