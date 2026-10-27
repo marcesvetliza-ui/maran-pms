@@ -788,15 +788,15 @@ export default function Dashboard() {
       {/* Cancelled Today */}
       {todayCancelled.length > 0 && (
         <Card className="border-destructive/30 bg-destructive/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-destructive">
-              <XCircle className="h-5 w-5" />
-              Anulaciones del día
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg p-5 text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <XCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <span className="text-lg font-semibold">Anulaciones del día</span>
               <Badge variant="destructive" className="ml-auto">{todayCancelled.length}</Badge>
-            </CardTitle>
-            <CardDescription>Reservas canceladas hoy — registradas con motivo</CardDescription>
-          </CardHeader>
+              <ChevronDown className="h-5 w-5 shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+            </summary>
           <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">Reservas canceladas hoy — registradas con motivo</p>
             <div className="space-y-3">
               {todayCancelled.map((log: any, i: number) => (
                 <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-2 p-3 rounded-md border border-destructive/20 bg-background">
@@ -819,6 +819,7 @@ export default function Dashboard() {
               ))}
             </div>
           </CardContent>
+          </details>
         </Card>
       )}
 
