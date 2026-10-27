@@ -119,7 +119,7 @@ it('shows an incompatible fiscal type without preparing or collecting',async()=>
 it('shows the saved fiscal condition and a prominent actionable cash warning without issuing',async()=>{
  emptyShifts=true;mount();
  const notice=await screen.findByTestId('spa-cash-notice');
- await waitFor(()=>expect(notice).toHaveTextContent('Abrí tu caja SPA'));
+ await waitFor(()=>expect(notice).toHaveTextContent('Abrí la caja SPA'));
  expect(screen.getByRole('textbox',{name:'Condición IVA'})).toHaveValue('Consumidor final');
  const link=screen.getByRole('link',{name:'Ir a Caja'});
  expect(link).toHaveAttribute('href','/cash-register');expect(link).toHaveAttribute('target','_blank');

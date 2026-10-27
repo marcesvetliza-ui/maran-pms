@@ -52,7 +52,7 @@ beforeAll(async()=>{
   if(label==="Cobros existentes") await pool.query("UPDATE funding_demo.spa_appointments SET guest_id=NULL WHERE id=$1",[id]);
   await pool.query("UPDATE funding_demo.spa_accounts SET appointment_id=$1 WHERE id=$1",[id]);
   await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
-  await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+  await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='Operadora de prueba SPA' WHERE id=$1",[`${id}:shift`]);
   if(partial){
    await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price) VALUES($1,'Insumo UI','true','ml',10,1)",[id]);
    await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[id]);
@@ -91,13 +91,13 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
    await browserExpect(page.getByRole("button",{name,exact:true})).toHaveCount(0);
   if(index===0) {
    await page.getByRole("button",{name:"Revisar factura",exact:true}).click();
-   await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toBeVisible();
+   await browserExpect(page.getByText("Falta una condición IVA válida en la ficha seleccionada. Revisá los datos fiscales antes de emitir.",{exact:true}).first()).toBeVisible();
    await page.getByLabel("Nombre / razón social",{exact:true}).fill("Cliente");
    await page.getByLabel("Apellido",{exact:true}).fill("Verificado");
    await page.getByLabel("Número de documento",{exact:true}).fill(String(10000000+parseInt(id.slice(-8),16)%90000000));
    await page.getByRole("combobox",{name:"Condición IVA",exact:true}).selectOption("consumidor_final");
    await page.getByRole("button",{name:"Guardar y vincular cliente",exact:true}).click();
-   await browserExpect(page.getByText("El turno no tiene un receptor fiscal identificado.",{exact:true})).toHaveCount(0);
+   await browserExpect(page.getByText("Falta una condición IVA válida en la ficha seleccionada. Revisá los datos fiscales antes de emitir.",{exact:true})).toHaveCount(0);
   }
   if(index===1) {
    await page.getByLabel("Monto del cobro 1",{exact:true}).fill("90000");
@@ -133,7 +133,8 @@ it("connected browser: prepare from source, authorized shifts, existing/mixed pa
  }
  expect(emissions).toBe(3);expect(errors).toEqual([]);
  const preparations=newRequests.filter(req=>req.url.endsWith("/prepare-document"));
- expect(preparations).toHaveLength(4);
+ // Missing IVA is now rejected locally before preparing a fiscal document.
+ expect(preparations).toHaveLength(3);
  expect(preparations.every(req=>req.body.expectedVersion?.length===64&&req.body.settings.recipientKind==="client")).toBe(true);
  await page.close();
 },60000);
@@ -199,7 +200,7 @@ it("prefactura browser: company, discount, advance, split methods, printable sum
  await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
  await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1 WHERE id=$1",[id]);
  await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
- await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+ await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='Operadora de prueba SPA' WHERE id=$1",[`${id}:shift`]);
  await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','SPA UI','consumidor_final','30111222')",[id]);
  await pool.query("INSERT INTO funding_demo.spa_treatments VALUES($1)",[id]);
  await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
@@ -277,7 +278,7 @@ it('browser reviews without a cash shift, then issues and recovers one real loca
  await pool.query('DELETE FROM payment_funding.documents WHERE scope_id=$1',[id]);
  await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1 WHERE id=$1",[id]);
  await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
- await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+ await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='Operadora de prueba SPA' WHERE id=$1",[`${id}:shift`]);
  await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','Voucher UI','consumidor_final','30111222')",[id]);
  await pool.query('INSERT INTO funding_demo.spa_treatments VALUES($1)',[id]);await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
  scenarios.push({id,title:'Voucher UI'});
@@ -306,7 +307,7 @@ it('browser adds a searchable Restaurant product with its sale price and closes 
  await pool.query('DELETE FROM payment_funding.documents WHERE scope_id=$1',[id]);await pool.query('DELETE FROM payment_funding.receipts WHERE scope_id=$1',[id]);
  await pool.query("DELETE FROM funding_demo.folio_movements WHERE folio_id=$1 AND type='payment'",[`${id}:folio`]);await pool.query('DELETE FROM funding_demo.cash_movements WHERE payment_id IN (SELECT id FROM funding_demo.spa_payments WHERE account_id=$1)',[id]);await pool.query('DELETE FROM funding_demo.spa_payments WHERE account_id=$1',[id]);
  await pool.query("UPDATE funding_demo.spa_accounts SET status='open',appointment_id=$1,total_paid=0 WHERE id=$1",[id]);await pool.query("UPDATE funding_demo.folios SET status='open',total_payments=0,balance=total_charges WHERE entity_id=$1",[id]);
- await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='connected-reviewer' WHERE id=$1",[`${id}:shift`]);
+ await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='Operadora de prueba SPA' WHERE id=$1",[`${id}:shift`]);
  await pool.query("INSERT INTO funding_demo.guests(id,first_name,last_name,vat_condition,document_number) VALUES($1,'Cliente','Catálogo UI','consumidor_final','30111222')",[id]);await pool.query('INSERT INTO funding_demo.spa_treatments(id) VALUES($1)',[id]);await pool.query("INSERT INTO funding_demo.spa_appointments(id,guest_id,treatment_id,status) VALUES($1,$1,$1,'confirmed')",[id]);
  await pool.query("INSERT INTO funding_demo.inventory_items(id,name,is_active,unit,current_stock,cost_price,item_kind) VALUES($1,'Gaseosa stock','true','unidad',10,100,'venta_directa')",[p]);await pool.query("INSERT INTO funding_demo.inventory_warehouses VALUES($1,'true')",[p]);await pool.query('INSERT INTO funding_demo.warehouse_stock VALUES($1,$1,10,now())',[p]);await pool.query("INSERT INTO funding_demo.stock_movements(item_id,movement_type,to_warehouse_id,created_at) VALUES($1,'transferencia',$1,now())",[p]);await pool.query("INSERT INTO funding_demo.menu_items(id,name,price,inventory_item_id) VALUES($1,'Gaseosa limón UI',2500,$2)",[m,p]);
  scenarios.push({id,title:'Catálogo Restaurant'});

@@ -1,3 +1,4 @@
+import { assertOpenSpaCashShift } from "./spaCashShift";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { PoolClient } from "pg";
@@ -115,8 +116,7 @@ export async function executeSpaAccountCommand(service:PaymentFundingService,id:
    result={...result,item};
   } else if(request.action==="payment") {
    if(request.amountCents>totals.totalCents-totals.paidCents) throw new FundingError("COLLECTION_EXCEEDS_DEBT","El pago supera el saldo pendiente.");
-   const shift=(await c.query(`SELECT id FROM ${s}.cash_shifts WHERE id=$1 AND opened_by=$2 AND area='spa' AND status='open' FOR UPDATE`,[request.shiftId,actor.id])).rowCount;
-   if(!shift) throw new FundingError("SHIFT_CLOSED","Abrí tu caja SPA para registrar este pago.");
+   await assertOpenSpaCashShift(c,request.shiftId,schema);
    const row={rowId:"account-payment",method:request.method,amountCents:request.amountCents,shiftId:request.shiftId};
    const collection=await adapter.collect(c,scope,row,commandId,actor);
    await c.query(`INSERT INTO payment_funding.receipts(id,scope_kind,scope_id,source_payment_id,original_cents,effective_cents,method,cash_movement_id,folio_movement_id)

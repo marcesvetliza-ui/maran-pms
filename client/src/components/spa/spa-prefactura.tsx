@@ -39,7 +39,7 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
  const profile=useQuery({queryKey:["/api/payment-funding/recipient",accountId,userId],queryFn:()=>fundingApi.recipient(accountId),retry:false,staleTime:0,refetchOnMount:"always"});
  const candidate=useQuery({queryKey:["spa-prefactura-guest",recipientId],queryFn:()=>fundingApi.recipientCandidate(recipientId),enabled:kind==="guest"&&!!recipientId,retry:false});
  const projection=useQuery({queryKey:["spa-prefactura-funding",accountId,userId,revision],queryFn:()=>fundingApi.scope(accountId),retry:false});
- const shifts=useQuery({queryKey:["/api/payment-funding/spa",accountId,"collection-shifts",userId],queryFn:()=>fundingApi.collectionShifts(accountId),retry:false});
+ const shifts=useQuery({queryKey:["/api/payment-funding/spa",accountId,"collection-shifts",userId],queryFn:()=>fundingApi.collectionShifts(accountId),retry:false,staleTime:0,refetchOnMount:"always"});
  const ordinary=account.items.filter(i=>i.itemType!=="discount"),gross=ordinary.reduce((n,i)=>n+Math.round(i.subtotal*100),0);
  let discountCents=0,problem="";
  const selectedDiscount=discount?{...discount,value:Number(discountValue.replace(",","."))}:null;
@@ -65,7 +65,7 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
   collections=rows.map(r=>({rowId:r.id,method:r.method,amountCents:pesosToCents(r.value),shiftId:effectiveShift}));
   preparedCents=collections.reduce((n,r)=>n+r.amountCents,0);
  }catch{if(required)problem=problem||"Completá los importes de las formas de pago.";}
- const cashProblem = !required ? "" : shifts.isPending ? "Consultando tu caja SPA…" : shifts.isError ? "No se pudo verificar tu caja SPA. Reintentá la consulta antes de cobrar." : !shifts.data?.length ? "Abrí tu caja SPA desde Caja para registrar el cobro." : !effectiveShift ? "Seleccioná una de tus cajas SPA abiertas para registrar el cobro." : "";
+ const cashProblem = !required ? "" : shifts.isPending ? "Consultando tu caja SPA…" : shifts.isError ? "No se pudo verificar tu caja SPA. Reintentá la consulta antes de cobrar." : !shifts.data?.length ? "Abrí la caja SPA desde Caja para registrar el cobro." : !effectiveShift ? "Seleccioná una de tus cajas SPA abiertas para registrar el cobro." : "";
  if(cashProblem)problem=problem||cashProblem;
  if(preparedCents!==required)problem=problem||"Los importes de cobro deben sumar el nuevo cobro requerido.";
  const settings:SpaPrefacturaSettings={...(receiptType?{receiptType}:{}),recipientKind:kind,...(kind!=="client"?{recipientId}:{}),discount:selectedDiscount,notes};

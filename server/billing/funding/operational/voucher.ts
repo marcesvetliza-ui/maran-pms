@@ -1,3 +1,4 @@
+import { assertOpenSpaCashShift } from "./spaCashShift";
 import { spaPrefacturaInputSchema } from "@shared/spaPrefactura";
 import { calcularMontos, type InvoiceItem } from "../../invoiceService";
 import {
@@ -121,18 +122,7 @@ export async function issueSpaVoucher(
         "Los pagos deben cubrir exactamente el importe del voucher.",
       );
     for (const row of request.newCollections) {
-      if (
-        !(
-          await c.query(
-            `SELECT id FROM ${s}.cash_shifts WHERE id=$1 AND opened_by=$2 AND area='spa' AND status='open' FOR UPDATE`,
-            [row.shiftId, actor.id],
-          )
-        ).rowCount
-      )
-        throw new FundingError(
-          "SHIFT_CLOSED",
-          "Abrí tu caja SPA para registrar el cobro.",
-        );
+      await assertOpenSpaCashShift(c,row.shiftId,schema);
       const collected = await adapter.collect(
         c,
         scope,

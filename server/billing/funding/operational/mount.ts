@@ -1,3 +1,4 @@
+import { assertOpenSpaCashShift, listOpenSpaCashShifts } from "./spaCashShift";
 import { ReservationPaymentCorrections } from "./reservationCorrections";
 import type { Express, Request, RequestHandler } from "express";
 import type { Pool } from "pg";
@@ -47,9 +48,7 @@ export function mountOperationalSpaFunding(app:Express,options:{
      }
      if(request.scope.kind==="spa") {
        for(const row of request.newCollections) {
-         if(!(await options.pool.query(`SELECT id FROM ${s}.cash_shifts
-           WHERE id=$1 AND area='spa' AND status='open' AND opened_by=$2`,[row.shiftId,who.id])).rowCount)
-           throw new FundingError("SHIFT_CLOSED","El turno no está abierto y autorizado para este cajero.");
+         await assertOpenSpaCashShift(options.pool,row.shiftId,schema,false);
        }
      }
      next();
@@ -164,10 +163,7 @@ export function mountOperationalSpaFunding(app:Express,options:{
      const who=actor(req);requirePermission(who,"funding:read");
      const data=await service.store.transaction({kind:"spa",id:req.params.accountId},null,async c=>{
        await service.store.assertAdopted(c,{kind:"spa",id:req.params.accountId});
-       // Only the current cashier's genuinely open SPA shifts can receive money.
-       const rows=(await c.query(`SELECT id,opened_at FROM ${s}.cash_shifts
-         WHERE area='spa' AND status='open' AND opened_by=$1 ORDER BY opened_at,id`,[who.id])).rows;
-       return rows.map(r=>({id:r.id,label:`Caja SPA — ${r.id}`}));
+       return listOpenSpaCashShifts(c,schema);
      });
      res.json({ok:true,data});
    } catch(error) {fundingErrorResponse(res,error);}

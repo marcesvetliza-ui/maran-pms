@@ -83,7 +83,7 @@ async function fixture(partial=false,open=false) {
  await pool.query("INSERT INTO funding_demo.spa_treatments VALUES($1)",[id]);
  await pool.query("INSERT INTO funding_demo.spa_appointments VALUES($1,$1,$1,'confirmed')",[id]);
  await pool.query("UPDATE funding_demo.spa_accounts SET appointment_id=$1,status=$2 WHERE id=$1",[id,partial||open?"open":"closed"]);
- await pool.query("UPDATE funding_demo.cash_shifts SET opened_by=$2 WHERE id=$1",[`${id}:shift`,actor.id]);
+ await pool.query("UPDATE funding_demo.cash_shifts SET opened_by=$2 WHERE id=$1",[`${id}:shift`,"Operadora de prueba SPA"]);
  await pool.query("UPDATE funding_demo.spa_account_items SET quantity=1,unit_price=95000,item_type='treatment' WHERE account_id=$1",[id]);
  await pool.query("UPDATE funding_demo.billing_config SET punto_venta_homolog=nextval('funding_demo.binding_pvs') WHERE id=1");
  const prepared=await prepareSpaDocument(service,id,actor,"funding_demo");
@@ -326,7 +326,7 @@ it("real session/role middleware denies unauthenticated, read-only writes, forge
  expect((await http("/previews",f.request,{"x-role":"reader"})).status).toBe(403);
  expect((await http(`/scopes/spa/${f.scope.id}`,undefined,{"x-role":"reader"})).status).toBe(200);
  expect((await http(`/spa/${f.scope.id}/prepare-document`,{snapshot:{total:1}})).status).toBe(422);
- await pool.query("UPDATE funding_demo.cash_shifts SET opened_by='somebody-else' WHERE id=$1",[`${f.scope.id}:shift`]);
+ await pool.query("UPDATE funding_demo.cash_shifts SET area='restaurant' WHERE id=$1",[`${f.scope.id}:shift`]);
  expect((await http("/previews",f.request)).body.error.code).toBe("SHIFT_CLOSED");
  expect(()=>sessionFundingActor({isAuthenticated:()=>true,user:{id:"u",role:"spa"},session:{pending2FA:true}} as any,()=>true)).toThrow();
  const response=await fetch(`${base}/api/spa/account-items/${f.scope.id}:item`,{method:"DELETE",headers:{"x-session":"yes"}});
@@ -501,7 +501,7 @@ it("account payment records one receipt/Caja entry and can later invoice without
  expect(await financialCounts(f.scope)).toEqual({payments:before.payments+1,cash:before.cash+1,folio:before.folio+1});expect(sends-n).toBe(1);
  expect((await accountCommand(id,{action:"add-charge",description:"Luego de facturar",quantity:1,unitCents:100})).status).toBe(409);
 });
-it("account writes require role, own open SPA shift and reject bad amounts without mutations",async()=>{
+it("account writes require role, an open SPA-area shift and reject bad amounts without mutations",async()=>{
  const f=await emptyAccount(),id=f.scope.id,before=await financialCounts(f.scope);
  const request={action:"payment",amountCents:100,method:"efectivo",shiftId:`${id}:shift`,notes:""};
  expect((await accountCommand(id,request,randomUUID(),{"x-role":"reader"})).status).toBe(403);
@@ -1053,4 +1053,22 @@ it('SPA catalog includes additional treatments with their sale price and persist
  expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(90);
  const voucher={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:11500000,shiftId:`${id}:shift`}]};
  expect((await http(`/spa/${id}/voucher`,voucher)).status).toBe(200);expect(Number((await pool.query('SELECT current_stock FROM funding_demo.inventory_items WHERE id=$1',[p])).rows[0].current_stock)).toBe(90);
+});
+
+it('uses the shared SPA cash shift with a human operator name and records the authenticated collector',async()=>{
+ const f=await emptyAccount(),id=f.scope.id;
+ const listed=await http(`/spa/${id}/collection-shifts`);
+ expect(listed.status).toBe(200);
+ expect(listed.body.data).toContainEqual({id:`${id}:shift`,label:`Caja SPA — Operadora de prueba SPA · ${id}:shift`});
+ const payment=await accountCommand(id,{action:"payment",amountCents:100,method:"efectivo",shiftId:`${id}:shift`,notes:"Prueba de caja compartida"});
+ expect(payment.status,JSON.stringify(payment.body)).toBe(200);
+ const request={...await prefactura(id,{receiptType:'cierre_spa'}),newCollections:[{rowId:'remaining',method:'efectivo',amountCents:9499900,shiftId:`${id}:shift`}]};
+ const voucher=await http(`/spa/${id}/voucher`,request);
+ expect(voucher.status,JSON.stringify(voucher.body)).toBe(200);
+ const movements=(await pool.query('SELECT registered_by,shift_id FROM funding_demo.cash_movements WHERE shift_id=$1',[`${id}:shift`])).rows;
+ expect(movements).toHaveLength(2);
+ expect(movements.every(m=>m.registered_by===actor.id&&m.shift_id===`${id}:shift`)).toBe(true);
+ expect((await pool.query('SELECT opened_by FROM funding_demo.cash_shifts WHERE id=$1',[`${id}:shift`])).rows[0].opened_by).toBe('Operadora de prueba SPA');
+ await pool.query("UPDATE funding_demo.cash_shifts SET status='closed' WHERE id=$1",[`${id}:shift`]);
+ expect((await http(`/spa/${id}/collection-shifts`)).body.data.some((shift:any)=>shift.id===`${id}:shift`)).toBe(false);
 });
