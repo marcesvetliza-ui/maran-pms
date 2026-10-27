@@ -5412,14 +5412,14 @@ export default function RestaurantPage() {
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
-        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto flex flex-col">
+        <DialogContent className="operational-dialog restaurant-checkout">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
               Cerrar - {getUpdatedOrder()?.orderLabel || currentOrder?.orderNumber}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="restaurant-close-grid operational-body"><section className="min-w-0 space-y-4" aria-label="Consumos y total de la mesa">
             {getOrderItems().some(i => i.status === "waiting_course") && (
               <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md p-3">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -5515,6 +5515,7 @@ export default function RestaurantPage() {
               })()}
             </div>
 
+          </section><section className="min-w-0 space-y-4" aria-label="Cliente y cobro">
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -6555,8 +6556,10 @@ export default function RestaurantPage() {
 
               </div>
             )}
-          </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          </section></div>
+          <DialogFooter className="operational-footer flex-col sm:flex-row gap-2">
+            <div className="mr-auto min-w-0 text-sm" aria-label="Total a cobrar de la mesa"><span className="block text-muted-foreground">A cobrar</span><strong className="text-xl">${Math.max(0, parseFloat(getUpdatedOrder()?.total || "0") - (closeDiscountType === "percent" ? parseFloat(getUpdatedOrder()?.total || "0") * parseFloat(closeDiscount || "0") / 100 : parseFloat(closeDiscount || "0")) - totalAdvanceCredit).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
+
             <Button
               variant="outline"
               onClick={() => {

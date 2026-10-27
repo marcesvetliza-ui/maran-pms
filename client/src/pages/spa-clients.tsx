@@ -87,6 +87,8 @@ export default function SpaClientsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/clients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payment-funding/recipient"] });
+      queryClient.invalidateQueries({ queryKey: ["spa-prefactura-guest"] });
       setDialogOpen(false);
       resetForm();
       toast({ title: "Cliente registrado" });
@@ -101,6 +103,8 @@ export default function SpaClientsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/clients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payment-funding/recipient"] });
+      queryClient.invalidateQueries({ queryKey: ["spa-prefactura-guest"] });
       setDialogOpen(false);
       resetForm();
       toast({ title: "Cliente actualizado" });
@@ -114,6 +118,8 @@ export default function SpaClientsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/clients"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/payment-funding/recipient"] });
+      queryClient.invalidateQueries({ queryKey: ["spa-prefactura-guest"] });
       toast({ title: "Cliente eliminado" });
     },
   });
@@ -135,7 +141,7 @@ export default function SpaClientsPage() {
       documentType: client.documentType || "dni",
       documentNumber: client.documentNumber || "",
       cuilCuit: client.cuilCuit ? formatCuit(client.cuilCuit) : "",
-      vatCondition: client.vatCondition || ((client.tipoPersona === "juridica") ? "responsable_inscripto" : "consumidor_final"),
+      vatCondition: client.vatCondition || "",
       direccion: client.direccion || "",
       provincia: client.provincia || "",
       localidad: client.localidad || "",
@@ -264,15 +270,15 @@ export default function SpaClientsPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) { setDialogOpen(false); resetForm(); } else { setDialogOpen(true); } }}>
-        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="operational-dialog">
           <DialogHeader>
             <DialogTitle>{editingClient ? "Editar Cliente SPA" : "Nuevo Cliente SPA"}</DialogTitle>
             <DialogDescription>Registrar cliente frecuente del SPA</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-2">
+          <div className="operational-body grid gap-4 py-2 sm:grid-cols-2">
 
             {/* Tipo de Persona */}
-            <div className="flex rounded-lg border overflow-hidden">
+            <div className="flex min-h-11 rounded-lg border overflow-hidden sm:col-span-2">
               <button type="button"
                 className={`flex-1 py-2 px-3 text-sm font-medium flex items-center justify-center gap-2 transition-colors ${!isJuridica ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted"}`}
                 onClick={() => setForm(f => ({ ...f, tipoPersona: "fisica", vatCondition: "consumidor_final" }))}
@@ -298,7 +304,7 @@ export default function SpaClientsPage() {
                 <Input value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} placeholder="Acme Corp" data-testid="input-client-nombre-comercial" />
               </div>
             </>) : (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Nombre <span className="text-red-500">*</span></Label>
                   <Input value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
@@ -311,7 +317,7 @@ export default function SpaClientsPage() {
             )}
 
             {/* Teléfono + Email */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>Teléfono</Label>
                 <Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+54 9 11 1234-5678" data-testid="input-client-phone" />
@@ -324,7 +330,7 @@ export default function SpaClientsPage() {
 
             {/* Documento — solo Física */}
             {!isJuridica && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
                   <Label>Tipo Doc.</Label>
                   <Select value={form.documentType} onValueChange={(v) => setForm({ ...form, documentType: v })}>
@@ -345,7 +351,7 @@ export default function SpaClientsPage() {
             )}
 
             {/* CUIL/CUIT + Condición IVA */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label>{isJuridica ? "CUIT" : "CUIL / CUIT"}</Label>
                 <Input
@@ -359,7 +365,7 @@ export default function SpaClientsPage() {
               <div className="grid gap-2">
                 <Label>Condición ante IVA</Label>
                 <Select value={form.vatCondition} onValueChange={(v) => setForm({ ...form, vatCondition: v })}>
-                  <SelectTrigger data-testid="select-client-vat"><SelectValue /></SelectTrigger>
+                  <SelectTrigger data-testid="select-client-vat"><SelectValue placeholder="Seleccionar condición IVA" /></SelectTrigger>
                   <SelectContent>
                     {Object.entries(VAT_CONDITION_LABELS).map(([val, label]) => (
                       <SelectItem key={val} value={val}>{label}</SelectItem>
@@ -370,7 +376,7 @@ export default function SpaClientsPage() {
             </div>
 
             {/* Domicilio */}
-            <div className="pt-1 border-t">
+            <div className="pt-3 border-t sm:col-span-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Domicilio</p>
             </div>
             <div className="grid gap-2">
@@ -391,7 +397,7 @@ export default function SpaClientsPage() {
             </div>
 
             {/* Observaciones */}
-            <div className="pt-1 border-t">
+            <div className="pt-3 border-t sm:col-span-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Observaciones</p>
             </div>
             <div className="grid gap-2">
@@ -400,7 +406,7 @@ export default function SpaClientsPage() {
             </div>
 
           </div>
-          <DialogFooter>
+          <DialogFooter className="operational-footer">
             <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} data-testid="button-cancel-client">Cancelar</Button>
             <Button
               onClick={handleSubmit}

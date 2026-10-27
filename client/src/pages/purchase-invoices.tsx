@@ -184,6 +184,12 @@ export type PurchaseInventoryOption = {
   costPrice?: string | null;
 };
 
+const purchaseVatSuggestion = (value: unknown) => {
+  if (value == null || String(value).trim() === "") return "";
+  const normalized = String(Number(value));
+  return ["2.5", "5", "10.5", "21", "27"].includes(normalized) ? normalized : "";
+};
+
 export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index, excludeIds }: {
   items: PurchaseInventoryOption[];
   selectedId: string;
@@ -197,43 +203,30 @@ export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange,
   // renglón.
   excludeIds?: string[];
 }) {
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const selectableItems = excludeIds?.length
-    ? items.filter(item => String(item.id) === selectedId || !excludeIds.includes(String(item.id)))
-    : items;
+    ? items.filter(item => String(item.id) === selectedId || !excludeIds.includes(String(item.id))) : items;
   const selected = items.find(item => String(item.id) === selectedId);
-  return (
-    <div>
-      <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-      <Popover modal={true} open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger asChild>
-          <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-8 text-sm" data-testid={`select-existing-item-${index}`}>
-            <span className="truncate">{selected?.name || "Seleccionar artículo..."}</span>
-            <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[min(520px,calc(100vw-2rem))] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="Buscar por nombre o SKU..." />
-            <CommandList>
-              <CommandEmpty>No se encontraron artículos</CommandEmpty>
-              <CommandGroup>
-                {[...selectableItems].sort((a, b) => a.name.localeCompare(b.name, "es")).map(item => (
-                  <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => onSelect(String(item.id))} className="items-start gap-2 py-2">
-                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium break-words">{item.name}</span>
-                      <span className="block text-xs text-muted-foreground break-words">SKU: {item.sku || "Sin código"} · {item.category?.name || "Sin categoría"}</span>
-                      <span className="block text-xs text-muted-foreground">Stock: {item.currentStock ?? "—"} {item.unit || ""} · Costo registrado: {item.costPrice == null ? "—" : `$${fmtMoney(item.costPrice)}`}</span>
-                    </span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
+  function choose(id: string) {
+    onSelect(id); onOpenChange(false); setSearch("");
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-testid="input-inv-qty-${index}"]`)?.focus());
+  }
+  return <div onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) onOpenChange(false); }}>
+    <Label className="text-sm mb-2 block">Artículo del inventario</Label>
+    <Command label={`Buscar artículo ${index+1} por nombre o SKU`} className="rounded-md border" filter={(value, query) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()) ? 1 : 0}>
+      <CommandInput ref={inputRef} aria-label={`Buscar artículo ${index+1} por nombre o SKU`} placeholder="Buscar por nombre o SKU..." value={search} onValueChange={value => { setSearch(value); onOpenChange(true); }} onFocus={() => onOpenChange(true)} onKeyDown={event => { if (event.key === "Escape") { onOpenChange(false); event.stopPropagation(); } }} />
+      {open && <CommandList className="max-h-56"><CommandEmpty>No se encontraron artículos</CommandEmpty><CommandGroup>
+        {[...selectableItems].sort((a,b) => a.name.localeCompare(b.name,"es")).map(item => <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => choose(String(item.id))} className="items-start gap-2 py-3">
+          <Check className={`h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
+          <span className="min-w-0"><span className="block font-medium break-words">{item.name}</span><span className="block text-xs text-muted-foreground">SKU: {item.sku || "Sin código"} · {item.category?.name || "Sin categoría"}</span><span className="block text-xs text-muted-foreground">Stock: {item.currentStock ?? "—"} {item.unit || ""} · Costo registrado: {item.costPrice == null ? "—" : `$${fmtMoney(item.costPrice)}`}</span></span>
+        </CommandItem>)}
+      </CommandGroup></CommandList>}
+    </Command>
+    <Button type="button" variant="ghost" className="h-auto w-full justify-start whitespace-normal px-0 py-2 text-left text-sm font-normal" data-testid={`select-existing-item-${index}`} onClick={() => { setSearch(""); onOpenChange(true); inputRef.current?.focus(); }}>
+      {selected ? <><span className="mr-1 text-muted-foreground">Seleccionado:</span><span>{selected.name}</span></> : "Buscar y seleccionar artículo"}
+    </Button>
+  </div>;
 }
 
 const $n = (v: string | undefined | null) => parseFloat(v || "0") || 0;
@@ -612,12 +605,13 @@ export function InvoiceDialog({
 
   const selectExistingInvItem = (i: number, id: string) => {
     const selected = (existingInvItems as any[]).find((it: any) => String(it.id) === id);
+    if (invItems[i]?.existingItemId && invItems[i].existingItemId !== id) setVatOverrideRows(previous => { const next = new Set(previous); next.delete(i); return next; });
     setInvItems((p) => p.map((r, j) => j === i ? {
       ...r,
       existingItemId: id,
       unit: selected?.unit || "unidad",
       stockUnitsPerInput: "",
-      vatRate: r.vatRate || (selected?.ivaRate ? String(selected.ivaRate) : r.vatRate),
+      vatRate: r.existingItemId === id || !r.existingItemId && r.vatRate ? r.vatRate : purchaseVatSuggestion(selected?.ivaRate),
     } : r));
   };
 
@@ -1240,10 +1234,12 @@ export function InvoiceDialog({
 
                       {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
-                        const locked = configuredRate != null && !vatOverrideRows.has(i);
+                        const configuredSuggestion = purchaseVatSuggestion(configuredRate);
+                        const locked = !!configuredSuggestion && !vatOverrideRows.has(i);
                         return (
                           <div>
                             <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                            {configuredRate != null && !configuredSuggestion && <p role="alert" className="mb-2 text-sm text-amber-700 dark:text-amber-300">La alícuota guardada del artículo no es válida para esta compra. Elegí la que figura en el comprobante y revisá la ficha del artículo.</p>}
                             <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)} disabled={locked}>
                               <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
                               <SelectContent>
@@ -1948,10 +1944,12 @@ export function InvoiceDialog({
 
                       {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
-                        const locked = configuredRate != null && !vatOverrideRows.has(i);
+                        const configuredSuggestion = purchaseVatSuggestion(configuredRate);
+                        const locked = !!configuredSuggestion && !vatOverrideRows.has(i);
                         return (
                           <div>
                             <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                            {configuredRate != null && !configuredSuggestion && <p role="alert" className="mb-2 text-sm text-amber-700 dark:text-amber-300">La alícuota guardada del artículo no es válida para esta compra. Elegí la que figura en el comprobante y revisá la ficha del artículo.</p>}
                             <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)} disabled={locked}>
                               <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
                               <SelectContent>

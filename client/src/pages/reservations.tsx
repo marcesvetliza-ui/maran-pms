@@ -1054,7 +1054,7 @@ export function ReservationFormDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+      <DialogContent className="operational-dialog">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Reserva" : "Nueva Reserva"}</DialogTitle>
           <DialogDescription>
@@ -1066,9 +1066,9 @@ export function ReservationFormDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="operational-form">
           {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Las tarifas y fechas de esta reserva se mantienen desde el Folio: Editar tarifas / Modificar estadía. Este formulario edita los demás datos.</p>}
-          <div className="grid gap-4 py-4">
+          <div className="operational-body grid items-start gap-6 lg:grid-cols-[1fr_1.1fr]"><section className="min-w-0 space-y-4" aria-label="Huésped y vínculos">
             <GuestSelector
               selectedGuest={selectedGuest}
               initialCreateGuest={defaultValues?.guest}
@@ -1136,6 +1136,8 @@ export function ReservationFormDialog({
               );
             })()}
 
+            <details className="optional-relations" open={selectedCompany || selectedAgency ? true : undefined}>
+              <summary>Empresa y agencia (opcional){selectedCompany ? ` · ${selectedCompany.razonSocial}` : ""}{selectedAgency ? ` · ${selectedAgency.razonSocial}` : ""}</summary>
             <CompanySelector
               selectedCompany={selectedCompany}
               onSelect={(company) => {
@@ -1164,6 +1166,18 @@ export function ReservationFormDialog({
               cardClassName={sectionCardClass(!!selectedAgency, false)}
             />
 
+            </details>
+            <aside className="hidden space-y-3 rounded-lg border bg-muted/30 p-4 lg:block" aria-label="Resumen de la reserva">
+              <h3 className="font-semibold">Resumen de la reserva</h3>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div><dt className="text-muted-foreground">Ingreso</dt><dd className="font-medium">{formData.checkInDate?.split("-").reverse().join("/") || "A definir"}</dd></div>
+                <div><dt className="text-muted-foreground">Salida</dt><dd className="font-medium">{formData.checkOutDate?.split("-").reverse().join("/") || "A definir"}</dd></div>
+                <div><dt className="text-muted-foreground">Noches</dt><dd className="font-medium">{formData.nights}</dd></div>
+                <div><dt className="text-muted-foreground">Huéspedes</dt><dd className="font-medium">{formData.numberOfGuests}</dd></div>
+                <div className="col-span-2 border-t pt-3"><dt className="text-muted-foreground">Alojamiento</dt><dd className="text-xl font-semibold">{formData.totalRoomAmount ? Number(formData.totalRoomAmount).toLocaleString("es-AR", { style:"currency", currency:"ARS" }) : "A definir"}</dd></div>
+              </dl>
+            </aside>
+          </section><section className="min-w-0 space-y-4" aria-label="Estadía y tarifa">
             <div className="grid gap-2">
               <Label htmlFor="source">Origen</Label>
               <Select
@@ -2257,8 +2271,8 @@ export function ReservationFormDialog({
               </StaySection>
             )}
             {!isEditing && <StaySelectionEditor guestId={formData.guestId || ""} value={stayDraft.value} onChange={stayDraft.onChange} />}
-          </div>
-          <DialogFooter>
+          </section></div>
+          <DialogFooter className="operational-footer">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Volver
             </Button>
@@ -2327,6 +2341,8 @@ export function ReservationDetailDialog({
   onCancel,
   onEdit,
   currentUserRole,
+  operationalActions,
+  allowCancel = true,
 }: {
   reservation: ReservationWithDetails;
   open: boolean;
@@ -2334,6 +2350,8 @@ export function ReservationDetailDialog({
   onCancel: () => void;
   onEdit?: () => void;
   currentUserRole?: string;
+  operationalActions?: React.ReactNode;
+  allowCancel?: boolean;
 }) {
   const { data: liveReservation } = useQuery<ReservationWithDetails>({
     queryKey: ["/api/reservations", initialReservation.id],
@@ -4917,6 +4935,7 @@ export function ReservationDetailDialog({
 
         <DialogFooter className="wf-footer shrink-0 gap-2 sm:justify-between">
           <div className="wf-footer-actions">
+            {operationalActions}
             <Button
               variant="outline"
               onClick={printConfirmation}
@@ -4945,7 +4964,7 @@ export function ReservationDetailDialog({
                 Editar datos de reserva
               </Button>
             )}
-            {reservation.status === "checked_in" && (
+            {!operationalActions && reservation.status === "checked_in" && (
               <Button
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
@@ -4964,7 +4983,7 @@ export function ReservationDetailDialog({
                 Check-out
               </Button>
             )}
-            {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
+            {allowCancel && reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
               <Button 
                 variant="destructive" 
                 onClick={() => {

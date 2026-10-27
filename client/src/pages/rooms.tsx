@@ -334,7 +334,7 @@ function RoomFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px] max-h-[85vh] overflow-y-auto">
+      <DialogContent className="operational-dialog">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Habitación" : "Nueva Habitación"}</DialogTitle>
           <DialogDescription>
@@ -343,8 +343,8 @@ function RoomFormDialog({
               : "Ingresa los datos para crear una nueva habitación."}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
+        <form onSubmit={handleSubmit} className="operational-form">
+          <div className="operational-body grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="roomNumber">Número de Habitación</Label>
               <Input
@@ -392,9 +392,9 @@ function RoomFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-2">
+            <div className="grid gap-2 sm:col-span-2">
               <Label>Camajes que admite la habitación</Label>
-              <div className="grid grid-cols-1 gap-1.5 rounded-md border p-3">
+              <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
                 {BED_CONFIG_OPTIONS.map(({ value, label }) => (
                   <label key={value} className="flex items-center gap-2 text-sm font-normal">
                     <Checkbox
@@ -453,7 +453,7 @@ function RoomFormDialog({
               </Select>
               {isEditing && <p className="text-xs text-muted-foreground">El estado se corrige desde Housekeeping, con motivo e historial.</p>}
             </div>
-            <div className="grid gap-2">
+            <div className="grid gap-2 sm:col-span-2">
               <Label htmlFor="notes">Notas</Label>
               <Textarea
                 id="notes"
@@ -464,7 +464,7 @@ function RoomFormDialog({
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="operational-footer">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>

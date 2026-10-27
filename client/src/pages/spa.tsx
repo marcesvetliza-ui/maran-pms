@@ -3154,12 +3154,12 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
 
       {/* Appointment Detail Dialog */}
       <Dialog open={!!selectedAppointment && !isFolioOpen} onOpenChange={() => setSelectedAppointment(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="operational-dialog !max-w-[760px]">
           <DialogHeader>
             <DialogTitle>Detalle del Turno</DialogTitle>
           </DialogHeader>
           {selectedAppointment && (
-            <div className="space-y-4">
+            <div className="operational-form"><div className="operational-body space-y-5">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge className={appointmentStatusColors[selectedAppointment.status]}>
                   {appointmentStatusLabels[selectedAppointment.status]}
@@ -3181,7 +3181,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -3406,7 +3406,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </div>
               )}
 
-              <DialogFooter className="flex-wrap gap-2">
+              </div><DialogFooter className="operational-footer flex-wrap gap-2">
                 <Button variant="outline" size="sm" onClick={() => printComandaTermica(selectedAppointment)} data-testid="button-print-confirmation">
                   <Printer className="h-4 w-4 mr-1" /> Reimprimir comanda
                 </Button>

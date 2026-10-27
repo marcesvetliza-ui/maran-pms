@@ -393,8 +393,8 @@ export default function CheckOutPage() {
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           {((reservation as any).groupId || (reservation as any).isGroup) && (
-                            <Badge variant="outline" className="border-violet-300 text-violet-700 dark:border-violet-700 dark:text-violet-300" data-testid={`badge-group-${reservation.id}`}>
-                              Grupo{(reservation as any).groupCode ? ` · ${(reservation as any).groupCode}` : ""}
+                            <Badge variant="outline" className="max-w-64 whitespace-normal text-right border-violet-300 text-violet-700 dark:border-violet-700 dark:text-violet-300" data-testid={`badge-group-${reservation.id}`}>
+                              {(reservation as any).groupName || "Grupo"}{(reservation as any).groupCode && <span className="ml-1 opacity-70"> · {(reservation as any).groupCode}</span>}
                             </Badge>
                           )}
                           {reservation.status === "checked_in" ? (
@@ -646,7 +646,7 @@ export default function CheckOutPage() {
             <div className="space-y-3 text-sm">
               <div className="rounded-md border bg-muted/40 p-3 space-y-1">
                 <p><span className="font-medium">Reserva:</span> {selectedReservation.id}</p>
-                <p><span className="font-medium">Grupo:</span> {(selectedReservation as any).groupCode || (selectedReservation as any).groupName || (selectedReservation as any).groupId || "ID no informado"}</p>
+                <p><span className="font-medium">Grupo:</span> {(selectedReservation as any).groupName || (selectedReservation as any).groupCode || (selectedReservation as any).groupId || "ID no informado"}</p>
                 {(selectedReservation as any).outstandingBalance != null || (selectedReservation as any).balance != null
                   ? <p><span className="font-medium">Saldo provisional:</span> ${fmtMoney(String((selectedReservation as any).outstandingBalance ?? (selectedReservation as any).balance))}</p>
                   : <p className="font-medium">Saldo: Consultar folio grupal</p>}

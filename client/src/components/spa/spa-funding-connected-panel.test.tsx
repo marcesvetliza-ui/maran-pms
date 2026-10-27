@@ -4,21 +4,23 @@ import { QueryClient,QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach,afterEach,it,expect,vi } from 'vitest';
 import { SpaFundingConnectedPanel } from './spa-funding-connected-panel';
 const scope={kind:'spa',id:'spa-connected'};
-let calls:Array<{url:string;body:any}>,document:any,operation:any,covered:boolean,deny:boolean,noShift:boolean,unpaid:boolean;
+let calls:Array<{url:string;body:any}>,document:any,operation:any,covered:boolean,deny:boolean,noShift:boolean,unpaid:boolean,missingVat:boolean,emptyShifts:boolean;
+let allowCash = true;
+vi.mock("@/App", () => ({ useAuth: () => ({ hasPermission: (key:string) => allowCash && key === "sidebar:/cash-register" }) }));
 const ok=(data:unknown,status=200)=>new Response(JSON.stringify({ok:true,data}),{status});
 function mount(canWrite=true,onCompleted=vi.fn(),onRoomTransfer=vi.fn()) {
  return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}})}><SpaFundingConnectedPanel accountId={scope.id} userId='u1' canWrite={canWrite} onCompleted={onCompleted} onRoomTransfer={onRoomTransfer}/></QueryClientProvider>);
 }
 function op(status:string){return {id:operation?.id,scope,status,canAuthorize:status==='reserved',canFinalize:status==='authorized_pending_link',canResume:status==='fiscal_unknown',fundsRetained:status!=='applied',invoice:null,result:null,lastError:null};}
 beforeEach(()=>{
- sessionStorage.clear();calls=[];document=null;operation=null;covered=false;deny=false;noShift=false;unpaid=false;
+ sessionStorage.clear();calls=[];document=null;operation=null;covered=false;deny=false;noShift=false;unpaid=false;missingVat=false;emptyShifts=false;allowCash=true;
  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>{
   const body=init?.body?JSON.parse(String(init.body)):undefined;calls.push({url,body});
   if(url.endsWith('/account'))return ok({id:scope.id,chargeVersion:'a'.repeat(64),preferences:null,guestName:'Cliente SPA',status:'open',totalCents:9500000,paidCents:unpaid?0:covered?9500000:500000,balanceCents:unpaid?9500000:covered?0:9000000,readOnly:false,canInvoice:true,transferred:null,
    items:[{id:'item',description:'Masaje SPA',quantity:1,unitPrice:95000,subtotal:95000,itemType:'treatment',inventoryItemId:null}],payments:[],movements:[],events:[],operations:[],invoices:[]});
   if(url.endsWith('/prefactura-context'))return ok({environment:'homologacion',point:5,voucherPoint:23,companies:[{id:'company',name:'Empresa RI',cuit:'20301234567',vatCondition:'responsable_inscripto',address:'Domicilio empresa'}]});
-  if(url.endsWith('/recipient'))return ok({guestId:'customer',kind:'guest',firstName:'Cliente',lastName:'SPA',documentType:'DNI',documentNumber:'30111222',vatCondition:'consumidor_final',cuit:'',address:'Domicilio',editable:true});
-  if(url.endsWith('/collection-shifts'))return noShift?new Response('Unavailable',{status:503}):ok([{id:'shift',label:'Mi caja SPA'}]);
+  if(url.endsWith('/recipient'))return ok({guestId:'customer',kind:'guest',firstName:'Cliente',lastName:'SPA',documentType:'DNI',documentNumber:'30111222',vatCondition:missingVat?null:'consumidor_final',cuit:'',address:'Domicilio',editable:true});
+  if(url.endsWith('/collection-shifts'))return noShift?new Response('Unavailable',{status:503}):ok(emptyShifts?[]:[{id:'shift',label:'Mi caja SPA'}]);
   if(url.includes('/scopes/'))return ok({scope,debtCents:unpaid?9500000:covered?0:9000000,receipts:unpaid?[]:[{id:'r1',sourcePaymentId:'p1',method:'tarjeta_debito',amountCents:covered?9500000:500000,appliedCents:0,heldCents:0,freeCents:covered?9500000:500000,version:1}],documents:document?[document]:[],operations:operation?[operation]:[],rectifications:[]});
   if(url.endsWith('/voucher'))return ok({invoiceId:'voucher-1',totalCents:9500000});
   if(url.endsWith('/prefactura-options'))return ok({saved:true});
@@ -112,4 +114,22 @@ it('shows an incompatible fiscal type without preparing or collecting',async()=>
  mount();await screen.findByLabelText('Monto del cobro 1');await userEvent.selectOptions(screen.getByLabelText('Tipo de comprobante'),'FA');
  await userEvent.click(screen.getByRole('button',{name:'Revisar factura'}));
  expect(await screen.findByRole('region',{name:'Revisión del comprobante SPA'})).toHaveTextContent('no corresponde');expect(calls.filter(c=>c.body)).toHaveLength(0);
+});
+
+it('shows the saved fiscal condition and a prominent actionable cash warning without issuing',async()=>{
+ emptyShifts=true;mount();
+ const notice=await screen.findByTestId('spa-cash-notice');
+ await waitFor(()=>expect(notice).toHaveTextContent('Abrí tu caja SPA'));
+ expect(screen.getByRole('textbox',{name:'Condición IVA'})).toHaveValue('Consumidor final');
+ const link=screen.getByRole('link',{name:'Ir a Caja'});
+ expect(link).toHaveAttribute('href','/cash-register');expect(link).toHaveAttribute('target','_blank');
+ expect(notice.compareDocumentPosition(screen.getByRole('combobox',{name:'Facturar a'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(calls.filter(c=>c.body)).toHaveLength(0);
+});
+it('does not offer cash access to an unauthorized user and does not invent missing IVA',async()=>{
+ emptyShifts=true;missingVat=true;allowCash=false;mount();
+ expect(await screen.findByRole('textbox',{name:'Condición IVA'})).toHaveValue('No registrada');
+ await waitFor(()=>expect(screen.getAllByText(/Falta una condición IVA válida/).length).toBeGreaterThan(0));
+ expect(screen.queryByRole('link',{name:'Ir a Caja'})).not.toBeInTheDocument();
+ expect(calls.filter(c=>c.body)).toHaveLength(0);
 });

@@ -18,13 +18,13 @@ export function SpaFundingRecipientEditor({accountId,userId,canWrite,onSaved}:{
   accountId:string;userId:string;canWrite:boolean;onSaved:()=>void;
 }) {
   const client=useQueryClient();
-  const profile=useQuery({queryKey:["/api/payment-funding/recipient",accountId,userId],queryFn:()=>fundingApi.recipient(accountId),retry:false});
+  const profile=useQuery({queryKey:["/api/payment-funding/recipient",accountId,userId],queryFn:()=>fundingApi.recipient(accountId),retry:false,staleTime:0,refetchOnMount:"always"});
   const [form,setForm]=useState<Fields>(fields());
   const [busy,setBusy]=useState(false),[error,setError]=useState("");
   useEffect(()=>{if(profile.data)setForm(fields(profile.data));},[profile.data]);
   if(profile.isPending)return <p>Consultando datos fiscales del cliente…</p>;
   const disabled=!canWrite||busy||profile.data?.editable===false;
-  return <details className="rounded border p-3" open={!profile.data?.guestId}>
+  return <details className="rounded border p-3" open={!profile.data?.guestId || !profile.data?.vatCondition}>
     <summary className="cursor-pointer font-medium">Datos fiscales del cliente{form.guestId?` · ${form.firstName} ${form.lastName}`:" · Falta vincular la ficha"}</summary>
     <p className="my-2 text-sm text-muted-foreground">Elegí una ficha o completá los datos para crearla y vincularla al turno. Guardar actualiza la ficha seleccionada; no emite ni cobra.</p>
     {(error||profile.isError)&&<p role="alert" className="text-destructive">{error||profile.error?.message}</p>}

@@ -294,3 +294,29 @@ textarea::placeholder {
     inset: -1px;
   }
 }
+
+/* Operational forms: fixed heading/actions, one scrollable body, no zoom required. */
+.operational-dialog { width: min(96vw, 1100px); max-width: 1100px; max-height: 92dvh; display: flex; flex-direction: column; overflow: hidden; gap: 1rem; }
+.operational-dialog > * { min-width: 0; }
+.operational-dialog .operational-form { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; gap: 1rem; }
+.operational-dialog .operational-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 2px 6px 12px 2px; scrollbar-gutter: stable; }
+.operational-dialog .operational-footer { flex-shrink: 0; border-top: 1px solid hsl(var(--border)); padding-top: 1rem; background: hsl(var(--background)); gap: .5rem; }
+.operational-dialog .operational-body label { overflow-wrap: anywhere; }
+.operational-dialog .operational-body input, .operational-dialog .operational-body [role=combobox] { min-width: 0; }
+.operational-dialog .optional-relations { border: 1px solid hsl(var(--border)); border-radius: .65rem; padding: 1rem; }
+.operational-dialog .optional-relations > summary { cursor: pointer; font-weight: 600; }
+.operational-dialog .optional-relations[open] > summary { margin-bottom: 1rem; }
+.operational-dialog .optional-relations > div + div { margin-top: 1rem; }
+@media (max-width: 639px) {
+ .operational-dialog { padding: 1rem; max-height: 94dvh; }
+ .operational-dialog .operational-footer { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; }
+ .operational-dialog .operational-footer > button { flex: 1 1 auto; }
+}
+
+.restaurant-checkout .restaurant-close-grid { display: grid; gap: 1.5rem; align-items: start; }
+@media (min-width: 900px) {
+ .restaurant-checkout .restaurant-close-grid { grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); }
+}
+
+/* A modal must not have its confirm action covered by the floating help launcher. */
+body:has(.operational-dialog[data-state="open"], .reservation-wide-folio[data-state="open"]) [data-testid="button-help-chat-open"] { visibility: hidden; pointer-events: none; }

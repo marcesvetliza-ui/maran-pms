@@ -525,7 +525,7 @@ export default function CompaniesPage() {
       </Card>
 
       <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setEditingCompany(null); } }}>
-        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="operational-dialog">
           <DialogHeader>
             <DialogTitle>{editingCompany ? "Editar Empresa" : "Nueva Empresa"}</DialogTitle>
             <DialogDescription>
@@ -533,10 +533,10 @@ export default function CompaniesPage() {
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="operational-form"><div className="operational-body space-y-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <FormField control={form.control} name="razonSocial" render={({ field }) => (
-                  <FormItem className="col-span-2">
+                  <FormItem className="sm:col-span-2 lg:col-span-3">
                     <FormLabel>Razón Social *</FormLabel>
                     <FormControl><Input {...field} data-testid="input-company-razon-social" /></FormControl>
                     <FormMessage />
@@ -615,7 +615,7 @@ export default function CompaniesPage() {
 
               <div className="border-t pt-4">
                 <h3 className="text-sm font-medium mb-3">Persona de Contacto</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <FormField control={form.control} name="contactName" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Nombre</FormLabel>
@@ -642,7 +642,7 @@ export default function CompaniesPage() {
 
               <div className="border-t pt-4">
                 <h3 className="text-sm font-medium mb-3">Condiciones Comerciales</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <FormField control={form.control} name="regimenHospedaje" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Régimen</FormLabel>
@@ -705,7 +705,7 @@ export default function CompaniesPage() {
                 </FormItem>
               )} />
 
-              <DialogFooter>
+              </div><DialogFooter className="operational-footer">
                 <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingCompany(null); }}>
                   Cancelar
                 </Button>
