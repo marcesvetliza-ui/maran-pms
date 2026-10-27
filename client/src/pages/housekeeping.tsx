@@ -1,4 +1,12 @@
+import "./housekeeping.css";
+import {loadHousekeepingBlockConflicts} from "@/lib/housekeeping-block-conflicts";
+import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
+import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
+import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
+import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
+import {HousekeepingPlanningView} from "@/components/housekeeping-planning";
+import {type TaskEditor, HousekeepingTaskManager} from "@/components/housekeeping-task-manager";
 import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
 import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
@@ -91,7 +99,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { RoomWithType, RoomStatus, HousekeepingTaskWithRoom, LostFoundItem, InsertLostFound, Guest, LoanItem, ItemLoanWithItem, SafeBoxOpening, InsertSafeBoxOpening } from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -166,18 +174,17 @@ function RoomCard({
   const taskWithNote = tasks.find(t => t.notes && (t.status === "pending" || t.status === "in_progress"));
   
   return (
-    <Card className={`${config.bgClass} border transition-all`}>
-      <CardContent className="p-3">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-lg">{room.roomNumber}</span>
-            <Icon className={`h-4 w-4 ${config.className}`} />
+    <Card className="hk-room-card" data-status={room.status} data-testid={`hk-room-card-${room.id}`}>
+      <CardContent className="hk-room-content">
+        <div className="hk-room-heading">
+          <div className="hk-room-identity">
+            <span className="hk-room-number">{room.roomNumber}</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="hk-room-tools">
             {hasNotes && (
               <MessageSquare className="h-3 w-3 text-muted-foreground" />
             )}
-            <Badge variant="outline" className="text-xs">
+            <Badge variant="outline" className="max-w-20 truncate text-xs" title={room.roomType?.name || room.roomType?.code || "Tipo sin registrar"}>
               {room.roomType?.code || "N/A"}
             </Badge>
             <Popover>
@@ -185,13 +192,14 @@ function RoomCard({
                 <Button 
                   size="icon" 
                   variant="ghost" 
-                  className="h-6 w-6"
+                  className="h-8 w-8 shrink-0"
+                  aria-label={`Opciones de habitación ${room.roomNumber}`}
                   data-testid={`button-room-menu-${room.id}`}
                 >
                   <MoreHorizontal className="h-3 w-3" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-48 p-2" align="end">
+              <PopoverContent className="hk-room-popover w-64 max-w-[calc(100vw-2rem)] p-2" align="end">
                 <div className="space-y-1">
                   <Button 
                     size="sm" 
@@ -241,7 +249,6 @@ function RoomCard({
                     variant="ghost" 
                     className="w-full justify-start h-8 text-xs"
                     onClick={() => {
-                      onUpdateStatus(room.id, "maintenance");
                       navigate(`/maintenance?newOrder=${room.id}&roomNumber=${encodeURIComponent(room.roomNumber)}`);
                     }}
                     data-testid={`button-quick-maintenance-${room.id}`}
@@ -249,31 +256,28 @@ function RoomCard({
                     <Wrench className="h-3 w-3 mr-2 text-red-500" />
                     Mantenimiento
                   </Button>
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    className="w-full justify-start h-8 text-xs"
-                    onClick={() => onEditBedConfig(room.id, room.bedConfig || "")}
-                    data-testid={`button-edit-bedconfig-${room.id}`}
-                  >
-                    <Bed className="h-3 w-3 mr-2 text-blue-500" />
-                    Cambiar Camaje {room.bedConfig ? `(${getBedConfigLabel(room.bedConfig)})` : ""}
-                  </Button>
+
                 </div>
               </PopoverContent>
             </Popover>
           </div>
         </div>
         
-        <div className="text-xs text-muted-foreground mb-2">
-          {config.label}
+        <div className="hk-room-status">
+          <Icon className={`h-4 w-4 shrink-0 mt-0.5 ${config.className}`} /><span>
+          {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : config.label}</span>
         </div>
+        <button className="hk-room-camaje" onClick={()=>onEditBedConfig(room.id,room.bedConfig||"")} aria-label={`Cambiar camaje físico de habitación ${room.roomNumber}`}>
+          <Bed className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0"><span className="hk-room-camaje-label">Camaje físico</span><span className="hk-room-camaje-value">{room.bedConfig ? getBedConfigLabel(room.bedConfig) : "Sin registrar"}</span></span>
+          <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
         
         <HousekeepingPreparationControl hideTrigger controlledOpen={preparationOpen} onOpenChange={setPreparationOpen} roomId={room.id} roomNumber={room.roomNumber} />
         {pendingTasks.length > 0 ? (
-          <div className="space-y-1">
+          <div className="hk-room-task-list">
             {pendingTasks.map(task => (
-              <div key={task.id} className="flex items-center justify-between gap-1">
+              <div key={task.id} className="hk-room-task-row">
                 <Badge className={`${taskStatusConfig[task.status as TaskStatus].className} text-xs`}>
                   {taskTypeLabels[task.taskType as TaskType] || task.taskType}
                 </Badge>
@@ -303,7 +307,8 @@ function RoomCard({
             ))}
           </div>
         ) : (
-          <div className="flex gap-1 flex-wrap">
+          <div className="hk-room-actions">
+            {["maintenance","oos"].includes(room.status) && <Button size="sm" variant="outline" onClick={()=>onOpenDetails(room.id)}><MessageSquare className="h-4 w-4" />Ver detalles</Button>}
             {room.status === "dirty" && (
               <>
                 <Button 
@@ -390,11 +395,11 @@ function RoomCard({
         )}
         {taskWithNote?.notes && (
           <div
-            className="flex items-start gap-1 mt-1 text-xs text-muted-foreground italic"
+            className="hk-room-note"
             title={taskWithNote.notes}
           >
             <MessageSquare className="h-3 w-3 shrink-0 mt-0.5" />
-            <span className="line-clamp-1">{taskWithNote.notes}</span>
+            <span>{taskWithNote.notes}</span>
           </div>
         )}
       </CardContent>
@@ -1097,6 +1102,7 @@ function MobileRoomCard({
   onUpdateStatus,
   onQuickStart,
   isUpdating,
+  canManage,
 }: {
   room: RoomWithType;
   tasks: HousekeepingTaskWithRoom[];
@@ -1109,6 +1115,7 @@ function MobileRoomCard({
   onUpdateStatus: (roomId: string, status: RoomStatus) => void;
   onQuickStart: (roomId: string) => void;
   isUpdating: boolean;
+  canManage: boolean;
 }) {
   const [, navigate] = useLocation();
   const config = statusConfig[room.status] ?? { label: room.status, icon: AlertCircle, className: "text-gray-500", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" };
@@ -1158,7 +1165,7 @@ function MobileRoomCard({
             <div className="flex flex-col gap-0.5">
               <div className={`flex items-center gap-1 text-sm font-medium ${config.className}`}>
                 <Icon className="h-4 w-4" />
-                {config.label}
+                {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,getArgentinaToday()) ? "Ocupada · limpieza pendiente" : config.label}
               </div>
               <span className="text-xs text-muted-foreground">{room.roomType?.name || room.roomType?.code || "—"} · Piso {room.floor}</span>
             </div>
@@ -1204,15 +1211,16 @@ function MobileRoomCard({
               )}
             </div>
             {currentTask.notes && (
-              <p className="text-xs mt-0.5 opacity-80 truncate">{currentTask.notes}</p>
+              <p className="text-xs mt-0.5 opacity-80 whitespace-pre-wrap break-words">{currentTask.notes}</p>
             )}
           </div>
         )}
 
+        {currentTask?.startedAt&&<p className="text-xs text-muted-foreground">Inicio {new Date(currentTask.startedAt).toLocaleTimeString('es-AR')}{currentTask.completedAt&&<> · Fin {new Date(currentTask.completedAt).toLocaleTimeString('es-AR')} · Duración {Math.max(0,Math.round((new Date(currentTask.completedAt).getTime()-new Date(currentTask.startedAt).getTime())/60000))} min</>}</p>}
         {/* Main action buttons */}
         <div className="flex flex-col gap-2">
           {/* No active task on a dirty/occupied room → Quick start */}
-          {!currentTask && (room.status === "dirty" || (checkoutToday && room.status === "occupied")) && (
+          {canManage && !currentTask && (room.status === "dirty" || (checkoutToday && room.status === "occupied")) && (
             <Button
               className="w-full h-12 text-base bg-orange-500 hover:bg-orange-600 text-white"
               disabled={isUpdating}
@@ -1250,7 +1258,7 @@ function MobileRoomCard({
           )}
 
           {/* Active task OR cleaning-status room → Finalizar limpieza */}
-          {(activeTask || (!activeTask && !pendingTask && room.status === "cleaning")) && (
+          {(activeTask || (canManage && !activeTask && !pendingTask && room.status === "cleaning")) && (
             <Button
               className="w-full h-12 text-base bg-green-500 hover:bg-green-600 text-white font-semibold shadow-sm"
               disabled={isUpdating}
@@ -1273,7 +1281,7 @@ function MobileRoomCard({
           )}
 
           {/* Completed task → Inspect */}
-          {completedTask && !activeTask && !pendingTask && (
+          {canManage && completedTask && !activeTask && !pendingTask && (
             <Button
               className="w-full h-12 text-base bg-blue-500 hover:bg-blue-600 text-white"
               disabled={isUpdating}
@@ -1302,10 +1310,10 @@ function MobileRoomCard({
         </div>
 
         {/* Quick status row */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
+        {canManage&&<div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border/50">
           <span className="text-xs text-muted-foreground w-full mb-0.5">Cambiar estado:</span>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Disponible — Hab. ${room.roomNumber}`,
               description: "¿Marcar esta habitación como disponible?",
@@ -1318,7 +1326,7 @@ function MobileRoomCard({
             Disponible
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Limpia ocupada — Hab. ${room.roomNumber}`,
               description: "¿Marcar esta habitación como limpia con huésped?",
@@ -1331,7 +1339,7 @@ function MobileRoomCard({
             Limpia ocup.
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `No molestar — Hab. ${room.roomNumber}`,
               description: "¿Activar estado No molestar?",
@@ -1344,7 +1352,7 @@ function MobileRoomCard({
             No molestar
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Sucia — Hab. ${room.roomNumber}`,
               description: "¿Marcar esta habitación como sucia?",
@@ -1357,13 +1365,12 @@ function MobileRoomCard({
             Sucia
           </button>
           <button
-            className="text-[11px] px-2 py-1.5 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium disabled:opacity-40"
+            className="text-xs px-2 py-1.5 rounded-md bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 font-medium disabled:opacity-40"
             onClick={() => confirm({
               title: `Mantenimiento — Hab. ${room.roomNumber}`,
-              description: "¿Pasar esta habitación a estado de mantenimiento?",
+              description: "Se abrirá el formulario para reportar una avería. El bloqueo se define por separado.",
               confirmLabel: "Sí, mantenimiento",
               fn: () => {
-                onUpdateStatus(room.id, "maintenance");
                 navigate(`/maintenance?newOrder=${room.id}&roomNumber=${encodeURIComponent(room.roomNumber)}`);
               },
             })}
@@ -1372,7 +1379,7 @@ function MobileRoomCard({
           >
             Mant.
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Confirmation dialog — local al componente, no bloquea otras tarjetas */}
@@ -1406,32 +1413,30 @@ function MobileRoomCard({
 
 export default function Housekeeping() {
   const { user, hasPermission } = useAuth();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
   // Etapa 3 del ABM de usuarios: mismo resourceKey server-side. Se aprovechó
   // para sacar "gobernanta" del array — no es un rol real del sistema
   // (SystemUserRole no lo incluye), quedó de una versión anterior.
   const isSupervisor = hasPermission("api:housekeeping:supervisor-view");
-  const isMucama = user?.role === "housekeeping";
+  const isMucama = !isSupervisor;
+  const [taskPlannerOpen,setTaskPlannerOpen]=useState(false);
+  const [plannerTask,setPlannerTask]=useState<TaskEditor | null>(null);
+  const [plannerRooms,setPlannerRooms]=useState<string[]>([]);
+  const [plannerDate,setPlannerDate]=useState<string|undefined>(undefined);
   const [floorFilter, setFloorFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [mobileView, setMobileView] = useState(() => localStorage.getItem("hk_mobile_view") === "true");
   const toggleMobileView = () => setMobileView(v => { const next = !v; localStorage.setItem("hk_mobile_view", String(next)); return next; });
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
-  const [taskType, setTaskType] = useState<TaskType>("checkout_clean");
-  const [priority, setPriority] = useState<Priority>("normal");
-  const [notes, setNotes] = useState("");
   const [detailNotes, setDetailNotes] = useState("");
-  // "Crear tarea de limpieza" es una sección opcional dentro del diálogo de
-  // detalle único (antes era un diálogo aparte) — se abre expandida cuando
-  // se entra por el botón "Tarea" de la tarjeta, y colapsada cuando se entra
-  // por "Ver Detalles / Notas".
-  const [showTaskSection, setShowTaskSection] = useState(false);
-
   // ── Bloqueo de habitación por fechas (limpiezas de varios días) ──────────
   // Reusa maintenance_blocks — la misma tabla y los mismos endpoints que ya
   // usa Mantenimiento — para que Planning y disponibilidad respeten un
   // bloqueo sin importar desde qué área se haya cargado.
+  const [blocksDialogOpen,setBlocksDialogOpen]=useState(false);
+  const [blockChecking,setBlockChecking]=useState(false);
   const [blockEnabled, setBlockEnabled] = useState(false);
   const [blockFrom, setBlockFrom] = useState("");
   const [blockTo, setBlockTo] = useState("");
@@ -1449,6 +1454,7 @@ export default function Housekeeping() {
 
   const { data: rooms, isLoading: roomsLoading } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms"],
+    refetchInterval: 30000,
   });
 
   const today = getArgentinaToday();
@@ -1560,8 +1566,8 @@ export default function Housekeeping() {
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Tarea iniciada", description: "La limpieza ha comenzado." });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo iniciar la tarea.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "No se pudo confirmar el cambio", description: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -1574,35 +1580,22 @@ export default function Housekeeping() {
       const roomNum = rooms?.find(r => r.id === completedTask?.roomId)?.roomNumber;
       toast({
         title: `✅ Limpieza finalizada${roomNum ? ` — Hab. ${roomNum}` : ""}`,
-        description: "La habitación quedó disponible.",
+        description: "Se registró la limpieza conservando la ocupación. La verificación queda a cargo de supervisión.",
         duration: 6000,
       });
     },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo completar la tarea.", variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "No se pudo confirmar el cambio", description: parseApiError(error), variant: "destructive" });
     },
   });
 
-  const updateRoomStatusMutation = useMutation({
-    mutationFn: ({ roomId, status }: { roomId: string; status: RoomStatus }) => 
-      apiRequest("PATCH", `/api/housekeeping/room/${roomId}/status`, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Estado actualizado" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo actualizar el estado.", variant: "destructive" });
-    },
-  });
+  const updateRoomStatusMutation = useRoomStatusCorrection(rooms || []);
 
   const createTaskMutation = useMutation({
     mutationFn: (data: { roomId: string; taskType: string; priority: string; notes?: string; scheduledDate: string }) => 
       apiRequest("POST", "/api/housekeeping", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
-      setShowTaskSection(false);
-      setNotes("");
       toast({ title: "Tarea creada", description: "La tarea de limpieza ha sido asignada." });
     },
     onError: () => {
@@ -1610,10 +1603,10 @@ export default function Housekeeping() {
     },
   });
 
-  const { data: selectedRoomBlocks = [] } = useQuery<Array<{ id: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }>>({
+  const { data: selectedRoomBlocks = [], isLoading: blocksLoading, isError: blocksError, refetch: reloadBlocks } = useQuery<Array<{ id: string; blockFrom: string; blockTo: string; blockedBy: string; notes: string | null }>>({
     queryKey: ["/api/maintenance/blocks", selectedRoomId],
-    queryFn: () => fetch(`/api/maintenance/blocks?roomId=${encodeURIComponent(selectedRoomId!)}`, { credentials: "include" }).then(r => r.json()),
-    enabled: detailsDialogOpen && !!selectedRoomId,
+    queryFn: () => apiRequest("GET", `/api/maintenance/blocks?roomId=${encodeURIComponent(selectedRoomId!)}`).then(r => r.json()),
+    enabled: blocksDialogOpen && !!selectedRoomId,
   });
 
   const addRoomBlockMutation = useMutation({
@@ -1672,12 +1665,9 @@ export default function Housekeeping() {
     to: string,
     action: NonNullable<typeof pendingBlockAction>,
   ) => {
+    setBlockChecking(true);
     try {
-      const res = await fetch(
-        `/api/maintenance/blocks/check-conflicts?roomId=${encodeURIComponent(roomId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-        { credentials: "include" }
-      );
-      const conflicts: BlockConflictRes[] = await res.json();
+      const conflicts = await loadHousekeepingBlockConflicts(roomId,from,to);
       if (Array.isArray(conflicts) && conflicts.length > 0) {
         setBlockConflicts(conflicts);
         setPendingBlockAction(action);
@@ -1685,8 +1675,8 @@ export default function Housekeeping() {
         executeBlockAction(action);
       }
     } catch {
-      executeBlockAction(action); // Si falla la verificación, se procede igual.
-    }
+      toast({title:"No se pudo verificar la disponibilidad",description:"No se aplicó el bloqueo. Reintentá la consulta antes de continuar.",variant:"destructive"});
+    } finally { setBlockChecking(false); }
   };
 
   const executeBlockAction = (action: NonNullable<typeof pendingBlockAction>) => {
@@ -1706,7 +1696,7 @@ export default function Housekeeping() {
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       toast({ title: "Habitación aprobada", description: "La inspección fue registrada." });
     },
-    onError: () => toast({ title: "Error", description: "No se pudo registrar la inspección.", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "No se pudo verificar", description: parseApiError(error), variant: "destructive" }),
   });
 
   const quickStartMutation = useMutation({
@@ -1733,7 +1723,7 @@ export default function Housekeeping() {
         duration: 5000,
       });
     },
-    onError: () => toast({ title: "Error", description: "No se pudo iniciar la limpieza.", variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "No se pudo iniciar", description: parseApiError(error), variant: "destructive" }),
   });
 
   const assignMutation = useMutation({
@@ -1757,11 +1747,11 @@ export default function Housekeeping() {
     return true;
   }) || [];
 
-  // Para mucamas: solo muestran sus habitaciones asignadas. Si no tiene ninguna asignada, ve todas.
+  // El servidor y la vista limitan el trabajo al personal asignado; sin asignación no hay tareas.
   const myAssignedRoomIds = isMucama
     ? new Set((tasks ?? []).filter(t => t.assignedTo === user?.id).map(t => t.roomId))
     : null;
-  const mobileRooms = (isMucama && myAssignedRoomIds && myAssignedRoomIds.size > 0)
+  const mobileRooms = (isMucama && myAssignedRoomIds)
     ? filteredRooms.filter(r => myAssignedRoomIds.has(r.id))
     : filteredRooms;
 
@@ -1795,23 +1785,13 @@ export default function Housekeeping() {
   const tareasHoy = tasks?.length ?? 0;
   const tareasCompletadas = tasks?.filter(t => t.status === "completed" || t.status === "inspected").length ?? 0;
 
-  const handleCreateTask = (roomId: string) => {
-    setSelectedRoomId(roomId);
-    const roomTasks = getTasksForRoom(roomId);
-    const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
-    setDetailNotes(existingNotes);
-    setShowTaskSection(true);
-    setBlockEnabled(false);
-    setEditingBlockId(null);
-    setDetailsDialogOpen(true);
-  };
+  const handleCreateTask = (roomId:string) => {setDetailsDialogOpen(false);setPlannerRooms([roomId]);setTaskPlannerOpen(true);};
 
   const handleOpenDetails = (roomId: string) => {
     setSelectedRoomId(roomId);
     const roomTasks = getTasksForRoom(roomId);
     const existingNotes = roomTasks.find(t => t.notes)?.notes || "";
     setDetailNotes(existingNotes);
-    setShowTaskSection(false);
     setBlockEnabled(false);
     setEditingBlockId(null);
     setDetailsDialogOpen(true);
@@ -1844,17 +1824,6 @@ export default function Housekeeping() {
   const selectedRoom = rooms?.find(r => r.id === selectedRoomId);
   const selectedRoomTasks = selectedRoomId ? getTasksForRoom(selectedRoomId) : [];
 
-  const handleSubmitTask = () => {
-    if (!selectedRoomId) return;
-    createTaskMutation.mutate({
-      roomId: selectedRoomId,
-      taskType,
-      priority,
-      notes: notes || undefined,
-      scheduledDate: today,
-    });
-  };
-
   if (roomsLoading || tasksLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -1862,7 +1831,7 @@ export default function Housekeeping() {
         <div className="grid grid-cols-4 gap-4">
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}
         </div>
-        <div className="grid grid-cols-7 gap-3">
+        <div className="hk-room-grid">
           {Array(14).fill(0).map((_, i) => <Skeleton key={i} className="h-32" />)}
         </div>
       </div>
@@ -1870,15 +1839,18 @@ export default function Housekeeping() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="housekeeping-page p-4 sm:p-6 space-y-5">
+      {updateRoomStatusMutation.dialog}
       <div className="flex items-center gap-2">
         <ClipboardCheck className="h-6 w-6 text-muted-foreground" />
         <h1 className="text-2xl font-bold" data-testid="text-page-title">Housekeeping</h1>
       </div>
 
+      {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} initialDate={plannerDate} initialTask={plannerTask} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value){setPlannerRooms([]);setPlannerDate(undefined);setPlannerTask(null);}}}/>}
       <Tabs defaultValue="rooms">
-        <TabsList>
-          <TabsTrigger value="rooms">Habitaciones</TabsTrigger>
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1">
+          <TabsTrigger value="rooms">Habitaciones · Hoy</TabsTrigger>
+          {isSupervisor&&<TabsTrigger value="planning">Planificación por fecha</TabsTrigger>}
           {isSupervisor && (
             <TabsTrigger value="turno" data-testid="tab-turno" className="gap-1">
               <CalendarClock className="h-4 w-4" />
@@ -1910,6 +1882,7 @@ export default function Housekeeping() {
           <TabsTrigger value="inventory" data-testid="tab-housekeeping-inventory" className="gap-1"><Boxes className="h-4 w-4" />Inventario Housekeeping</TabsTrigger>
         </TabsList>
 
+        {isSupervisor&&<TabsContent value="planning"><HousekeepingPlanningView onManageBlocks={date=>{setSelectedRoomId(null);setBlockEnabled(false);setEditingBlockId(null);setBlockFrom(date);setBlockTo(date);setBlockNotes("");setBlocksDialogOpen(true);}} onCreateTask={(roomId,date)=>{setPlannerRooms(roomId ? [roomId] : []);setPlannerTask(null);setPlannerDate(date);setTaskPlannerOpen(true);}} onEditTask={task=>{setPlannerTask(task);setPlannerRooms([task.roomId]);setPlannerDate(task.scheduledDate);setTaskPlannerOpen(true);}}/></TabsContent>}
         <TabsContent value="inventory"><HousekeepingInventory /></TabsContent>
 
         <TabsContent value="rooms">
@@ -1969,7 +1942,7 @@ export default function Housekeeping() {
               <div className="flex items-center gap-2 flex-wrap">
                 <Filter className="h-4 w-4 text-muted-foreground" />
                 <Select value={floorFilter} onValueChange={setFloorFilter}>
-                  <SelectTrigger className="w-32" data-testid="select-floor-filter">
+                  <span className="text-xs font-medium">Piso</span><SelectTrigger className="w-32" data-testid="select-floor-filter">
                     <SelectValue placeholder="Piso" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1980,7 +1953,7 @@ export default function Housekeeping() {
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-40" data-testid="select-status-filter">
+                  <span className="text-xs font-medium">Estado de limpieza</span><SelectTrigger className="w-40" data-testid="select-status-filter">
                     <SelectValue placeholder="Estado" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1993,7 +1966,7 @@ export default function Housekeeping() {
                   </SelectContent>
                 </Select>
               </div>
-              <button
+              {isSupervisor&&<button
                 onClick={toggleMobileView}
                 data-testid="button-toggle-mobile-view"
                 title={mobileView ? "Cambiar a vista escritorio" : "Cambiar a vista móvil (táctil)"}
@@ -2005,7 +1978,7 @@ export default function Housekeeping() {
               >
                 {mobileView ? <LayoutGrid className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />}
                 {mobileView ? "Vista escritorio" : "Vista móvil"}
-              </button>
+              </button>}
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -2066,7 +2039,7 @@ export default function Housekeeping() {
         </Card>
       </div>
 
-      {mobileView ? (
+      {(mobileView || !isSupervisor) ? (
         /* ── VISTA MÓVIL ── */
         <div className="space-y-3">
           {isMucama && myAssignedRoomIds && myAssignedRoomIds.size > 0 && (
@@ -2078,7 +2051,7 @@ export default function Housekeeping() {
           {isMucama && myAssignedRoomIds && myAssignedRoomIds.size === 0 && (
             <div className="flex items-center gap-2 px-1 py-2 text-sm text-amber-600 border-b border-amber-200 bg-amber-50 rounded-lg">
               <Users className="h-4 w-4" />
-              <span>Sin asignación aún — mostrando todas las habitaciones</span>
+              <span>No tenés tareas asignadas para hoy.</span>
             </div>
           )}
           {mobileRooms.length === 0 && (
@@ -2091,6 +2064,11 @@ export default function Housekeeping() {
           {mobileRooms
             .slice()
             .sort((a, b) => {
+              const priorityOrder:Record<string,number>={urgent:0,high:1,normal:2,low:3};
+              const roomPriority=(id:string)=>Math.min(4,...getTasksForRoom(id).filter(t=>t.status==='pending'||t.status==='in_progress').map(t=>priorityOrder[t.priority]??4));
+              const active=(id:string)=>getTasksForRoom(id).some(t=>t.status==='in_progress')?0:1;
+              if(active(a.id)!==active(b.id))return active(a.id)-active(b.id);
+              if(roomPriority(a.id)!==roomPriority(b.id))return roomPriority(a.id)-roomPriority(b.id);
               const urgentA = checkoutRoomIds.has(a.id) && (a.status === "dirty" || a.status === "occupied") ? 0 : 1;
               const urgentB = checkoutRoomIds.has(b.id) && (b.status === "dirty" || b.status === "occupied") ? 0 : 1;
               if (urgentA !== urgentB) return urgentA - urgentB;
@@ -2102,6 +2080,7 @@ export default function Housekeeping() {
             })
             .map(room => (
               <MobileRoomCard
+                canManage={isSupervisor}
                 key={room.id}
                 room={room}
                 tasks={getTasksForRoom(room.id)}
@@ -2137,7 +2116,7 @@ export default function Housekeeping() {
                   <Clock className="h-4 w-4 text-muted-foreground" />
                   Piso {floor}
                 </h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="hk-room-grid">
                   {floorRooms
                     .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber))
                     .map(room => (
@@ -2169,10 +2148,11 @@ export default function Housekeeping() {
 
         {isSupervisor && (
         <TabsContent value="turno">
+          <HousekeepingStaffAvailability />
           <div className="mt-4 space-y-6">
             {/* ── Cards por mucama ── */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <h3 className="md:col-span-2 xl:col-span-3 text-sm font-semibold text-muted-foreground flex items-center gap-2">
                 <Users className="h-4 w-4" /> Personal asignado hoy
               </h3>
               {hkStaff.length === 0 && (
@@ -2184,7 +2164,7 @@ export default function Housekeeping() {
                 const staffTasks = (tasks ?? []).filter(t => t.assignedTo === staff.id);
                 const roleLabel: Record<string, string> = { housekeeping: "Mucama", gobernanta: "Gobernanta", responsable_area: "Resp. Área" };
                 return (
-                  <Card key={staff.id} className="border">
+                  <Card key={staff.id} className="rounded-xl shadow-sm border">
                     <CardContent className="p-4">
                       <div className="flex items-start gap-3">
                         <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -2241,7 +2221,7 @@ export default function Housekeeping() {
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-sm">Hab. {room.roomNumber}</span>
                           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${statusColor[room.status] ?? "bg-muted text-muted-foreground"}`}>
-                            {statusLabel[room.status] ?? room.status}
+                            {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,today) ? "Ocupada · limpieza pendiente" : statusLabel[room.status] ?? room.status}
                           </span>
                           {checkoutRoomIds.has(room.id) && (
                             <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Checkout hoy</span>
@@ -2500,127 +2480,22 @@ export default function Housekeeping() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
-        <DialogContent className="max-w-md">
+      <Dialog open={blocksDialogOpen} onOpenChange={open=>{if(!blockChecking&&!addRoomBlockMutation.isPending&&!updateRoomBlockMutation.isPending&&!removeRoomBlockMutation.isPending&&!pendingBlockAction)setBlocksDialogOpen(open);}}>
+        <DialogContent className="max-w-xl max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Habitacion {selectedRoom?.roomNumber}</DialogTitle>
-            <DialogDescription>
-              {selectedRoom?.roomType?.name} - {statusConfig[selectedRoom?.status || "available"].label}
-            </DialogDescription>
+            <DialogTitle>Bloqueos por fechas</DialogTitle>
+            <DialogDescription>Gestioná disponibilidad por fechas. Un bloqueo no cambia el estado de limpieza ni realiza un checkout.</DialogDescription>
           </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Estado Actual</Label>
-              <div className="flex gap-2 flex-wrap">
-                <Button 
-                  size="sm" 
-                  variant={selectedRoom?.status === "available" ? "default" : "outline"}
-                  onClick={() => {
-                    if (selectedRoomId) {
-                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "available" });
-                    }
-                  }}
-                  data-testid="button-detail-available"
-                >
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Disponible
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant={selectedRoom?.status === "dirty" ? "default" : "outline"}
-                  onClick={() => {
-                    if (selectedRoomId) {
-                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "dirty" });
-                    }
-                  }}
-                  data-testid="button-detail-dirty"
-                >
-                  <AlertCircle className="h-3 w-3 mr-1" />
-                  Sucia
-                </Button>
-                <Button 
-                  size="sm" 
-                  variant={selectedRoom?.status === "maintenance" ? "default" : "outline"}
-                  onClick={() => {
-                    if (selectedRoomId) {
-                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "maintenance" });
-                    }
-                  }}
-                  data-testid="button-detail-maintenance"
-                >
-                  <Wrench className="h-3 w-3 mr-1" />
-                  Mantenimiento
-                </Button>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-muted-foreground" />
-                  <Label className="text-sm font-medium">Crear tarea de limpieza</Label>
-                </div>
-                <Switch
-                  checked={showTaskSection}
-                  onCheckedChange={setShowTaskSection}
-                  data-testid="switch-create-task"
-                />
-              </div>
-              {showTaskSection && (
-                <div className="space-y-3 pt-1">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Tipo de Tarea</Label>
-                    <Select value={taskType} onValueChange={(v) => setTaskType(v as TaskType)}>
-                      <SelectTrigger data-testid="select-task-type">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="checkout_clean">Limpieza Check-out</SelectItem>
-                        <SelectItem value="stayover_clean">Limpieza Estancia</SelectItem>
-                        <SelectItem value="deep_clean">Limpieza Profunda</SelectItem>
-                        <SelectItem value="inspection">Inspeccion</SelectItem>
-                        <SelectItem value="maintenance_prep">Prep. Mantenimiento</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Prioridad</Label>
-                    <Select value={priority} onValueChange={(v) => setPriority(v as Priority)}>
-                      <SelectTrigger data-testid="select-priority">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Baja</SelectItem>
-                        <SelectItem value="normal">Normal</SelectItem>
-                        <SelectItem value="high">Alta</SelectItem>
-                        <SelectItem value="urgent">Urgente</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-muted-foreground">Notas (opcional)</Label>
-                    <Textarea
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Instrucciones adicionales..."
-                      className="text-sm"
-                      data-testid="input-notes"
-                    />
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={handleSubmitTask}
-                    disabled={createTaskMutation.isPending}
-                    data-testid="button-submit-task"
-                  >
-                    <Sparkles className="mr-2 h-3.5 w-3.5" />
-                    {createTaskMutation.isPending ? "Creando..." : "Crear Tarea"}
-                  </Button>
-                </div>
-              )}
-            </div>
-
+          <fieldset className="space-y-4" disabled={blockChecking||addRoomBlockMutation.isPending||updateRoomBlockMutation.isPending||removeRoomBlockMutation.isPending||!!pendingBlockAction}>
+            <label className="block text-sm font-medium">Habitación del bloqueo
+              <select className="mt-1 w-full rounded-md border bg-background p-2" value={selectedRoomId||""} onChange={e=>{setSelectedRoomId(e.target.value);setBlockEnabled(false);setEditingBlockId(null);setBlockFrom("");setBlockTo("");setBlockNotes("");}}>
+                <option value="">Seleccionar habitación</option>
+                {(rooms||[]).filter(isOperationalInventoryRoom).map(room=><option key={room.id} value={room.id}>Hab. {room.roomNumber} · Piso {room.floor}</option>)}
+              </select>
+            </label>
+            {selectedRoomId && blocksLoading && <p role="status">Cargando bloqueos…</p>}
+            {selectedRoomId && blocksError && <div role="alert">No se pudieron consultar los bloqueos. <Button variant="outline" onClick={()=>void reloadBlocks()}>Reintentar</Button></div>}
+            {selectedRoomId && !blocksLoading && !blocksError && <>
             <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
               {selectedRoomBlocks.length > 0 && (
                 <div className="space-y-2">
@@ -2630,7 +2505,7 @@ export default function Housekeeping() {
                         <div className="text-xs">
                           <p className="font-medium flex items-center gap-1">
                             <Lock className="h-3 w-3 text-muted-foreground" />
-                            {block.blockFrom} — {block.blockTo}
+                            {formatDisplayDate(block.blockFrom)} — {formatDisplayDate(block.blockTo)}
                           </p>
                           <p className="text-muted-foreground">Bloqueado por {block.blockedBy}</p>
                           {block.notes && <p className="text-muted-foreground">Motivo: {block.notes}</p>}
@@ -2657,7 +2532,7 @@ export default function Housekeeping() {
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
                             onClick={() => {
-                              if (window.confirm(`¿Finalizar el bloqueo del ${block.blockFrom} al ${block.blockTo}? La habitación quedará disponible para el planning.`)) {
+                              if (window.confirm(`¿Finalizar el bloqueo del ${formatDisplayDate(block.blockFrom)} al ${formatDisplayDate(block.blockTo)}? Se retira este bloqueo; se conservan la ocupación y los demás bloqueos.`)) {
                                 removeRoomBlockMutation.mutate(block.id);
                               }
                             }}
@@ -2760,7 +2635,7 @@ export default function Housekeeping() {
                   />
                   <Button
                     size="sm"
-                    disabled={!blockFrom || !blockTo || blockTo < blockFrom || addRoomBlockMutation.isPending}
+                    disabled={!blockFrom || !blockTo || blockTo < blockFrom || !blockNotes.trim() || addRoomBlockMutation.isPending}
                     onClick={() => {
                       if (!selectedRoomId) return;
                       checkBlockConflictsAndProceed(selectedRoomId, blockFrom, blockTo, {
@@ -2782,6 +2657,68 @@ export default function Housekeeping() {
                 </div>
               )}
             </div>
+            </>}
+          </fieldset>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Habitacion {selectedRoom?.roomNumber}</DialogTitle>
+            <DialogDescription>
+              {selectedRoom?.roomType?.name} - {statusConfig[selectedRoom?.status || "available"].label}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Estado Actual</Label>
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  variant={selectedRoom?.status === "available" ? "default" : "outline"}
+                  onClick={() => {
+                    if (selectedRoomId) {
+                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "available" });
+                    }
+                  }}
+                  data-testid="button-detail-available"
+                >
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Disponible
+                </Button>
+                <Button
+                  size="sm"
+                  variant={selectedRoom?.status === "dirty" ? "default" : "outline"}
+                  onClick={() => {
+                    if (selectedRoomId) {
+                      updateRoomStatusMutation.mutate({ roomId: selectedRoomId, status: "dirty" });
+                    }
+                  }}
+                  data-testid="button-detail-dirty"
+                >
+                  <AlertCircle className="h-3 w-3 mr-1" />
+                  Sucia
+                </Button>
+                <Button
+                  size="sm"
+                  variant={selectedRoom?.status === "maintenance" ? "default" : "outline"}
+                  onClick={() => {
+                    if (selectedRoomId) {
+                      setDetailsDialogOpen(false);
+                      navigate(`/maintenance?newOrder=${selectedRoomId}&roomNumber=${encodeURIComponent(selectedRoom?.roomNumber||"")}`);
+                    }
+                  }}
+                  data-testid="button-detail-maintenance"
+                >
+                  <Wrench className="h-3 w-3 mr-1" />
+                  Mantenimiento
+                </Button>
+              </div>
+            </div>
+
+            <Button onClick={()=>selectedRoomId&&handleCreateTask(selectedRoomId)}>Crear y asignar tarea para esta habitación</Button>
 
             {selectedRoomTasks.length > 0 && (
               <div className="space-y-2">
@@ -2849,7 +2786,7 @@ export default function Housekeeping() {
 
       {/* Dialog de conflictos — se muestra cuando hay reservas activas en el rango a bloquear */}
       <Dialog open={blockConflicts.length > 0} onOpenChange={(open) => { if (!open) { setBlockConflicts([]); setPendingBlockAction(null); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-orange-600 dark:text-orange-400">
               <AlertTriangle className="h-5 w-5" />
@@ -2864,7 +2801,7 @@ export default function Housekeeping() {
               <div key={c.id} className="px-3 py-2">
                 <p className="font-medium text-sm">{c.guestName || "Sin nombre"}</p>
                 <p className="text-xs text-muted-foreground">
-                  Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                  Check-in: {formatDisplayDate(c.checkInDate)} · Check-out: {formatDisplayDate(c.checkOutDate)} · <span className="capitalize">{c.status}</span>
                 </p>
               </div>
             ))}

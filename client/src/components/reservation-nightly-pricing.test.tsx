@@ -30,9 +30,11 @@ beforeEach(() => {
     fiscal: { state: "pendiente", coveredCents: 0, pendingCents: 18000 },
   };
   activatedAt = "2026-10-19T12:00:00Z";
+  vi.mocked(useQuery).mockClear();
   vi.mocked(useQuery).mockImplementation(({ queryKey }: any) => ({
     data: queryKey[0] === "/api/reservation-pricing/activation"
-      ? { activatedAt, timeZone: "America/Argentina/Buenos_Aires" } : data,
+      ? { activatedAt, timeZone: "America/Argentina/Buenos_Aires" }
+      : queryKey[0] === "/api/reservation-edit-permission" ? {canEdit:true} : data,
     isLoading: false, isError: false, refetch: vi.fn(),
   }) as any);
 });
@@ -77,11 +79,12 @@ describe("Folio con información operativa", () => {
     expect(screen.getByLabelText("Seleccionar noche 20/10/2026")).not.toBeChecked();
   });
 
-  it("mantiene la habilitación explícita para las altas nuevas", () => {
+  it("no exige habilitación para usar el folio", () => {
     activatedAt = null;
     render(<ReservationNightlyPricing reservationId="saved-reservation" role="admin" />);
-    expect(screen.getByRole("button", { name: "Habilitar tarifas por noche" })).toBeInTheDocument();
-    expect(screen.queryByText(/nuevo esquema|no convierte/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Importe de la estadía")).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: /Habilitar tarifas/})).not.toBeInTheDocument();
+    expect(vi.mocked(useQuery).mock.calls.every(([options]:any)=>options.queryKey[0] !== "/api/reservation-pricing/activation")).toBe(true);
   });
 
   it("muestra el saldo real sin instrucciones técnicas permanentes", () => {

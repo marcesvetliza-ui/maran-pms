@@ -930,7 +930,15 @@ export function registerRoomsRoutes(app: Express) {
 
   app.patch("/api/rooms/:id", requirePermission(ROOMS_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const room = await storage.updateRoom(req.params.id, req.body);
+      if (Object.prototype.hasOwnProperty.call(req.body, "status")) {
+        const current = await storage.getRoom(req.params.id);
+        if (!current) return res.status(404).json({ error: "Room not found" });
+        if (req.body.status !== current.status) {
+          return res.status(403).json({ error: "El estado de limpieza se gestiona desde Housekeeping por supervisión." });
+        }
+      }
+      const { status: _status, ...roomData } = req.body;
+      const room = await storage.updateRoom(req.params.id, roomData);
       if (!room) {
         return res.status(404).json({ error: "Room not found" });
       }

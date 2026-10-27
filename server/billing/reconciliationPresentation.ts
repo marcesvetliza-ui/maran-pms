@@ -4,9 +4,10 @@ function invoiceValue(invoice: any, snakeCase: string, camelCase: string) {
 
 /**
  * Historical group invoices can retain the draft's "pendiente" value even
- * after the group payment claimed them. Relational link evidence is
- * authoritative: once that link exists, there is no reconciliation left for
- * an operator to perform.
+ * after their operational link completed. A payment requires its payment
+ * link; a direct invoice requires a group_invoices link to its owner group.
+ * Normalize only these completed links for display; never alter stored
+ * documents, authorization-pending invoices or fiscal adjustments.
  */
 export function exposeInvoiceReconciliation(invoice: any) {
   const storedStatus = invoiceValue(invoice, "reconciliation_status", "reconciliationStatus") ?? null;
@@ -16,7 +17,15 @@ export function exposeInvoiceReconciliation(invoice: any) {
     invoiceValue(invoice, "group_reconciliation_linked", "groupReconciliationLinked")
       ?? invoiceValue(invoice, "group_payment_id", "groupPaymentId"),
   );
-  const status = storedStatus === "pendiente" && hasGroupIntent && groupLinkCompleted
+  const isDirectGroupInvoice = Boolean(invoiceValue(invoice, "group_id", "groupId"))
+    && ["FA", "FB", "FC", "FT", "FM", "FMB"].includes(String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante")))
+    && ["emitida", "parcial", "anulada"].includes(String(invoice.estado))
+    && !hasGroupIntent
+    && !invoiceValue(invoice, "group_payment_id", "groupPaymentId");
+  // This flag is produced only from a group_invoices row matching BOTH the
+  // invoice and its owner group. A CAE or group_id alone proves no link.
+  const directLinkCompleted = invoiceValue(invoice, "direct_group_reconciliation_linked", "directGroupReconciliationLinked") === true;
+  const status = storedStatus === "pendiente" && ((hasGroupIntent && groupLinkCompleted) || (isDirectGroupInvoice && directLinkCompleted))
     ? "conciliada"
     : storedStatus;
   const visibleError = status === "pendiente" ? reconciliationError : null;

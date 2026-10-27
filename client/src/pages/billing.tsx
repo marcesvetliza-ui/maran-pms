@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { ArcaCredentialDiagnosticPanel } from "@/components/arca-credential-diagnostic";
@@ -11,7 +12,7 @@ import { formatInvoiceCreatedTime, isInvoiceReconciliationPending } from "@/lib/
 import { ToastAction } from "@/components/ui/toast";
 import { format } from "date-fns";
 import {
-  FileText, Plus, Download, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
+  FileText, Plus, Eye, Settings, Search, RefreshCw, AlertTriangle, CheckCircle2, XCircle,
   FlaskConical, ShieldCheck, ShieldAlert, Upload, Wifi, Trash2, BookOpen, Gift, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -66,9 +67,7 @@ function redistributeNonRetentionRows(rows: any[], targetGross: number): any[] {
 }
 
 function fDate(d: string | undefined | null) {
-  if (!d) return "—";
-  const dt = new Date(d + "T12:00:00");
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`;
+  return formatDisplayDate(d);
 }
 
 function padNum(n: number | undefined, len: number) {
@@ -268,6 +267,29 @@ export default function BillingPage() {
     },
   });
 
+  const cashInformationKey = ["/api/billing/group-cash-information/pending"];
+  const { data: pendingCashInformation = [], isError: cashInformationFailed, refetch: refreshCashInformation } = useQuery<any[]>({
+    queryKey: cashInformationKey,
+    queryFn: async () => {
+      const response = await fetch(cashInformationKey[0], { credentials: "include" });
+      if (response.status === 403) return [];
+      if (!response.ok) throw new Error("No se pudieron consultar los registros informativos de Caja.");
+      return response.json();
+    },
+  });
+  const completeCashInformation = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/billing/invoices/${id}/complete-cash-information`),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: cashInformationKey }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts"] }),
+      ]);
+      toast({ title: "Registro informativo de Caja completado", description: "No se emitieron comprobantes ni se registraron cobros." });
+    },
+    onError: (error: Error) => toast({ title: parseApiError(error), variant: "destructive" }),
+  });
+
   const reconcileCreditNoteMutation = useMutation({
     mutationFn: (creditNoteId: number) => apiRequest("POST", `/api/billing/credit-notes/${creditNoteId}/reconcile`),
     onSuccess: async (response: Response) => {
@@ -277,6 +299,7 @@ export default function BillingPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/companies"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/agencies"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/groups"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
       ]);
       toast({
@@ -307,7 +330,7 @@ export default function BillingPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto p-6">
+      <div className="w-full min-w-0 p-4 sm:p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -392,10 +415,25 @@ export default function BillingPage() {
                 className="w-56 text-sm h-8"
                 data-testid="input-filtro-cliente"
               />
-              <Button variant="outline" size="sm" onClick={() => refetch()} className="h-8">
+              <Button variant="outline" size="sm" onClick={() => { void refetch(); void refreshCashInformation(); }} className="h-8">
                 <RefreshCw className="w-3.5 h-3.5 mr-1" /> Actualizar
               </Button>
             </div>
+
+            {cashInformationFailed && <p role="alert" className="mb-3 text-sm text-destructive">No se pudieron consultar los registros informativos de Caja. Tocá Actualizar para reintentar.</p>}
+            {pendingCashInformation.length > 0 && (
+              <Card className="mb-4 border-amber-300">
+                <CardHeader className="pb-2"><CardTitle className="text-sm">Registros informativos de Caja pendientes ({pendingCashInformation.length})</CardTitle>
+                  <p className="text-xs text-muted-foreground">Son comprobantes ya emitidos. Completar el registro no emite otra factura ni NC y no genera cobros ni devoluciones.</p>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {pendingCashInformation.map(document => <div key={document.id} className="flex flex-wrap items-center justify-between gap-2 border rounded-md p-2 text-xs">
+                    <div>{TIPO_LABELS[document.tipo_comprobante]?.nombre || document.tipo_comprobante} {padNum(document.punto_venta,4)}-{padNum(document.numero,8)} · {document.group_name || document.cliente_razon_social} · ${fPeso(document.monto_total)}</div>
+                    <Button variant="outline" size="sm" disabled={completeCashInformation.isPending} onClick={() => completeCashInformation.mutate(Number(document.id))} data-testid={`btn-complete-cash-information-${document.id}`}>Completar registro en Caja</Button>
+                  </div>)}
+                </CardContent>
+              </Card>
+            )}
 
             {(pendingCreditNotes as any[]).length > 0 && (
               <Card className="mb-4 border-amber-300 bg-amber-50/60 dark:bg-amber-950/20">
@@ -411,7 +449,7 @@ export default function BillingPage() {
                       <div className="min-w-0">
                         <div className="font-medium">
                           {TIPO_LABELS[nc.tipo_comprobante]?.nombre || nc.tipo_comprobante} {padNum(nc.punto_venta, 4)}-{padNum(nc.numero, 8)}
-                          <span className="font-normal text-muted-foreground"> · Reserva #{nc.reserva_id}</span>
+                          <span className="font-normal text-muted-foreground"> · {nc.group_id ? `Grupo #${nc.group_id}` : `Reserva #${nc.reserva_id}`}</span>
                         </div>
                         <div className="text-muted-foreground mt-0.5">
                           Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
@@ -444,25 +482,24 @@ export default function BillingPage() {
                 ) : (invoices as any[]).length === 0 ? (
                   <div className="p-8 text-center text-muted-foreground">No hay comprobantes en el período seleccionado</div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="relative isolate overflow-x-auto" data-testid="billing-invoices-scroll">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
+                        <tr className="border-b bg-muted text-xs text-muted-foreground">
                           <th className="px-3 py-2 text-left">Tipo / N°</th>
                           <th className="px-3 py-2 text-left">Origen</th>
                           <th className="px-3 py-2 text-left">Fecha</th>
                           <th className="px-3 py-2 text-left">Cliente</th>
                           <th className="px-3 py-2 text-right">Total</th>
                           <th className="px-3 py-2 text-left">CAE</th>
-                          <th className="px-3 py-2 text-left">Estado</th>
-                          <th className="px-3 py-2"></th>
+                          <th scope="col" className="sticky right-0 z-20 bg-inherit px-3 py-2 text-left">Estado / Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
                         {(invoices as any[]).map((f: any) => {
                           const tl = TIPO_LABELS[f.tipo_comprobante] ?? { nombre: f.tipo_comprobante, color: "bg-gray-100 text-gray-700" };
                           return (
-                            <tr key={f.id} className={`hover:bg-muted/20 ${f.estado === "anulada" ? "opacity-50" : ""}`} data-testid={`row-invoice-${f.id}`}>
+                            <tr key={f.id} className={`bg-card hover:bg-muted ${f.estado === "anulada" ? "opacity-50" : ""}`} data-testid={`row-invoice-${f.id}`}>
                               <td className="px-3 py-2">
                                 <div className="flex flex-col gap-0.5">
                                   <Badge variant="outline" className={`text-xs w-fit px-1.5 ${tl.color}`}>{tl.nombre}</Badge>
@@ -505,7 +542,9 @@ export default function BillingPage() {
                                 </div>
                                 <div className="text-xs text-muted-foreground">Vto: {fDate(f.cae_fecha_vto)}</div>
                               </td>
-                              <td className="px-3 py-2">
+                              <td className="sticky right-0 z-10 bg-inherit px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
+                                <div className="flex items-center gap-3">
+                                <div className="min-w-0">
                                 {f.center_settlement_status === "pending" ? (
                                   <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
                                 ) : isInvoiceReconciliationPending(f) ? (
@@ -513,7 +552,7 @@ export default function BillingPage() {
                                     <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
                                       <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
                                     </Badge>
-                                    <div className="text-[10px] text-amber-700 dark:text-amber-300">No emitir otra NC</div>
+                                    <div className="text-[10px] text-amber-700 dark:text-amber-300">{f.tipo_comprobante?.startsWith("NC") ? "No emitir otra NC" : f.group_id ? "Vinculación con el grupo pendiente" : "Revisión de la operación pendiente"}</div>
                                     {getReconciliationError(f) && (
                                       <div className="text-[10px] text-amber-700 dark:text-amber-300">{getReconciliationError(f)}</div>
                                     )}
@@ -526,17 +565,16 @@ export default function BillingPage() {
                                   <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Anulada</Badge>
                                 )}
                                 {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
-                              </td>
-                              <td className="px-3 py-2">
-                                <div className="flex gap-1 justify-end">
+                                </div>
+                                <div className="flex shrink-0 items-center gap-1">
                                   {f.center_settlement_status === "pending" && (
                                     <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
                                   )}
-                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Descargar PDF" data-testid={`btn-pdf-${f.id}`}>
-                                    <Download className="w-3.5 h-3.5" />
+                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Ver / descargar comprobante" aria-label="Ver / descargar comprobante" data-testid={`btn-pdf-${f.id}`}>
+                                    <Eye className="w-3.5 h-3.5" />
                                   </Button>
                                   {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" aria-label="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
                                       <Pencil className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
@@ -554,11 +592,13 @@ export default function BillingPage() {
                                       className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700"
                                       onClick={() => setShowNC(f.id)}
                                       title={f.estado === "parcial" ? "Emitir otra Nota de Crédito sobre el saldo pendiente" : "Emitir Nota de Crédito"}
+                                      aria-label="Emitir Nota de Crédito"
                                       data-testid={`btn-nc-${f.id}`}
                                     >
                                       <XCircle className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
+                                </div>
                                 </div>
                               </td>
                             </tr>
@@ -1313,12 +1353,19 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       const data = await res.json();
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/group-cash-information/pending"] });
+      const groupCashInformationError = groupId && data.cashMovementError;
       const esNoFiscal = NON_FISCAL_TIPOS_SET.has(data.tipo_comprobante);
       toast({
-        title: esNoFiscal ? "Comprobante emitido" : "Factura emitida",
-        description: esNoFiscal
+        title: groupCashInformationError
+          ? "Factura emitida; registro informativo de Caja pendiente"
+          : esNoFiscal ? "Comprobante emitido" : "Factura emitida",
+        description: groupCashInformationError
+          ? `${data.cashMovementError}. No vuelvas a emitir la factura; el comprobante fiscal ya existe.`
+          : esNoFiscal
           ? `${TIPO_LABELS[data.tipo_comprobante]?.nombre ?? data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}`
           : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} — CAE: ${data.cae}`,
+        variant: groupCashInformationError ? "destructive" : "default",
       });
       setEmitted(true);
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
@@ -3691,7 +3738,7 @@ function DeleteNonFiscalSection() {
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       toast({
         title: data.deleted === 0 ? "Sin comprobantes para borrar" : `${data.deleted} comprobante(s) eliminado(s)`,
-        description: data.deleted > 0 ? `Período: ${startDate} → ${endDate}` : undefined,
+        description: data.deleted > 0 ? `Período: ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}` : undefined,
       });
     } catch (e: any) {
       toast({ title: "Error al borrar", description: parseApiError(e), variant: "destructive" });
@@ -3753,7 +3800,7 @@ function DeleteNonFiscalSection() {
           </DialogHeader>
           <p className="text-sm">
             Se eliminarán <strong>todos los comprobantes no fiscales</strong> (Tickets, Vouchers, Cierres) emitidos
-            entre el <strong>{startDate}</strong> y el <strong>{endDate}</strong>.
+            entre el <strong>{formatDisplayDate(startDate)}</strong> y el <strong>{formatDisplayDate(endDate)}</strong>.
           </p>
           <p className="text-sm text-destructive font-medium">Esta acción es irreversible.</p>
           <DialogFooter>

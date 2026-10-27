@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { Move, ArrowLeftRight, Calendar, User, Palette, X, AlertTriangle } from "lucide-react";
 import {
   Dialog,
@@ -82,7 +83,7 @@ export function PlanningMoveConfirmDialog({
                 <Calendar className="h-4 w-4 text-muted-foreground" />
                 <span className="text-muted-foreground">Nuevas fechas:</span>
                 <Badge variant="outline" className="text-orange-600 border-orange-300">
-                  {moveConfirm.newCheckIn} → {moveConfirm.newCheckOut}
+                  {formatDisplayDate(moveConfirm.newCheckIn)} → {formatDisplayDate(moveConfirm.newCheckOut)}
                 </Badge>
               </div>
             )}

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   hasFinancialActivity: false,
+  canEdit: true,
   updateReservation: vi.fn(),
   deleteGroupBlock: vi.fn(),
   getGroup: vi.fn(),
@@ -60,9 +61,11 @@ vi.mock("../db", () => ({
 }));
 vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
 vi.mock("../auth", () => ({
-  // Business-route fixture: permission enforcement is verified separately.
-  requirePermission: () => (_req: any, _res: any, next: () => void) => next(), requireAuth: (_req: any, _res: any, next: () => void) => next() }));
+  requirePermission: (_key: string) => (_req: any, _res: any, next: () => void) => next(),
+  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+}));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
+vi.mock("../accommodationPermissions", () => ({ canEditAccommodation: async () => state.canEdit }));
 vi.mock("../billing/groupInvoiceScope", () => ({
   assertGroupPaymentInvoiceScope: vi.fn(),
   assertMasterFacturaTAllowed: vi.fn(),
@@ -85,6 +88,58 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
     server.close();
   }
 }
+
+describe("Group rate errors and permissions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    state.updateReservation.mockReset();
+    state.canEdit = true;
+    state.getGroup.mockResolvedValue({ id: "g", name: "Grupo", reservations: [{
+      id: "r", checkInDate: "2026-10-28", checkOutDate: "2026-10-31",
+    }] });
+  });
+  const change = (base: string, body: object) => fetch(`${base}/api/groups/g/reservations/r/rate`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  it.each([
+    "Esta reserva usa precios por noche. Usá Editar tarifas o Modificar estadía desde el Folio.",
+    "La reserva pertenece a un grupo con facturación. Resolvé el ajuste en el Folio Maestro antes de modificar alojamiento.",
+  ])("preserves the actual pricing conflict: %s", async (message) => {
+    state.updateReservation.mockRejectedValue(Object.assign(new Error(message), { statusCode: 409 }));
+    await withServer(async (base) => {
+      const response = await change(base, { finalRatePerNight: "144000" });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: message });
+    });
+  });
+  it("rejects unauthorized price writes before storage", async () => {
+    state.canEdit = false;
+    await withServer(async (base) => expect((await change(base, { finalRatePerNight: "144000" })).status).toBe(403));
+    expect(state.updateReservation).not.toHaveBeenCalled();
+  });
+  it.each(["144000oops", "Infinity", "-1", "10.999"])("rejects invalid amount %s", async (value) => {
+    await withServer(async (base) => expect((await change(base, { finalRatePerNight: value })).status).toBe(400));
+    expect(state.updateReservation).not.toHaveBeenCalled();
+  });
+  it("saves legacy rate and keeps operational-only updates separate", async () => {
+    state.updateReservation.mockResolvedValue({ id: "r" });
+    await withServer(async (base) => {
+      expect((await change(base, { finalRatePerNight: "144000" })).status).toBe(200);
+      expect(state.updateReservation).toHaveBeenLastCalledWith("r", { finalRatePerNight: "144000.00", totalRoomAmount: "432000.00" });
+      state.canEdit = false;
+      expect((await change(base, { finalRatePerNight: "", lateCheckOut: true, lateCheckOutTime: "16:00" })).status).toBe(200);
+      expect(state.updateReservation).toHaveBeenLastCalledWith("r", { lateCheckOut: true, lateCheckOutTime: "16:00" });
+    });
+  });
+  it("hides unexpected internal errors", async () => {
+    state.updateReservation.mockRejectedValue(new Error("database details"));
+    await withServer(async (base) => {
+      const response = await change(base, { finalRatePerNight: "144000" });
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Error al actualizar tarifa" });
+    });
+  });
+});
 
 describe("DELETE /api/group-blocks/:id financial activity guard", () => {
   beforeEach(() => {

@@ -301,7 +301,7 @@ export default function AccountingSuppliers() {
                       <TableCell className="font-mono text-sm">{s.cuit}</TableCell>
                       <TableCell>
                         <Badge variant={s.condicionIva === "Responsable Inscripto" ? "default" : "secondary"}>
-                          {s.condicionIva}
+                          {s.condicionIva || "Condición IVA pendiente"}
                         </Badge>
                       </TableCell>
                       <TableCell>{s.alicuotaIibb?.toFixed(2)}%</TableCell>

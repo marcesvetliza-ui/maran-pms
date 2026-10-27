@@ -649,7 +649,7 @@ export interface IStorage {
   deleteSpaTreatmentCategory(id: string): Promise<boolean>;
 
   // SPA Treatments
-  getSpaTreatments(status?: string): Promise<SpaTreatment[]>;
+  getSpaTreatments(): Promise<SpaTreatment[]>;
   getSpaTreatment(id: string): Promise<SpaTreatment | undefined>;
   getSpaTreatmentsByCategory(categoryId: string): Promise<SpaTreatment[]>;
   createSpaTreatment(treatment: InsertSpaTreatment): Promise<SpaTreatment>;

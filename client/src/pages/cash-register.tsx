@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { informationalSummary } from "@/lib/cash-informational-summary";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { DespegarUnbilledSection } from "@/components/despegar-unbilled-section";
@@ -187,6 +188,7 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   transferencia: "Transferencia",
   no_fiscal: "Sin cargo",
   nc: "Nota de Crédito",
+  factura_grupo: "Factura de grupo",
   nd: "Nota de Débito",
   compensacion: "Compensación",
   echeq: "eCheq",
@@ -196,7 +198,7 @@ const PAYMENT_METHOD_MAP: Record<string, string> = {
   retencion_iva: "Retención IVA",
 };
 
-const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal", "nc", "nd", "compensacion"]);
+const NON_CASH_METHODS = new Set(["room_charge", "cuenta_habitacion", "current_account", "cuenta_corriente", "voucher", "gift_voucher", "voucher_regalo", "no_fiscal", "nc", "nd", "compensacion", "factura_grupo"]);
 
 const AREA_COLORS: Record<string, string> = {
   // Los turnos reales se guardan con area="recepcion" (español) — "reception"
@@ -244,7 +246,7 @@ function SpaCancellationHistory({ shiftId = "", today = false }: { shiftId?: str
     {isLoading ? <p>Cargando cancelaciones…</p> : isError ? <p className="text-destructive">No se pudo cargar el historial de cancelaciones.</p> : data.length ? data.map(entry => {
       let details: any = {}; try { details = JSON.parse(entry.details || "{}"); } catch {}
       const appointment = details.before || {};
-      return <div key={entry.id} className="border-b py-2 text-sm"><Badge variant="destructive">Cancelado</Badge> {appointment.guestName} {appointment.guestLastName || ""} · {appointment.appointmentDate} {appointment.startTime}
+      return <div key={entry.id} className="border-b py-2 text-sm"><Badge variant="destructive">Cancelado</Badge> {appointment.guestName} {appointment.guestLastName || ""} · {formatDisplayDate(appointment.appointmentDate)} {appointment.startTime}
         <p>{details.reason || entry.description}</p><p className="text-muted-foreground">{entry.user_name || "Sistema"} · {formatDateTime(entry.timestamp)}</p></div>;
     }) : <p className="text-sm text-muted-foreground">No hay cancelaciones registradas en este período.</p>}
   </CardContent></Card>;
@@ -278,8 +280,7 @@ function formatTime(dateStr: string): string {
 }
 
 function formatDate(dateStr: string): string {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("es-AR", { timeZone: ARGENTINA_TIME_ZONE });
+  return formatDisplayDate(dateStr);
 }
 
 function formatDateTime(dateStr: string): string {
@@ -2418,7 +2419,7 @@ function ResumenDiaTab() {
 
           {data.movimientos.length === 0 && (
             <div className="text-center py-12 text-muted-foreground" data-testid="text-resumen-empty">
-              No hay movimientos registrados para el {fecha}
+              No hay movimientos registrados para el {formatDisplayDate(fecha)}
             </div>
           )}
         </>
@@ -2482,10 +2483,10 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Moon className="h-4 w-4 text-indigo-600" />
-            Corte nocturno — {detail.auditDate ?? audit.auditDate}
+            Corte nocturno — {formatDisplayDate(detail.auditDate ?? audit.auditDate)}
           </DialogTitle>
           <DialogDescription>
-            {detail.nextDate && <span>Operación para {detail.nextDate} · </span>}
+            {detail.nextDate && <span>Operación para {formatDisplayDate(detail.nextDate)} · </span>}
             Generado {formatHotelDateTime(detail.generatedAt ?? audit.executedAt)} por {audit.executedBy}
             {audit.isManual && <Badge variant="outline" className="ml-2 text-[10px]">manual</Badge>}
             {detail.recalculatedAt && <Badge variant="secondary" className="ml-2 text-[10px]">Recalculado {formatHotelDateTime(detail.recalculatedAt)}{detail.recalculatedBy ? ` · ${detail.recalculatedBy}` : ""}</Badge>}
@@ -2588,7 +2589,7 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                       <TableRow key={r.reservationId} className={r.hasBalance ? "bg-amber-50 dark:bg-amber-950/20" : ""}>
                         <TableCell className="text-sm font-medium">{nightAuditText(r.roomNumber)}</TableCell>
                         <TableCell><div className="text-xs">{nightAuditText(r.guestName, "Sin huésped")}</div><div className="font-mono text-[10px] text-muted-foreground">{nightAuditText(r.reservationCode)}</div><div className="text-[10px] text-muted-foreground">{[r.companyName, r.agencyName].filter(Boolean).join(" · ")}</div></TableCell>
-                        <TableCell className="text-xs">{nightAuditText(r.checkOutDate)}</TableCell>
+                        <TableCell className="text-xs">{formatDisplayDate(r.checkOutDate)}</TableCell>
                         <TableCell className="text-xs text-right">{fmt(r.totalCharges)}</TableCell>
                         <TableCell className="text-xs text-right">{fmt(r.totalPaid)}</TableCell>
                         <TableCell className={`text-xs text-right font-semibold ${r.hasBalance ? "text-amber-600" : "text-muted-foreground"}`}>
@@ -2653,7 +2654,7 @@ function NightAuditDetailDialog({ audit, open, onClose }: { audit: any; open: bo
                     <TableRow key={r.reservationId}>
                       <TableCell className="font-medium">{nightAuditText(r.roomNumber)}</TableCell>
                       <TableCell><div className="text-xs">{nightAuditText(r.guestName,"Sin huésped")}</div><div className="font-mono text-[10px] text-muted-foreground">{nightAuditText(r.reservationCode)}</div></TableCell>
-                      <TableCell className="text-xs">{nightAuditText(r.checkOutDate)}</TableCell>
+                      <TableCell className="text-xs">{formatDisplayDate(r.checkOutDate)}</TableCell>
                       <TableCell className="text-xs">Pendiente de liquidación{r.hasBalance && <div className="text-amber-600">Otros cargos pendientes: {fmt(r.balance)}</div>}</TableCell>
                     </TableRow>
                   ))}</TableBody>
@@ -2762,7 +2763,7 @@ function NightAuditTab() {
             {status?.lastAudit ? (
               <div>
                 <p className={`text-sm font-medium ${NA_STATUS_COLOR[status.lastAudit.status]}`}>
-                  {NA_STATUS_LABEL[status.lastAudit.status]} — {status.lastAudit.auditDate}
+                  {NA_STATUS_LABEL[status.lastAudit.status]} — {formatDisplayDate(status.lastAudit.auditDate)}
                 </p>
                 <p className="text-xs text-muted-foreground">{formatHotelDateTime(status.lastAudit.executedAt)}</p>
               </div>
@@ -2801,7 +2802,7 @@ function NightAuditTab() {
         <Card className="border-green-200 dark:border-green-800">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2 text-green-700 dark:text-green-400">
-              <CheckCircle className="h-4 w-4" />Resultado — {lastResult.auditDate}
+              <CheckCircle className="h-4 w-4" />Resultado — {formatDisplayDate(lastResult.auditDate)}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -2874,7 +2875,7 @@ function NightAuditTab() {
               <TableBody>
                 {(history as any[]).map((audit) => (
                   <TableRow key={audit.id} data-testid={`row-night-audit-${audit.id}`}>
-                    <TableCell className="font-mono text-sm">{audit.auditDate}</TableCell>
+                    <TableCell className="font-mono text-sm">{formatDisplayDate(audit.auditDate)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatHotelDateTime(audit.executedAt)}
                       {audit.isManual && <Badge variant="outline" className="ml-1 text-[10px]">manual</Badge>}
@@ -3275,6 +3276,16 @@ export default function CashRegister() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
+
+  useEffect(() => {
+    if (isLoading || !configs) return;
+    if (parteSeleccionado && !allActiveConfigs.some(config => config.area === parteSeleccionado)) {
+      sessionStorage.removeItem("caja_parte_activo");
+      setParteSeleccionado(null);
+      setCurrentTab(undefined);
+      if (isAdminOrManager) setMostrarSelectorParte(true);
+    }
+  }, [configs, isLoading, parteSeleccionado, isAdminOrManager]);
 
   function seleccionarParte(area: string) {
     setShiftRefreshToken((token) => token + 1);

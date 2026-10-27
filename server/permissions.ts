@@ -1,3 +1,4 @@
+import { ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db";
 import { rolePermissions, type SystemUserRole } from "@shared/schema";
@@ -62,6 +63,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
     "admin", "manager", "ama_de_llaves", "housekeeping", "reception",
     "responsable_area", "jefe_recepcion", "comercial", "spa",
   ],
+  "sidebar:/housekeeping-daily-report": ["admin","manager","ama_de_llaves","housekeeping","reception","responsable_area","jefe_recepcion"],
   "sidebar:/admin/indec": [
     "admin", "manager", "resp_deposito", "resp_administracion", "responsable_area", "jefe_recepcion",
   ],
@@ -191,6 +193,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * que cualquier resourceKey agregado después del seed inicial.
  */
 export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
+  "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
   // conexiones y mapeos (crear/editar/borrar/sincronizar catálogo).
   "api:channex:config": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
@@ -335,6 +338,10 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * detectar faltantes.
  */
 export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: string }> = {
+  [ACCOMMODATION_PERMISSION]: { label: "Edición de folios de reservas", section: "API — Reservas" },
+  "funding:read": { label: "Consultar financiación de Folio/SPA", section: "Financiación Folio/SPA" },
+  "funding:write": { label: "Operar financiación de Folio/SPA", section: "Financiación Folio/SPA" },
+  "funding:historical": { label: "Vincular cuentas y conciliar historia de Folio/SPA", section: "Financiación Folio/SPA" },
   "sidebar:/": { label: "Dashboard", section: "PMS — Recepción" },
   "sidebar:/planning": { label: "Planning", section: "PMS — Recepción" },
   "sidebar:/reservations": { label: "Reservas", section: "PMS — Recepción" },
@@ -345,6 +352,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:group/reportes-recepcion": { label: "Reportes", section: "PMS — Recepción" },
   "sidebar:/rooms?tab=ocupadas": { label: "Hab. Ocupadas", section: "PMS — Recepción" },
   "sidebar:/daily-report": { label: "Planilla Diaria", section: "PMS — Recepción" },
+  "sidebar:/housekeeping-daily-report": {label:"Planilla diaria Housekeeping",section:"PMS — Recepción"},
   "sidebar:/admin/indec": { label: "Reporte INDEC", section: "PMS — Recepción" },
   "sidebar:/rate-plans": { label: "Tarifas", section: "PMS — Recepción" },
   "sidebar:/guests": { label: "Huéspedes", section: "PMS — Recepción" },
@@ -385,7 +393,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:/operaciones": { label: "Operaciones", section: "Gerencia & Revenue" },
   "sidebar:/executive": { label: "Ejecutivo", section: "Gerencia & Revenue" },
   "sidebar:/reports": { label: "Reportes", section: "Gerencia & Revenue" },
-  "sidebar:/revenue-management": { label: "Revenue Management", section: "Gerencia & Revenue" },
+  "sidebar:/revenue-management": { label: "Acceder al módulo Revenue Management", section: "Revenue Management" },
 
   "sidebar:/administration": { label: "Configuración", section: "Configuración" },
   "sidebar:/admin/room-types/integrity": { label: "Reparar tipos de habitación", section: "Configuración" },
@@ -435,10 +443,11 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:reports:export-pdf": { label: "Exportar informe a PDF", section: "API — Reportes" },
   "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
 
-  "api:revenue:read": { label: "Ver tablero, pace report y sugerencias", section: "API — Revenue Management" },
-  "api:revenue:events-write": { label: "Cargar calendario de demanda", section: "API — Revenue Management" },
-  "api:revenue:competitor-write": { label: "Cargar tarifas de competencia", section: "API — Revenue Management" },
-  "api:revenue:configure": { label: "Configurar motor de sugerencias", section: "API — Revenue Management" },
+  "api:hospitality:campaigns": {label:"Fechas especiales: contactos, mensajes y envíos",section:"API — Hospitalidad"},
+  "api:revenue:read": { label: "Ver tablero, Pace, demanda, competencia y sugerencias", section: "Revenue Management" },
+  "api:revenue:events-write": { label: "Agregar, modificar y eliminar eventos de demanda", section: "Revenue Management" },
+  "api:revenue:competitor-write": { label: "Agregar, modificar y eliminar tarifas de competencia", section: "Revenue Management" },
+  "api:revenue:configure": { label: "Configurar sugerencias y planes tarifarios de referencia", section: "Revenue Management" },
   "api:dashboard:breakfasts": { label: "Lista de desayunos", section: "API — Operaciones" },
   "api:purchase-invoices:write": { label: "Alta, edición y baja de Facturas de Compra", section: "API — Operaciones" },
   "api:night-audit:run": { label: "Ejecutar auditoría nocturna", section: "API — Operaciones" },

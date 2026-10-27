@@ -1,6 +1,6 @@
 import { useState, useEffect, forwardRef, useImperativeHandle } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
+import { queryClient, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
@@ -19,14 +19,11 @@ async function jsonGet(path: string) {
 }
 export type ReservationNightlyPricingHandle = { openStay: () => void };
 export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHandle, {
-  reservationId: string; role?: string; onLegacyEdit?: () => void;
-}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit }, ref) {
+  reservationId: string; role?: string; onLegacyEdit?: () => void; onApplied?: () => void;
+}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit, onApplied }, ref) {
   const { toast } = useToast();
   const key = ["/api/reservations", reservationId, "nightly-pricing"];
   const state = useQuery<State>({ queryKey: key, queryFn: () => jsonGet(`/api/reservations/${reservationId}/nightly-pricing`), staleTime: 0, refetchOnMount: "always" });
-  const activation = useQuery<{ activatedAt: string | null; timeZone: string }>({
-    queryKey: ["/api/reservation-pricing/activation"], queryFn: () => jsonGet("/api/reservation-pricing/activation"),
-  });
   const access = useQuery<{ canEdit: boolean }>({
     queryKey: ["/api/reservation-edit-permission"], staleTime: 0, refetchOnMount: "always",
   });
@@ -94,17 +91,10 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       void queryClient.invalidateQueries({ queryKey: ["/api/reservation-changelog", reservationId] });
       void queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId, "changelog"] });
       setMode(null); setSelected([]);
+      onApplied?.();
       toast({ title: "Alojamiento actualizado", description: "El detalle y el total se guardaron con motivo e historial. No se modificaron los cobros." });
     },
     onError: (e: Error) => { setError(e.message); setPreview(null); void state.refetch(); },
-  });
-  const activate = useMutation({
-    mutationFn: async () => {
-      const result = await apiRequest("POST", "/api/reservation-pricing/activation", { confirm: true });
-      return result.json();
-    },
-    onSuccess: () => { void activation.refetch(); toast({ title: "Tarifas por noche habilitadas", description: "Se aplicarán a las reservas creadas desde ahora." }); },
-    onError: (e: Error) => toast({ title: "No se pudo activar", description: e.message, variant: "destructive" }),
   });
   if (state.isLoading) return <section className="rounded-lg border p-4" role="status">Cargando alojamiento…</section>;
   if (state.isError || !reservation) return <section className="rounded-lg border p-4 text-destructive"><p>No se pudo cargar el alojamiento.</p><Button variant="outline" onClick={() => void state.refetch()}>Reintentar</Button></section>;
@@ -126,7 +116,6 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       {!nightly && <footer className="border-t p-3 flex justify-between font-semibold"><span>Subtotal alojamiento <small className="font-normal text-muted-foreground">· IVA incluido</small></span><span>{money(totalBefore)}</span></footer>}
       {nightly && selected.length > 0 && <div className="wf-selection-bar"><span>{selected.length} {selected.length === 1 ? "noche seleccionada" : "noches seleccionadas"}</span><div className="wf-selection-actions"><Button variant="outline" size="sm" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil size={14}/>Editar {selected.length} {selected.length === 1 ? "noche" : "noches"}</Button><Button variant="ghost" size="sm" disabled={!canWrite || !!blocked} onClick={() => { start("rates"); setDiscountMode("percent"); }}><Minus size={14}/>Aplicar descuento</Button></div></div>}
       <p className="wf-footnote">Las tarifas incluyen IVA. El desglose fiscal se realiza al facturar.</p>
-      {!activation.data?.activatedAt && ["admin", "manager"].includes(role || "") && <div className="p-3 border-t text-sm"><p>Tarifas por noche para reservas nuevas</p><Button className="mt-2" size="sm" variant="outline" disabled={activation.isPending} onClick={() => { if (window.confirm("¿Habilitar tarifas por noche para las reservas creadas desde ahora? Las reservas existentes conservarán sus importes.")) activate.mutate(); }}>Habilitar tarifas por noche</Button></div>}
     </section>
     <Dialog open={!!mode} onOpenChange={open => { if (!save.isPending && !open) setMode(null); }}>
       <DialogContent className="wf-production wf-tariff-modal dark max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>

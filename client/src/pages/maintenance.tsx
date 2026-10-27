@@ -1,3 +1,5 @@
+import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -965,19 +967,7 @@ export default function MaintenancePage() {
     },
   });
 
-  const clearMaintenanceFlagMutation = useMutation({
-    mutationFn: async (roomId: string) => {
-      return apiRequest("PATCH", `/api/housekeeping/room/${roomId}/status`, { status: "available" });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
-      toast({ title: "Habitación disponible", description: "La habitación volvió a estado disponible" });
-    },
-    onError: () => {
-      toast({ title: "Error", description: "No se pudo actualizar la habitación", variant: "destructive" });
-    },
-  });
+  const clearMaintenanceFlagMutation = useRoomStatusCorrection(rooms);
 
   // Helper: execute the pending block action after conflict confirmation
   const executeBlockAction = (action: NonNullable<typeof pendingBlockAction>) => {
@@ -1111,6 +1101,7 @@ export default function MaintenancePage() {
 
   return (
     <div className="p-6 space-y-6">
+      {clearMaintenanceFlagMutation.dialog}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Mantenimiento</h1>
@@ -1400,7 +1391,7 @@ export default function MaintenancePage() {
                           size="sm"
                           variant="outline"
                           className="flex-1 text-xs"
-                          onClick={() => clearMaintenanceFlagMutation.mutate(room.id)}
+                          onClick={() => clearMaintenanceFlagMutation.mutate({roomId:room.id,status:"available"})}
                           disabled={clearMaintenanceFlagMutation.isPending}
                           data-testid={`button-clear-maintenance-${room.id}`}
                         >
@@ -2193,7 +2184,7 @@ export default function MaintenancePage() {
               <div key={c.id} className="px-3 py-2">
                 <p className="font-medium text-sm">{c.guestName || "Sin nombre"}</p>
                 <p className="text-xs text-muted-foreground">
-                  Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                  Check-in: {formatDisplayDate(c.checkInDate)} · Check-out: {formatDisplayDate(c.checkOutDate)} · <span className="capitalize">{c.status}</span>
                 </p>
               </div>
             ))}
@@ -2239,7 +2230,7 @@ export default function MaintenancePage() {
                 <p className="font-medium text-sm">Hab. {room.roomNumber}</p>
                 {conflicts.map((c) => (
                   <p key={c.id} className="text-xs text-muted-foreground">
-                    {c.guestName || "Sin nombre"} · Check-in: {c.checkInDate} · Check-out: {c.checkOutDate} · <span className="capitalize">{c.status}</span>
+                    {c.guestName || "Sin nombre"} · Check-in: {formatDisplayDate(c.checkInDate)} · Check-out: {formatDisplayDate(c.checkOutDate)} · <span className="capitalize">{c.status}</span>
                   </p>
                 ))}
               </div>

@@ -94,6 +94,14 @@ async function buildServer(outfile: string, mode: "production" | "development") 
     external: mode === "development" ? [...externals, "./vite"] : externals,
     logLevel: "info",
   });
+  await esbuild({
+    entryPoints: ["script/install-spa-funding.ts"], platform: "node", bundle: true,
+    format: "esm", outfile: "dist/install-spa-funding.mjs", packages: "external",
+  });
+  await mkdir("dist/funding-sql/operational", { recursive: true });
+  for (const file of ["schema.sql", "operational/schema.sql"]) {
+    await writeFile(`dist/funding-sql/${file}`, await readFile(`server/billing/funding/${file}`));
+  }
 }
 
 async function buildNightlyDemoServer() {

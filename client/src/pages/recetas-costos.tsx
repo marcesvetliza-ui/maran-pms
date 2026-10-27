@@ -1,4 +1,6 @@
+import {RecipeIngredientPicker} from "@/components/recipe-ingredient-picker";
 import { useState } from "react";
+import { RecipeIngredientUnit } from "@/components/recipe-ingredient-unit";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -94,6 +96,7 @@ type Recipe = {
   id: string;
   menuItemId: string | null;   // null for elaboraciones base
   notes: string | null;
+  isActive?: string;
   // Elaboración fields
   isBase?: boolean;
   name?: string | null;
@@ -106,6 +109,14 @@ type Recipe = {
 
 export default function RecetasCostosPage() {
   const { toast } = useToast();
+  const [catalogState, setCatalogState] = useState("active");
+  const [baseSearch, setBaseSearch] = useState("");
+  const matchesState = (active?: string | null) => catalogState === "all" || (catalogState === "active" ? active !== "false" : active === "false");
+  const lifecycle = useMutation({
+    mutationFn: async ({kind,id,active}: {kind:"menu/items"|"menu/categories"|"recipes";id:string;active:boolean}) => apiRequest("PATCH", `/api/restaurant/${kind}/${id}`, {isActive:active ? "true" : "false", ...(kind === "menu/items" ? {isAvailable:active ? "true" : "false"} : {})}),
+    onSuccess: () => { for (const key of ["/api/restaurant/menu/items","/api/restaurant/menu/categories","/api/restaurant/recipes","/api/production/formulas","/api/inventory/items"]) queryClient.invalidateQueries({queryKey:[key]}); toast({title:"Estado actualizado; historial conservado"}); },
+    onError: (e:any) => toast({title:"No se pudo cambiar el estado",description:e.message,variant:"destructive"}),
+  });
 
   const [isRecipeDialogOpen, setIsRecipeDialogOpen] = useState(false);
   const [selectedRecipeItem, setSelectedRecipeItem] = useState<MenuItem | null>(null);
@@ -227,21 +238,9 @@ export default function RecetasCostosPage() {
     },
     onSuccess: (created: Recipe) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/recipes"] });
-      setSelectedBaseRecipe(created);
+      setSelectedBaseRecipe({ ...created, ingredients: created.ingredients ?? [] });
       setIsBaseRecipeDialogOpen(true);
       toast({ title: "Elaboración creada", description: "Ahora podés agregar sus ingredientes." });
-    },
-  });
-
-  const deleteBaseRecipeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/restaurant/recipes/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/recipes"] });
-      setSelectedBaseRecipe(null);
-      setIsBaseRecipeDialogOpen(false);
-      toast({ title: "Elaboración eliminada" });
     },
   });
 
@@ -321,23 +320,6 @@ export default function RecetasCostosPage() {
     },
   });
 
-  const deleteMenuItemMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const res = await apiRequest("DELETE", `/api/restaurant/menu/items/${id}`);
-      if (res.status === 204) return { deactivated: false };
-      return res.json();
-    },
-    onSuccess: (result: { deactivated?: boolean; message?: string }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/items"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
-      if (result?.deactivated) {
-        toast({ title: "No se pudo eliminar", description: result.message || "El plato tiene ventas registradas, se desactivó en su lugar." });
-      } else {
-        toast({ title: "Plato eliminado" });
-      }
-    },
-  });
-
   const createCategoryMutation = useMutation({
     mutationFn: async (data: CategoryFormValues) => {
       const res = await apiRequest("POST", "/api/restaurant/menu/categories", data);
@@ -365,16 +347,6 @@ export default function RecetasCostosPage() {
     },
   });
 
-  const deleteCategoryMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/restaurant/menu/categories/${id}`);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/menu/categories"] });
-      toast({ title: "Categoria eliminada" });
-    },
-  });
-
   const openMenuItemDialog = (item?: MenuItem) => {
     if (item) {
       setIsNewItemWizard(false);
@@ -394,7 +366,7 @@ export default function RecetasCostosPage() {
       setEditingMenuItem(null);
       menuItemForm.reset({
         name: "",
-        categoryId: menuCategories[0]?.id || "",
+        categoryId: menuCategories.find(c=>c.isActive !== "false")?.id || "",
         description: "",
         price: 0,
         preparationTime: 0,
@@ -429,7 +401,7 @@ export default function RecetasCostosPage() {
   // Elaboraciones base = recipes where isBase=true
   const baseRecipes = (recipes as Recipe[]).filter(r => r.isBase && !r.outputInventoryItemId);
   const producedRecipes = (recipes as Recipe[]).filter(r => r.isBase && !!r.outputInventoryItemId);
-  const ingredientRecipes = ingredientSourceType === "produccion" ? producedRecipes : baseRecipes;
+  const ingredientRecipes = (ingredientSourceType === "produccion" ? producedRecipes : baseRecipes).filter(r=>r.isActive !== "false");
   const ingredientUnit = (rec: Recipe) => rec.outputInventoryItemId ? inventoryItems.find(i=>i.id===rec.outputInventoryItemId)?.unit || rec.productionUnit || "g" : rec.productionUnit || "g";
 
   // Current elaboración (when editing via base recipe dialog)
@@ -458,6 +430,36 @@ export default function RecetasCostosPage() {
     return baseRecipeTotalCost(rec) / y;
   };
 
+  const ingredientRecipeOptions = ingredientRecipes.map(recipe=>({
+    id:recipe.id,name:recipe.name || "Elaboración",unit:ingredientUnit(recipe),
+    yield:String(recipe.productionYield || "0"),yieldUnit:recipe.productionUnit || ingredientUnit(recipe),cost:baseRecipeCostPerUnit(recipe),
+  }));
+  const selectIngredientRecipe = (id:string) => {
+    const recipe=ingredientRecipes.find(candidate=>candidate.id===id);
+    if(!recipe)return;
+    const cost=baseRecipeCostPerUnit(recipe);
+    setNewIngredientSubRecipeId(recipe.id);
+    setNewIngredientInventoryId("");
+    setNewIngredientName(recipe.name || "Elaboración");
+    setNewIngredientUnit(ingredientUnit(recipe));
+    setNewIngredientCost(cost>0?cost.toFixed(4):"0");
+  };
+
+  const ingredientStockItem = ingredientSourceType === "inventario"
+    ? inventoryItems.find(item => item.id === newIngredientInventoryId)
+    : undefined;
+  const ingredientUnitControl = ingredientStockItem ? <RecipeIngredientUnit
+    key={ingredientStockItem.id}
+    itemId={ingredientStockItem.id} stockUnit={ingredientStockItem.unit}
+    stockCost={Number(ingredientStockItem.costPrice || 0)}
+    unit={newIngredientUnit} quantity={newIngredientQty}
+    onChange={value => {
+      setNewIngredientUnit(value.unit);
+      setNewIngredientQty(value.quantity);
+      setNewIngredientCost(value.cost);
+    }}
+  /> : <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm">{newIngredientUnit}</div>;
+
   // Open dialog to edit an elaboración (or create its recipe shell first)
   const openBaseRecipeEditDialog = (rec: Recipe) => {
     setSelectedBaseRecipe(rec);
@@ -480,7 +482,7 @@ export default function RecetasCostosPage() {
   const filteredItems = menuItems.filter((item) => {
     const matchSearch = !recipeSearch || item.name.toLowerCase().includes(recipeSearch.toLowerCase());
     const matchCat = recipeCategoryFilter === "all" || item.categoryId === recipeCategoryFilter;
-    return matchSearch && matchCat;
+    return matchSearch && matchCat && matchesState(item.isActive);
   });
 
   return (
@@ -495,8 +497,8 @@ export default function RecetasCostosPage() {
             Cargá platos, categorías y recetas para calcular costos y márgenes
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setIsCategoryManagerOpen(true)} data-testid="button-manage-categories">
+        {activeTab === "platos" && <div className="flex items-center gap-2">
+          <Button disabled={activeTab !== "platos"} variant="outline" onClick={() => setIsCategoryManagerOpen(true)} data-testid="button-manage-categories">
             <UtensilsCrossed className="h-4 w-4 mr-2" />
             Categorías
           </Button>
@@ -507,7 +509,7 @@ export default function RecetasCostosPage() {
               setIsEditingBasicData(true);
               menuItemForm.reset({
                 name: "",
-                categoryId: menuCategories[0]?.id || "",
+                categoryId: menuCategories.find(c=>c.isActive !== "false")?.id || "",
                 description: "",
                 price: 0,
                 preparationTime: 0,
@@ -517,14 +519,16 @@ export default function RecetasCostosPage() {
               });
               setIsRecipeDialogOpen(true);
             }}
+            disabled={activeTab !== "platos" || createMenuItemMutation.isPending}
             data-testid="button-add-menu-item"
           >
             <Plus className="h-4 w-4 mr-2" />
             Agregar Plato
           </Button>
-        </div>
+        </div>}
       </div>
 
+      {["platos","elaboraciones"].includes(activeTab) && <div className="flex flex-wrap items-center gap-3"><Label>Estado del catálogo</Label><Select value={catalogState} onValueChange={setCatalogState}><SelectTrigger className="w-44" aria-label="Estado del catálogo"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="active">Activos</SelectItem><SelectItem value="inactive">Inactivos</SelectItem><SelectItem value="all">Todos</SelectItem></SelectContent></Select></div>}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="platos" data-testid="tab-platos">
@@ -567,7 +571,7 @@ export default function RecetasCostosPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas las categorías</SelectItem>
-              {menuCategories.map((cat) => (
+              {menuCategories.filter(c=>c.isActive !== "false").map((cat) => (
                 <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
               ))}
             </SelectContent>
@@ -674,10 +678,12 @@ export default function RecetasCostosPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => deleteMenuItemMutation.mutate(item.id)}
+                            onClick={() => lifecycle.mutate({kind:"menu/items",id:item.id,active:item.isActive === "false"})}
+                            disabled={lifecycle.isPending}
+                            aria-label={`${item.isActive === "false" ? "Activar" : "Desactivar"} ${item.name}`}
                             data-testid={`button-delete-item-${item.id}`}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            {item.isActive === "false" ? <span>Activar</span> : <Trash2 className="h-4 w-4 text-destructive" />}
                           </Button>
                         </div>
                       </TableCell>
@@ -718,10 +724,11 @@ export default function RecetasCostosPage() {
               data-testid="button-new-elaboracion-form"
             >
               <Plus className="h-4 w-4 mr-2" />
-              Nueva Elaboración
+              Limpiar formulario
             </Button>
           </div>
 
+          <Input aria-label="Buscar elaboración" placeholder="Buscar elaboración por nombre…" value={baseSearch} onChange={e=>setBaseSearch(e.target.value)}/>
           {/* Inline create form */}
           <Card>
             <CardContent className="pt-5">
@@ -841,7 +848,7 @@ export default function RecetasCostosPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {baseRecipes.map((br) => {
+              {baseRecipes.filter(br=>matchesState(br.isActive) && (!baseSearch || (br.name || "").toLocaleLowerCase("es-AR").includes(baseSearch.toLocaleLowerCase("es-AR")))).map((br) => {
                 const totalCost = baseRecipeTotalCost(br);
                 const cpUnit = baseRecipeCostPerUnit(br);
                 const isOpen = currentBaseRecipe?.id === br.id && isBaseRecipeDialogOpen;
@@ -891,10 +898,12 @@ export default function RecetasCostosPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => deleteBaseRecipeMutation.mutate(br.id)}
+                            onClick={() => lifecycle.mutate({kind:"recipes",id:br.id,active:br.isActive === "false"})}
+                            disabled={lifecycle.isPending}
+                            aria-label={`${br.isActive === "false" ? "Activar" : "Desactivar"} ${br.name}`}
                             data-testid={`button-delete-base-recipe-${br.id}`}
                           >
-                            <Trash2 className="h-4 w-4 text-destructive" />
+                            {br.isActive === "false" ? <span>Activar</span> : <Trash2 className="h-4 w-4 text-destructive" />}
                           </Button>
                         </div>
                       </div>
@@ -1149,6 +1158,211 @@ export default function RecetasCostosPage() {
               </div>
             )}
 
+            {selectedRecipeItem && <div className="rounded-lg border bg-muted/20 p-4 md:p-5 space-y-4">
+              <Label className="block text-base font-semibold">Agregar Ingrediente</Label>
+
+              {/* Toggle: Materia Prima vs Elaboración */}
+              <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-md w-fit">
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "inventario" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => {
+                    setIngredientSourceType("inventario");
+                    setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId("");
+                  }}
+                >
+                  Materia Prima
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "elaboracion" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  onClick={() => {
+                    setIngredientSourceType("elaboracion");
+                    setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId("");
+                  }}
+                >
+                  <FlaskConical className="h-3.5 w-3.5 mr-1 inline-block" />
+                  Elaboración Base
+                </button>
+                <button type="button" className={`px-3 py-1.5 rounded text-sm font-medium ${ingredientSourceType === "produccion" ? "bg-background shadow" : "text-muted-foreground"}`} onClick={()=>{setIngredientSourceType("produccion");setNewIngredientName("");setNewIngredientInventoryId("");setNewIngredientSubRecipeId("");setNewIngredientCost("");}}>Preparación con stock</button>
+              </div>
+
+              {ingredientSourceType === "inventario" ? (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
+                  <div className="relative">
+                    {!ingredientComboOpen ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between font-normal"
+                        data-testid="btn-ingredient-combo"
+                        onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
+                      >
+                        <span className={newIngredientName ? "" : "text-muted-foreground"}>
+                          {newIngredientName || "Buscar artículo..."}
+                        </span>
+                        <svg className="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                        </svg>
+                      </Button>
+                    ) : (
+                      <div className="border rounded-md bg-background shadow-md">
+                        <div className="flex items-center border-b px-3 py-2 gap-2">
+                          <svg className="h-4 w-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                          </svg>
+                          <input
+                            autoFocus
+                            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                            placeholder="Escribí el nombre del artículo..."
+                            value={ingredientSearch}
+                            onChange={(e) => setIngredientSearch(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); }
+                            }}
+                            data-testid="input-ingredient-search"
+                          />
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}
+                          >✕</button>
+                        </div>
+                        <p className="px-3 py-2 text-xs text-muted-foreground">Materias primas: artículos activos. Los semielaborados se eligen en Preparación con stock. Podés elegir la unidad de consumo; cantidad y costo se convierten juntos.</p><div className="max-h-52 overflow-y-auto">
+                          {(() => {
+                            const filtered = (inventoryItems as any[]).filter((i: any) =>
+                              i.isActive !== "false" && i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch ||
+                              i.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
+                              (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase())))
+                            );
+                            if (filtered.length === 0) return (
+                              <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos activos. Revisá la clasificación o elegí Preparación con stock para un semielaborado.</p>
+                            );
+                            return filtered.map((item: any) => (
+                              <button
+                                key={item.id}
+                                type="button"
+                                className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
+                                data-testid={`combo-item-${item.id}`}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setNewIngredientInventoryId(item.id);
+                                  setNewIngredientSubRecipeId("");
+                                  setNewIngredientName(item.name);
+                                  setNewIngredientUnit(item.unit);
+                                  setNewIngredientCost(item.costPrice || "0");
+                                  setIngredientSearch("");
+                                  setIngredientComboOpen(false);
+                                }}
+                              >
+                                <span className="text-sm font-medium">
+                                  {item.name}
+                                  {item.sku ? <span className="text-muted-foreground font-normal"> [{item.sku}]</span> : ""}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {parseFloat(item.costPrice || "0") > 0
+                                    ? `Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
+                                    : "Sin precio cargado"}
+                                </span>
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {newIngredientInventoryId
+                    ? <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará al cerrar la orden</p>
+                    : <p className="text-xs text-muted-foreground">Seleccioná un artículo para vincular el stock automáticamente</p>
+                  }
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <RecipeIngredientPicker key={`dish-${ingredientSourceType}`} mode={ingredientSourceType} options={ingredientRecipeOptions} selectedId={newIngredientSubRecipeId} onSelect={selectIngredientRecipe}/>
+                  {newIngredientSubRecipeId && (
+                    <p className="text-xs text-violet-600">{ingredientSourceType === "produccion" ? "✓ Se consumirá el producto preparado, sin repetir sus materias primas" : "✓ Se consumirán los ingredientes de la elaboración al cerrar la orden"}</p>
+                  )}
+                </div>
+              )}
+
+              {newIngredientName && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs">Cantidad neta *</Label>
+                      <Input
+                        type="number"
+                        placeholder="Ej: 200"
+                        step="0.001"
+                        value={newIngredientQty}
+                        onChange={(e) => setNewIngredientQty(e.target.value)}
+                        data-testid="input-ingredient-qty"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Unidad</Label>
+                      {ingredientUnitControl}
+                    </div>
+                    <div className="w-24 space-y-1">
+                      <Label className="text-xs">Merma %</Label>
+                      <Input
+                        type="number"
+                        placeholder="Ej: 10"
+                        step="0.1"
+                        min="0"
+                        max="99"
+                        value={newIngredientMerma}
+                        onChange={(e) => setNewIngredientMerma(e.target.value)}
+                        data-testid="input-ingredient-merma"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Costo unit.</Label>
+                      <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm min-w-28">
+                        {parseFloat(newIngredientCost || "0") > 0
+                          ? `$${parseFloat(newIngredientCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                          : <span className="text-muted-foreground text-xs italic">sin precio</span>
+                        }
+                      </div>
+                    </div>
+                  </div>
+                  {newIngredientMerma && parseFloat(newIngredientMerma) > 0 && newIngredientQty && (
+                    <p className="text-xs text-amber-600">
+                      Cantidad bruta a consumir del stock:{" "}
+                      <strong>
+                        {(parseFloat(newIngredientQty) / (1 - parseFloat(newIngredientMerma) / 100)).toFixed(3)} {newIngredientUnit}
+                      </strong>
+                      {" "}— costo real incluye merma
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <Button
+                onClick={() => {
+                  if (!currentRecipe || !newIngredientName || !newIngredientQty) return;
+                  addIngredientMutation.mutate({
+                    recipeId: currentRecipe.id,
+                    ingredientName: newIngredientName,
+                    quantity: newIngredientQty,
+                    unit: newIngredientUnit,
+                    unitCost: newIngredientCost || "0",
+                    inventoryItemId: ingredientSourceType === "inventario" ? (newIngredientInventoryId || null) : null,
+                    subRecipeId: ingredientSourceType !== "inventario" ? (newIngredientSubRecipeId || null) : null,
+                    merma: newIngredientMerma || null,
+                  });
+                }}
+                disabled={addIngredientMutation.isPending || !newIngredientName || !newIngredientQty}
+                data-testid="button-add-ingredient"
+              >
+                {addIngredientMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                <Plus className="h-4 w-4 mr-1" />
+                Agregar Ingrediente
+              </Button>
+            </div>}
+
+            {selectedRecipeItem && <h3 className="font-semibold pt-2">Ingredientes de la receta</h3>}
             {selectedRecipeItem && currentRecipe && currentRecipe.ingredients.length > 0 && (
               <Table>
                 <TableHeader>
@@ -1232,7 +1446,7 @@ export default function RecetasCostosPage() {
 
             {selectedRecipeItem && currentRecipe && !currentCostReady && <p className="rounded-md border p-3 text-sm text-muted-foreground">Costo pendiente: completá los ingredientes y sus costos para calcular el margen.</p>}
             {selectedRecipeItem && currentRecipe && currentCostReady && (
-              <div className="flex items-center gap-4 p-3 bg-muted rounded-md text-sm">
+              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted rounded-md text-sm">
                 <div>Costo: <strong>${recipeCost.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
                 <div>Precio: <strong>${parseFloat(selectedRecipeItem.price).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
                 <div>
@@ -1247,250 +1461,6 @@ export default function RecetasCostosPage() {
               </div>
             )}
 
-            {selectedRecipeItem && <div className="border-t pt-4 space-y-3">
-              <Label className="block font-medium">Agregar Ingrediente</Label>
-
-              {/* Toggle: Materia Prima vs Elaboración */}
-              <div className="flex gap-1 p-1 bg-muted rounded-md w-fit">
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "inventario" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => {
-                    setIngredientSourceType("inventario");
-                    setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId("");
-                  }}
-                >
-                  Materia Prima
-                </button>
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "elaboracion" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  onClick={() => {
-                    setIngredientSourceType("elaboracion");
-                    setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId("");
-                  }}
-                >
-                  <FlaskConical className="h-3.5 w-3.5 mr-1 inline-block" />
-                  Elaboración Base
-                </button>
-                <button type="button" className={`px-3 py-1.5 rounded text-sm font-medium ${ingredientSourceType === "produccion" ? "bg-background shadow" : "text-muted-foreground"}`} onClick={()=>{setIngredientSourceType("produccion");setNewIngredientName("");setNewIngredientInventoryId("");setNewIngredientSubRecipeId("");setNewIngredientCost("");}}>Preparación con stock</button>
-              </div>
-
-              {ingredientSourceType === "inventario" ? (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
-                  <div className="relative">
-                    {!ingredientComboOpen ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full justify-between font-normal"
-                        data-testid="btn-ingredient-combo"
-                        onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
-                      >
-                        <span className={newIngredientName ? "" : "text-muted-foreground"}>
-                          {newIngredientName || "Buscar artículo..."}
-                        </span>
-                        <svg className="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
-                        </svg>
-                      </Button>
-                    ) : (
-                      <div className="border rounded-md bg-background shadow-md">
-                        <div className="flex items-center border-b px-3 py-2 gap-2">
-                          <svg className="h-4 w-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                          </svg>
-                          <input
-                            autoFocus
-                            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                            placeholder="Escribí el nombre del artículo..."
-                            value={ingredientSearch}
-                            onChange={(e) => setIngredientSearch(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); }
-                            }}
-                            data-testid="input-ingredient-search"
-                          />
-                          <button
-                            type="button"
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}
-                          >✕</button>
-                        </div>
-                        <div className="max-h-52 overflow-y-auto">
-                          {(() => {
-                            const filtered = (inventoryItems as any[]).filter((i: any) =>
-                              i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch ||
-                              i.name.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
-                              (i.sku && i.sku.toLowerCase().includes(ingredientSearch.toLowerCase())))
-                            );
-                            if (filtered.length === 0) return (
-                              <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>
-                            );
-                            return filtered.map((item: any) => (
-                              <button
-                                key={item.id}
-                                type="button"
-                                className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
-                                data-testid={`combo-item-${item.id}`}
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  setNewIngredientInventoryId(item.id);
-                                  setNewIngredientSubRecipeId("");
-                                  setNewIngredientName(item.name);
-                                  setNewIngredientUnit(item.unit);
-                                  setNewIngredientCost(item.costPrice || "0");
-                                  setIngredientSearch("");
-                                  setIngredientComboOpen(false);
-                                }}
-                              >
-                                <span className="text-sm font-medium">
-                                  {item.name}
-                                  {item.sku ? <span className="text-muted-foreground font-normal"> [{item.sku}]</span> : ""}
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {parseFloat(item.costPrice || "0") > 0
-                                    ? `Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}`
-                                    : "Sin precio cargado"}
-                                </span>
-                              </button>
-                            ));
-                          })()}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {newIngredientInventoryId
-                    ? <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará al cerrar la orden</p>
-                    : <p className="text-xs text-muted-foreground">Seleccioná un artículo para vincular el stock automáticamente</p>
-                  }
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">{ingredientSourceType === "produccion" ? "Seleccionar preparación con stock" : "Seleccionar elaboración base"}</Label>
-                  {ingredientRecipes.length === 0 ? (
-                    <div className="border rounded-md p-4 text-sm text-muted-foreground text-center">
-                      No hay elaboraciones creadas aún. Creá una en la pestaña "Elaboraciones".
-                    </div>
-                  ) : (
-                    <div className="border rounded-md max-h-52 overflow-y-auto divide-y">
-                      {ingredientRecipes.map((br) => {
-                        const cpUnit = baseRecipeCostPerUnit(br);
-                        const isSelected = newIngredientSubRecipeId === br.id;
-                        return (
-                          <button
-                            key={br.id}
-                            type="button"
-                            className={`w-full text-left px-3 py-2 hover:bg-accent flex items-center justify-between gap-2 ${isSelected ? "bg-accent" : ""}`}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              setNewIngredientSubRecipeId(br.id);
-                              setNewIngredientInventoryId("");
-                              setNewIngredientName(br.name || "Elaboración");
-                              setNewIngredientUnit(ingredientUnit(br));
-                              setNewIngredientCost(cpUnit > 0 ? String(cpUnit.toFixed(4)) : "0");
-                            }}
-                          >
-                            <div>
-                              <span className="text-sm font-medium flex items-center gap-1">
-                                <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
-                                {br.name}
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                Rinde: {br.productionYield} {br.productionUnit} — Costo/u: ${cpUnit.toLocaleString("es-AR", { minimumFractionDigits: 4 })}
-                              </span>
-                            </div>
-                            {isSelected && <span className="text-xs text-violet-600 font-medium">✓ Seleccionado</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {newIngredientSubRecipeId && (
-                    <p className="text-xs text-violet-600">{ingredientSourceType === "produccion" ? "✓ Se consumirá el producto preparado, sin repetir sus materias primas" : "✓ Se consumirán los ingredientes de la elaboración al cerrar la orden"}</p>
-                  )}
-                </div>
-              )}
-
-              {newIngredientName && (
-                <div className="space-y-2">
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1 space-y-1">
-                      <Label className="text-xs">Cantidad neta *</Label>
-                      <Input
-                        type="number"
-                        placeholder="Ej: 200"
-                        step="0.001"
-                        value={newIngredientQty}
-                        onChange={(e) => setNewIngredientQty(e.target.value)}
-                        data-testid="input-ingredient-qty"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Unidad</Label>
-                      <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm font-medium min-w-14 justify-center">
-                        {newIngredientUnit}
-                      </div>
-                    </div>
-                    <div className="w-24 space-y-1">
-                      <Label className="text-xs">Merma %</Label>
-                      <Input
-                        type="number"
-                        placeholder="Ej: 10"
-                        step="0.1"
-                        min="0"
-                        max="99"
-                        value={newIngredientMerma}
-                        onChange={(e) => setNewIngredientMerma(e.target.value)}
-                        data-testid="input-ingredient-merma"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">Costo unit.</Label>
-                      <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm min-w-28">
-                        {parseFloat(newIngredientCost || "0") > 0
-                          ? `$${parseFloat(newIngredientCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
-                          : <span className="text-muted-foreground text-xs italic">sin precio</span>
-                        }
-                      </div>
-                    </div>
-                  </div>
-                  {newIngredientMerma && parseFloat(newIngredientMerma) > 0 && newIngredientQty && (
-                    <p className="text-xs text-amber-600">
-                      Cantidad bruta a consumir del stock:{" "}
-                      <strong>
-                        {(parseFloat(newIngredientQty) / (1 - parseFloat(newIngredientMerma) / 100)).toFixed(3)} {newIngredientUnit}
-                      </strong>
-                      {" "}— costo real incluye merma
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (!currentRecipe || !newIngredientName || !newIngredientQty) return;
-                  addIngredientMutation.mutate({
-                    recipeId: currentRecipe.id,
-                    ingredientName: newIngredientName,
-                    quantity: newIngredientQty,
-                    unit: newIngredientUnit,
-                    unitCost: newIngredientCost || "0",
-                    inventoryItemId: ingredientSourceType === "inventario" ? (newIngredientInventoryId || null) : null,
-                    subRecipeId: ingredientSourceType !== "inventario" ? (newIngredientSubRecipeId || null) : null,
-                    merma: newIngredientMerma || null,
-                  });
-                }}
-                disabled={addIngredientMutation.isPending || !newIngredientName || !newIngredientQty}
-                data-testid="button-add-ingredient"
-              >
-                {addIngredientMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                <Plus className="h-4 w-4 mr-1" />
-                Agregar Ingrediente
-              </Button>
-            </div>}
 
           </div>
 
@@ -1717,7 +1687,7 @@ export default function RecetasCostosPage() {
               {menuCategories.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-6">No hay categorías creadas</p>
               )}
-              {menuCategories.map((cat) => (
+              {menuCategories.filter(cat=>matchesState(cat.isActive)).map((cat) => (
                 <div key={cat.id} className="flex items-center justify-between gap-2 p-3 border rounded-md" data-testid={`category-row-${cat.id}`}>
                   <div>
                     <div className="flex items-center gap-2">
@@ -1732,8 +1702,8 @@ export default function RecetasCostosPage() {
                     <Button variant="ghost" size="icon" onClick={() => openCategoryDialog(cat)} data-testid={`button-edit-category-${cat.id}`}>
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => deleteCategoryMutation.mutate(cat.id)} data-testid={`button-delete-category-${cat.id}`}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                    <Button variant="ghost" size="icon" onClick={() => lifecycle.mutate({kind:"menu/categories",id:cat.id,active:cat.isActive === "false"})} disabled={lifecycle.isPending} aria-label={`${cat.isActive === "false" ? "Activar" : "Desactivar"} ${cat.name}`} data-testid={`button-delete-category-${cat.id}`}>
+                      {cat.isActive === "false" ? <span>Activar</span> : <Trash2 className="h-4 w-4 text-destructive" />}
                     </Button>
                   </div>
                 </div>
@@ -1867,6 +1837,156 @@ export default function RecetasCostosPage() {
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+            {/* Add ingredient form */}
+            {currentBaseRecipe && (
+              <div className="rounded-lg border bg-muted/20 p-4 md:p-5 space-y-4">
+                <Label className="block text-base font-semibold">Agregar Ingrediente a la Elaboración</Label>
+
+                {/* Toggle */}
+                <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-md w-fit">
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "inventario" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => { setIngredientSourceType("inventario"); setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId(""); }}
+                  >
+                    Materia Prima
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "elaboracion" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
+                    onClick={() => { setIngredientSourceType("elaboracion"); setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId(""); }}
+                  >
+                    <FlaskConical className="h-3.5 w-3.5 mr-1 inline-block" />
+                    Elaboración Base
+                  </button>
+                  <button type="button" className={`px-3 py-1.5 rounded text-sm font-medium ${ingredientSourceType === "produccion" ? "bg-background shadow" : "text-muted-foreground"}`} onClick={()=>{setIngredientSourceType("produccion");setNewIngredientName("");setNewIngredientInventoryId("");setNewIngredientSubRecipeId("");setNewIngredientCost("");}}>Preparación con stock</button>
+                </div>
+
+                {ingredientSourceType === "inventario" ? (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
+                    <div className="relative">
+                      {!ingredientComboOpen ? (
+                        <Button
+                          type="button" variant="outline" className="w-full justify-between font-normal"
+                          onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
+                        >
+                          <span className={newIngredientName ? "" : "text-muted-foreground"}>
+                            {newIngredientName || "Buscar artículo..."}
+                          </span>
+                          <svg className="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                          </svg>
+                        </Button>
+                      ) : (
+                        <div className="border rounded-md bg-background shadow-md">
+                          <div className="flex items-center border-b px-3 py-2 gap-2">
+                            <svg className="h-4 w-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                            </svg>
+                            <input
+                              autoFocus
+                              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                              placeholder="Escribí el nombre del artículo..."
+                              value={ingredientSearch}
+                              onChange={(e) => setIngredientSearch(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); } }}
+                            />
+                            <button type="button" className="text-muted-foreground hover:text-foreground"
+                              onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}>✕</button>
+                          </div>
+                          <p className="px-3 py-2 text-xs text-muted-foreground">Los semielaborados se eligen en Preparación con stock. Podés elegir gramos aunque el stock esté en kg; el costo se convierte junto con la cantidad.</p><div className="max-h-48 overflow-y-auto">
+                            {(() => {
+                              const filtered = (inventoryItems as any[]).filter((i: any) =>
+                                i.isActive !== "false" && i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()))
+                              );
+                              if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos activos. Revisá la clasificación o elegí Preparación con stock para un semielaborado.</p>;
+                              return filtered.map((item: any) => (
+                                <button key={item.id} type="button"
+                                  className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setNewIngredientInventoryId(item.id);
+                                    setNewIngredientSubRecipeId("");
+                                    setNewIngredientName(item.name);
+                                    setNewIngredientUnit(item.unit);
+                                    setNewIngredientCost(item.costPrice || "0");
+                                    setIngredientSearch(""); setIngredientComboOpen(false);
+                                  }}
+                                >
+                                  <span className="text-sm font-medium">{item.name}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {parseFloat(item.costPrice || "0") > 0 ? `Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}` : "Sin precio"}
+                                  </span>
+                                </button>
+                              ));
+                            })()}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <RecipeIngredientPicker key={`base-${ingredientSourceType}`} mode={ingredientSourceType} options={ingredientRecipeOptions.filter(option=>option.id!==currentBaseRecipe.id)} selectedId={newIngredientSubRecipeId} onSelect={selectIngredientRecipe}/>
+
+                  </div>
+                )}
+
+                {newIngredientName && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="flex-1 space-y-1">
+                        <Label className="text-xs">Cantidad neta *</Label>
+                        <Input type="number" placeholder="Ej: 200" step="0.001"
+                          value={newIngredientQty} onChange={(e) => setNewIngredientQty(e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Unidad</Label>
+                        {ingredientUnitControl}
+                      </div>
+                      <div className="w-24 space-y-1">
+                        <Label className="text-xs">Merma %</Label>
+                        <Input type="number" placeholder="Ej: 10" step="0.1" min="0" max="99"
+                          value={newIngredientMerma} onChange={(e) => setNewIngredientMerma(e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Costo unit.</Label>
+                        <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm min-w-28">
+                          {parseFloat(newIngredientCost || "0") > 0
+                            ? `$${parseFloat(newIngredientCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
+                            : <span className="text-muted-foreground text-xs italic">sin precio</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    if (!currentBaseRecipe || !newIngredientName || !newIngredientQty) return;
+                    addIngredientMutation.mutate({
+                      recipeId: currentBaseRecipe.id,
+                      ingredientName: newIngredientName,
+                      quantity: newIngredientQty,
+                      unit: newIngredientUnit,
+                      unitCost: newIngredientCost || "0",
+                      inventoryItemId: ingredientSourceType === "inventario" ? (newIngredientInventoryId || null) : null,
+                      subRecipeId: ingredientSourceType !== "inventario" ? (newIngredientSubRecipeId || null) : null,
+                      merma: newIngredientMerma || null,
+                    });
+                  }}
+                  disabled={addIngredientMutation.isPending || !newIngredientName || !newIngredientQty}
+                >
+                  {addIngredientMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  <Plus className="h-4 w-4 mr-1" />
+                  Agregar Ingrediente
+                </Button>
+              </div>
+            )}
+
+            <h3 className="font-semibold pt-2">Ingredientes de la elaboración</h3>
             {/* Ingredient table */}
             {currentBaseRecipe && currentBaseRecipe.ingredients.length > 0 && (
               <Table>
@@ -1938,189 +2058,11 @@ export default function RecetasCostosPage() {
             {currentBaseRecipe && currentBaseRecipe.ingredients.length === 0 && (
               <div className="border-2 border-dashed rounded-md p-6 text-center text-sm text-muted-foreground">
                 <FlaskConical className="h-8 w-8 mx-auto opacity-30 mb-2" />
-                <p>Esta elaboración no tiene ingredientes aún. Agregá materias primas abajo.</p>
+                <p>Esta elaboración no tiene ingredientes aún. Agregá los ingredientes desde el formulario de arriba.</p>
               </div>
             )}
 
-            {/* Add ingredient form */}
-            {currentBaseRecipe && (
-              <div className="border-t pt-4 space-y-3">
-                <Label className="block font-medium">Agregar Ingrediente a la Elaboración</Label>
 
-                {/* Toggle */}
-                <div className="flex gap-1 p-1 bg-muted rounded-md w-fit">
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "inventario" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
-                    onClick={() => { setIngredientSourceType("inventario"); setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId(""); }}
-                  >
-                    Materia Prima
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${ingredientSourceType === "elaboracion" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
-                    onClick={() => { setIngredientSourceType("elaboracion"); setNewIngredientName(""); setNewIngredientUnit("g"); setNewIngredientCost(""); setNewIngredientInventoryId(""); setNewIngredientSubRecipeId(""); }}
-                  >
-                    <FlaskConical className="h-3.5 w-3.5 mr-1 inline-block" />
-                    Elaboración Base
-                  </button>
-                  <button type="button" className={`px-3 py-1.5 rounded text-sm font-medium ${ingredientSourceType === "produccion" ? "bg-background shadow" : "text-muted-foreground"}`} onClick={()=>{setIngredientSourceType("produccion");setNewIngredientName("");setNewIngredientInventoryId("");setNewIngredientSubRecipeId("");setNewIngredientCost("");}}>Preparación con stock</button>
-                </div>
-
-                {ingredientSourceType === "inventario" ? (
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
-                    <div className="relative">
-                      {!ingredientComboOpen ? (
-                        <Button
-                          type="button" variant="outline" className="w-full justify-between font-normal"
-                          onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
-                        >
-                          <span className={newIngredientName ? "" : "text-muted-foreground"}>
-                            {newIngredientName || "Buscar artículo..."}
-                          </span>
-                          <svg className="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
-                          </svg>
-                        </Button>
-                      ) : (
-                        <div className="border rounded-md bg-background shadow-md">
-                          <div className="flex items-center border-b px-3 py-2 gap-2">
-                            <svg className="h-4 w-4 shrink-0 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                            </svg>
-                            <input
-                              autoFocus
-                              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                              placeholder="Escribí el nombre del artículo..."
-                              value={ingredientSearch}
-                              onChange={(e) => setIngredientSearch(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); } }}
-                            />
-                            <button type="button" className="text-muted-foreground hover:text-foreground"
-                              onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}>✕</button>
-                          </div>
-                          <div className="max-h-48 overflow-y-auto">
-                            {(() => {
-                              const filtered = (inventoryItems as any[]).filter((i: any) =>
-                                i.itemKind !== "semielaborado" && !producedRecipes.some(r=>r.outputInventoryItemId===i.id) && (!ingredientSearch || i.name.toLowerCase().includes(ingredientSearch.toLowerCase()))
-                              );
-                              if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos</p>;
-                              return filtered.map((item: any) => (
-                                <button key={item.id} type="button"
-                                  className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    setNewIngredientInventoryId(item.id);
-                                    setNewIngredientSubRecipeId("");
-                                    setNewIngredientName(item.name);
-                                    setNewIngredientUnit(item.unit);
-                                    setNewIngredientCost(item.costPrice || "0");
-                                    setIngredientSearch(""); setIngredientComboOpen(false);
-                                  }}
-                                >
-                                  <span className="text-sm font-medium">{item.name}</span>
-                                  <span className="text-xs text-muted-foreground">
-                                    {parseFloat(item.costPrice || "0") > 0 ? `Costo: $${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}/${item.unit}` : "Sin precio"}
-                                  </span>
-                                </button>
-                              ));
-                            })()}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Seleccionar otra elaboración</Label>
-                    {ingredientRecipes.filter(br => br.id !== currentBaseRecipe.id).length === 0 ? (
-                      <div className="border rounded-md p-3 text-sm text-muted-foreground text-center">
-                        No hay otras elaboraciones disponibles.
-                      </div>
-                    ) : (
-                      <div className="border rounded-md max-h-40 overflow-y-auto divide-y">
-                        {ingredientRecipes.filter(br => br.id !== currentBaseRecipe.id).map((br) => {
-                          const cpUnit = baseRecipeCostPerUnit(br);
-                          return (
-                            <button key={br.id} type="button"
-                              className={`w-full text-left px-3 py-2 hover:bg-accent flex items-center justify-between ${newIngredientSubRecipeId === br.id ? "bg-accent" : ""}`}
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setNewIngredientSubRecipeId(br.id);
-                                setNewIngredientInventoryId("");
-                                setNewIngredientName(br.name || "Elaboración");
-                                setNewIngredientUnit(ingredientUnit(br));
-                                setNewIngredientCost(cpUnit > 0 ? String(cpUnit.toFixed(4)) : "0");
-                              }}
-                            >
-                              <span className="text-sm font-medium flex items-center gap-1">
-                                <FlaskConical className="h-3.5 w-3.5 text-violet-500" />
-                                {br.name}
-                              </span>
-                              <span className="text-xs text-muted-foreground">Costo/u: ${cpUnit.toLocaleString("es-AR", { minimumFractionDigits: 4 })}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {newIngredientName && (
-                  <div className="space-y-2">
-                    <div className="flex items-end gap-2">
-                      <div className="flex-1 space-y-1">
-                        <Label className="text-xs">Cantidad neta *</Label>
-                        <Input type="number" placeholder="Ej: 200" step="0.001"
-                          value={newIngredientQty} onChange={(e) => setNewIngredientQty(e.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Unidad</Label>
-                        <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm font-medium min-w-14 justify-center">
-                          {newIngredientUnit}
-                        </div>
-                      </div>
-                      <div className="w-24 space-y-1">
-                        <Label className="text-xs">Merma %</Label>
-                        <Input type="number" placeholder="Ej: 10" step="0.1" min="0" max="99"
-                          value={newIngredientMerma} onChange={(e) => setNewIngredientMerma(e.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Costo unit.</Label>
-                        <div className="h-9 px-3 flex items-center border rounded-md bg-muted/40 text-sm min-w-28">
-                          {parseFloat(newIngredientCost || "0") > 0
-                            ? `$${parseFloat(newIngredientCost).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
-                            : <span className="text-muted-foreground text-xs italic">sin precio</span>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    if (!currentBaseRecipe || !newIngredientName || !newIngredientQty) return;
-                    addIngredientMutation.mutate({
-                      recipeId: currentBaseRecipe.id,
-                      ingredientName: newIngredientName,
-                      quantity: newIngredientQty,
-                      unit: newIngredientUnit,
-                      unitCost: newIngredientCost || "0",
-                      inventoryItemId: ingredientSourceType === "inventario" ? (newIngredientInventoryId || null) : null,
-                      subRecipeId: ingredientSourceType !== "inventario" ? (newIngredientSubRecipeId || null) : null,
-                      merma: newIngredientMerma || null,
-                    });
-                  }}
-                  disabled={addIngredientMutation.isPending || !newIngredientName || !newIngredientQty}
-                >
-                  {addIngredientMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  <Plus className="h-4 w-4 mr-1" />
-                  Agregar Ingrediente
-                </Button>
-              </div>
-            )}
           </div>
 
           <DialogFooter className="shrink-0 pt-2 border-t">

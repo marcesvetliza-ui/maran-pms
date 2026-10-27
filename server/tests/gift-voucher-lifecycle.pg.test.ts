@@ -185,6 +185,28 @@ suite("PostgreSQL: ciclo de vida de vouchers de regalo", () => {
     }
   });
 
+  it("guardar sin cambios conserva el voucher y no genera eventos vacíos", async () => {
+    const voucher = await makeVoucher();
+    try {
+      const before = await storage.getGiftVoucherEvents(voucher.id);
+      const updated = await storage.updateGiftVoucher(voucher.id, {
+        description: voucher.description, beneficiaryName: voucher.beneficiaryName,
+        expiresAt: voucher.expiresAt, notes: voucher.notes,
+      }, "tester");
+      expect(updated).toEqual(voucher);
+      expect(await storage.getGiftVoucherEvents(voucher.id)).toEqual(before);
+      expect(await storage.updateGiftVoucher(voucher.id, {}, "tester")).toEqual(voucher);
+      const changed = await storage.updateGiftVoucher(voucher.id, { description: voucher.description, notes: "Nueva nota" }, "tester");
+      expect(changed?.notes).toBe("Nueva nota");
+      const edited = (await storage.getGiftVoucherEvents(voucher.id)).filter(e => e.eventType === "editado");
+      expect(edited).toHaveLength(1);
+      expect(edited[0].fieldChanged).toBe("notes");
+    } finally {
+      await pool?.query("DELETE FROM gift_voucher_events WHERE voucher_id=$1",[voucher.id]);
+      await pool?.query("DELETE FROM gift_vouchers WHERE id=$1",[voucher.id]);
+    }
+  });
+
   it("getAvailableGiftVouchers excluye vencidos y de otra área", async () => {
     const alojamiento = await makeVoucher("alojamiento");
     const restaurant = await makeVoucher("restaurant");

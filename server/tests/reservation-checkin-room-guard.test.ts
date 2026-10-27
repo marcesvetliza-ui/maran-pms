@@ -94,6 +94,7 @@ async function checkIn(baseUrl: string, authenticated = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  storage.getReservations.mockResolvedValue([]);
   const today = new Date().toLocaleDateString("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
   });
@@ -141,6 +142,25 @@ describe("POST /api/reservations/:id/check-in room guard", () => {
     });
   });
 
+  it.each(["2000-01-01", new Date().toLocaleDateString("en-CA",{timeZone:"America/Argentina/Buenos_Aires"}), "2099-01-01"])("never auto-closes an entered guest with scheduled departure %s",async checkOutDate=>{
+    state.room={...state.room,roomNumber:"101",isVirtual:false,status:"occupied"};
+    storage.getReservations.mockResolvedValue([{id:"other",roomId:"room-1",status:"checked_in",checkOutDate}] as any);
+    await withServer(async baseUrl=>{
+      const result=await checkIn(baseUrl);
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/checkout efectivo/);
+      expect(storage.updateReservation).not.toHaveBeenCalled();
+      expect(storage.updateRoom).not.toHaveBeenCalled();
+    });
+  });
+  it("does not mark a dirty room clean on check-in",async()=>{
+    state.room={...state.room,roomNumber:"101",isVirtual:false,status:"dirty"};
+    await withServer(async baseUrl=>{
+      expect((await checkIn(baseUrl)).status).toBe(200);
+      expect(state.room.status).toBe("occupied");
+      expect(storage.updateRoom).not.toHaveBeenCalledWith(expect.anything(),expect.objectContaining({status:"limpia_ocupada"}));
+    });
+  });
   it("allows check-in after moving the reservation to a real room", async () => {
     state.room = { ...state.room, roomNumber: "101", isVirtual: false };
     await withServer(async (baseUrl) => {

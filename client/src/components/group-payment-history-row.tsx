@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Receipt, FileX, Printer } from "lucide-react";
@@ -80,7 +81,7 @@ export function GroupPaymentHistoryRow({
   return (
     <div className="flex items-center justify-between px-3 py-2 text-sm" data-testid={`row-group-payment-history-${gp.id}`}>
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-muted-foreground">{gp.date}</span>
+        <span className="text-muted-foreground">{formatDisplayDate(gp.date)}</span>
         {groupName && <Badge variant="default" className="text-xs">{groupName}</Badge>}
         <Badge variant="outline" className="text-xs font-mono gap-1">
           <Receipt className="h-3 w-3" />

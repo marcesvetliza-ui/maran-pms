@@ -1,3 +1,6 @@
+import { matchesIssuer } from "@/lib/issuer-search";
+import { isActiveWarehouse } from "@/lib/inventory-warehouse";
+import { formatDisplayDate } from "@shared/date-display";
 import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -182,6 +185,12 @@ export type PurchaseInventoryOption = {
   costPrice?: string | null;
 };
 
+const purchaseVatSuggestion = (value: unknown) => {
+  if (value == null || String(value).trim() === "") return "";
+  const normalized = String(Number(value));
+  return ["2.5", "5", "10.5", "21", "27"].includes(normalized) ? normalized : "";
+};
+
 export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange, onSelect, index, excludeIds }: {
   items: PurchaseInventoryOption[];
   selectedId: string;
@@ -195,43 +204,30 @@ export function PurchaseInventoryPicker({ items, selectedId, open, onOpenChange,
   // renglón.
   excludeIds?: string[];
 }) {
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const selectableItems = excludeIds?.length
-    ? items.filter(item => String(item.id) === selectedId || !excludeIds.includes(String(item.id)))
-    : items;
+    ? items.filter(item => String(item.id) === selectedId || !excludeIds.includes(String(item.id))) : items;
   const selected = items.find(item => String(item.id) === selectedId);
-  return (
-    <div>
-      <Label className="text-xs mb-1 block">Artículo del inventario</Label>
-      <Popover modal={true} open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger asChild>
-          <Button variant="outline" role="combobox" className="w-full justify-between font-normal h-8 text-sm" data-testid={`select-existing-item-${index}`}>
-            <span className="truncate">{selected?.name || "Seleccionar artículo..."}</span>
-            <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[min(520px,calc(100vw-2rem))] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="Buscar por nombre o SKU..." />
-            <CommandList>
-              <CommandEmpty>No se encontraron artículos</CommandEmpty>
-              <CommandGroup>
-                {[...selectableItems].sort((a, b) => a.name.localeCompare(b.name, "es")).map(item => (
-                  <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => onSelect(String(item.id))} className="items-start gap-2 py-2">
-                    <Check className={`mt-0.5 h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium break-words">{item.name}</span>
-                      <span className="block text-xs text-muted-foreground break-words">SKU: {item.sku || "Sin código"} · {item.category?.name || "Sin categoría"}</span>
-                      <span className="block text-xs text-muted-foreground">Stock: {item.currentStock ?? "—"} {item.unit || ""} · Costo registrado: {item.costPrice == null ? "—" : `$${fmtMoney(item.costPrice)}`}</span>
-                    </span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
+  function choose(id: string) {
+    onSelect(id); onOpenChange(false); setSearch("");
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-testid="input-inv-qty-${index}"]`)?.focus());
+  }
+  return <div onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) onOpenChange(false); }}>
+    <Label className="text-sm mb-2 block">Artículo del inventario</Label>
+    <Command label={`Buscar artículo ${index+1} por nombre o SKU`} className="rounded-md border" filter={(value, query) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()) ? 1 : 0}>
+      <CommandInput ref={inputRef} aria-label={`Buscar artículo ${index+1} por nombre o SKU`} placeholder="Buscar por nombre o SKU..." value={search} onValueChange={value => { setSearch(value); onOpenChange(true); }} onFocus={() => onOpenChange(true)} onKeyDown={event => { if (event.key === "Escape") { onOpenChange(false); event.stopPropagation(); } }} />
+      {open && <CommandList className="max-h-56"><CommandEmpty>No se encontraron artículos</CommandEmpty><CommandGroup>
+        {[...selectableItems].sort((a,b) => a.name.localeCompare(b.name,"es")).map(item => <CommandItem key={item.id} value={`${item.name} ${item.sku || ""}`} onMouseDown={e => e.preventDefault()} onSelect={() => choose(String(item.id))} className="items-start gap-2 py-3">
+          <Check className={`h-4 w-4 shrink-0 ${selectedId === String(item.id) ? "opacity-100" : "opacity-0"}`} />
+          <span className="min-w-0"><span className="block font-medium break-words">{item.name}</span><span className="block text-xs text-muted-foreground">SKU: {item.sku || "Sin código"} · {item.category?.name || "Sin categoría"}</span><span className="block text-xs text-muted-foreground">Stock: {item.currentStock ?? "—"} {item.unit || ""} · Costo registrado: {item.costPrice == null ? "—" : `$${fmtMoney(item.costPrice)}`}</span></span>
+        </CommandItem>)}
+      </CommandGroup></CommandList>}
+    </Command>
+    <Button type="button" variant="ghost" className="h-auto w-full justify-start whitespace-normal px-0 py-2 text-left text-sm font-normal" data-testid={`select-existing-item-${index}`} onClick={() => { setSearch(""); onOpenChange(true); inputRef.current?.focus(); }}>
+      {selected ? <><span className="mr-1 text-muted-foreground">Seleccionado:</span><span>{selected.name}</span></> : "Buscar y seleccionar artículo"}
+    </Button>
+  </div>;
 }
 
 const $n = (v: string | undefined | null) => parseFloat(v || "0") || 0;
@@ -322,6 +318,7 @@ interface InvItemRow {
   unit: string;
   costPrice: string;
   warehouseId: string;
+  stockUnitsPerInput?: string;
   vatRate: string;
 }
 
@@ -575,13 +572,13 @@ export function InvoiceDialog({
     enabled: open,
   });
 
-  const { data: invWarehouses = [] } = useQuery<any[]>({
+  const { data: invWarehouses = [], isError: warehouseError, isLoading: warehouseLoading } = useQuery<any[]>({
     queryKey: ["/api/inventory/warehouses"],
     enabled: open,
   });
 
   const defaultWarehouseId = useMemo(() => {
-    const general = (invWarehouses as any[]).find((w: any) => String(w.name || "").trim().toLowerCase() === "depósito general" || String(w.name || "").trim().toLowerCase() === "deposito general");
+    const general = (invWarehouses as any[]).filter(isActiveWarehouse).find((w: any) => String(w.name || "").trim().toLowerCase() === "depósito general" || String(w.name || "").trim().toLowerCase() === "deposito general");
     return general ? String(general.id) : "";
   }, [invWarehouses]);
 
@@ -609,10 +606,13 @@ export function InvoiceDialog({
 
   const selectExistingInvItem = (i: number, id: string) => {
     const selected = (existingInvItems as any[]).find((it: any) => String(it.id) === id);
+    if (invItems[i]?.existingItemId && invItems[i].existingItemId !== id) setVatOverrideRows(previous => { const next = new Set(previous); next.delete(i); return next; });
     setInvItems((p) => p.map((r, j) => j === i ? {
       ...r,
       existingItemId: id,
-      vatRate: r.vatRate || (selected?.ivaRate ? String(selected.ivaRate) : r.vatRate),
+      unit: selected?.unit || "unidad",
+      stockUnitsPerInput: "",
+      vatRate: r.existingItemId === id || !r.existingItemId && r.vatRate ? r.vatRate : purchaseVatSuggestion(selected?.ivaRate),
     } : r));
   };
 
@@ -803,6 +803,7 @@ export function InvoiceDialog({
           itemId: row.existingItemId,
           warehouseId: row.warehouseId || null,
           unit: row.unit,
+          ...(["caja","paquete"].includes(row.unit) && row.stockUnitsPerInput ? {stockUnitsPerInput:row.stockUnitsPerInput} : {}),
           quantity: row.quantity,
           unitCost: row.costPrice,
           vatRate: row.vatRate || null,
@@ -1086,7 +1087,7 @@ export function InvoiceDialog({
                       <input
                         type="text"
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="Buscar proveedor..."
+                        placeholder="Buscar proveedor por nombre o CUIT..."
                         value={supplierDropdownOpen
                           ? supplierSearch
                           : form.supplierId
@@ -1102,7 +1103,7 @@ export function InvoiceDialog({
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
                           {[...suppliers]
-                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
                             .slice(0, 60)
                             .map((s) => (
@@ -1118,7 +1119,7 @@ export function InvoiceDialog({
                                 <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
                               </div>
                             ))}
-                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                          {suppliers.filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch)).length === 0 && (
                             <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
                           )}
                         </div>
@@ -1206,7 +1207,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
+                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false)} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1230,12 +1231,16 @@ export function InvoiceDialog({
                         </div>
                       </div>
 
+                      {(["caja","paquete"].includes(row.unit) && row.unit !== existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit) && <div className="space-y-1"><Label>Contenido por {row.unit} en {existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit || "unidad de stock"}</Label><Input type="number" min="0.001" step="0.001" aria-label={`Contenido de presentación ${i+1}`} value={row.stockUnitsPerInput || ""} onChange={e=>updateInvRow(i,"stockUnitsPerInput",e.target.value)} placeholder="Ej.: 24 o 120 sobres"/><p className="text-xs text-muted-foreground">Si lo indicás, se usa para esta compra y queda registrado en sus cantidades. Vacío: usa la equivalencia del artículo.</p>{Number(row.stockUnitsPerInput)>0 && <p className="text-xs">Ingreso: {Number(row.quantity)*Number(row.stockUnitsPerInput)} unidades de stock · costo por unidad: ${(Number(row.costPrice)/Number(row.stockUnitsPerInput)).toLocaleString("es-AR",{maximumFractionDigits:4})}</p>}</div>}
+
                       {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
-                        const locked = configuredRate != null && !vatOverrideRows.has(i);
+                        const configuredSuggestion = purchaseVatSuggestion(configuredRate);
+                        const locked = !!configuredSuggestion && !vatOverrideRows.has(i);
                         return (
                           <div>
                             <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                            {configuredRate != null && !configuredSuggestion && <p role="alert" className="mb-2 text-sm text-amber-700 dark:text-amber-300">La alícuota guardada del artículo no es válida para esta compra. Elegí la que figura en el comprobante y revisá la ficha del artículo.</p>}
                             <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)} disabled={locked}>
                               <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
                               <SelectContent>
@@ -1262,12 +1267,12 @@ export function InvoiceDialog({
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
                         <div>
-                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>{warehouseLoading ? <p className="text-xs">Cargando depósitos…</p> : warehouseError ? <p role="alert" className="text-xs">No se pudieron cargar los depósitos. Volvé a intentar.</p> : !invWarehouses.some(isActiveWarehouse) ? <p role="alert" className="text-xs">No hay depósitos activos.</p> : null}
                           <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
                             <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">— Elegir depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
+                              {(invWarehouses as any[]).filter(isActiveWarehouse).map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -1570,7 +1575,7 @@ export function InvoiceDialog({
                       <input
                         type="text"
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="Buscar proveedor..."
+                        placeholder="Buscar proveedor por nombre o CUIT..."
                         value={supplierDropdownOpen
                           ? supplierSearch
                           : form.supplierId
@@ -1586,7 +1591,7 @@ export function InvoiceDialog({
                       {supplierDropdownOpen && (
                         <div className="absolute top-full left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-md border bg-popover shadow-md">
                           {[...suppliers]
-                            .filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch))
+                            .filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch))
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
                             .slice(0, 60)
                             .map((s) => (
@@ -1602,7 +1607,7 @@ export function InvoiceDialog({
                                 <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
                               </div>
                             ))}
-                          {suppliers.filter((s) => !supplierSearch || s.razonSocial.toLowerCase().includes(supplierSearch.toLowerCase()) || s.cuit.includes(supplierSearch)).length === 0 && (
+                          {suppliers.filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch)).length === 0 && (
                             <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
                           )}
                         </div>
@@ -1912,7 +1917,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
+                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false)} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1936,12 +1941,16 @@ export function InvoiceDialog({
                         </div>
                       </div>
 
+                      {(["caja","paquete"].includes(row.unit) && row.unit !== existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit) && <div className="space-y-1"><Label>Contenido por {row.unit} en {existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit || "unidad de stock"}</Label><Input type="number" min="0.001" step="0.001" aria-label={`Contenido de presentación ${i+1}`} value={row.stockUnitsPerInput || ""} onChange={e=>updateInvRow(i,"stockUnitsPerInput",e.target.value)} placeholder="Ej.: 24 o 120 sobres"/><p className="text-xs text-muted-foreground">Si lo indicás, se usa para esta compra y queda registrado en sus cantidades. Vacío: usa la equivalencia del artículo.</p>{Number(row.stockUnitsPerInput)>0 && <p className="text-xs">Ingreso: {Number(row.quantity)*Number(row.stockUnitsPerInput)} unidades de stock · costo por unidad: ${(Number(row.costPrice)/Number(row.stockUnitsPerInput)).toLocaleString("es-AR",{maximumFractionDigits:4})}</p>}</div>}
+
                       {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
-                        const locked = configuredRate != null && !vatOverrideRows.has(i);
+                        const configuredSuggestion = purchaseVatSuggestion(configuredRate);
+                        const locked = !!configuredSuggestion && !vatOverrideRows.has(i);
                         return (
                           <div>
                             <Label className="text-xs mb-1 block">IVA del artículo {form.tipoComprobante === "FACT-B" ? "(informativo; precio final)" : ""}</Label>
+                            {configuredRate != null && !configuredSuggestion && <p role="alert" className="mb-2 text-sm text-amber-700 dark:text-amber-300">La alícuota guardada del artículo no es válida para esta compra. Elegí la que figura en el comprobante y revisá la ficha del artículo.</p>}
                             <Select value={row.vatRate || undefined} onValueChange={value => updateInvRow(i, "vatRate", value)} disabled={locked}>
                               <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-vat-${i}`}><SelectValue placeholder="Elegir alícuota" /></SelectTrigger>
                               <SelectContent>
@@ -1968,12 +1977,12 @@ export function InvoiceDialog({
                       {/* Warehouse selector */}
                       {invWarehouses.length > 0 && (
                         <div>
-                          <Label className="text-xs mb-1 block">Depósito destino</Label>
+                          <Label className="text-xs mb-1 block">Depósito destino</Label>{warehouseLoading ? <p className="text-xs">Cargando depósitos…</p> : warehouseError ? <p role="alert" className="text-xs">No se pudieron cargar los depósitos. Volvé a intentar.</p> : !invWarehouses.some(isActiveWarehouse) ? <p role="alert" className="text-xs">No hay depósitos activos.</p> : null}
                           <Select value={row.warehouseId || "__none__"} onValueChange={(v) => updateInvRow(i, "warehouseId", v === "__none__" ? "" : v)}>
                             <SelectTrigger className="h-8 text-xs" data-testid={`select-inv-warehouse-${i}`}><SelectValue placeholder="Elegir depósito" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">— Elegir depósito —</SelectItem>
-                              {(invWarehouses as any[]).filter((w: any) => w.id && w.isActive === "true").map((wh: any) => (
+                              {(invWarehouses as any[]).filter(isActiveWarehouse).map((wh: any) => (
                                 <SelectItem key={wh.id} value={String(wh.id)}>{wh.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -2195,7 +2204,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
                         </div>
                         <div className="text-right">
                           <div className="text-xs text-muted-foreground">Fecha de pago</div>
-                          <div className="font-medium">{op.fecha}</div>
+                          <div className="font-medium">{formatDisplayDate(op.fecha)}</div>
                         </div>
                       </div>
                     ))}
@@ -2428,7 +2437,7 @@ function PaymentOrderDialog({
                         {inv.estado === "parcial" && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-normal">saldo parcial</span>}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {inv.fechaEmision}
+                        {formatDisplayDate(inv.fechaEmision)}
                         {inv.estado === "parcial" && ` · Total ${fmt(inv.montoTotal)}, ya pagado ${fmt($n(inv.montoTotal) - $n(inv.saldoPendiente))}`}
                       </div>
                     </div>
@@ -2569,7 +2578,7 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
           <div className="flex items-center gap-3 shrink-0 flex-wrap">
             <Input
               type="search"
-              placeholder="Buscar proveedor..."
+              placeholder="Buscar proveedor por nombre o CUIT..."
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               className="h-8 text-sm w-52"
@@ -3027,7 +3036,7 @@ export default function PurchaseInvoices() {
                           <TableCell className="max-w-[160px] truncate" title={inv.supplierNombre || inv.proveedorNombre}>
                             {inv.supplierNombre || inv.proveedorNombre || "—"}
                           </TableCell>
-                          <TableCell>{inv.fechaEmision}</TableCell>
+                          <TableCell>{formatDisplayDate(inv.fechaEmision)}</TableCell>
                           <TableCell>{inv.periodo || "—"}</TableCell>
                           <TableCell className="text-right font-semibold">${fmt(inv.montoTotal)}</TableCell>
                           <TableCell>{estadoBadge(inv.estado)}</TableCell>

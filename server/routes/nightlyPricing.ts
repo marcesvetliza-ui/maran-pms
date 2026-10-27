@@ -3,9 +3,9 @@ import { sql } from "drizzle-orm";
 import { z } from "zod";
 import { storage } from "../db-storage";
 import { db, withDatabaseTransaction } from "../db";
-import { requireAuth, requireRole, requirePermission } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import { canEditAccommodation } from "../accommodationPermissions";
-import { accommodationFiscalStatus, NIGHTLY_ACTIVATION_KEY, withNightlyWriter, withReservationFinancialLock } from "../nightlyPricingGuard";
+import { accommodationFiscalStatus, withNightlyWriter, withReservationFinancialLock } from "../nightlyPricingGuard";
 import { amountString, calendarNights, editNights, nightlyTotal, pricingError, type PricedNight } from "@shared/nightlyPricing";
 
 const ratesSchema = z.object({
@@ -55,7 +55,7 @@ async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
     });
     if (conflict && !(conflict.code === "GROUP_BLOCK_WARNING" && input.overrideTentativeGroupWarning)) {
       throw Object.assign(new Error("Las fechas afectan el inventario de grupos. Revisá disponibilidad."), {
-        statusCode: 409, response: { error: "Las fechas afectan el inventario de grupos. Revisá disponibilidad.", warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" },
+        statusCode: 409, response: { error: "Las fechas afectan el inventario de grupos. Revisá disponibilidad.", code: conflict.code, warning: conflict, canOverride: conflict.code === "GROUP_BLOCK_WARNING" },
       });
     }
   }
@@ -68,30 +68,6 @@ async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
   };
 }
 export function registerNightlyPricingRoutes(app: Express) {
-  app.get("/api/reservation-pricing/activation", requireAuth, async (_req, res) => {
-    try {
-      const setting = await db.execute(sql`SELECT value FROM system_settings WHERE key=${NIGHTLY_ACTIVATION_KEY}`);
-      res.json({ activatedAt: (setting.rows[0] as any)?.value || null, timeZone: "America/Argentina/Buenos_Aires" });
-    } catch (error) { sendError(res, error); }
-  });
-  app.post("/api/reservation-pricing/activation", requireAuth, requireRole(["admin", "manager"]), async (req, res) => {
-    try {
-      if (req.body?.confirm !== true) pricingError("Confirmá la activación sólo para reservas nuevas.");
-      const at = new Date().toISOString();
-      await withDatabaseTransaction(async () => {
-        const changed = await db.execute(sql`
-          INSERT INTO system_settings (key,value,category,description,updated_at,updated_by)
-          VALUES (${NIGHTLY_ACTIVATION_KEY},${at},'reservations','Activación de precios por noche para altas nuevas',NOW(),${String(req.user?.id)})
-          ON CONFLICT (key) DO NOTHING RETURNING value
-        `);
-        if (changed.rows.length) await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
-          VALUES (${req.user?.id},${req.user?.username || "Sistema"},'activate','reservations','pricing_scheme',${NIGHTLY_ACTIVATION_KEY},
-          'Activación del esquema nocturno sólo para nuevas reservas',${JSON.stringify({ activatedAt: at })},NOW())`);
-      });
-      const setting = await db.execute(sql`SELECT value FROM system_settings WHERE key=${NIGHTLY_ACTIVATION_KEY}`);
-      res.json({ activatedAt: (setting.rows[0] as any)?.value, timeZone: "America/Argentina/Buenos_Aires" });
-    } catch (error) { sendError(res, error); }
-  });
   app.get("/api/reservations/:id/nightly-pricing", requireAuth, async (req, res) => {
     try { res.json(await getState(req.params.id)); } catch (error) { sendError(res, error); }
   });

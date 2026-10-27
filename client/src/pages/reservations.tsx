@@ -73,7 +73,6 @@ import { EmitirFacturaDialog, NotaCreditoDialog, type EmitirFacturaInitialValues
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 import { ReservationWaitlistDialog } from "@/components/ReservationWaitlistDialog";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { EmitirComprobanteButton } from "@/components/emitir-comprobante-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -123,7 +122,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
 import { GroupRoomObservations } from "@/components/group-room-observations";
@@ -967,7 +966,8 @@ export function ReservationFormDialog({
       return;
     }
     const effectiveRate = parseReservationRate(formData.finalRatePerNight);
-    const requiresRateReason = formData.ratePlanId === "__special__" || isZeroReservationRate(effectiveRate);
+    const linkedZeroGroup = Boolean((reservation as any)?.groupId) && isZeroReservationRate(effectiveRate);
+    const requiresRateReason = !linkedZeroGroup && (formData.ratePlanId === "__special__" || isZeroReservationRate(effectiveRate));
     if (requiresRateReason && !formData.specialRateReason?.trim()) {
       toast({ title: "Motivo requerido", description: "Ingrese el motivo de la tarifa $0 para guardar.", variant: "destructive" });
       return;
@@ -975,7 +975,7 @@ export function ReservationFormDialog({
     mutation.mutate({
       ...formData,
       ratePlanId: formData.ratePlanId === "__special__" ? null : (formData.ratePlanId || null),
-      specialRateReason: requiresRateReason
+      specialRateReason: linkedZeroGroup ? (formData.specialRateReason || null) : requiresRateReason
         ? (formData.specialRateReason || null) : null,
       roomId: finalRoomId,
       roomTypeId: formData.roomTypeId || reservation?.roomTypeId || "",
@@ -1054,7 +1054,7 @@ export function ReservationFormDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+      <DialogContent className="operational-dialog">
         <DialogHeader>
           <DialogTitle>{isEditing ? "Editar Reserva" : "Nueva Reserva"}</DialogTitle>
           <DialogDescription>
@@ -1066,9 +1066,9 @@ export function ReservationFormDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="operational-form">
           {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Las tarifas y fechas de esta reserva se mantienen desde el Folio: Editar tarifas / Modificar estadía. Este formulario edita los demás datos.</p>}
-          <div className="grid gap-4 py-4">
+          <div className="operational-body grid items-start gap-6 lg:grid-cols-[1fr_1.1fr]"><section className="min-w-0 space-y-4" aria-label="Huésped y vínculos">
             <GuestSelector
               selectedGuest={selectedGuest}
               initialCreateGuest={defaultValues?.guest}
@@ -1136,6 +1136,8 @@ export function ReservationFormDialog({
               );
             })()}
 
+            <details className="optional-relations" open={selectedCompany || selectedAgency ? true : undefined}>
+              <summary>Empresa y agencia (opcional){selectedCompany ? ` · ${selectedCompany.razonSocial}` : ""}{selectedAgency ? ` · ${selectedAgency.razonSocial}` : ""}</summary>
             <CompanySelector
               selectedCompany={selectedCompany}
               onSelect={(company) => {
@@ -1164,6 +1166,18 @@ export function ReservationFormDialog({
               cardClassName={sectionCardClass(!!selectedAgency, false)}
             />
 
+            </details>
+            <aside className="hidden space-y-3 rounded-lg border bg-muted/30 p-4 lg:block" aria-label="Resumen de la reserva">
+              <h3 className="font-semibold">Resumen de la reserva</h3>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div><dt className="text-muted-foreground">Ingreso</dt><dd className="font-medium">{formData.checkInDate?.split("-").reverse().join("/") || "A definir"}</dd></div>
+                <div><dt className="text-muted-foreground">Salida</dt><dd className="font-medium">{formData.checkOutDate?.split("-").reverse().join("/") || "A definir"}</dd></div>
+                <div><dt className="text-muted-foreground">Noches</dt><dd className="font-medium">{formData.nights}</dd></div>
+                <div><dt className="text-muted-foreground">Huéspedes</dt><dd className="font-medium">{formData.numberOfGuests}</dd></div>
+                <div className="col-span-2 border-t pt-3"><dt className="text-muted-foreground">Alojamiento</dt><dd className="text-xl font-semibold">{formData.totalRoomAmount ? Number(formData.totalRoomAmount).toLocaleString("es-AR", { style:"currency", currency:"ARS" }) : "A definir"}</dd></div>
+              </dl>
+            </aside>
+          </section><section className="min-w-0 space-y-4" aria-label="Estadía y tarifa">
             <div className="grid gap-2">
               <Label htmlFor="source">Origen</Label>
               <Select
@@ -1255,7 +1269,7 @@ export function ReservationFormDialog({
               <Select
                 value={formData.ratePlanId || ""}
                 onValueChange={handleRatePlanChange}
-                disabled={lodgingReadOnly || !selectedRoomTypeId}
+                disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1" || !selectedRoomTypeId}
               >
                 <SelectTrigger data-testid="select-rate-plan">
                   <SelectValue placeholder="Seleccionar plan tarifario" />
@@ -1285,7 +1299,7 @@ export function ReservationFormDialog({
                 isZeroReservationRate(parseReservationRate(formData.finalRatePerNight))) && (
                 <div className="space-y-3 p-3 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-700 mt-1">
                   <div className="space-y-1.5">
-                    <Label>Motivo de tarifa especial <span className="text-destructive">*</span> <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
+                    <Label>Motivo de tarifa especial {Boolean((reservation as any)?.groupId)&&isZeroReservationRate(formData.finalRatePerNight)?<span className="font-normal text-muted-foreground">(opcional: cobro grupal)</span>:<span className="text-destructive">*</span>} <span className="font-normal text-muted-foreground text-xs">(aparece en informe diario y caja)</span></Label>
                     <Textarea
                       placeholder="Ej: Convenio verbal, cliente frecuente, cortesía gerencia..."
                       value={formData.specialRateReason || ""}
@@ -1497,7 +1511,7 @@ export function ReservationFormDialog({
                     }
                   }}
               >
-                <SelectTrigger disabled={lodgingReadOnly} data-testid="select-package">
+                <SelectTrigger disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1"} data-testid="select-package">
                   <SelectValue placeholder={isLoadingPackages ? "Cargando paquetes..." : "Sin paquete"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -1641,7 +1655,7 @@ export function ReservationFormDialog({
               <div className="grid gap-2">
                 <Label htmlFor="discountType">Tipo Descuento</Label>
                 <Select
-                  disabled={lodgingReadOnly}
+                  disabled={lodgingReadOnly || reservation?.pricingScheme === "nightly_v1"}
                   value={formData.discountType}
                   onValueChange={(value) => handleDiscountChange(value as DiscountType, undefined)}
                 >
@@ -2257,8 +2271,8 @@ export function ReservationFormDialog({
               </StaySection>
             )}
             {!isEditing && <StaySelectionEditor guestId={formData.guestId || ""} value={stayDraft.value} onChange={stayDraft.onChange} />}
-          </div>
-          <DialogFooter>
+          </section></div>
+          <DialogFooter className="operational-footer">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Volver
             </Button>
@@ -2327,6 +2341,8 @@ export function ReservationDetailDialog({
   onCancel,
   onEdit,
   currentUserRole,
+  operationalActions,
+  allowCancel = true,
 }: {
   reservation: ReservationWithDetails;
   open: boolean;
@@ -2334,6 +2350,8 @@ export function ReservationDetailDialog({
   onCancel: () => void;
   onEdit?: () => void;
   currentUserRole?: string;
+  operationalActions?: React.ReactNode;
+  allowCancel?: boolean;
 }) {
   const { data: liveReservation } = useQuery<ReservationWithDetails>({
     queryKey: ["/api/reservations", initialReservation.id],
@@ -2829,12 +2847,14 @@ export function ReservationDetailDialog({
     },
     onSuccess: () => {
       refetchCharges();
+      queryClient.invalidateQueries({ queryKey: ["spa-account-folio"] });
+      queryClient.invalidateQueries({ queryKey: ["spa-prefactura-account"] });
       setAnularTarget(null);
       setMotivoAnulacion("");
       toast({ title: "Cargo anulado", description: "El cargo ha sido anulado del folio." });
     },
     onError: (error: any) => {
-      toast({ title: "Error", description: error?.message || "No se pudo anular el cargo", variant: "destructive" });
+      toast({ title: "Error", description: parseApiError(error) || "No se pudo anular el cargo", variant: "destructive" });
       console.error("Anular charge error:", error);
     },
   });
@@ -4915,6 +4935,7 @@ export function ReservationDetailDialog({
 
         <DialogFooter className="wf-footer shrink-0 gap-2 sm:justify-between">
           <div className="wf-footer-actions">
+            {operationalActions}
             <Button
               variant="outline"
               onClick={printConfirmation}
@@ -4943,7 +4964,7 @@ export function ReservationDetailDialog({
                 Editar datos de reserva
               </Button>
             )}
-            {reservation.status === "checked_in" && (
+            {!operationalActions && reservation.status === "checked_in" && (
               <Button
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
@@ -4962,7 +4983,7 @@ export function ReservationDetailDialog({
                 Check-out
               </Button>
             )}
-            {reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
+            {allowCancel && reservation.status !== "cancelled" && reservation.status !== "checked_out" && (
               <Button 
                 variant="destructive" 
                 onClick={() => {
@@ -5417,9 +5438,11 @@ export function ReservationDetailDialog({
                   )}
                 </div>
               )}
-              <Label htmlFor="motivo-anulacion">Motivo de anulación (opcional)</Label>
+              <Label htmlFor="motivo-anulacion">Motivo de anulación{anularTarget?.type === "cargo" ? " (obligatorio)" : " (opcional)"}</Label>
               <Textarea
                 id="motivo-anulacion"
+                maxLength={500}
+                required={anularTarget?.type === "cargo"}
                 placeholder="Ej: Error de carga, duplicado..."
                 value={motivoAnulacion}
                 onChange={(e) => setMotivoAnulacion(e.target.value)}
@@ -5455,7 +5478,7 @@ export function ReservationDetailDialog({
                     });
                   }
                 }}
-                disabled={anularChargeMutation.isPending || anularPaymentMutation.isPending || (anularTarget?.type === "pago" && anularLinkedInvoiceId !== null && isLoadingAnularInvoice)}
+                disabled={(anularTarget?.type === "cargo" && !motivoAnulacion.trim()) || anularChargeMutation.isPending || anularPaymentMutation.isPending || (anularTarget?.type === "pago" && anularLinkedInvoiceId !== null && isLoadingAnularInvoice)}
                 data-testid="button-confirm-anular"
               >
                 {(anularChargeMutation.isPending || anularPaymentMutation.isPending) ? "Anulando..." : "Confirmar Anulación"}
@@ -6088,7 +6111,6 @@ export default function ReservationsPage() {
           <p className="text-muted-foreground">Gestiona todas las reservaciones del hotel</p>
         </div>
         <div className="flex items-center gap-2">
-          <EmitirComprobanteButton area="recepcion" />
           <Button variant="outline" onClick={() => setWaitlistOpen(true)} data-testid="button-reservation-waitlist">
             <Clock className="mr-2 h-4 w-4" />
             Lista de Espera

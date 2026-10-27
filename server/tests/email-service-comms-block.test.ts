@@ -33,7 +33,7 @@ vi.mock("nodemailer", () => ({
   },
 }));
 
-const { sendEmail, sendEmailWithPdfAttachment } = await import("../email-service");
+const { sendEmail, sendEmailWithPdfAttachment, sendBirthdayEmail, birthdayEmailReadiness } = await import("../email-service");
 const nodemailer = (await import("nodemailer")).default;
 
 const originalFetch = global.fetch;
@@ -154,5 +154,21 @@ describe("email-service — bloqueo por ambiente antes de SMTP/Resend", () => {
 
     expect(result.ok).toBe(true);
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("birthday campaigns preserve pilot isolation", () => {
+  afterEach(() => { global.fetch = originalFetch; resetAppEnvForTests(); vi.clearAllMocks(); });
+  it.each(["pilot", "development", "test"] as const)("blocks readiness and delivery in %s before reading configuration", async appEnv => {
+    resetAppEnvForTests(); initAppEnv({APP_ENV:appEnv,NODE_ENV:appEnv==="pilot"?"production":appEnv==="development"?"development":"test"});
+    const fetchSpy=vi.fn(); global.fetch=fetchSpy;
+    nodemailerState.sendMail.mockClear();
+    const {db}=await import("../db"); vi.mocked(db.select).mockClear();
+    expect(await birthdayEmailReadiness()).toMatchObject({ok:false});
+    expect(await sendBirthdayEmail({to:"guest@example.test",subject:"Promo",body:"Hola",idempotencyKey:"synthetic"})).toMatchObject({status:"failed"});
+    expect(db.select).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(nodemailerState.sendMail).not.toHaveBeenCalled();
   });
 });

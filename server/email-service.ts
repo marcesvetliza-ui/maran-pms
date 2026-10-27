@@ -556,3 +556,136 @@ export async function runReminderScheduler(baseUrl: string): Promise<{ sent: num
   }
   return stats;
 }
+
+export type BirthdayEmailResult = {
+  status: "sent" | "failed" | "unknown";
+  error?: string;
+  providerId?: string;
+};
+export async function birthdayEmailReadiness(): Promise<{
+  ok: boolean;
+  reason?: string;
+}> {
+  if (shouldBlockExternalComm({ integration: "email", action: "birthday" }))
+    return { ok: false, reason: "Envíos de correo deshabilitados en el entorno demo." };
+  const cfg = await getConfig();
+  if (!cfg || !cfg.globalEnabled)
+    return {
+      ok: false,
+      reason: "El correo del sistema no está configurado o está desactivado.",
+    };
+  if (cfg.provider === "smtp" ? !cfg.smtpUser || !cfg.smtpPass : !cfg.apiKey)
+    return {
+      ok: false,
+      reason: "Falta completar la configuración del proveedor de correo.",
+    };
+  return { ok: true };
+}
+// Plain text promotion: no attachments and no unescaped HTML from operators or guests.
+// An uncertain transport result must never become a successful contact or an automatic retry.
+export async function sendBirthdayEmail(opts: {
+  to: string;
+  subject: string;
+  body: string;
+  idempotencyKey: string;
+}): Promise<BirthdayEmailResult> {
+  if (shouldBlockExternalComm({ integration: "email", action: "birthday" }))
+    return { status: "failed", error: "Envíos de correo deshabilitados en el entorno demo." };
+  const cfg = await getConfig();
+  if (!cfg?.globalEnabled)
+    return { status: "failed", error: "Correo no configurado o desactivado." };
+  const escape = (value: string) =>
+    value.replace(
+      /[&<>"']/g,
+      (char) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[char]!,
+    );
+  const html = `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escape(opts.body)}</div>`;
+  const from = `${cfg.fromName} <${cfg.fromEmail}>`;
+  if (cfg.provider === "smtp") {
+    if (!cfg.smtpUser || !cfg.smtpPass)
+      return { status: "failed", error: "SMTP sin configurar." };
+    try {
+      const transporter = await createIpv4SmtpTransport({
+        host: cfg.smtpHost || "smtp.gmail.com",
+        port: cfg.smtpPort || 587,
+        secure: cfg.smtpSecure ?? false,
+        auth: { user: cfg.smtpUser, pass: cfg.smtpPass },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 30000,
+      });
+      try {
+        const result = await transporter.sendMail({
+          from,
+          to: opts.to,
+          subject: opts.subject,
+          text: opts.body,
+          html,
+        });
+        return result.accepted?.length
+          ? { status: "sent", providerId: result.messageId }
+          : {
+              status: "failed",
+              error: "El servidor de correo rechazó el destinatario.",
+            };
+      } finally {
+        transporter.close();
+      }
+    } catch {
+      return {
+        status: "unknown",
+        error:
+          "No se pudo confirmar si el servidor aceptó el correo. Revisá antes de reenviar.",
+      };
+    }
+  }
+  if (!cfg.apiKey) return { status: "failed", error: "Resend sin configurar." };
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      signal: AbortSignal.timeout(30000),
+      headers: {
+        Authorization: `Bearer ${cfg.apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": opts.idempotencyKey,
+      },
+      body: JSON.stringify({
+        from,
+        to: [opts.to],
+        subject: opts.subject,
+        text: opts.body,
+        html,
+      }),
+    });
+    if (response.ok) {
+      const value = await response.json().catch(() => ({}));
+      return {
+        status: "sent",
+        providerId: typeof value.id === "string" ? value.id : undefined,
+      };
+    }
+    return response.status >= 500 || response.status === 408
+      ? {
+          status: "unknown",
+          error:
+            "El proveedor no confirmó el resultado. Revisá antes de reenviar.",
+        }
+      : {
+          status: "failed",
+          error: `El proveedor rechazó el envío (HTTP ${response.status}).`,
+        };
+  } catch {
+    return {
+      status: "unknown",
+      error:
+        "Conexión interrumpida: no se puede confirmar el envío. No se reintentará automáticamente.",
+    };
+  }
+}

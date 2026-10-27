@@ -1,3 +1,4 @@
+import {validateInventoryConversions} from "./inventoryConversionValidation";
 import {inventoryWritePermission} from "./inventoryAccess";
 import {reverseInventorySource} from "./inventorySourceReversal";
 import type {Express} from 'express';
@@ -9,7 +10,7 @@ import {storage} from './db-storage';
 import {grossQuantityFor,planIngredientsWithActualQuantities} from './recipeStockDeduction';
 import {convertInventoryQuantity} from './inventoryUnits';
 import {cascadeRecipeCostsFromInventoryItem} from './recipeCostCascade';
-import {inventoryUnitFactor,INVENTORY_UNITS} from './inventoryUnits';
+
 export function registerInventoryStage2Routes(app:Express){
  app.post('/api/inventory/recipe-stock-preview',requireAuth,inventoryWritePermission,async(req,res)=>{try{
   const multiplier=Number(req.body.multiplier);if(!Number.isFinite(multiplier)||multiplier<=0)throw Object.assign(new Error('Cantidad de porciones inválida'),{statusCode:400});
@@ -22,10 +23,9 @@ export function registerInventoryStage2Routes(app:Express){
  app.post('/api/inventory/source-stock-reversals',requireAuth,inventoryWritePermission,async(req,res)=>{try{res.json(await reverseInventorySource(String(req.body.sourceType || ''),String(req.body.sourceId || ''),String(req.body.reason || ''),req.user!.id));}catch(e:any){res.status(e.statusCode||500).json({error:e.message});}});
  app.get('/api/inventory/items/:id/unit-conversions',requireAuth,async(req,res)=>{try{const r=await db.execute(sql`SELECT from_unit AS "fromUnit",factor::text FROM inventory_unit_conversions WHERE item_id=${req.params.id} ORDER BY from_unit`);res.json(r.rows);}catch{res.status(500).json({error:'No se pudieron consultar las equivalencias'});}});
  app.put('/api/inventory/items/:id/unit-conversions',requireAuth,inventoryWritePermission,async(req,res)=>{try{
-  const lines=req.body.conversions;if(!Array.isArray(lines)||lines.length>8||new Set(lines.map((l:any)=>l?.fromUnit)).size!==lines.length||lines.some((l:any)=>!l||!INVENTORY_UNITS.includes(l.fromUnit)||!Number.isFinite(Number(l.factor))||Number(l.factor)<=0||Number(l.factor)>9999999))return res.status(400).json({error:'Equivalencias inválidas; usá unidades distintas y factores positivos'});
+  const lines=req.body.conversions;
   await withDatabaseTransaction(async()=>{const item=await db.execute(sql`SELECT unit FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);if(!item.rows.length)throw Object.assign(new Error('Artículo no encontrado'),{statusCode:404});
-   if(lines.some((l:any)=>l.fromUnit===item.rows[0].unit&&Number(l.factor)!==1))throw Object.assign(new Error('La unidad de stock siempre equivale a 1'),{statusCode:400});
-   for(const line of lines){let standard:number|undefined;try{standard=inventoryUnitFactor(line.fromUnit,String(item.rows[0].unit));}catch{}if(standard!==undefined && Math.abs(Number(line.factor)-standard)>1e-9)throw Object.assign(new Error('Las equivalencias estándar de masa, volumen y docena no se pueden modificar'),{statusCode:400});}
+   validateInventoryConversions(lines,String(item.rows[0].unit));
    const before=await db.execute(sql`SELECT from_unit,factor FROM inventory_unit_conversions WHERE item_id=${req.params.id}`);
    await db.execute(sql`DELETE FROM inventory_unit_conversions WHERE item_id=${req.params.id}`);
    for(const l of lines)await db.execute(sql`INSERT INTO inventory_unit_conversions(item_id,from_unit,factor) VALUES(${req.params.id},${l.fromUnit},${String(l.factor)})`);

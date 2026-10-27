@@ -1,6 +1,7 @@
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { feCAESolicitar } from "../billing/wsfevClient";
-import { initAppEnv, resetAppEnvForTests } from "../app-env";
+import { authorizationFixture } from "./helpers/wsfeConsultationFixture";
 
 /**
  * Guards RG 4540/19 (in force since 2021-04-01): ARCA rejects every Nota de
@@ -25,10 +26,11 @@ afterEach(() => {
 });
 
 function mockArcaSuccess() {
-  global.fetch = vi.fn(async () => new Response(
-    `<soap:Envelope><Resultado>A</Resultado><CAE>71234567890123</CAE><CAEFchVto>20260930</CAEFchVto></soap:Envelope>`,
-    { status: 200 },
-  )) as any;
+  global.fetch = vi.fn(async (_url: unknown, options?: RequestInit) => {
+    const body = String(options?.body);
+    const value = (tag: string) => Number(body.match(new RegExp(`<ar:${tag}>([0-9]+)</ar:${tag}>`))?.[1]);
+    return new Response(authorizationFixture(value("PtoVta"), value("CbteDesde"), "", "20260930", value("CbteTipo")), { status: 200 });
+  }) as any;
 }
 
 const baseRequest = {
@@ -95,11 +97,13 @@ describe("WSFEv1 FECAESolicitar — CbtesAsoc en Notas de Crédito/Débito", () 
   });
 });
 
-describe("WSFEv1 — fechas de prestación en Facturas A/B", () => {
-  it.each(["FA", "FB"])("usa la fecha de emisión, el día siguiente y 60 días para %s", async (tipo) => {
+describe("WSFEv1 — fechas de prestación para Concepto 2", () => {
+  it.each(["FA", "FB", "FC", "FT", "FM", "FMB", "NCA", "NCB", "NCC", "NCT", "NCM", "NCMB", "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB"])("usa la fecha de emisión, el día siguiente y 60 días para %s", async (tipo) => {
     mockArcaSuccess();
     await feCAESolicitar({ ...baseRequest, tipo, fecha: "20260930" }, "homologacion");
     const [, request] = (global.fetch as any).mock.calls[0];
+    expect(request.body).toContain("<ar:Concepto>2</ar:Concepto>");
+    expect(request.body.indexOf("<ar:FchServDesde>")).toBeLessThan(request.body.indexOf("<ar:MonId>"));
     expect(request.body).toContain(
       "<ar:FchServDesde>20260930</ar:FchServDesde>" +
       "<ar:FchServHasta>20261001</ar:FchServHasta>" +
@@ -116,9 +120,9 @@ describe("WSFEv1 — fechas de prestación en Facturas A/B", () => {
     expect(result.caeFechaVto.toISOString()).toContain("2026-09-30");
   });
 
-  it("rechaza una fecha inválida antes de llamar a ARCA", async () => {
+  it.each(["FA","NCA","NCB","NDA"])("rechaza una fecha inválida antes de llamar a ARCA para %s", async (tipo) => {
     mockArcaSuccess();
-    await expect(feCAESolicitar({ ...baseRequest, tipo: "FA", fecha: "20260230" }, "homologacion"))
+    await expect(feCAESolicitar({ ...baseRequest, tipo, fecha: "20260230" }, "homologacion"))
       .rejects.toThrow("Fecha de emisión inválida");
     expect(global.fetch).not.toHaveBeenCalled();
   });

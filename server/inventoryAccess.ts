@@ -3,7 +3,7 @@ import {requirePermission} from './auth';
 import {hasPermission} from './permissions';
 export function inventoryWriteKey(path:string,body:any={}) {
  if (/source-stock-reversals|\/movements\/[^/]+\/(corregir|anular)|\/counts\/.+\/close/.test(path) || body.movementType==='ajuste') return 'api:inventory:adjust';
- if (/\/categories|\/brands|unit-conversions|\/items(?:\/[^/]+(?:\/metadata|\/deactivate)?)?$/.test(path) || /\/warehouses(?:\/[^/]+)?$/.test(path)) return 'api:inventory:catalog';
+ if (/\/categories|\/brands|unit-conversions|\/items(?:\/[^/]+(?:\/metadata|\/deactivate|\/purchasing)?)?$/.test(path) || /\/warehouses(?:\/[^/]+)?$/.test(path)) return 'api:inventory:catalog';
  return 'api:inventory:operate';
 }
 export const inventoryWritePermission:RequestHandler=(req,res,next)=>requirePermission(inventoryWriteKey(req.path,req.body))(req,res,next);

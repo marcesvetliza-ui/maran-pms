@@ -210,7 +210,13 @@ runIsolated("Reservation circuit in disposable PostgreSQL, through real authenti
     expect(second.status, JSON.stringify(second.body)).toBe(201);
     expect(second.body.id).not.toBe(paymentId);
     // PATCH and void cannot recycle the original operation into another collection.
-    expect((await api("PATCH", `/api/payments/${paymentId}`, { paymentRequestId: randomUUID(), paymentRequestFingerprint: "forged" })).status).toBe(200);
+    const identityBefore = (await testPool.query("SELECT payment_request_id, payment_request_fingerprint FROM payments WHERE id = $1", [paymentId])).rows[0];
+    expect((await api("PATCH", `/api/payments/${paymentId}`, { paymentRequestId: randomUUID(), paymentRequestFingerprint: "forged" })).status).toBe(409);
+    expect((await testPool.query("SELECT payment_request_id, payment_request_fingerprint FROM payments WHERE id = $1", [paymentId])).rows[0]).toEqual(identityBefore);
+    // Descriptive edits remain available without changing the collection identity.
+    expect((await api("PATCH", `/api/payments/${paymentId}`, { notes: "Synthetic descriptive correction" })).status).toBe(200);
+    expect((await testPool.query("SELECT payment_request_id, payment_request_fingerprint, notes FROM payments WHERE id = $1", [paymentId])).rows[0])
+      .toEqual({ ...identityBefore, notes: "Synthetic descriptive correction" });
     expect((await api("PATCH", `/api/payments/${paymentId}/anular`, { motivoAnulacion: "Synthetic correction" })).status).toBe(200);
     const replayVoided = await api("POST", "/api/payments", body);
     expect(replayVoided.status).toBe(200);

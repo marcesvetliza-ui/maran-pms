@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -1075,7 +1076,7 @@ function GroupTable({
               {group.status === "tentative" && group.releaseDate && group.releaseDate <= today && (
                 <div className="flex items-center gap-1 mb-1">
                   <span className="inline-flex items-center gap-1 rounded-full border border-amber-400 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                    ⚠ Release vencido {group.releaseDate}
+                    ⚠ Release vencido {formatDisplayDate(group.releaseDate)}
                   </span>
                 </div>
               )}

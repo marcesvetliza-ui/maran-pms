@@ -1,5 +1,4 @@
-import { convertInventoryQuantity } from "../inventoryUnits";
-import { unitFactor } from "../inventoryStockEngine";
+import { spaPlanningMoveSchema, spaMoveEndTime } from "@shared/spaPlanningMove";
 import type { Express } from "express";
 import { voidSpaPayment } from "../spaCancellation";
 import { storage } from "../db-storage";
@@ -202,7 +201,7 @@ async function normalizeSpaResourceBookings(
       label = treatment.name;
     } else {
       const cabin = input.cabinId ? cabinMap.get(input.cabinId) : undefined;
-      if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+      if (!cabin || cabin.isActive !== "true") {
         throw Object.assign(new Error("El recurso seleccionado no está disponible para circuitos."), { statusCode: 400 });
       }
       cabinId = cabin.id;
@@ -570,9 +569,7 @@ export function registerSpaRoutes(app: Express) {
   // SPA Treatments
   app.get("/api/spa/treatments", requireAuth, async (req, res) => {
     try {
-      const status = String(req.query.status || "active");
-      if (!["active", "inactive", "all"].includes(status)) return res.status(400).json({ error: "Estado de tratamientos inválido" });
-      const treatments = await storage.getSpaTreatments(status);
+      const treatments = await storage.getSpaTreatments();
       res.json(treatments);
     } catch (error) {
       res.status(500).json({ error: "Error fetching treatments" });
@@ -598,9 +595,8 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.post("/api/spa/treatments", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/spa/treatments", requireAuth, async (req, res) => {
     try {
-      if (req.body.isActive !== undefined && !["true", "false"].includes(req.body.isActive)) return res.status(400).json({ error: "Estado de tratamiento inválido" });
       const treatment = await storage.createSpaTreatment(req.body);
       res.status(201).json(treatment);
     } catch (error) {
@@ -608,9 +604,8 @@ export function registerSpaRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/spa/treatments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/spa/treatments/:id", requireAuth, async (req, res) => {
     try {
-      if (req.body.isActive !== undefined && !["true", "false"].includes(req.body.isActive)) return res.status(400).json({ error: "Estado de tratamiento inválido" });
       const treatment = await storage.updateSpaTreatment(req.params.id, req.body);
       if (!treatment) return res.status(404).json({ error: "Treatment not found" });
       res.json(treatment);
@@ -621,8 +616,7 @@ export function registerSpaRoutes(app: Express) {
 
   app.delete("/api/spa/treatments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      const changed = await storage.deleteSpaTreatment(req.params.id);
-      if (!changed) return res.status(404).json({ error: "Tratamiento no encontrado" });
+      await storage.deleteSpaTreatment(req.params.id);
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ error: "Error deleting treatment" });
@@ -708,8 +702,8 @@ export function registerSpaRoutes(app: Express) {
           };
         }
         const cabin = cabinMap.get(row?.defaultCabinId);
-        if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
-          throw Object.assign(new Error("Seleccioná un recurso SPA activo (Sauna, Hidromasaje o un tratamiento)."), { statusCode: 400 });
+        if (!cabin || cabin.isActive !== "true") {
+          throw Object.assign(new Error("Seleccioná un gabinete SPA activo."), { statusCode: 400 });
         }
         return {
           treatmentId: req.params.id,
@@ -754,7 +748,7 @@ export function registerSpaRoutes(app: Express) {
       }
 
       const [cabin] = await db.select().from(spaCabins).where(eq(spaCabins.id, cabinId));
-      if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+      if (!cabin || cabin.isActive !== "true") {
         return res.status(400).json({ error: "Recurso SPA inválido" });
       }
 
@@ -1269,6 +1263,134 @@ export function registerSpaRoutes(app: Express) {
       res.status(error?.statusCode || 500).json({ error: "Error creating appointment", detail: msg });
     }
   });
+
+  app.post(
+    "/api/spa/appointments/:id/move",
+    requireAuth,
+    requirePermission(SPA_WRITE_RESOURCE_KEY),
+    async (req, res) => {
+      const parsed = spaPlanningMoveSchema.safeParse(req.body);
+      if (!parsed.success)
+        return res.status(400).json({ error: "Movimiento de turno inválido." });
+      try {
+        const updated = await withDatabaseTransaction(async () => {
+          await db.execute(
+            sql`SELECT id FROM spa_appointments WHERE id=${req.params.id} FOR UPDATE`,
+          );
+          const [current] = await db
+            .select()
+            .from(spaAppointments)
+            .where(eq(spaAppointments.id, req.params.id));
+          if (!current)
+            throw Object.assign(new Error("Turno no encontrado."), {
+              statusCode: 404,
+            });
+          const { expected, cabinId, startTime } = parsed.data;
+          if (
+            Object.entries(expected).some(
+              ([key, value]) =>
+                (key === "appointmentDate"
+                  ? String(current.appointmentDate).slice(0, 10)
+                  : String((current as any)[key])) !== value,
+            )
+          )
+            throw Object.assign(
+              new Error(
+                "El turno cambió mientras lo movías. Actualizá el planning y revisalo.",
+              ),
+              { statusCode: 409 },
+            );
+          if (
+            !["pending", "confirmed"].includes(current.status) ||
+            current.appointmentDate < getArgentinaOperationalDate()
+          )
+            throw Object.assign(
+              new Error(
+                "Sólo se pueden mover turnos pendientes o confirmados de hoy en adelante.",
+              ),
+              { statusCode: 409 },
+            );
+          const [treatment] = await db
+            .select()
+            .from(spaTreatments)
+            .where(eq(spaTreatments.id, current.treatmentId));
+          const resources = await db
+            .select({ id: spaAppointmentResources.id })
+            .from(spaAppointmentResources)
+            .where(eq(spaAppointmentResources.appointmentId, current.id));
+          if (!treatment || treatment.isCircuit || resources.length)
+            throw Object.assign(
+              new Error(
+                "Los circuitos se modifican desde Editar turno para conservar todas sus etapas.",
+              ),
+              { statusCode: 409 },
+            );
+          let endTime: string;
+          try {
+            endTime = spaMoveEndTime(
+              startTime,
+              current.startTime,
+              current.endTime,
+            );
+          } catch (error: any) {
+            throw Object.assign(error, { statusCode: 400 });
+          }
+          const [cabin] = await db
+            .select()
+            .from(spaCabins)
+            .where(eq(spaCabins.id, cabinId));
+          if (!cabin || cabin.isActive !== "true")
+            throw Object.assign(new Error("El gabinete no está disponible."), {
+              statusCode: 409,
+            });
+          await lockAndAssertSpaAvailability(
+            db,
+            current.appointmentDate,
+            [{ cabinId, startTime, endTime, label: cabin.name }],
+            current.id,
+          );
+          const [moved] = await db
+            .update(spaAppointments)
+            .set({ cabinId, startTime, endTime })
+            .where(eq(spaAppointments.id, current.id))
+            .returning();
+          await db
+            .insert(auditLogs)
+            .values({
+              userId: req.user!.id,
+              userName: req.user!.fullName || req.user!.username,
+              action: "update",
+              module: "spa",
+              entityType: "spa_appointment",
+              entityId: current.id,
+              description: "Turno SPA reprogramado desde el planning",
+              details: JSON.stringify({
+                before: {
+                  cabinId: current.cabinId,
+                  startTime: current.startTime,
+                  endTime: current.endTime,
+                  appointmentDate: current.appointmentDate,
+                },
+                after: {
+                  cabinId,
+                  startTime,
+                  endTime,
+                  appointmentDate: current.appointmentDate,
+                },
+              }),
+              ipAddress: req.ip,
+              timestamp: new Date(),
+            });
+          return moved;
+        });
+        res.json(updated);
+      } catch (error: any) {
+        res
+          .status(error.statusCode || 500)
+          .json({ error: error.message || "No se pudo mover el turno." });
+      }
+    },
+  );
 
   app.patch("/api/spa/appointments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
@@ -2242,21 +2364,9 @@ export function registerSpaRoutes(app: Express) {
       const supplies = await storage.getTreatmentSupplies(req.params.id);
       // Enrich with inventory item info
       const enriched = await Promise.all(supplies.map(async (s) => {
-        const [item] = await db.select({ name: inventoryItems.name, unit: inventoryItems.unit, costPrice: inventoryItems.costPrice })
+        const [item] = await db.select({ name: inventoryItems.name, unit: inventoryItems.unit })
           .from(inventoryItems).where(eq(inventoryItems.id, s.inventoryItemId));
-        let estimatedCost: number | null = null;
-        let costWarning: string | null = null;
-        try {
-          if (!item || item.costPrice == null || !Number.isFinite(Number(item.costPrice)) || Number(item.costPrice) < 0) throw Object.assign(new Error("Falta costo del artículo"), { statusCode: 409 });
-          const factor = await unitFactor(db, s.inventoryItemId, s.unit || item.unit, item.unit);
-          const quantity = Number(s.quantity);
-          if (!Number.isFinite(quantity) || quantity < 0) throw Object.assign(new Error("Cantidad inválida"), { statusCode: 409 });
-          estimatedCost = Math.round(convertInventoryQuantity(quantity, factor) * Number(item.costPrice) * 100) / 100;
-        } catch (error: any) {
-          if (error.statusCode !== 409) throw error;
-          costWarning = error.message || "No se pudo calcular el costo";
-        }
-        return { ...s, inventoryItemName: item?.name ?? "—", inventoryItemUnit: item?.unit ?? s.unit, estimatedCost, costWarning };
+        return { ...s, inventoryItemName: item?.name ?? "—", inventoryItemUnit: item?.unit ?? s.unit };
       }));
       res.json(enriched);
     } catch (error) {

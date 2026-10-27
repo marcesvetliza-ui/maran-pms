@@ -315,7 +315,7 @@ export default function Dashboard() {
       @media print { @page { margin: 12mm; size: landscape; } }
     </style></head><body>
     <h1>Listado In House — Maran Suites & Towers</h1>
-    <p class="sub">${dateStr} &nbsp;·&nbsp; ${inHouseData.length} habitación(es) &nbsp;·&nbsp; ${totalPax} persona(s)</p>
+    <p class="sub">${dateStr} &nbsp;·&nbsp; ${inHouseData.length} habitación(es) &nbsp;·&nbsp; ${totalPax} persona(s) identificada(s)</p>
     <table>
       <thead><tr>
         <th>Hab.</th><th>Apellido y Nombre</th><th>Tipo Doc.</th><th>N° Doc.</th>
@@ -484,7 +484,7 @@ export default function Dashboard() {
                       Imprimir PDF
                     </Button>
                     <Button variant="outline" size="sm" asChild data-testid="button-xls-inhouse">
-                      <a href="/api/dashboard/inhouse/export-xls?mode=inhouse" download>
+                      <a href={`/api/dashboard/inhouse/export-xls?mode=inhouse&date=${inHouseDate}`} download>
                         <FileSpreadsheet className="h-4 w-4 mr-1" />
                         XLS Actual
                       </a>
@@ -496,7 +496,7 @@ export default function Dashboard() {
             </div>
             <CardDescription>
               Ocupantes actuales (check-in confirmado) ·{" "}
-              {inHouseLoading ? "…" : `${inHouseData.length} habitación(es) · ${inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0)} persona(s)`}
+              {inHouseLoading ? "…" : `${inHouseData.length} habitación(es) · ${inHouseData.reduce((s, e) => s + (e.numberOfGuests || 0), 0)} huéspedes declarados · ${inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0)} identificados`}
             </CardDescription>
           </CardHeader>
           <CardContent>

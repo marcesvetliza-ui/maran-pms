@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
@@ -258,7 +259,7 @@ export default function CcHuespedesPage() {
                     .sort((a, b) => String(b.date).localeCompare(String(a.date)))
                     .map((m) => (
                       <TableRow key={m.id} data-testid={`row-movement-${m.id}`}>
-                        <TableCell className="text-xs">{m.date}</TableCell>
+                        <TableCell className="text-xs">{formatDisplayDate(m.date)}</TableCell>
                         <TableCell className="text-xs">{cleanAccountMovementDescription(m.description, m.reservationCode)}</TableCell>
                         <TableCell className="text-xs text-muted-foreground font-mono">{m.reservationCode || m.reference || "—"}</TableCell>
                         <TableCell className="text-right">

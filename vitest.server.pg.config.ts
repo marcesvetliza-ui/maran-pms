@@ -17,7 +17,9 @@ export default defineConfig({
     fileParallelism: false,
     setupFiles: ["./server/tests/setup.ts"],
     include: ["server/tests/**/*.pg.test.ts"],
-    exclude: ["node_modules/**", ".cache/**", "dist/**"],
+    // Dedicated node:test suite owns a Unix-socket-only disposable cluster.
+    // Never run it via the operational DATABASE_URL / global Vitest setup.
+    exclude: ["node_modules/**", ".cache/**", "dist/**", "server/tests/*.isolated.pg.test.ts"],
   },
   resolve: {
     alias: {

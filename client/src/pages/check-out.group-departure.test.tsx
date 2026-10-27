@@ -17,6 +17,7 @@ const groupedReservation = {
   id: "res-group-1",
   groupId: "group-42",
   groupCode: "GR-042",
+  groupName: "Congreso de Derecho Administrativo",
   status: "checked_in",
   checkInDate: "2020-01-01",
   checkOutDate: "2020-01-02",
@@ -46,7 +47,7 @@ describe("CheckOutPage — group departure", () => {
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
     render(<QueryClientProvider client={queryClient}><CheckOutPage /></QueryClientProvider>);
 
-    expect(await screen.findByTestId("badge-group-res-group-1")).toBeInTheDocument();
+    expect(await screen.findByTestId("badge-group-res-group-1")).toHaveTextContent("Congreso de Derecho Administrativo · GR-042");
     await user.click(screen.getByTestId("button-checkout-res-group-1"));
     expect(await screen.findByRole("heading", { name: "Check-out grupal sin cobro" })).toBeInTheDocument();
     expect(screen.getAllByText(/GR-042/).length).toBeGreaterThan(0);

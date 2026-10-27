@@ -22,6 +22,8 @@ import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 import { emitirFactura } from "../billing/invoiceService";
 import { assertInvoiceEmittedForLink, canonicalInvoiceReference } from "../billing/invoiceLinkIntegrity";
 import { countReservationExtraFolioCharges } from "../groupReservationExtraCharges";
+import { canEditAccommodation } from "../accommodationPermissions";
+import { moneyCents } from "@shared/nightlyPricing";
 
 // A retención (IIBB/Ganancias) withheld by the payer is persisted on the
 // room-level payment's notes as { retencion: { tipo, monto, neto } } — the
@@ -1536,6 +1538,7 @@ export function registerGroupsRoutes(app: Express) {
           return exposeInvoiceReconciliation({
             ...invoice,
             groupReconciliationLinked: Boolean(invoice.groupPaymentId),
+            directGroupReconciliationLinked: invoice.groupId === req.params.groupId && linkedRows.some((row) => row.invoice.id === invoice.id),
             groupComposition: Object.keys(sourceAmounts).length > 0
               ? buildGroupInvoiceComposition(
                   persistedSources.length > 0 ? persistedSources : compositionSources,
@@ -2519,8 +2522,8 @@ export function registerGroupsRoutes(app: Express) {
       const updateData: Record<string, any> = {};
 
       if (finalRatePerNight !== undefined && finalRatePerNight !== "") {
-        const rate = parseFloat(finalRatePerNight);
-        if (isNaN(rate) || rate < 0) return res.status(400).json({ error: "Tarifa inválida" });
+        if (!await canEditAccommodation(req.user!)) return res.status(403).json({ error: "No tenés permiso para editar tarifas y noches de alojamiento." });
+        const rate = moneyCents(finalRatePerNight) / 100;
         const checkIn = new Date(reservation.checkInDate);
         const checkOut = new Date(reservation.checkOutDate);
         const nights = Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24));
@@ -2551,7 +2554,8 @@ export function registerGroupsRoutes(app: Express) {
       res.json({ success: true });
     } catch (error: any) {
       console.error("update-rate error:", error);
-      res.status(500).json({ error: "Error al actualizar tarifa" });
+      const expected = Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 500;
+      res.status(expected ? error.statusCode : 500).json({ error: expected ? error.message : "Error al actualizar tarifa" });
     }
   });
 

@@ -1,24 +1,32 @@
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import express from "express";
 import pg from "pg";
 import { nightlyTotal } from "../../shared/nightlyPricing";
 
-// Never uses an inherited DATABASE_URL. Copies only the known, local synthetic demo.
-const available = existsSync("/tmp/maran-nightly-folio-demo/socket/.s.PGSQL.55478");
-const database = `nightly_folio_test_${process.pid}_${Date.now()}`;
-const admin = new pg.Pool({ host: "/tmp/maran-nightly-folio-demo/socket", port: 55478, user: "runner", database: "postgres", ssl: false });
+// Run only with explicit destructive-test consent and a local test database.
+const url = process.env.DATABASE_URL;
+const available = !!url && process.env.ALLOW_DESTRUCTIVE_PG_TESTS === "true";
+if (available) {
+  const target = new URL(url!);
+  if (!["127.0.0.1", "localhost"].includes(target.hostname) || !/test/i.test(target.pathname)) {
+    throw new Error("Nightly pricing tests require a disposable local test database.");
+  }
+}
+const prefix = `nightly-test-${randomUUID()}`;
+const idFor = (name: string) => `${prefix}-${name}`;
 let applicationPool: pg.Pool, server: Server, base: string, storage: any, fixture: any;
-let actor: "admin" | "reception" | "housekeeping" | "piloto_externo" | null = "admin";
-let created = false, counter = 0;
-const editable = "nightly-demo-editable";
-const url = `postgresql://runner@/${database}?host=%2Ftmp%2Fmaran-nightly-folio-demo%2Fsocket&port=55478`;
+let actor: "admin" | "reception" | "housekeeping" | null = "admin";
+let counter = 0;
+const editable = idFor("editable");
+let previousActivation: any;
 async function request(path: string, body?: any, method = "POST") {
   const response = await fetch(`${base}${path}`, {
     method: body === undefined ? "GET" : method,
     headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
   });
+  if (response.status === 204) return {status:204,data:null};
   const text = await response.text();
   if (!response.headers.get("content-type")?.includes("application/json")) throw new Error(`HTTP ${response.status}: ${text.slice(0, 1800)}`);
   return { status: response.status, data: JSON.parse(text) };
@@ -36,45 +44,44 @@ async function moneyEvidence() {
     (SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY id),'[]') FROM cash_movements c) AS cash,
     (SELECT coalesce(jsonb_agg(to_jsonb(i) ORDER BY id),'[]') FROM sales_invoices i) AS invoices`)).rows[0];
 }
-describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales · copia desechable", () => {
+describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales · datos sintéticos en base desechable", () => {
   beforeAll(async () => {
-    const location = (await admin.query("SELECT inet_server_addr() AS address")).rows[0];
-    expect(location.address).toBe(null);
-    await admin.query(`CREATE DATABASE ${database} TEMPLATE maran_nightly_folio_demo`);
-    created = true;
-    process.env.DATABASE_URL = url;
     ({ pool: applicationPool } = await import("../db"));
-    const permissions = await import("../accommodationPermissions");
-    await permissions.ensureAccommodationPermissionsSchema();
-    await applicationPool.query(`INSERT INTO system_users(id,username,email,full_name,role,created_at)
-      VALUES ('permission-fixture','permission.fixture','fixture@example.invalid','Synthetic permission test','piloto_externo',NOW())
-      ON CONFLICT(id) DO NOTHING`);
-    await applicationPool.query("INSERT INTO role_permissions(role,resource_key) VALUES ('admin','sidebar:/reservations'),('piloto_externo','sidebar:/reservations') ON CONFLICT DO NOTHING");
+    await (await import("../accommodationPermissions")).ensureAccommodationPermissionsSchema();
+    previousActivation = (await applicationPool.query("SELECT * FROM system_settings WHERE key='reservation_nightly_activation_at'")).rows[0];
+    await applicationPool.query(`INSERT INTO system_settings(key,value,category,updated_at) VALUES ('reservation_nightly_activation_at','2001-01-01T00:00:00Z','reservations',NOW())
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
     await (await import("../permissions")).loadRolePermissionsCache();
     ({ storage } = await import("../db-storage"));
     const { registerReservationsRoutes } = await import("../routes/reservations");
-    // The interactive demo is deliberately persistent. Normalize only our
-    // disposable COPY so running this suite after a demo edit is repeatable.
-    const template = await saved();
-    const day = (offset: number) => new Date(Date.parse(`${template.checkInDate}T00:00:00Z`) + offset * 86400000).toISOString().slice(0, 10);
-    const baseline = [9_000_000, 9_500_000, 10_000_000].map((rateCents, index) => ({
-      date: day(index), rateCents, discountCents: 0,
-    }));
-    await applicationPool.query(`UPDATE reservations SET nightly_pricing=$1,pricing_revision=0,
-      total_room_amount='285000.00',base_rate_per_night='95000.00',final_rate_per_night='95000.00',
-      discount_type='none',discount_value=0,check_out_date=$2,nights=3 WHERE id=$3`,
-      [JSON.stringify(baseline), day(3), editable]);
+    await applicationPool.query(`INSERT INTO system_users(id,username,password,email,full_name,role,is_active,created_at)
+      VALUES ($1::text,$1::text,'unused-synthetic','nightly@example.invalid','Synthetic nightly actor','admin','true',NOW())`, [idFor("admin")]);
+    await applicationPool.query("INSERT INTO room_types(id,code,name) VALUES ($1::text,$1::text,'Synthetic nightly type')", [idFor("type")]);
+    await applicationPool.query("INSERT INTO guests(id,first_name,last_name,document_type,document_number) VALUES ($1::text,'Synthetic','Nightly','dni',$1::text)", [idFor("guest")]);
+    for (let i=1; i<=5; i++) await applicationPool.query("INSERT INTO rooms(id,room_number,room_type_id,floor,status) VALUES ($1::text,$1::text,$2,0,'available')", [idFor(`room-${i}`),idFor("type")]);
+    const baseline = [9_000_000,9_500_000,10_000_000].map((rateCents,index) => ({date:`2090-01-0${index+1}`,rateCents,discountCents:0}));
+    for (const [index,name] of ["editable","partial","full","legacy"].entries()) {
+      await applicationPool.query(`INSERT INTO reservations(id,reservation_code,guest_id,room_id,room_type_id,
+        check_in_date,check_out_date,nights,base_rate_per_night,final_rate_per_night,total_room_amount,
+        discount_type,discount_value,status,source,number_of_guests,created_at,pricing_scheme,pricing_revision,nightly_pricing)
+        VALUES ($1::text,$1::text,$2,$3,$4,'2090-01-01','2090-01-04',3,95000,95000,285000,'none',0,'confirmed','directo',1,'2000-01-01',$5,0,$6)`,
+        [idFor(name),idFor("guest"),idFor(`room-${index+1}`),idFor("type"),name==="legacy"?"legacy":"nightly_v1",name==="legacy"?null:JSON.stringify(baseline)]);
+      await applicationPool.query("INSERT INTO payments(id,reservation_id,amount,method,notes,date,status) VALUES ($1,$2,50000,'efectivo','Synthetic advance',NOW(),'active')",[idFor(`payment-${name}`),idFor(name)]);
+      if (["partial","full"].includes(name)) await applicationPool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,
+        cliente_condicion_iva,monto_neto,monto_total,estado,modo_ficticio,reserva_id,source_charge_ids,source_charge_amounts,items)
+        VALUES ('FB',999,$1,NOW(),'Synthetic nightly','Consumidor Final',$2,$2,'emitida',true,$3,'["accommodation"]',$4,'[]')`,
+        [index,name==="full"?285000:50000,idFor(name),JSON.stringify({accommodation:name==="full"?285000:50000})]);
+    }
     fixture = await saved();
     const app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
       req.isAuthenticated = (() => actor !== null) as any;
-      if (actor) req.user = { id: actor === "piloto_externo" ? "permission-fixture" : "nightly-demo-admin", username: "Demo Actor", role: actor } as any;
+      if (actor) req.user = { id: idFor("admin"), username: "Demo Actor", role: actor } as any;
       next();
     });
-    app.use("/api", (await import("../pilot-external-role")).authorizePilotExternalRole);
-    permissions.registerAccommodationPermissionRoutes(app);
     registerReservationsRoutes(app);
+    (await import("../accommodationPermissions")).registerAccommodationPermissionRoutes(app);
     app.use((error: any, _req: any, res: any, _next: any) => {
       console.error("Synthetic API middleware error:", error.stack || error.message);
       res.status(error.statusCode || 500).json({ error: error.message });
@@ -86,7 +93,6 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
   }, 60_000);
   beforeEach(async () => {
     actor = "admin";
-    await applicationPool.query("DELETE FROM user_permission_overrides WHERE user_id IN ('permission-fixture','nightly-demo-admin')");
     await applicationPool.query(`UPDATE reservations SET nightly_pricing=$1,pricing_revision=0,
       total_room_amount=$2,base_rate_per_night=$3,final_rate_per_night=$4,
       discount_type='none',discount_value=0,check_in_date=$5,check_out_date=$6,nights=3
@@ -95,31 +101,21 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
   });
   afterAll(async () => {
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));
-    if (applicationPool) await applicationPool.end();
-    if (created) await admin.query(`DROP DATABASE ${database} WITH (FORCE)`);
-    await admin.end();
-  });
-  it("admin grants and revokes only the individual permission without changing roles", async () => {
-    const endpoint = "/api/admin/accommodation-permissions/permission-fixture";
-    actor = "piloto_externo";
-    expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(false);
-    expect((await request(endpoint, { allowed: true }, "PUT")).status).toBe(403);
-    expect((await request(`/api/reservations/${editable}/nightly-pricing/preview`, rateBody())).status).toBe(403);
-    actor = "admin";
-    const grant = await fetch(`${base}${endpoint}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allowed: true }) });
-    expect(grant.status).toBe(204);
-    actor = "piloto_externo";
-    expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
-    expect((await request(`/api/reservations/${editable}/nightly-pricing/preview`, rateBody())).status).toBe(200);
-    expect((await request(`/api/reservations/nightly-demo-full/nightly-pricing/preview`, rateBody())).status).toBe(409);
-    actor = "admin";
-    const revoke = await fetch(`${base}${endpoint}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allowed: false }) });
-    expect(revoke.status).toBe(204);
-    actor = "piloto_externo";
-    expect((await request(`/api/reservations/${editable}/nightly-pricing/preview`, rateBody())).status).toBe(403);
-    expect((await request(`/api/reservations/${editable}/nightly-pricing/apply`, rateBody())).status).toBe(403);
-    expect((await applicationPool.query("SELECT role FROM system_users WHERE id='permission-fixture'")).rows[0].role).toBe("piloto_externo");
-    expect((await applicationPool.query("SELECT count(*) FROM audit_logs WHERE entity_type='user_permission' AND entity_id='permission-fixture'")).rows[0].count).toBe("2");
+    if (applicationPool) {
+      await applicationPool.query("DELETE FROM sales_invoices WHERE reserva_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
+      await applicationPool.query("DELETE FROM payments WHERE reservation_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
+      await applicationPool.query("DELETE FROM reservation_changelog WHERE reservation_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
+      await applicationPool.query("DELETE FROM reservations WHERE guest_id=$1",[idFor("guest")]);
+      await applicationPool.query("DELETE FROM rooms WHERE room_type_id=$1",[idFor("type")]);
+      await applicationPool.query("DELETE FROM room_types WHERE id=$1",[idFor("type")]);
+      await applicationPool.query("DELETE FROM guests WHERE id=$1",[idFor("guest")]);
+      await applicationPool.query("DELETE FROM user_permission_overrides WHERE user_id=$1",[idFor("admin")]);
+      await applicationPool.query("DELETE FROM audit_logs WHERE user_id=$1",[idFor("admin")]);
+      await applicationPool.query("DELETE FROM system_users WHERE id=$1",[idFor("admin")]);
+      if (previousActivation) await applicationPool.query("UPDATE system_settings SET value=$1 WHERE key='reservation_nightly_activation_at'",[previousActivation.value]);
+      else await applicationPool.query("DELETE FROM system_settings WHERE key='reservation_nightly_activation_at'");
+      await applicationPool.end();
+    }
   });
   it("autoriza con middleware real, sin depender de los controles del navegador", async () => {
     actor = null;
@@ -127,7 +123,84 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     actor = "housekeeping";
     expect((await request(`${pathFor()}/apply`, rateBody())).status).toBe(403);
     actor = "reception";
-    expect((await request("/api/reservation-pricing/activation", { confirm: true })).status).toBe(403);
+
+  });
+  it("aplica el permiso por rol en preview y PATCH y retira la edición individual", async () => {
+    actor = "reception";
+    expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
+    expect((await request(`${pathFor()}/preview`, rateBody())).status).toBe(200);
+    expect((await request(`/api/admin/accommodation-permissions/${idFor("admin")}`, {allowed:true}, "PUT")).status).toBe(403);
+    actor = "admin";
+    const { revokePermission, grantPermission } = await import("../permissions");
+    expect((await request(`/api/admin/accommodation-permissions/${idFor("admin")}`, {allowed:false}, "PUT")).status).toBe(410);
+    try {
+      await revokePermission("admin", "reservations:edit-accommodation");
+      expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(false);
+      expect((await request(`${pathFor()}/preview`, rateBody())).status).toBe(403);
+      expect((await request(`${pathFor()}/apply`, rateBody())).status).toBe(403);
+      expect((await request(`/api/reservations/${editable}`, {totalRoomAmount:"1"}, "PATCH")).status).toBe(403);
+      expect((await saved()).pricingRevision).toBe(0);
+    } finally {
+      await grantPermission("admin", "reservations:edit-accommodation");
+    }
+    expect((await request("/api/reservation-edit-permission")).data.canEdit).toBe(true);
+  });
+  it("sin configuración una nueva reserva usa precios nocturnos sin aceptar el detalle inyectado", async () => {
+    const activation = (await applicationPool.query("SELECT value FROM system_settings WHERE key='reservation_nightly_activation_at'")).rows[0]?.value;
+    await applicationPool.query("DELETE FROM system_settings WHERE key='reservation_nightly_activation_at'");
+    try {
+      const result = await request("/api/reservations", {
+        guestId:fixture.guestId,roomTypeId:fixture.roomTypeId,roomId:idFor("room-5"),
+        checkInDate:"2090-03-01",checkOutDate:"2090-03-02",nights:1,
+        baseRatePerNight:"90000",finalRatePerNight:"90000",totalRoomAmount:"90000",
+        status:"confirmed",source:"directo",pricingScheme:"nightly_v1",nightlyPricing:fixture.nightlyPricing,
+      });
+      expect(result.status).toBe(201);
+      expect(result.data.pricingScheme).toBe("nightly_v1");
+      expect(result.data.nightlyPricing).toEqual([{date:"2090-03-01",rateCents:9000000,discountCents:0}]);
+    } finally {
+      await applicationPool.query("INSERT INTO system_settings(key,value,category,updated_at) VALUES ('reservation_nightly_activation_at',$1,'reservations',NOW())",[activation]);
+    }
+  });
+  it("crea paquetes con total exacto aunque el promedio por noche redondee hacia abajo", async () => {
+    const result=await request("/api/reservations",{
+      guestId:fixture.guestId,roomTypeId:fixture.roomTypeId,roomId:idFor("room-5"),
+      checkInDate:"2090-04-01",checkOutDate:"2090-04-04",nights:3,
+      baseRatePerNight:"33.33",finalRatePerNight:"33.33",totalRoomAmount:"100.00",
+      discountType:"none",discountValue:"0",status:"confirmed",source:"directo",
+    });
+    expect(result.status).toBe(201);
+    expect(result.data.totalRoomAmount).toBe("100.00");
+    expect(nightlyTotal(result.data.nightlyPricing)).toBe(10000);
+    expect(result.data.nightlyPricing.every((n:any)=>n.discountCents===0)).toBe(true);
+  });
+  it.each(["autorizacion_pendiente","ambiguous"])("no modifica alojamiento ante evidencia fiscal %s", async state => {
+    const id=idFor("full");
+    try {
+      await applicationPool.query("UPDATE sales_invoices SET estado=$1,source_charge_amounts=$2 WHERE reserva_id=$3",
+        [state === "ambiguous"?"emitida":state,state === "ambiguous"?null:JSON.stringify({accommodation:285000}),id]);
+      const result=await request(pathFor(id));
+      expect(result.data.fiscal.state).toBe(state === "ambiguous"?"revisar":"en_curso");
+      expect((await request(`${pathFor(id)}/apply`,rateBody())).status).toBe(409);
+    } finally {
+      await applicationPool.query("UPDATE sales_invoices SET estado='emitida',source_charge_amounts=$1 WHERE reserva_id=$2",[JSON.stringify({accommodation:285000}),id]);
+    }
+  });
+  it("remite al Folio Maestro cuando hay facturación del grupo", async () => {
+    const group=idFor("group");
+    await applicationPool.query("INSERT INTO groups(id,group_code,name,check_in_date,check_out_date,status,created_at) VALUES ($1::text,$1::text,'Synthetic nightly group','2090-01-01','2090-01-04','confirmed',NOW())",[group]);
+    try {
+      await applicationPool.query("INSERT INTO group_reservation_links(id,group_id,reservation_id) VALUES ($1,$2,$3)",[idFor("group-link"),group,editable]);
+      await applicationPool.query("UPDATE sales_invoices SET group_id=$1 WHERE reserva_id=$2",[group,idFor("full")]);
+      expect((await request(pathFor())).data.fiscal.state).toBe("grupal");
+      const result=await request(`${pathFor()}/apply`,rateBody());
+      expect(result.status).toBe(409);
+      expect(result.data.error).toContain("Folio Maestro");
+    } finally {
+      await applicationPool.query("UPDATE sales_invoices SET group_id=NULL WHERE group_id=$1",[group]);
+      await applicationPool.query("DELETE FROM group_reservation_links WHERE group_id=$1",[group]);
+      await applicationPool.query("DELETE FROM groups WHERE id=$1",[group]);
+    }
   });
   it("la previsualización no escribe; guardar persiste total, revisión, actor, antes/después y motivo", async () => {
     const evidence = await moneyEvidence();
@@ -140,6 +213,13 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect(reloaded.pricingRevision).toBe(1);
     expect(reloaded.totalRoomAmount).toBe("270000.00");
     expect(nightlyTotal(reloaded.nightlyPricing)).toBe(27_000_000);
+    // Prefactura consumes this existing endpoint: use the saved total, not
+    // a reconstructed rounded average, and keep the advance untouched.
+    const folio = await request(`/api/reservations/${editable}/folio`);
+    expect(folio.status).toBe(200);
+    expect(folio.data.roomTotal).toBe(270000);
+    expect(folio.data.totalPayments).toBe(50000);
+    expect(folio.data.balance).toBe(220000);
     const log = (await applicationPool.query("SELECT * FROM reservation_changelog WHERE reservation_id=$1 AND tipo='tarifa'", [editable])).rows;
     expect(log).toHaveLength(1);
     expect(log[0].operador).toBe("Demo Actor");
@@ -149,9 +229,9 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect(log[0].descripcion).toContain('"after"');
     expect(await moneyEvidence()).toEqual(evidence);
   });
-  it("activa sólo nuevas altas del servidor; fecha de ingreso futura no convierte las anteriores", async () => {
+  it("usa el esquema nocturno sólo en nuevas altas del servidor; fecha de ingreso futura no convierte las anteriores", async () => {
     const future = (offset: number) => new Date(Date.parse(`${fixture.checkInDate}T00:00:00Z`) + offset * 86400000).toISOString().slice(0,10);
-    const body = { guestId: fixture.guestId, roomTypeId: fixture.roomTypeId, roomId: "nightly-demo-room-5",
+    const body = { guestId: fixture.guestId, roomTypeId: fixture.roomTypeId, roomId: idFor("room-5"),
       checkInDate: future(30), checkOutDate: future(31), nights: 1,
       baseRatePerNight: "90000", finalRatePerNight: "85000", totalRoomAmount: "85000",
       discountType: "fixed", discountValue: "5000", status: "confirmed", source: "directo",
@@ -160,16 +240,14 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect(first.status).toBe(201);
     expect(first.data.pricingScheme).toBe("nightly_v1");
     expect(first.data.nightlyPricing).toEqual([{ date: body.checkInDate, rateCents: 9_000_000, discountCents: 500_000 }]);
-    const activation = (await request("/api/reservation-pricing/activation")).data.activatedAt;
-    expect((await request("/api/reservation-pricing/activation", { confirm: true })).status).toBe(200);
-    expect((await request("/api/reservation-pricing/activation")).data.activatedAt).toBe(activation);
-    expect((await saved("nightly-demo-legacy")).pricingScheme).toBe("legacy");
+    const activation = (await applicationPool.query("SELECT value FROM system_settings WHERE key='reservation_nightly_activation_at'")).rows[0]?.value;
+    expect((await saved(idFor("legacy"))).pricingScheme).toBe("legacy");
     await applicationPool.query("UPDATE system_settings SET value='2999-01-01T00:00:00Z' WHERE key='reservation_nightly_activation_at'");
     try {
       const second = await request("/api/reservations", { ...body, checkInDate: future(32), checkOutDate: future(33), pricingScheme: "nightly_v1" });
       expect(second.status).toBe(201);
-      expect(second.data.pricingScheme).toBe("legacy");
-      expect(second.data.nightlyPricing).toBe(null);
+      expect(second.data.pricingScheme).toBe("nightly_v1");
+      expect(second.data.nightlyPricing).toEqual([{date:future(32),rateCents:9000000,discountCents:500000}]);
     } finally {
       await applicationPool.query("UPDATE system_settings SET value=$1 WHERE key='reservation_nightly_activation_at'", [activation]);
     }
@@ -190,7 +268,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect((await applicationPool.query("SELECT count(*)::int AS n FROM reservation_changelog WHERE reservation_id=$1 AND tipo='tarifa'", [editable])).rows[0].n).toBe(1);
   });
   it.each(["partial", "full"])("bloquea factura %s tanto en el endpoint nuevo como en el PATCH anterior", async (suffix) => {
-    const id = `nightly-demo-${suffix}`;
+    const id = idFor(suffix);
     const state = await request(pathFor(id));
     expect(state.data.blocked).toContain("fiscal");
     expect(state.data.fiscal.state).toBe(suffix === "partial" ? "parcial" : "facturado");
@@ -198,7 +276,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect((await request(`/api/reservations/${id}`, { totalRoomAmount: "1" }, "PATCH")).status).toBe(409);
   });
   it("no convierte anteriores al leer, editar notas o intentar inyectar un esquema", async () => {
-    const id = "nightly-demo-legacy";
+    const id = idFor("legacy");
     const before = await saved(id);
     expect((await request(`${pathFor(id)}/apply`, rateBody())).status).toBe(409);
     expect((await request(`/api/reservations/${id}`, { notes: "Nota sintética", pricingScheme: "nightly_v1", nightlyPricing: fixture.nightlyPricing, pricingRevision: 300 }, "PATCH")).status).toBe(200);
@@ -211,6 +289,23 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect((await request(`/api/reservations/${editable}`, { nights: 4 }, "PATCH")).status).toBe(409);
     expect((await request(`/api/reservations/${editable}`, { finalRatePerNight: "1" }, "PATCH")).status).toBe(409);
     expect((await saved()).totalRoomAmount).toBe(fixture.totalRoomAmount);
+  });
+  it("conserva la confirmación explícita de cupos tentativos al extender la estadía", async () => {
+    const group=idFor("tentative");
+    await applicationPool.query("INSERT INTO groups(id,group_code,name,check_in_date,check_out_date,status,created_at) VALUES ($1::text,$1::text,'Synthetic tentative group','2090-01-04','2090-01-05','tentative',NOW())",[group]);
+    try {
+      await applicationPool.query("INSERT INTO group_room_blocks(id,group_id,room_type_id,quantity) VALUES ($1,$2,$3,5)",[idFor("block"),group,idFor("type")]);
+      const proposal={revision:0,reason:"Extensión con aviso de grupo",edit:{kind:"stay",checkIn:fixture.checkInDate,checkOut:"2090-01-05",addedRates:{"2090-01-04":"97000"}}};
+      const warning=await request(`${pathFor()}/preview`,proposal);
+      expect(warning.status).toBe(409);
+      expect(warning.data.code).toBe("GROUP_BLOCK_WARNING");
+      expect(warning.data.canOverride).toBe(true);
+      expect((await request(`${pathFor()}/preview`,{...proposal,overrideTentativeGroupWarning:true})).status).toBe(200);
+      expect((await request(`${pathFor()}/apply`,{...proposal,overrideTentativeGroupWarning:true})).status).toBe(200);
+    } finally {
+      await applicationPool.query("DELETE FROM group_room_blocks WHERE group_id=$1",[group]);
+      await applicationPool.query("DELETE FROM groups WHERE id=$1",[group]);
+    }
   });
   it("quita una noche junto con su descuento y conserva exactamente las restantes", async () => {
     const discounted = await request(`${pathFor()}/apply`, rateBody());
@@ -265,7 +360,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     const ready = new Promise<void>(resolve => { acquired = resolve; });
     const emission = withReservationFinancialLock(editable, async () => {
       acquired(); await hold;
-      await applicationPool.query("UPDATE sales_invoices SET reserva_id=$1 WHERE reserva_id='nightly-demo-full'", [editable]);
+      await applicationPool.query("UPDATE sales_invoices SET reserva_id=$1 WHERE reserva_id=$2", [editable,idFor("full")]);
     });
     await ready;
     let settled = false;

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -32,12 +32,14 @@ const ACCOUNTS: any[] = [];
 const CATEGORIES: any[] = [];
 const EXISTING_ITEMS = [
   { id: "item-1", name: "Aceite de Oliva", currentStock: "5", unit: "unidad", ivaRate: "10.5" },
-  { id: "item-2", name: "Vino Reserva", currentStock: "3", unit: "unidad", ivaRate: "21" },
+  { id: "item-2", name: "Vino Reserva", currentStock: "3", unit: "unidad", ivaRate: "21.00" },
+  { id: "item-zero", name: "Artículo IVA Cero", currentStock: "1", unit: "unidad", ivaRate: 0 },
   { id: "item-3", name: "Artículo Sin IVA Cargado", currentStock: "0", unit: "unidad" },
 ];
 const WAREHOUSES = [
-  { id: "wh-cocina", name: "Depósito Cocina", isActive: "true" },
-  { id: "wh-general", name: "Depósito General", isActive: "true" },
+  { id: "wh-cocina", name: "Depósito Cocina", is_active: "true" },
+  { id: "wh-general", name: "Depósito General", is_active: "true" },
+  { id: "wh-inactive", name: "Depósito Inactivo", is_active: "false" },
 ];
 
 function buildFetchMock() {
@@ -109,7 +111,7 @@ describe("InvoiceDialog — sugerencia de IVA por artículo y depósito por defe
     expect(screen.getByTestId("select-inv-vat-0")).toHaveTextContent("Elegir alícuota");
   });
 
-  it("no pisa una alícuota ya elegida a mano al cambiar de artículo", async () => {
+  it("usa la alícuota del nuevo artículo al cambiar, sin arrastrar la anterior", async () => {
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });
 
@@ -121,7 +123,28 @@ describe("InvoiceDialog — sugerencia de IVA por artículo y depósito por defe
     expect(screen.getByTestId("select-inv-vat-0")).toHaveTextContent("27%");
 
     await selectItemOnRow(user, "Aceite de Oliva");
-    expect(screen.getByTestId("select-inv-vat-0")).toHaveTextContent("27%");
+    expect(screen.getByTestId("select-inv-vat-0")).toHaveTextContent("10,5%");
+  });
+
+  it("no interpreta una alícuota cero como exento o no gravado ni arrastra la tasa anterior", async () => {
+    const user = userEvent.setup(); renderDialog({ unifiedLayout: true });
+    await addItemRow(user); await selectItemOnRow(user, "Artículo IVA Cero");
+    expect(screen.getByTestId("select-inv-vat-0")).toHaveTextContent("Elegir alícuota");
+    expect(screen.getByRole("alert")).toHaveTextContent("La alícuota guardada del artículo no es válida");
+    expect(screen.getByTestId("select-inv-vat-0")).not.toBeDisabled();
+    await selectItemOnRow(user, "Artículo Sin IVA Cargado");
+    expect(screen.getByTestId("select-inv-vat-0")).toHaveTextContent("Elegir alícuota");
+  });
+
+  it("permite buscar directamente y elegir con el teclado, dejando el foco en cantidad", async () => {
+    const user = userEvent.setup(); renderDialog({ unifiedLayout: true }); await addItemRow(user);
+    const input = screen.getByRole("combobox", { name: "Buscar artículo 1 por nombre o SKU" });
+    await user.type(input, "vino");
+    expect(screen.getByRole("option", { name: /Vino Reserva/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Aceite de Oliva/ })).not.toBeInTheDocument();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByTestId("select-existing-item-0")).toHaveTextContent("Vino Reserva");
+    await waitFor(() => expect(screen.getByTestId("input-inv-qty-0")).toHaveFocus());
   });
 
   it("preselecciona Depósito General en una fila nueva de artículo", async () => {
@@ -140,7 +163,17 @@ describe("InvoiceDialog — sugerencia de IVA por artículo y depósito por defe
     await screen.findByText("Depósito General");
 
     await user.click(screen.getByTestId("select-inv-warehouse-0"));
+    expect(screen.queryByRole("option", { name: "Depósito Inactivo" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("option", { name: "Depósito Cocina" }));
     expect(screen.getByTestId("select-inv-warehouse-0")).toHaveTextContent("Depósito Cocina");
   });
+  it.each([true,false])("permite indicar el contenido variable de una caja (vista unificada: %s)",async unifiedLayout=>{
+    const user=userEvent.setup();renderDialog({unifiedLayout});if(!unifiedLayout)for(let step=0;step<4;step++)await user.click(screen.getByTestId('btn-next-step'));await addItemRow(user);await selectItemOnRow(user,'Aceite de Oliva');
+    await user.click(screen.getAllByRole('combobox').find(e=>e.textContent==='unidad')!);await user.click(screen.getByRole('option',{name:'caja'}));
+    await user.clear(screen.getByTestId('input-inv-qty-0'));await user.type(screen.getByTestId('input-inv-qty-0'),'2');
+    const content=screen.getByLabelText('Contenido de presentación 1'),cost=screen.getByTestId('input-inv-cost-0');
+    await user.type(content,'24');await user.clear(cost);await user.type(cost,'240');expect(screen.getByText(/Ingreso: 48 unidades de stock/)).toHaveTextContent('costo por unidad: $10');
+    await user.clear(content);await user.type(content,'120');await user.clear(cost);await user.type(cost,'1200');expect(screen.getByText(/Ingreso: 240 unidades de stock/)).toHaveTextContent('costo por unidad: $10');
+  });
+
 });

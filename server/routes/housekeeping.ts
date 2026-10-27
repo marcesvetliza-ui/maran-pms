@@ -1,5 +1,9 @@
+import {registerHousekeepingAvailability} from "../housekeepingAvailability";
+import {registerHousekeepingPlanning} from "../housekeepingPlanning";
+import {registerHousekeepingTaskRoutes} from "../housekeepingTasks";
 import { lostFoundShippingSchema, lostFoundStatusUpdateSchema } from "@shared/lostFoundDelivery";
 import type { Express } from "express";
+import {registerHousekeepingDailyReport} from '../housekeepingDailyReport';
 import { storage } from "../db-storage";
 import { db,withDatabaseTransaction } from "../db";
 import { lostFoundItems, reservations, safeBoxOpenings, type LostFoundCategory, type LostFoundStatus } from "@shared/schema";
@@ -9,9 +13,10 @@ import {hideInventoryCosts} from "../inventoryAccess";
 import { eq, desc, like, and, or, ilike, sql, type SQL } from "drizzle-orm";
 
 export function registerHousekeepingRoutes(app: Express) {
+  registerHousekeepingDailyReport(app);
   app.get("/api/housekeeping/inventory", requireAuth, requirePermission('sidebar:/housekeeping'), async (req,res) => {
     try {
-      const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping');
+      const items=(await storage.getInventoryItems()).filter(item=>item.category?.area==='housekeeping' && item.itemKind!=='plato');
       res.json(hasPermission(req.user!.role,'api:inventory:cost')?items:hideInventoryCosts(items));
     } catch { res.status(500).json({error:'No se pudo consultar el inventario de Housekeeping'}); }
   });
@@ -41,170 +46,9 @@ export function registerHousekeepingRoutes(app: Express) {
       });res.json(result);
     }catch(error:any){res.status(error.statusCode||500).json({error:error.message});}
   });
-  // Housekeeping Tasks
-  app.get("/api/housekeeping", async (req, res) => {
-    try {
-      const date = req.query.date as string | undefined;
-      const assignedTo = req.query.assignedTo as string | undefined;
-      const tasks = await storage.getHousekeepingTasks(date, assignedTo);
-      res.json(tasks);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching housekeeping tasks" });
-    }
-  });
-
-  // Get housekeeping staff (mucamas + supervisors) — must be before /:id
-  app.get("/api/housekeeping/staff", async (req, res) => {
-    try {
-      const allUsers = await storage.getSystemUsers();
-      const staff = allUsers
-        .filter(u => ["housekeeping"].includes(u.role) && u.isActive === "true")
-        .map(u => ({ id: u.id, fullName: u.fullName, role: u.role, username: u.username }));
-      res.json(staff);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching staff" });
-    }
-  });
-
-  // Assign a room to a staff member for a given date
-  app.post("/api/housekeeping/assign", async (req, res) => {
-    try {
-      const { roomId, assignedTo, date } = req.body;
-      if (!roomId || !date) return res.status(400).json({ error: "roomId y date son obligatorios" });
-      const tasks = await storage.getHousekeepingTasks(date);
-      const existing = tasks.find(t => t.roomId === roomId);
-      if (existing) {
-        const updated = await storage.updateHousekeepingTask(existing.id, { assignedTo: assignedTo || null });
-        return res.json(updated);
-      }
-      const task = await storage.createHousekeepingTask({
-        roomId,
-        taskType: "checkout_clean",
-        status: "pending",
-        priority: "normal",
-        scheduledDate: date,
-        assignedTo: assignedTo || null,
-        createdAt: new Date(),
-      });
-      res.json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error al asignar habitación" });
-    }
-  });
-
-  app.get("/api/housekeeping/:id", async (req, res) => {
-    try {
-      const task = await storage.getHousekeepingTask(req.params.id);
-      if (!task) {
-        return res.status(404).json({ error: "Task not found" });
-      }
-      res.json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching task" });
-    }
-  });
-
-  app.post("/api/housekeeping", async (req, res) => {
-    try {
-      const task = await storage.createHousekeepingTask({
-        ...req.body,
-        createdAt: new Date(),
-      });
-      res.status(201).json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating housekeeping task" });
-    }
-  });
-
-  app.patch("/api/housekeeping/:id", async (req, res) => {
-    try {
-      const task = await storage.updateHousekeepingTask(req.params.id, req.body);
-      if (!task) {
-        return res.status(404).json({ error: "Task not found" });
-      }
-      res.json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating task" });
-    }
-  });
-
-  app.delete("/api/housekeeping/:id", async (req, res) => {
-    try {
-      const deleted = await storage.deleteHousekeepingTask(req.params.id);
-      if (!deleted) {
-        return res.status(404).json({ error: "Task not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting task" });
-    }
-  });
-
-  // Update room status (for housekeeping)
-  app.patch("/api/housekeeping/room/:roomId/status", async (req, res) => {
-    try {
-      const { status } = req.body;
-      const room = await storage.updateRoom(req.params.roomId, { status });
-      if (!room) {
-        return res.status(404).json({ error: "Room not found" });
-      }
-      res.json(room);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating room status" });
-    }
-  });
-
-  // Start a task (change status to in_progress)
-  app.post("/api/housekeeping/:id/start", async (req, res) => {
-    try {
-      const task = await storage.updateHousekeepingTask(req.params.id, {
-        status: "in_progress",
-        startedAt: new Date(),
-      });
-      if (!task) {
-        return res.status(404).json({ error: "Task not found" });
-      }
-      await storage.updateRoom(task.roomId, { status: "cleaning" });
-      res.json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error starting task" });
-    }
-  });
-
-  // Complete a task (change status to completed)
-  app.post("/api/housekeeping/:id/complete", async (req, res) => {
-    try {
-      const task = await storage.updateHousekeepingTask(req.params.id, {
-        status: "completed",
-        completedAt: new Date(),
-      });
-      if (!task) {
-        return res.status(404).json({ error: "Task not found" });
-      }
-      await storage.updateRoom(task.roomId, { status: "available" });
-      res.json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error completing task" });
-    }
-  });
-
-  // Inspect a task (for supervisor)
-  app.post("/api/housekeeping/:id/inspect", async (req, res) => {
-    try {
-      const { inspectedBy } = req.body;
-      const task = await storage.updateHousekeepingTask(req.params.id, {
-        status: "inspected",
-        inspectedBy,
-        inspectedAt: new Date(),
-      });
-      if (!task) {
-        return res.status(404).json({ error: "Task not found" });
-      }
-      res.json(task);
-    } catch (error) {
-      res.status(500).json({ error: "Error inspecting task" });
-    }
-  });
+  registerHousekeepingAvailability(app);
+  registerHousekeepingPlanning(app);
+  registerHousekeepingTaskRoutes(app);
 
   // ==================== LOST & FOUND MODULE ====================
 

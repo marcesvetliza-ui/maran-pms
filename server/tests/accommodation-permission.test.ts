@@ -12,6 +12,11 @@ describe("individual accommodation permission", () => {
     expect(accommodationPermission("reception", false)).toBe(false);
     expect(accommodationPermission("admin", false)).toBe(false);
   });
+  it("can preserve the main system's existing role-based access without importing demo defaults", () => {
+    expect(accommodationPermission("responsable_area", null, true)).toBe(true);
+    expect(accommodationPermission("responsable_area", false, true)).toBe(false);
+    expect(accommodationPermission("piloto_externo", true, false)).toBe(true);
+  });
   it("does not block notes/guest edits or semantically identical financial values", () => {
     expect(changesAccommodation({ finalRatePerNight: "100.00" }, { notes: "nota", finalRatePerNight: 100 })).toBe(false);
     expect(changesAccommodation({ ratePlanId: null }, { ratePlanId: "" })).toBe(false);

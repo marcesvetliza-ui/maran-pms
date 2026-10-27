@@ -1,3 +1,7 @@
+import { registerGroupFiscalCashRecoveryRoutes } from "./groupFiscalCashRecovery";
+import { recoverGroupCreditNote } from "./groupCreditRecovery";
+import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
+import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
 import {creditNoteAccountMovement} from './creditNoteAccountMovement';
 import type { Express } from "express";
@@ -24,6 +28,7 @@ import { audit } from "../audit";
 import { assertExternalCommAllowed } from "../external-comms-policy";
 import { registerWsaaDebugRoute } from "./wsaaDebug";
 import { storage, getArgentinaToday } from "../db-storage";
+import { isEventCashArea } from "../cashArea";
 import { assetPath } from "../utils/assetPath";
 import {
   assertGroupInvoiceAllocation,
@@ -245,6 +250,7 @@ async function reconcileReservationCreditNote(
   const originalNroFacReal = `${originalTipoComprobante}-${String(invoiceValue(original, "numero", "numero")).padStart(8, "0")}`;
 
   await db.transaction(async (tx) => {
+    await releaseReservationCredit(tx, original, nc);
     await tx.execute(sql`
       UPDATE sales_invoices
       SET nota_credito_id = ${ncId},
@@ -578,6 +584,7 @@ async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise
 }
 
 export function registerBillingRoutes(app: Express) {
+  registerGroupFiscalCashRecoveryRoutes(app);
   registerArcaCredentialDiagnosticRoutes(app);
 
   // GET /api/billing/config
@@ -794,6 +801,10 @@ export function registerBillingRoutes(app: Express) {
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
                EXISTS (
+                 SELECT 1 FROM group_invoices gi
+                 WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
+               ) AS direct_group_reconciliation_linked,
+               EXISTS (
                  SELECT 1
                  FROM group_payments gp
                  WHERE gp.invoice_id = si.id
@@ -814,7 +825,7 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
-  // Pending reservation NCs are intentionally visible outside date filters:
+  // Pending reservation and group NCs remain visible outside date filters:
   // an authorized fiscal correction must be actionable until its Folio
   // adjustment has been committed.
   app.get("/api/billing/credit-note-reconciliations/pending", requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), async (_req, res) => {
@@ -829,7 +840,7 @@ export function registerBillingRoutes(app: Express) {
           orig.cliente_razon_social AS original_cliente_razon_social
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
-        WHERE nc.reserva_id IS NOT NULL
+        WHERE (nc.reserva_id IS NOT NULL OR nc.group_id IS NOT NULL)
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.reconciliation_status = 'pendiente'
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
@@ -856,12 +867,12 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE nc.id = ${ncId}
-          AND nc.reserva_id IS NOT NULL
+          AND (nc.reserva_id IS NOT NULL OR nc.group_id IS NOT NULL)
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
         LIMIT 1
       `);
       if (!initial.rows.length) {
-        return res.status(404).json({ error: "No se encontró una NC de reserva pendiente" });
+        return res.status(404).json({ error: "No se encontró una NC de reserva o grupo pendiente" });
       }
 
       // Query aliases avoid accidental field shadowing in the joined row.
@@ -873,6 +884,9 @@ export function registerBillingRoutes(app: Express) {
       `);
       const nc = initialNc.rows[0] as any;
       const original = initialOriginal.rows[0] as any;
+      if (nc?.group_id && !nc.reserva_id && original?.group_id === nc.group_id) {
+        return res.json(await recoverGroupCreditNote(ncId,(req as any).user));
+      }
       if (!nc || !original || !original.reserva_id) {
         return res.status(404).json({ error: "No se encontró la factura original de la NC" });
       }
@@ -977,6 +991,8 @@ export function registerBillingRoutes(app: Express) {
                  FROM sales_invoices nc
                  WHERE nc.nota_credito_id = si.id
                    AND nc.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB')
+                   AND nc.estado IN ('emitida','parcial','anulada')
+                   AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status='conciliada')
                ), '[]'::jsonb) AS credit_source_charge_amounts,
                orig.tipo_comprobante AS original_tipo,
                orig.numero           AS original_numero,
@@ -987,6 +1003,10 @@ export function registerBillingRoutes(app: Express) {
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
+               EXISTS (
+                 SELECT 1 FROM group_invoices gi
+                 WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
+               ) AS direct_group_reconciliation_linked,
                EXISTS (
                  SELECT 1
                  FROM group_payments gp
@@ -1052,6 +1072,9 @@ export function registerBillingRoutes(app: Express) {
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      if (isEventCashArea(cashArea)) {
+        return res.status(400).json({ error: "La caja de Eventos está desactivada. Los cobros se registran en Administración o Recepción." });
+      }
       let checkoutDiscount: CheckoutDiscount | undefined;
       if (!tipoComprobante || !cliente || !items?.length) {
         return res.status(400).json({ error: "tipoComprobante, cliente e items son requeridos" });
@@ -1678,7 +1701,7 @@ export function registerBillingRoutes(app: Express) {
           }
           if (Number(amount) + (checkoutDiscount?.sourceAmounts[id] || 0) > pending + 0.02) {
               throw new FolioInvoiceValidationError(
-                `El cargo seleccionado ya no tiene saldo suficiente para facturar ($${Math.max(0, pending).toFixed(2)} disponible)`,
+                `Este cargo ya está facturado o tiene una emisión en curso. No queda saldo suficiente para facturar el importe seleccionado ($${Math.max(0, pending).toFixed(2)} disponible). Actualizá la prefactura para ver su estado.`,
                 409
               );
           }
@@ -2011,6 +2034,27 @@ export function registerBillingRoutes(app: Express) {
             : await emitInvoice();
       const user = (req as any).user;
       let cashMovementError: string | undefined;
+      if (groupId && ["FA", "FB", "FC", "FT", "FM", "FMB"].includes(factura.tipoComprobante)) {
+        try {
+          await db.transaction(tx => ensureGroupFiscalCashInformation(tx, {
+            id: factura.id,
+            groupId,
+            tipoComprobante: factura.tipoComprobante,
+            puntoVenta: factura.puntoVenta,
+            numero: factura.numero,
+            montoTotal: factura.montoTotal,
+            clienteRazonSocial: factura.clienteRazonSocial,
+          }, user?.fullName || user?.username));
+        } catch (error: any) {
+          // ARCA has already authorized the document. Keep its identity and
+          // report the missing information; retrying must not emit it again.
+          cashMovementError = error?.message || "No se pudo registrar el comprobante informativo del grupo en Caja";
+          await audit(req, "update", "sales_invoices",
+            `Factura de grupo ${factura.id} emitida; registro informativo de Caja pendiente`,
+            { entityType: "sales_invoice", entityId: String(factura.id), details: { error: cashMovementError } },
+          ).catch(() => undefined);
+        }
+      }
       const invoiceTotalForSettlement = parseFloat(String(
         (factura as any).montoTotal ?? (factura as any).monto_total ?? "0",
       ));
@@ -3075,6 +3119,11 @@ export function registerBillingRoutes(app: Express) {
         }
       }
 
+      if(original.group_id && !original.reserva_id){
+        const pendingGroup=await db.execute(sql`SELECT id FROM sales_invoices WHERE nota_credito_id=${id} AND group_id=${String(original.group_id)} AND tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB') AND reconciliation_status='pendiente' ORDER BY id LIMIT 1`);
+        if(pendingGroup.rows.length)return res.status(409).json({error:"Hay una Nota de Crédito del grupo pendiente. Usá Reintentar y conciliar en Facturación; no emitas otra NC.",pendingCreditNoteId:Number((pendingGroup.rows[0] as any).id),reconciliationStatus:"pendiente"});
+      }
+
       let sourceChargeAmounts: Record<string, number> = {};
       let sourceItemById = new Map<string, any>();
       let ncItems: any[] = [];
@@ -3129,6 +3178,8 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices
         WHERE nota_credito_id = ${original.id}
           AND tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
+          AND estado IN ('emitida','parcial','anulada')
+          AND (reconciliation_status IS NULL OR reconciliation_status='conciliada')
       `);
       const creditedBySource: Record<string, number> = {};
       let creditedWithNoSourceMap = 0;
@@ -3296,6 +3347,18 @@ export function registerBillingRoutes(app: Express) {
       const nuevoAcreditado = Math.min(montoTotal, montoYaAcreditado + montoNC);
       const nuevoEstado = nuevoAcreditado >= montoTotal - 0.009 ? "anulada" : "parcial";
       await db.transaction(async (tx) => {
+        if (original.group_id) {
+          await ensureGroupFiscalCashInformation(tx, {
+            id: Number(nc.id),
+            groupId: String(original.group_id),
+            tipoComprobante: nc.tipoComprobante,
+            puntoVenta: nc.puntoVenta,
+            numero: nc.numero,
+            montoTotal: nc.montoTotal,
+            clienteRazonSocial: original.cliente_razon_social,
+            originalReference: `${original.tipo_comprobante} ${String(original.punto_venta).padStart(4, "0")}-${String(original.numero).padStart(8, "0")}`,
+          }, user?.fullName || user?.username);
+        }
         await tx.execute(sql`
           UPDATE sales_invoices
             SET nota_credito_id = ${nc.id},
@@ -3303,21 +3366,24 @@ export function registerBillingRoutes(app: Express) {
                 estado = ${nuevoEstado}
           WHERE id = ${id}
         `);
+        if (original.group_id) await tx.execute(sql`UPDATE sales_invoices SET reconciliation_status='conciliada',reconciliation_error=NULL,reconciliation_updated_at=NOW() WHERE id=${nc.id}`);
       });
+
+      if (original.group_id) Object.assign(nc,{reconciliationStatus:'conciliada',reconciliation_status:'conciliada'});
 
       // A reservation NC changes the fiscal amount and Folio balance only. It
       // must not create a cash outflow while its payments remain active.
       // Non-reservation NCs are informative-only in Caja: emitting a NC never
       // moves cash by itself (any real refund is its own separate movement,
       // e.g. payment_void below) — it just needs to be visible for control.
-      // Group NCs have no área of their own (grupos are billed by punto de
-      // venta, not área) — same pos_configs lookup as the ND site below.
-      if (!original.reserva_id) {
+      // Group NCs were recorded transactionally above in Reception. Only
+      // other non-reservation modules use their POS area here.
+      if (!original.reserva_id && !original.group_id) {
         try {
           const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nc.puntoVenta} AND activo = true LIMIT 1`);
           const pvArea = (pvRow.rows[0] as any)?.area || (original.group_id ? "recepcion" : "restaurant");
           const totalNC = parseFloat(String((nc as any).montoTotal || "0"));
-          if (totalNC > 0) {
+          if (totalNC > 0 && !isEventCashArea(pvArea)) {
             const nroOriginal = `${original.tipo_comprobante}-${String(original.numero).padStart(8, "0")}`;
             const nroNC = `${nc.tipoComprobante}-${String(nc.numero).padStart(8, "0")}`;
             await storage.registerCashMovement(
@@ -3526,7 +3592,7 @@ export function registerBillingRoutes(app: Express) {
 
                 // Cash reversal for the voided payment
                 try {
-                  await storage.registerCashMovement(
+                  if (cashArea !== "event" && !isEventCashArea(cashArea)) await storage.registerCashMovement(
                     cashArea, "payment_void", movId,
                     `Anulación pago ${cashArea} ${payLabel} — ${nroNC}`,
                     mov.payment_method, String(mov.amount), "expense", operador
@@ -3623,6 +3689,7 @@ export function registerBillingRoutes(app: Express) {
             const originalCredited = parseFloat(String(sourceInvoice.monto_acreditado || 0));
             const newOriginalCredited = Math.max(0, originalCredited - debitAmount);
             await db.transaction(async tx => {
+              await reclaimReservationCredit(tx,sourceInvoice,nd);
               await tx.execute(sql`
                 UPDATE sales_invoices
                 SET monto_acreditado = ${newNcReversed.toFixed(2)},
@@ -3888,7 +3955,7 @@ export function registerBillingRoutes(app: Express) {
         const pvRow = await db.execute(sql`SELECT area FROM pos_configs WHERE numero = ${nd.puntoVenta} AND activo = true LIMIT 1`);
         const pvArea = (pvRow.rows[0] as any)?.area || "recepcion";
         const totalND = parseFloat(String((nd as any).montoTotal || "0"));
-        if (totalND > 0) {
+        if (totalND > 0 && !isEventCashArea(pvArea)) {
           const nroND = `${nd.tipoComprobante}-${String(nd.numero).padStart(8, "0")}`;
           await storage.registerCashMovement(
             pvArea,

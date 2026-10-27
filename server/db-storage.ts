@@ -1,10 +1,12 @@
+import {breakfastEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
 import { stockUnits } from "./inventorySafety";
 import { randomUUID } from "crypto";
 import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
 import { planIngredientsWithActualQuantities, grossQuantityFor } from "./recipeStockDeduction";
-import { queueAutomaticConsumption } from "./inventoryStockEngine";
+import { queueAutomaticConsumption, unitFactor } from "./inventoryStockEngine";
+import { convertInventoryQuantity } from "./inventoryUnits";
 import { assertPaymentRequestMatches, type ReservationPaymentRequest } from "./reservationPaymentRequest";
 import { getArgentinaOperationalParts, daysBetweenCalendarDates } from "./utils/argentinaDateTime";
 import { classifyReservationPaymentMethod, normalizeReservationPaymentMethod } from "./payment-method";
@@ -15,7 +17,7 @@ import {
   projectReservationOperationalReportRows,
 } from "./reservation-operational-balances";
 import { visibleGuestCondition } from "./guest-visibility";
-import { getCashShiftAreaVariants, normalizeCashShiftArea } from "./cashArea";
+import { getCashShiftAreaVariants, normalizeCashShiftArea, isEventCashArea, assertOperationalCashArea } from "./cashArea";
 
 export function getArgentinaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
@@ -697,14 +699,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRoom(room: InsertRoom): Promise<Room> {
-    const [created] = await db.insert(rooms).values(room as any).returning();
+    const [created] = await db.insert(rooms).values({...room,bedConfigRevision:0,housekeepingServiceDate:room.status==="limpia_ocupada"?getArgentinaToday():null} as any).returning();
     return created;
   }
 
   async updateRoom(id: string, room: Partial<InsertRoom>): Promise<Room | undefined> {
     const safeUpdates: Record<string, any> = {};
     for (const [key, val] of Object.entries(room)) {
-      if (val !== undefined) safeUpdates[key] = val;
+      if (key !== "bedConfigRevision" && key !== "housekeepingServiceDate" && val !== undefined) safeUpdates[key] = val;
+    }
+    if (safeUpdates.status) safeUpdates.housekeepingServiceDate = safeUpdates.status === "limpia_ocupada" ? getArgentinaToday() : null;
+    if (Object.prototype.hasOwnProperty.call(safeUpdates,"bedConfig")) {
+      safeUpdates.bedConfigRevision=sql`CASE WHEN ${rooms.bedConfig} IS DISTINCT FROM ${safeUpdates.bedConfig} THEN ${rooms.bedConfigRevision}+1 ELSE ${rooms.bedConfigRevision} END`;
     }
     if (Object.keys(safeUpdates).length === 0) {
       const [existing] = await db.select().from(rooms).where(eq(rooms.id, id));
@@ -1130,6 +1136,7 @@ export class DatabaseStorage implements IStorage {
     return this.withInventoryMutationLock(() => withDatabaseTransaction(async () => {
       const insertData = { ...(reservation as any) };
       delete insertData.housekeepingPreparation;
+      delete insertData.housekeepingBedPreparation;
       const contextGroupId = insertData._inventoryContextGroupId as string | undefined;
       const overrideSoft = insertData._inventoryOverrideTentativeGroupWarning === true;
       delete insertData._inventoryContextGroupId;
@@ -1343,7 +1350,7 @@ export class DatabaseStorage implements IStorage {
 
   private async updateReservationUnlocked(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
     const safeData: Record<string, any> = {};
-    const protectedFields = ["id", "createdAt", "reservationCode"];
+    const protectedFields = ["id", "createdAt", "reservationCode", "housekeepingBedPreparation"];
     const fkFields = ["guestId", "roomId", "roomTypeId"];
     const validStatuses = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled", "no_show"];
     for (const [key, value] of Object.entries(reservation)) {
@@ -1356,6 +1363,9 @@ export class DatabaseStorage implements IStorage {
     if (Object.keys(safeData).length === 0) return undefined;
 
     const before = (await db.select().from(reservations).where(eq(reservations.id, id)))[0];
+    if (before && ["roomId","bedTypeId","bedTypeNotes"].some(key=>safeData[key]!==undefined&&String(safeData[key]??"")!==String((before as any)[key]??""))) {
+      safeData.housekeepingBedPreparation=null;
+    }
 
     // Igual que en createReservation: aplicar ANTES de commitear el update.
     // Si el voucher ya no está disponible, el PATCH entero falla en vez de
@@ -2264,15 +2274,7 @@ export class DatabaseStorage implements IStorage {
         COUNT(*) AS rooms_count
       FROM reservations r
       JOIN rooms rm ON rm.id = r.room_id
-      WHERE r.check_in_date <= ${today}
-        AND r.check_out_date > ${today}
-        AND (
-          r.status = 'checked_in'
-          OR (
-            r.check_in_date = ${today}
-            AND r.status IN ('confirmed', 'web_checkin', 'pending')
-          )
-        )
+      WHERE ${breakfastEligibility(new Date(Date.parse(today+"T12:00:00Z")+86400000).toISOString().slice(0,10))}
         AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
     const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
@@ -2791,6 +2793,25 @@ export class DatabaseStorage implements IStorage {
     if (resIds.length > 0) {
       const rawReservations = await db.select().from(reservations).where(inArray(reservations.id, resIds));
       reservationsList = await this.enrichReservations(rawReservations);
+
+      // Rooming list needs named companions per room (see group-detail.tsx
+      // printRoomingList / Rooming List dialog). reservation_companions is
+      // the one real source — scoped by reservationId, so rooms/reservations
+      // never mix. Excludes any row whose guestId matches the reservation's
+      // own titular, guarding against the titular also appearing as its own
+      // companion through a data inconsistency.
+      const companionRows = await db.select().from(reservationCompanions)
+        .where(inArray(reservationCompanions.reservationId, resIds))
+        .orderBy(asc(reservationCompanions.createdAt));
+      const companionsByReservation = new Map<string, typeof companionRows>();
+      for (const c of companionRows) {
+        if (!companionsByReservation.has(c.reservationId)) companionsByReservation.set(c.reservationId, []);
+        companionsByReservation.get(c.reservationId)!.push(c);
+      }
+      reservationsList = reservationsList.map(r => ({
+        ...r,
+        companions: (companionsByReservation.get(r.id) ?? []).filter(c => !c.guestId || c.guestId !== r.guestId),
+      }));
     }
 
     const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
@@ -4385,6 +4406,8 @@ export class DatabaseStorage implements IStorage {
       );
     } else if (date) {
       tasks = await db.select().from(housekeepingTasks).where(eq(housekeepingTasks.scheduledDate, date));
+    } else if (assignedTo) {
+      tasks = await db.select().from(housekeepingTasks).where(eq(housekeepingTasks.assignedTo, assignedTo));
     } else {
       tasks = await db.select().from(housekeepingTasks);
     }
@@ -4515,13 +4538,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateMenuCategory(id: string, category: Partial<InsertMenuCategory>): Promise<MenuCategory | undefined> {
-    const [updated] = await db.update(menuCategories).set(category as any).where(eq(menuCategories.id, id)).returning();
-    return updated;
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if(category.isActive !== undefined && !["true","false"].includes(category.isActive as string)) throw Object.assign(new Error("Estado inválido"),{statusCode:400});
+      if (category.isActive === "false") {
+        const [used] = await db.select({id:menuItems.id}).from(menuItems).where(and(eq(menuItems.categoryId,id),eq(menuItems.isActive,"true"))).limit(1);
+        if (used) throw Object.assign(new Error("La categoría tiene platos activos; reasignalos o desactivalos primero"), {statusCode:409});
+      }
+      const [updated] = await db.update(menuCategories).set(category as any).where(eq(menuCategories.id, id)).returning();
+      return updated;
+    });
   }
 
+
   async deleteMenuCategory(id: string): Promise<boolean> {
-    const result = await db.delete(menuCategories).where(eq(menuCategories.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const updated = await this.updateMenuCategory(id, { isActive: "false" });
+    return !!updated;
   }
 
   async getMenuItems(): Promise<MenuItemWithCategory[]> {
@@ -4581,15 +4613,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createMenuItem(item: InsertMenuItem): Promise<MenuItem> {
-    const [created] = await db.insert(menuItems).values(item as any).returning();
-    return this.syncMenuItemInventoryMirror(created);
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      const category = await this.getMenuCategory(item.categoryId);
+      if (!category || category.isActive === "false") throw Object.assign(new Error("La categoría está inactiva o no existe"), { statusCode: 409 });
+      const [created] = await db.insert(menuItems).values(item as any).returning();
+      return this.syncMenuItemInventoryMirror(created);
+    });
   }
 
+
   async updateMenuItem(id: string, item: Partial<InsertMenuItem>): Promise<MenuItem | undefined> {
-    const [updated] = await db.update(menuItems).set(item as any).where(eq(menuItems.id, id)).returning();
-    if (!updated) return undefined;
-    return this.syncMenuItemInventoryMirror(updated);
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if (item.isActive !== undefined && !["true","false"].includes(item.isActive as string)) throw Object.assign(new Error("Estado inválido"),{statusCode:400});
+      if (item.isActive === "true" || item.categoryId) {
+        const [existing] = await db.select().from(menuItems).where(eq(menuItems.id,id));
+        if(!existing) return undefined;
+        const [category] = await db.select().from(menuCategories).where(eq(menuCategories.id,item.categoryId || existing.categoryId));
+        if(!category || category.isActive === "false") throw Object.assign(new Error("La categoría está inactiva o no existe"), {statusCode:409});
+        const missing = await db.execute(sql`WITH RECURSIVE deps(id) AS (
+          SELECT id FROM recipes WHERE menu_item_id=${id}
+          UNION SELECT ri.sub_recipe_id FROM recipe_ingredients ri JOIN deps d ON d.id=ri.recipe_id WHERE ri.sub_recipe_id IS NOT NULL
+        ) SELECT 1 FROM recipes r JOIN deps d ON d.id=r.id WHERE r.is_active='false' LIMIT 1`);
+        if(missing.rows.length) throw Object.assign(new Error("Primero reactivá las elaboraciones de la receta"), {statusCode:409});
+      }
+      const [updated] = await db.update(menuItems).set(item as any).where(eq(menuItems.id, id)).returning();
+      if (!updated) return undefined;
+      return this.syncMenuItemInventoryMirror(updated);
+    });
   }
+
 
   async menuItemHasMovement(id: string): Promise<boolean> {
     const [row] = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.menuItemId, id)).limit(1);
@@ -4600,20 +4654,8 @@ export class DatabaseStorage implements IStorage {
     const [item] = await db.select().from(menuItems).where(eq(menuItems.id, id));
     if (!item) return { deleted: false, deactivated: false };
 
-    const hasMovement = await this.menuItemHasMovement(id);
-    if (hasMovement) {
-      await db.update(menuItems).set({ isActive: "false", isAvailable: "false" } as any).where(eq(menuItems.id, id));
-      if (item.inventoryItemId) {
-        await db.update(inventoryItems).set({ isActive: "false" } as any).where(eq(inventoryItems.id, item.inventoryItemId));
-      }
-      return { deleted: false, deactivated: true };
-    }
-
-    if (item.inventoryItemId) {
-      await db.delete(inventoryItems).where(eq(inventoryItems.id, item.inventoryItemId));
-    }
-    const result = await db.delete(menuItems).where(eq(menuItems.id, id));
-    return { deleted: (result.rowCount ?? 0) > 0, deactivated: false };
+    await this.updateMenuItem(id, { isActive: "false", isAvailable: "false" });
+    return { deleted: false, deactivated: true };
   }
 
   async closeStaleOrders(): Promise<number> {
@@ -5298,17 +5340,34 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateRecipe(id: string, recipe: Partial<InsertRecipe>): Promise<Recipe | undefined> {
+    if (recipe.isActive !== undefined && !["true","false"].includes(recipe.isActive as string)) throw Object.assign(new Error("Estado inválido"),{statusCode:400});
     return db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
       await requireActiveInventoryReferences(tx, recipe.outputInventoryItemId);
+      if (recipe.isActive === "false") {
+        const used = await tx.execute(sql`SELECT 1 FROM recipe_ingredients ri JOIN recipes r ON r.id=ri.recipe_id LEFT JOIN menu_items m ON m.id=r.menu_item_id
+          WHERE ri.sub_recipe_id=${id} AND r.is_active='true' AND (r.menu_item_id IS NULL OR m.is_active IS DISTINCT FROM 'false') LIMIT 1`);
+        if (used.rows.length) throw Object.assign(new Error("La elaboración está usada por una receta activa; quitá o reemplazá esa referencia antes de desactivarla"), {statusCode:409});
+        const breakfast = await tx.execute(sql`SELECT 1 FROM breakfast_catalog_items WHERE recipe_id=${id} AND is_active='true' LIMIT 1`);
+        if (breakfast.rows.length) throw Object.assign(new Error("Desactivá primero esta elaboración en el catálogo de Desayunos"),{statusCode:409});
+        const pending = await tx.execute(sql`SELECT 1 FROM inventory_pending_productions WHERE status='pending' AND payload->>'recipeId'=${id} LIMIT 1`);
+        if (pending.rows.length) throw Object.assign(new Error("La elaboración tiene una producción pendiente; resolvela antes de desactivar"), {statusCode:409});
+      }
+      if (recipe.isActive === "true") {
+        const inactive = await tx.execute(sql`WITH RECURSIVE deps(id) AS (
+          SELECT sub_recipe_id FROM recipe_ingredients WHERE recipe_id=${id} AND sub_recipe_id IS NOT NULL
+          UNION SELECT ri.sub_recipe_id FROM recipe_ingredients ri JOIN deps d ON d.id=ri.recipe_id WHERE ri.sub_recipe_id IS NOT NULL
+        ) SELECT 1 FROM recipes r JOIN deps d ON d.id=r.id WHERE r.is_active='false' LIMIT 1`);
+        if (inactive.rows.length) throw Object.assign(new Error("Primero reactivá las elaboraciones usadas como ingredientes"), {statusCode:409});
+      }
       const [updated] = await tx.update(recipes).set(recipe as any).where(eq(recipes.id, id)).returning();
       return updated;
     });
   }
 
   async deleteRecipe(id: string): Promise<boolean> {
-    await db.delete(recipeIngredients).where(eq(recipeIngredients.recipeId, id));
-    const result = await db.delete(recipes).where(eq(recipes.id, id));
-    return (result.rowCount ?? 0) > 0;
+    const updated = await this.updateRecipe(id, { isActive: "false" });
+    return !!updated;
   }
 
   async getRecipeIngredients(recipeId: string): Promise<RecipeIngredient[]> {
@@ -5317,7 +5376,18 @@ export class DatabaseStorage implements IStorage {
 
   async createRecipeIngredient(ingredient: InsertRecipeIngredient): Promise<RecipeIngredient> {
     return db.transaction(async tx => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      if (ingredient.subRecipeId) {
+        const sub = await tx.execute(sql`SELECT id FROM recipes WHERE id=${ingredient.subRecipeId} AND is_active='true' FOR SHARE`);
+        if (!sub.rows.length) throw Object.assign(new Error("La elaboración seleccionada está inactiva o no existe"), {statusCode:409});
+      }
       await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
+      if (ingredient.inventoryItemId) {
+        const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, ingredient.inventoryItemId)).for("share");
+        const factor = await unitFactor(tx, item.id, ingredient.unit, item.unit);
+        convertInventoryQuantity(Number(ingredient.quantity), factor);
+        ingredient = { ...ingredient, unitCost: (Number(item.costPrice || 0) * factor).toFixed(4) };
+      }
       const [created] = await tx.insert(recipeIngredients).values(ingredient as any).returning();
       return created;
     });
@@ -5325,7 +5395,21 @@ export class DatabaseStorage implements IStorage {
 
   async updateRecipeIngredient(id: string, ingredient: Partial<InsertRecipeIngredient>): Promise<RecipeIngredient | undefined> {
     return db.transaction(async tx => {
-      await requireActiveInventoryReferences(tx, ingredient.inventoryItemId, ingredient.warehouseId);
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(173410, 4)`);
+      const [existing] = await tx.select().from(recipeIngredients).where(eq(recipeIngredients.id, id)).for("update");
+      if (!existing) return undefined;
+      const effective = { ...existing, ...ingredient };
+      if (ingredient.subRecipeId) {
+        const sub = await tx.execute(sql`SELECT id FROM recipes WHERE id=${ingredient.subRecipeId} AND is_active='true' FOR SHARE`);
+        if (!sub.rows.length) throw Object.assign(new Error("La elaboración seleccionada está inactiva o no existe"), { statusCode: 409 });
+      }
+      await requireActiveInventoryReferences(tx, effective.inventoryItemId, effective.warehouseId);
+      if (effective.inventoryItemId) {
+        const [item] = await tx.select().from(inventoryItems).where(eq(inventoryItems.id, effective.inventoryItemId)).for("share");
+        const factor = await unitFactor(tx, item.id, effective.unit, item.unit);
+        convertInventoryQuantity(Number(effective.quantity), factor);
+        ingredient = { ...ingredient, unitCost: (Number(item.costPrice || 0) * factor).toFixed(4) };
+      }
       const [updated] = await tx.update(recipeIngredients).set(ingredient as any).where(eq(recipeIngredients.id, id)).returning();
       return updated;
     });
@@ -5640,9 +5724,8 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getSpaTreatments(status: string = "active"): Promise<SpaTreatment[]> {
-    if (status === "all") return db.select().from(spaTreatments);
-    return db.select().from(spaTreatments).where(eq(spaTreatments.isActive, status === "inactive" ? "false" : "true"));
+  async getSpaTreatments(): Promise<SpaTreatment[]> {
+    return db.select().from(spaTreatments).where(eq(spaTreatments.isActive, "true"));
   }
 
   async getSpaTreatment(id: string): Promise<SpaTreatment | undefined> {
@@ -5667,8 +5750,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteSpaTreatment(id: string): Promise<boolean> {
-    const rows = await db.update(spaTreatments).set({ isActive: "false" }).where(eq(spaTreatments.id, id)).returning({ id: spaTreatments.id });
-    return rows.length > 0;
+    const result = await db.delete(spaTreatments).where(eq(spaTreatments.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   private async enrichSpaAppointmentsBulk(appointments: SpaAppointment[]): Promise<SpaAppointmentWithDetails[]> {
@@ -7782,10 +7865,12 @@ export class DatabaseStorage implements IStorage {
   // ==================== Cash Register Module ====================
 
   async getCashConfigs(): Promise<CashRegisterConfig[]> {
-    return db.select().from(cashRegisterConfigs).orderBy(asc(cashRegisterConfigs.area));
+    const configs = await db.select().from(cashRegisterConfigs).orderBy(asc(cashRegisterConfigs.area));
+    return configs.map(config => isEventCashArea(config.area) ? { ...config, isActive: false } : config);
   }
 
   async updateCashConfig(area: string, data: Partial<InsertCashRegisterConfig>): Promise<CashRegisterConfig | undefined> {
+    if (isEventCashArea(area) || isEventCashArea(data.area)) data = { ...data, isActive: false };
     const [updated] = await db.update(cashRegisterConfigs)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(cashRegisterConfigs.area, area))
@@ -7797,12 +7882,14 @@ export class DatabaseStorage implements IStorage {
     const conditions: any[] = [];
     if (area) conditions.push(inArray(cashShifts.area, getCashShiftAreaVariants(area)));
     if (status) conditions.push(eq(cashShifts.status, status));
+    if (status === "open" && !area) conditions.push(not(inArray(cashShifts.area, getCashShiftAreaVariants("events"))));
     return db.select().from(cashShifts)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id));
   }
 
   async getCurrentShift(area: string): Promise<CashShift | undefined> {
+    if (isEventCashArea(area)) return undefined;
     const [shift] = await db.select().from(cashShifts)
       .where(and(inArray(cashShifts.area, getCashShiftAreaVariants(area)), eq(cashShifts.status, "open")))
       .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id))
@@ -7826,6 +7913,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async openShift(data: InsertCashShift): Promise<CashShift> {
+    assertOperationalCashArea(data.area);
     const existing = await this.getCurrentShift(data.area);
     if (existing) throw new Error("Ya hay un turno abierto para esta área");
     const shiftNumber = await this._nextShiftNumber(data.area);
@@ -7856,6 +7944,7 @@ export class DatabaseStorage implements IStorage {
     return db.transaction(async (tx) => {
     const [shift] = await tx.select().from(cashShifts).where(eq(cashShifts.id, shiftId)).for("update");
     if (!shift) throw new Error("Turno no encontrado");
+    assertOperationalCashArea(shift.area);
     if (shift.status !== "open") throw new Error("El turno ya está cerrado");
 
     // Update turnoTipo if provided and not already set
@@ -7976,6 +8065,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getOrCreateActiveTurno(area: string): Promise<CashShift> {
+    assertOperationalCashArea(area);
     const turnoActivo = await this.getCurrentShift(area);
 
     if (turnoActivo) return turnoActivo;
@@ -7996,6 +8086,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async initCashShifts(): Promise<void> {
+    // Retire the configuration only. Never close or rewrite historical shifts/money.
+    await db.update(cashRegisterConfigs).set({ isActive: false })
+      .where(and(inArray(cashRegisterConfigs.area, getCashShiftAreaVariants("events")), eq(cashRegisterConfigs.isActive, true)));
     const areas = ["recepcion", "restaurant", "spa"];
     for (const area of areas) {
       const existing = await this.getCurrentShift(area);
@@ -8016,6 +8109,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async tomarTurno(shiftId: string, operador: string, turnoTipo?: string | null): Promise<CashShift> {
+    const [existing] = await db.select({ area: cashShifts.area }).from(cashShifts).where(eq(cashShifts.id, shiftId));
+    if (existing) assertOperationalCashArea(existing.area);
     const setValues: Record<string, any> = { openedBy: operador, autoCreado: false };
     if (turnoTipo) setValues.turnoTipo = turnoTipo;
     const [shift] = await db.update(cashShifts)
@@ -8028,7 +8123,7 @@ export class DatabaseStorage implements IStorage {
 
   async getAutocreadoShifts(): Promise<CashShift[]> {
     return db.select().from(cashShifts)
-      .where(and(eq(cashShifts.status, "open"), eq(cashShifts.autoCreado, true)))
+      .where(and(eq(cashShifts.status, "open"), eq(cashShifts.autoCreado, true), not(inArray(cashShifts.area, getCashShiftAreaVariants("events")))))
       .orderBy(desc(cashShifts.openedAt));
   }
 
@@ -8208,6 +8303,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCashMovement(data: InsertCashMovement): Promise<CashMovement> {
+    assertOperationalCashArea(data.area);
+    if (data.shiftId) {
+      const [shift] = await db.select({ area: cashShifts.area }).from(cashShifts).where(eq(cashShifts.id, data.shiftId));
+      if (shift) assertOperationalCashArea(shift.area);
+    }
     // Generic/manual creation is deliberately unable to link a cash movement
     // to a payment. Only registerCashMovement and transactional internal flows
     // may set paymentId.
@@ -8224,6 +8324,7 @@ export class DatabaseStorage implements IStorage {
 
   async registerCashMovement(area: string, sourceType: string, sourceId: string | null, sourceLabel: string, paymentMethod: string, amount: string, movementType: string = "income", registeredBy?: string, receiptType?: string, paymentId?: string | null): Promise<CashMovement> {
     // Resolver ambos alias y conservar el área del turno elegido.
+    assertOperationalCashArea(area);
     area = normalizeCashShiftArea(area);
     for (;;) {
       const turno = await this.getOrCreateActiveTurno(area);
@@ -9157,24 +9258,21 @@ export class DatabaseStorage implements IStorage {
       }
 
       const { area, status, valueType, ...rest } = data;
-      const voucher: Partial<typeof giftVouchers.$inferInsert> = { ...rest };
+      const diffFields = (Object.keys(rest) as (keyof typeof rest)[])
+        .filter(field => rest[field] !== undefined && String((existing as any)[field] ?? "") !== String(rest[field] ?? ""));
+      // Opening the editor and saving unchanged is a successful no-op. Do not
+      // issue an empty UPDATE or insert an empty audit-events batch.
+      if (diffFields.length === 0) return existing;
+      const voucher = Object.fromEntries(diffFields.map(field => [field, rest[field]]));
       const [v] = await tx.update(giftVouchers).set(voucher).where(eq(giftVouchers.id, id)).returning();
-
-      const diffFields = Object.keys(rest) as (keyof typeof rest)[];
-      if (diffFields.length > 0) {
-        await tx.insert(giftVoucherEvents).values(
-          diffFields
-            .filter((field) => String((existing as any)[field] ?? "") !== String((rest as any)[field] ?? ""))
-            .map((field) => ({
-              voucherId: id,
-              eventType: "editado" as const,
-              fieldChanged: String(field),
-              oldValue: (existing as any)[field] == null ? null : String((existing as any)[field]),
-              newValue: (rest as any)[field] == null ? null : String((rest as any)[field]),
-              performedBy: performedBy ?? null,
-            })),
-        );
-      }
+      await tx.insert(giftVoucherEvents).values(diffFields.map(field => ({
+        voucherId: id,
+        eventType: "editado" as const,
+        fieldChanged: String(field),
+        oldValue: (existing as any)[field] == null ? null : String((existing as any)[field]),
+        newValue: (rest as any)[field] == null ? null : String(rest[field]),
+        performedBy: performedBy ?? null,
+      })));
       return v;
     });
   }

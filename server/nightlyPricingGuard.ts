@@ -6,7 +6,6 @@ import { initialNightlyPricing, nightlyTotal, amountString, pricingError } from 
 
 const financialScope = new AsyncLocalStorage<Set<string>>();
 const nightlyWriter = new AsyncLocalStorage<number>();
-export const NIGHTLY_ACTIVATION_KEY = "reservation_nightly_activation_at";
 export const withNightlyWriter = <T>(revision: number, action: () => Promise<T>) => nightlyWriter.run(revision, action);
 export function withFinancialScopeLock<T>(key: string, action: () => Promise<T>): Promise<T> {
   const held = financialScope.getStore();
@@ -71,11 +70,6 @@ export async function accommodationFiscalBlock(id: string): Promise<string | nul
 export async function initializeNightlyPricing(data: Record<string, any>) {
   // Never accept a client-supplied pricing identity or reconstruct an existing reservation.
   delete data.nightlyPricing; delete data.pricingScheme; delete data.pricingRevision;
-  const setting = await db.execute(sql`SELECT value FROM system_settings WHERE key=${NIGHTLY_ACTIVATION_KEY}`);
-  const activeAt = Date.parse(String((setting.rows[0] as any)?.value || ""));
-  if (setting.rows.length && !Number.isFinite(activeAt)) pricingError("La activación del esquema nocturno es inválida. Requiere corrección administrativa antes de crear reservas.", 409);
-  if (!Number.isFinite(activeAt) || Date.now() < activeAt ||
-      new Date(data.createdAt).getTime() < activeAt) return;
   const lines = initialNightlyPricing(data);
   data.pricingScheme = "nightly_v1";
   data.nightlyPricing = lines;

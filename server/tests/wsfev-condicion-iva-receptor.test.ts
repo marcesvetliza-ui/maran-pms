@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { feCAESolicitar } from "../billing/wsfevClient";
+import { authorizationFixture } from "./helpers/wsfeConsultationFixture";
 import { resolveCondicionIvaReceptorId } from "../billing/fiscalDocument";
 
 /**
@@ -20,10 +21,11 @@ afterEach(() => {
 });
 
 function mockArcaSuccess() {
-  global.fetch = vi.fn(async () => new Response(
-    `<soap:Envelope><Resultado>A</Resultado><CAE>71234567890123</CAE><CAEFchVto>20260930</CAEFchVto></soap:Envelope>`,
-    { status: 200 },
-  )) as any;
+  global.fetch = vi.fn(async (_url: unknown, options?: RequestInit) => {
+    const body = String(options?.body);
+    const value = (tag: string) => Number(body.match(new RegExp(`<ar:${tag}>([0-9]+)</ar:${tag}>`))?.[1]);
+    return new Response(authorizationFixture(value("PtoVta"), value("CbteDesde"), "", "20260930", value("CbteTipo")), { status: 200 });
+  }) as any;
 }
 
 const baseRequest = {

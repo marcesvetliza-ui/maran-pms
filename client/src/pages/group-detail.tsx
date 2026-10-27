@@ -1,3 +1,4 @@
+import { ReservationNightlyPricing } from "@/components/reservation-nightly-pricing";
 import { GroupOccupantDialog } from "@/components/group-occupant-dialog";
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
@@ -202,6 +203,34 @@ export function calculateGroupCajaToday(rows: Array<{ method: string; amount?: s
   return rows
     .filter((row) => GROUP_CAJA_TENDER_METHODS.has(row.method))
     .reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+}
+
+/**
+ * Shared ordering for the Grupos "Rooming List" (preview dialog and print):
+ * active reservations only, in natural ascending room order — "207" sorts
+ * before "1001", unlike a plain string sort, which would put "1001" first.
+ * Reservations without a room assigned sort after every assigned room,
+ * tied by check-in date then reservation id so the order stays stable
+ * across renders/regenerations.
+ */
+export function sortReservationsForRoomingList<T extends { status: string; checkInDate?: string | null; id: string; room?: { roomNumber?: string | null } | null }>(
+  reservationsList: T[],
+): T[] {
+  return reservationsList
+    .filter(r => r.status !== "cancelled")
+    .slice()
+    .sort((a, b) => {
+      const roomA = (a.room?.roomNumber || "").trim();
+      const roomB = (b.room?.roomNumber || "").trim();
+      if (roomA && roomB) {
+        const cmp = roomA.localeCompare(roomB, "es", { numeric: true, sensitivity: "base" });
+        if (cmp !== 0) return cmp;
+        return (a.checkInDate || "").localeCompare(b.checkInDate || "") || a.id.localeCompare(b.id);
+      }
+      if (roomA && !roomB) return -1;
+      if (!roomA && roomB) return 1;
+      return a.id.localeCompare(b.id);
+    });
 }
 
 const fmtDate = (d: string) => {
@@ -1709,16 +1738,16 @@ export default function GroupDetailPage() {
     if (!group) return;
     const escapeNote = (value: string) => value.replace(/[&<>"']/g, (char) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char);
-    const roomObservations = (notes: string | null | undefined) => [
-      group.notes ? `<div><strong>Grupo:</strong> ${escapeNote(group.notes)}</div>` : "",
-      notes ? `<div><strong>Habitación:</strong> ${escapeNote(notes)}</div>` : "",
-    ].join("");
-    const sortedReservations = [...group.reservations]
-      .filter(r => r.status !== "cancelled")
-      .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""));
+    // Grupo.notes ya se muestra una única vez en el bloque "Notas de la
+    // estadía" más abajo — acá solo va lo específico de la habitación, para
+    // no repetir el mismo texto en cada fila (eso era lo que inflaba la
+    // columna de Notas y disparaba la altura de cada fila).
+    const roomObservations = (notes: string | null | undefined) =>
+      notes ? `<div>${escapeNote(notes)}</div>` : "";
+    const sortedReservations = sortReservationsForRoomingList(group.reservations);
 
     const groups = sortedReservations.map((res, idx) => {
-      const companions: any[] = (res as any).companions || [];
+      const companions = res.companions ?? [];
       const lateCheckout = (res as any).lateCheckOut;
       const lateCheckoutTime = (res as any).lateCheckOutTime;
       const isLastRowOfGroup = companions.length === 0;
@@ -1733,16 +1762,16 @@ export default function GroupDetailPage() {
         <td class="c-date${isLastRowOfGroup ? '' : ' no-border'}">${fmtDate(res.checkOutDate)}${lateCheckout ? `<br/><span class="badge-late">LATE${lateCheckoutTime ? ' ' + lateCheckoutTime : ''}</span>` : ""}</td>
         <td class="c-notes${isLastRowOfGroup ? '' : ' no-border'}">${roomObservations(res.notes)}</td>
       </tr>`;
-      const companionRows = companions.map((c: any, cIdx: number) => `
+      const companionRows = companions.map((c, cIdx) => `
       <tr class="companion-row${idx % 2 === 1 ? ' alt' : ''}${cIdx === companions.length - 1 ? ' last-companion' : ''}">
         <td class="c-idx no-border"></td>
         <td class="c-room no-border companion-label">&#8627;</td>
         <td class="c-bed no-border companion-label">Acomp.</td>
-        <td class="c-guest no-border">${c.lastName || ""} ${c.firstName || ""}</td>
-        <td class="c-doc no-border">${c.documentNumber ? `${c.documentType || "DOC"}: ${c.documentNumber}` : "-"}</td>
+        <td class="c-guest no-border">${escapeNote(`${c.lastName || ""} ${c.firstName || ""}`.trim())}</td>
+        <td class="c-doc no-border">${c.documentNumber ? `${c.documentType || "DOC"}: ${escapeNote(c.documentNumber)}` : "-"}</td>
         <td class="c-date no-border"></td>
         <td class="c-date no-border"></td>
-        <td class="c-notes no-border">${c.notes || ""}</td>
+        <td class="c-notes no-border"></td>
       </tr>`).join("");
       return `<tbody class="room-group">${mainRow}${companionRows}</tbody>`;
     }).join("");
@@ -1764,12 +1793,12 @@ export default function GroupDetailPage() {
 
     table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; }
     colgroup .col-idx { width: 24px; }
-    colgroup .col-room { width: 46px; }
-    colgroup .col-bed { width: 88px; }
+    colgroup .col-room { width: 50px; }
+    colgroup .col-bed { width: 80px; }
     colgroup .col-guest { width: auto; }
-    colgroup .col-doc { width: 104px; }
-    colgroup .col-date { width: 82px; }
-    colgroup .col-notes { width: 108px; }
+    colgroup .col-doc { width: 100px; }
+    colgroup .col-date { width: 76px; }
+    colgroup .col-notes { width: 180px; }
 
     thead { display: table-header-group; }
     th { background: #222; color: #fff; padding: 7px 6px; text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.2px; white-space: nowrap; }
@@ -1792,7 +1821,7 @@ export default function GroupDetailPage() {
 
     @media print {
       body { padding: 10mm; }
-      @page { margin: 12mm; }
+      @page { size: landscape; margin: 12mm; }
     }
   </style>
 </head>
@@ -2644,7 +2673,15 @@ export default function GroupDetailPage() {
                         <FileDown className="h-4 w-4 mr-2" />Folio Maestro PDF
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem onClick={() => setShowRoomingListDialog(true)}>
+                    <DropdownMenuItem onSelect={(e) => {
+                      // Radix docs: opening a Dialog synchronously from a
+                      // DropdownMenuItem races the dropdown's own closing
+                      // focus-restoration against the dialog's focus trap.
+                      // Deferring the open to the next tick is their
+                      // documented fix.
+                      e.preventDefault();
+                      setTimeout(() => setShowRoomingListDialog(true), 0);
+                    }}>
                       <Printer className="h-4 w-4 mr-2" />Rooming List
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -3713,6 +3750,13 @@ export default function GroupDetailPage() {
               </div>
             </div>
 
+            {group.notes?.trim() && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-md text-sm" data-testid="rooming-list-group-notes">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Notas de la estadía</p>
+                <p className="whitespace-pre-wrap break-words">{group.notes}</p>
+              </div>
+            )}
+
             {group.reservations.length > 0 ? (
               <Table>
                 <TableHeader>
@@ -3729,28 +3773,27 @@ export default function GroupDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {group.reservations
-                    .filter(r => r.status !== "cancelled")
-                    .sort((a, b) => (a.room?.roomNumber || "").localeCompare(b.room?.roomNumber || ""))
-                    .map((res, idx) => (
+                  {sortReservationsForRoomingList(group.reservations).flatMap((res, idx) => {
+                    const companions = res.companions ?? [];
+                    const rows = [
                       <TableRow key={res.id} data-testid={`row-rooming-${res.id}`}>
-                        <TableCell className="font-medium">{idx + 1}</TableCell>
-                        <TableCell className="font-bold">{res.room?.roomNumber}</TableCell>
-                        <TableCell>{getBedLabel(res)}</TableCell>
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium align-top">{idx + 1}</TableCell>
+                        <TableCell className="font-bold align-top">{res.room?.roomNumber || "-"}</TableCell>
+                        <TableCell className="align-top">{getBedLabel(res)}</TableCell>
+                        <TableCell className="font-medium align-top">
                           {res.guestId && res.guest?.firstName && !res.guest?.codigo?.startsWith("GROUP-")
                             ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
                             : (res as any).guestName || <span className="text-muted-foreground italic">{group?.name || "Sin asignar"}</span>}
                         </TableCell>
-                        <TableCell className="text-sm">
+                        <TableCell className="text-sm align-top">
                           {res.guest?.documentNumber
                             ? `${res.guest?.documentType || "DOC"}: ${res.guest?.documentNumber}`
                             : "-"}
                         </TableCell>
-                        <TableCell>{fmtDate(res.checkInDate)}</TableCell>
-                        <TableCell>{fmtDate(res.checkOutDate)}</TableCell>
-                        <TableCell>
-                          <Badge 
+                        <TableCell className="align-top">{fmtDate(res.checkInDate)}</TableCell>
+                        <TableCell className="align-top">{fmtDate(res.checkOutDate)}</TableCell>
+                        <TableCell className="align-top">
+                          <Badge
                             variant={
                               res.status === "checked_in" ? "default" :
                               res.status === "confirmed" ? "secondary" :
@@ -3762,12 +3805,31 @@ export default function GroupDetailPage() {
                              res.status === "checked_out" ? "Salió" : res.status}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[240px] whitespace-pre-wrap break-words">
-                          <GroupRoomObservations groupNotes={group.notes} roomNotes={res.notes} />
-                          {!group.notes && !res.notes && "-"}
+                        <TableCell className="text-sm text-muted-foreground max-w-[240px] whitespace-pre-wrap break-words align-top">
+                          <GroupRoomObservations roomNotes={res.notes} />
+                          {!res.notes?.trim() && "-"}
                         </TableCell>
-                      </TableRow>
-                    ))}
+                      </TableRow>,
+                    ];
+                    companions.forEach((c, cIdx) => {
+                      rows.push(
+                        <TableRow key={`${res.id}-companion-${c.id ?? cIdx}`} data-testid={`row-rooming-companion-${c.id ?? `${res.id}-${cIdx}`}`} className="bg-muted/40">
+                          <TableCell className="align-top" />
+                          <TableCell className="text-muted-foreground text-xs italic align-top">&#8627;</TableCell>
+                          <TableCell className="text-muted-foreground text-xs italic align-top">Acomp.</TableCell>
+                          <TableCell className="text-muted-foreground align-top">{`${c.lastName || ""} ${c.firstName || ""}`.trim()}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground align-top">
+                            {c.documentNumber ? `${c.documentType || "DOC"}: ${c.documentNumber}` : "-"}
+                          </TableCell>
+                          <TableCell className="align-top" />
+                          <TableCell className="align-top" />
+                          <TableCell className="align-top" />
+                          <TableCell className="align-top" />
+                        </TableRow>,
+                      );
+                    });
+                    return rows;
+                  })}
                 </TableBody>
               </Table>
             ) : (
@@ -5274,7 +5336,7 @@ export default function GroupDetailPage() {
       )}
 
       <Dialog open={!!editingRateRes} onOpenChange={(open) => { if (!open) { setEditingRateRes(null); setEditingRate(""); setEditingEarlyCheckin(false); setEditingEarlyCheckinTime(""); setEditingLateCheckout(false); setEditingLateCheckoutTime(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className={editingRateRes?.pricingScheme === "nightly_v1" ? "max-w-4xl max-h-[90dvh] overflow-y-auto" : "max-w-sm"}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="h-4 w-4" />
@@ -5285,6 +5347,12 @@ export default function GroupDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {editingRateRes?.pricingScheme === "nightly_v1" ? (
+              <ReservationNightlyPricing reservationId={editingRateRes.id} onApplied={() => {
+                void queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
+                void queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
+              }} />
+            ) : (
             <div>
               <Label htmlFor="editing-rate">Tarifa por noche ($)</Label>
               <Input
@@ -5299,6 +5367,7 @@ export default function GroupDetailPage() {
                 className="mt-1"
               />
             </div>
+            )}
             <div className="rounded-lg border p-3 space-y-3">
               <div className="flex items-center gap-3">
                 <Checkbox id="early-checkin" checked={editingEarlyCheckin}
@@ -5354,7 +5423,7 @@ export default function GroupDetailPage() {
                 if (!editingRateRes) return;
                 updateRateMutation.mutate({
                   reservationId: editingRateRes.id,
-                  rate: editingRate,
+                  rate: editingRateRes.pricingScheme === "nightly_v1" ? "" : editingRate,
                   earlyCheckIn: editingEarlyCheckin,
                   earlyCheckInTime: editingEarlyCheckinTime,
                   lateCheckOut: editingLateCheckout,
@@ -5364,7 +5433,7 @@ export default function GroupDetailPage() {
               disabled={updateRateMutation.isPending}
               data-testid="button-save-rate"
             >
-              {updateRateMutation.isPending ? "Guardando..." : "Guardar cambios"}
+              {updateRateMutation.isPending ? "Guardando..." : editingRateRes?.pricingScheme === "nightly_v1" ? "Guardar horarios" : "Guardar cambios"}
             </Button>
           </DialogFooter>
         </DialogContent>

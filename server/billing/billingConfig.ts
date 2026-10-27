@@ -4,11 +4,11 @@ import { eq } from "drizzle-orm";
 
 export type BillingConfig = typeof billingConfig.$inferSelect;
 
-export async function getBillingConfig(): Promise<BillingConfig> {
-  const rows = await db.select().from(billingConfig).limit(1);
+export async function getBillingConfig(database: Omit<typeof db,"$client"> = db): Promise<BillingConfig> {
+  const rows = await database.select().from(billingConfig).limit(1);
   if (rows.length > 0) return rows[0];
   // Insert default row if none exists
-  const [row] = await db.insert(billingConfig).values({ id: 1 }).returning();
+  const [row] = await database.insert(billingConfig).values({ id: 1 }).returning();
   return row;
 }
 

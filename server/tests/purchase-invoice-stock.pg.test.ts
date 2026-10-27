@@ -277,4 +277,25 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
       await pool.query("DELETE FROM accounting_suppliers WHERE id = $1", [supplier.rows[0].id]);
     }
   });
+  it.each([24,120])("convierte una caja de %i sobres sin alterar la equivalencia de otras presentaciones", async content=>{
+    const suffix=randomUUID();
+    const supplier=(await pool!.query("INSERT INTO accounting_suppliers(razon_social,cuit,condicion_iva) VALUES($1,$2,'responsable_inscripto') RETURNING id",['Azúcar '+suffix,'30'+suffix.replaceAll('-','').slice(0,9)])).rows[0].id;
+    const item=(await pool!.query("INSERT INTO inventory_items(name,unit,current_stock,cost_price) VALUES($1,'unidad',0,0) RETURNING id",['Sobres '+suffix])).rows[0].id;
+    const warehouse=(await pool!.query("INSERT INTO inventory_warehouses(name) VALUES($1) RETURNING id",['Depósito '+suffix])).rows[0].id;
+    let invoiceId:number|undefined;
+    try {
+      await pool!.query("INSERT INTO inventory_unit_conversions(item_id,from_unit,factor) VALUES($1,'caja',48)",[item]);
+      const response=await request('POST','/api/purchase-invoices',{tipoComprobante:'REMITO',supplierId:supplier,numeroComprobante:suffix,fechaEmision:'2026-10-10',montoNeto:'0',stockItems:[{itemId:item,warehouseId:warehouse,quantity:2,unit:'caja',unitCost:content*10,stockUnitsPerInput:content}]});
+      expect(response.status,JSON.stringify(response.body)).toBe(201);invoiceId=response.body.id;
+      const row=(await pool!.query('SELECT current_stock,cost_price FROM inventory_items WHERE id=$1',[item])).rows[0];
+      expect(Number(row.current_stock)).toBe(content*2);expect(Number(row.cost_price)).toBe(10);
+      const line=(await pool!.query('SELECT quantity,stock_quantity,input_unit,stock_unit FROM purchase_invoice_lines WHERE invoice_id=$1',[invoiceId])).rows[0];
+      expect(Number(line.stock_quantity)/Number(line.quantity)).toBe(content);expect(line.input_unit).toBe('caja');expect(line.stock_unit).toBe('unidad');
+      expect(Number((await pool!.query('SELECT factor FROM inventory_unit_conversions WHERE item_id=$1',[item])).rows[0].factor)).toBe(48);
+    } finally {
+      if(invoiceId){await pool!.query("DELETE FROM stock_movements WHERE source_type='purchase_invoice' AND source_id=$1",[String(invoiceId)]);await pool!.query('DELETE FROM purchase_invoices WHERE id=$1',[invoiceId]);}
+      await pool!.query('DELETE FROM item_price_history WHERE item_id=$1',[item]);await pool!.query('DELETE FROM inventory_item_suppliers WHERE item_id=$1',[item]);await pool!.query('DELETE FROM warehouse_stock WHERE item_id=$1',[item]);await pool!.query('DELETE FROM inventory_unit_conversions WHERE item_id=$1',[item]);await pool!.query('DELETE FROM inventory_items WHERE id=$1',[item]);await pool!.query('DELETE FROM inventory_warehouses WHERE id=$1',[warehouse]);await pool!.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplier]);
+    }
+  });
+
 });

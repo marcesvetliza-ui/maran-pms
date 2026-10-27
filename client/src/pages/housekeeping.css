@@ -1,0 +1,106 @@
+/* Housekeeping: room content determines the grid, not a fixed seven-column count. */
+.hk-room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.hk-room-card {
+  --hk-accent: #94a3b8;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-top: 3px solid var(--hk-accent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--hk-accent) 10%, hsl(var(--background)));
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.04);
+}
+.hk-room-card[data-status="available"], .hk-room-card[data-status="inspected"] { --hk-accent: #22a46f; }
+.hk-room-card[data-status="occupied"] { --hk-accent: #4b8be8; }
+.hk-room-card[data-status="dirty"] { --hk-accent: #ed9c42; }
+.hk-room-card[data-status="cleaning"] { --hk-accent: #dfb526; }
+.hk-room-card[data-status="maintenance"] { --hk-accent: #e36c78; }
+.hk-room-card[data-status="limpia_ocupada"] { --hk-accent: #20a695; }
+.hk-room-card[data-status="no_molestar"] { --hk-accent: #a07bd4; }
+.dark .hk-room-card { background: color-mix(in srgb, var(--hk-accent) 16%, hsl(var(--background))); }
+.hk-room-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 280px;
+  height: 100%;
+  padding: 16px;
+  gap: 12px;
+}
+.hk-room-heading, .hk-room-identity, .hk-room-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hk-room-heading { justify-content: space-between; }
+.hk-room-number { font-size: 24px; line-height: 1.2; font-weight: 700; letter-spacing: -0.025em; }
+.hk-room-tools { flex-shrink: 0; gap: 4px; }
+.hk-room-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-height: 36px;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  color: hsl(var(--foreground));
+}
+.hk-room-camaje {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  align-items: start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 78px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 9px;
+  background: hsl(var(--muted) / 0.4);
+  text-align: left;
+}
+.hk-room-camaje:hover { background: hsl(var(--muted) / 0.7); }
+.hk-room-camaje:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.hk-room-camaje-label { display: block; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.4; margin-bottom: 3px; }
+.hk-room-camaje-value { display: block; font-size: 13px; line-height: 1.45; font-weight: 500; overflow-wrap: anywhere; }
+.hk-room-actions, .hk-room-task-list { display: flex; flex-direction: column; gap: 8px; margin-top: auto; min-width: 0; }
+.hk-room-actions > button {
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  height: auto;
+  padding: 8px 10px;
+  white-space: normal;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.35;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--background));
+  overflow-wrap: anywhere;
+}
+.hk-room-actions > button svg { flex-shrink: 0; margin: 0; width: 15px; height: 15px; }
+.hk-room-task-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; min-width: 0; }
+.hk-room-task-row > :first-child { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; padding: 5px 8px; }
+.hk-room-task-row > button { flex-shrink: 0; min-width: 34px; min-height: 34px; }
+.hk-room-note { display: flex; align-items: flex-start; gap: 7px; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.hk-room-popover button { height: auto; min-height: 36px; white-space: normal; text-align: left; font-size: 13px; line-height: 1.4; }
+.housekeeping-page [role="tablist"] { gap: 4px; padding: 5px; border-radius: 10px; }
+.housekeeping-page [role="tab"] { min-height: 36px; font-size: 13px; }
+@media (max-width: 540px) {
+  .hk-room-grid { gap: 12px; }
+  .hk-room-content { min-height: 0; }
+}
+.hk-room-note > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.housekeeping-page { min-width: 0; }
+.housekeeping-page [aria-label="Planificación por fecha"] article,
+.housekeeping-page [aria-label="Planificación por fecha"] header { min-width: 0; overflow-wrap: anywhere; }

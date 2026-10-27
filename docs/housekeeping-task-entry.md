@@ -1,0 +1,79 @@
+# Accesos a tareas de Housekeeping
+
+La acción desde el detalle de una habitación abre un formulario individual con
+la habitación fija. Conserva fecha, responsable, tipo, prioridad e instrucciones;
+no muestra selección ni búsqueda de otras habitaciones.
+
+Planificación por fecha tiene un único acceso general a la asignación masiva,
+con la fecha consultada precargada. Cada tarea muestra responsable, prioridad,
+estado e instrucciones. Las pendientes permiten abrir el editor precargado desde
+su tarjeta; guardar modifica el mismo ID mediante el PATCH existente. Las tareas
+en curso o finalizadas no ofrecen ese cambio.
+
+Se reutilizan las validaciones del servidor y la protección contra duplicados de
+igual tipo/fecha. Tras guardar se refrescan tanto tareas como planificación.
+No cambia estados de limpieza, ocupación, No mover, permisos ni inspecciones.
+No requiere migración ni activación.
+
+Validación: pruebas de componentes de Housekeeping, TypeScript y compilación.
+
+## Revisión de estados y salidas
+
+El planning de Recepción muestra el estado sin ofrecer botones de cambio. El
+endpoint genérico de edición de habitaciones rechaza cambios de estado incluso
+para supervisión: las correcciones usan el endpoint de Housekeeping con sus
+controles y auditoría. Si llega el mismo estado se omite de la escritura para no
+pisar un cambio concurrente ni renovar la fecha de limpieza.
+
+La planificación de Housekeeping muestra el late check-out y su hora junto a
+la salida prevista. Se obtiene de la reserva actual en cada consulta y conserva
+el refresco periódico existente (30 segundos); no implica checkout ni modifica
+la prioridad de tareas automáticamente.
+
+La renovación diaria recuperada se documenta en housekeeping-daily-service.md.
+
+## Correcciones excepcionales
+
+Habitaciones y Housekeeping comparten un diálogo con motivo obligatorio de
+hasta 500 caracteres y comparación del estado original. Cancelar no escribe;
+un conflicto conserva el motivo para revisión. El servidor exige supervisión y
+acceso a Housekeeping, registra usuario, motivo y estados antes/después en la
+misma transacción, y conserva la protección de tareas en curso.
+
+Corregir limpieza no registra un check-in: un cuarto vacío no puede marcarse
+ocupado. Limpiar un cuarto con estadía ingresada conserva su ocupación; marcarlo
+sucio también mantiene la ocupación. Las acciones normales de iniciar/finalizar
+una tarea conservan su flujo y no piden este motivo excepcional.
+
+## Cierre de presentación y bloqueos
+
+Los bloqueos se gestionan desde un acceso general de Planificación por fecha,
+con selección de habitación, alta, edición y eliminación. Se retiran del modal
+operativo de detalles/notas. Se conserva la confirmación de reservas
+superpuestas y se detiene el guardado cuando falla la consulta de conflictos.
+Crear un bloqueo requiere motivo. Retirar uno no promete liberar una habitación
+ocupada ni retirar otros bloqueos.
+
+El camaje distingue la solicitud de la reserva, el estado físico actual y la
+preparación confirmada para esa reserva. Una confirmación obsoleta se marca para
+revisión; una solicitud no se presenta como trabajo realizado. En la tarjeta
+diaria el camaje físico es visible y se puede abrir su edición directamente.
+Reportar una avería abre la orden de mantenimiento sin efectuar primero una
+corrección de limpieza que quedaría sin confirmar al navegar.
+
+Prueba local de navegador con APIs simuladas: camaje pendiente, acceso global a
+bloqueos, fallo de consulta sin escritura y reservas superpuestas con cancelación
+sin escritura. Sin cambios en datos operativos ni llamadas fiscales.
+
+## Ocupación hasta checkout efectivo
+
+La verificación previa al despliegue detectó dos automatismos anteriores que
+contradecían esta regla. Night Audit ya no cierra estadías ingresadas por fecha
+vencida y saldo cero. Un nuevo check-in tampoco cierra al huésped anterior por
+haber llegado su fecha prevista: requiere primero registrar su checkout.
+Los no-shows de reservas sin ingreso conservan su tratamiento existente.
+
+Regresión: check-in con otra estadía ingresada (salida pasada/hoy/futura),
+check-in que no marca como limpia una habitación sucia y ejecución de Night
+Audit real sobre PostgreSQL local dentro de una transacción revertida, con
+estadía vencida de saldo cero y No mover. No se enviaron correos.

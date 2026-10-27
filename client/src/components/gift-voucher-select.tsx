@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useMemo, useRef, useState, useEffect } from "react";
 import { Search, Check, X, Gift } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -124,7 +125,7 @@ export function GiftVoucherSelect({
                     v.valueType === "monetario" && v.valueAmount
                       ? `$${parseFloat(v.valueAmount).toLocaleString("es-AR", { minimumFractionDigits: 2 })}`
                       : v.description,
-                    v.expiresAt && `Vence ${v.expiresAt}`,
+                    v.expiresAt && `Vence ${formatDisplayDate(v.expiresAt)}`,
                   ].filter(Boolean).join(" · ")}
                 </span>
               </button>

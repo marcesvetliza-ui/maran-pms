@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -286,7 +287,7 @@ export default function OTAChannelsPage() {
                         <div>
                           <p className="font-medium">{log.guestName}</p>
                           <p className="text-sm text-muted-foreground">
-                            {log.externalReservationId} - {log.checkInDate} al {log.checkOutDate}
+                            {log.externalReservationId} - {formatDisplayDate(log.checkInDate)} al {formatDisplayDate(log.checkOutDate)}
                           </p>
                         </div>
                       </div>

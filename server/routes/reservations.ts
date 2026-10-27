@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
 import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
 import { guestCountAfterCompanionChange } from "@shared/reservationGuestCount";
@@ -136,6 +137,15 @@ export function calculateGroupPersonalExtrasCap(input: {
 }
 
 export function registerReservationsRoutes(app: Express) {
+  // Release counters are server-owned; relinking preserves persisted values.
+  app.use("/api/payments",(req,_res,next)=>{
+    if(req.body&&typeof req.body==='object')for(const field of ['invoiceData','invoiceRef']){
+      const value=req.body[field];
+      try {const ref=typeof value==='string'?JSON.parse(value):value;if(ref&&typeof ref==='object'&&!Array.isArray(ref)){const {fundingReleases,reapplications,...safe}=ref;req.body[field]=typeof value==='string'?JSON.stringify(safe):safe;}}catch{/* Existing validation reports malformed references. */}
+    }
+    next();
+  });
+
   registerNightlyPricingRoutes(app);
   registerGuestStayRoutes(app);
   registerManualChargeActionRoutes(app);
@@ -467,6 +477,7 @@ export function registerReservationsRoutes(app: Express) {
       const preparationAck=req.body.acknowledgeHousekeepingPreparation;
       delete req.body.acknowledgeHousekeepingPreparation;
       delete req.body.housekeepingPreparation;
+      delete req.body.housekeepingBedPreparation;
       const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
       delete req.body.contextGroupId;
@@ -499,7 +510,7 @@ export function registerReservationsRoutes(app: Express) {
         : String(existing.specialRateReason ?? "").trim();
       const rateError = hasRate && (req.body.finalRatePerNight === null || req.body.finalRatePerNight === "")
         ? "La tarifa asignada por noche no puede quedar vacía."
-        : getReservationRateValidationError(effectiveRate, effectiveReason);
+        : getReservationRateValidationError(effectiveRate, effectiveReason, {allowZeroWithoutReason:!!linkedGroupId});
       if (rateError) return res.status(400).json({ error: rateError });
       if (hasReason) {
         req.body.specialRateReason = effectiveReason || null;
@@ -879,7 +890,7 @@ export function registerReservationsRoutes(app: Express) {
       const diffDays = Math.round((ciMs - todayMs) / (1000 * 60 * 60 * 24));
 
       if (diffDays > 0) {
-        return res.status(400).json({ error: `No se puede hacer check-in en fecha futura. La reserva es para el ${checkInDate} y hoy es ${today}.` });
+        return res.status(400).json({ error: `No se puede hacer check-in en fecha futura. La reserva es para el ${formatDisplayDate(checkInDate)} y hoy es ${formatDisplayDate(today)}.` });
       }
 
       if (diffDays < 0) {
@@ -887,7 +898,7 @@ export function registerReservationsRoutes(app: Express) {
         if (!motivo || String(motivo).trim() === "") {
           return res.status(400).json({
             error: "CHECK_IN_RETROACTIVO",
-            message: `La fecha de check-in es ${checkInDate}. Para registrar con fecha pasada, ingrese un motivo.`,
+            message: `La fecha de check-in es ${formatDisplayDate(checkInDate)}. Para registrar con fecha pasada, ingrese un motivo.`,
             requiresMotivo: true,
           });
         }
@@ -896,7 +907,7 @@ export function registerReservationsRoutes(app: Express) {
           fecha: new Date(),
           operador: (req as any).user?.username || "sistema",
           tipo: "checkin_retroactivo",
-          descripcion: `Check-in retroactivo registrado el ${today} para fecha ${checkInDate}. Motivo: ${String(motivo).trim()}`,
+          descripcion: `Check-in retroactivo registrado el ${formatDisplayDate(today)} para fecha ${formatDisplayDate(checkInDate)}. Motivo: ${String(motivo).trim()}`,
         }).catch((e) => console.warn("changelog insert failed (non-fatal):", e?.message));
       }
 
@@ -919,7 +930,6 @@ export function registerReservationsRoutes(app: Express) {
 
       // Verificar si hay OTRA reserva en checked_in actualmente para esta habitación
       // (no usar room.status === "occupied" porque puede quedar desactualizado)
-      const todayForCheck = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
       const allRes = await storage.getReservations();
       const otherCheckedIn = allRes.find(
         r => r.id !== req.params.id && r.roomId === reservation.roomId && r.status === "checked_in"
@@ -930,32 +940,10 @@ export function registerReservationsRoutes(app: Express) {
           : "Huésped desconocido";
         const checkOut = (otherCheckedIn as any).checkOutDate ?? "?";
 
-        // Si la reserva bloqueante tiene checkout vencido (ya pasó) O es HOY, auto-cerrarla y continuar.
-        // Checkout hoy significa que el huésped debe salir antes del horario de check-in del nuevo huésped.
-        const isOverdue = checkOut !== "?" && checkOut <= todayForCheck;
-        if (isOverdue) {
-          console.warn(`[check-in] Reserva vencida detectada en hab ${room.roomNumber}: ${otherCheckedIn.id} (${(otherCheckedIn as any).reservationCode ?? ""}) — ${guestName} — salida ${checkOut}. Auto-checkout forzado.`);
-          try {
-            await db.update(reservations).set({ status: "checked_out" } as any).where(eq(reservations.id, otherCheckedIn.id));
-            if (room.id) {
-              await db.update(rooms).set({ status: "dirty" } as any).where(eq(rooms.id, room.id));
-            }
-          } catch (autoErr: any) {
-            console.error(`[check-in] Error auto-checkout vencida: ${autoErr.message}`);
-          }
-          // Continuar con el check-in normalmente
-        } else {
-          console.warn(`[check-in] Bloqueado: hab ${room.roomNumber} ocupada por ${otherCheckedIn.id} (${(otherCheckedIn as any).reservationCode ?? ""}) — ${guestName} — salida ${checkOut}`);
-          return res.status(400).json({
-            error: `La habitación ${room.roomNumber} está ocupada por otro huésped`,
-            detail: {
-              reservationId: otherCheckedIn.id,
-              reservationCode: (otherCheckedIn as any).reservationCode,
-              guest: guestName,
-              checkOut,
-            }
-          });
-        }
+        return res.status(400).json({
+          error: `La habitación ${room.roomNumber} está ocupada por otro huésped. Registrá su checkout efectivo antes de ingresar otra estadía.`,
+          detail: {reservationId:otherCheckedIn.id,reservationCode:(otherCheckedIn as any).reservationCode,guest:guestName,checkOut},
+        });
       }
 
       await storage.updateReservation(req.params.id, { status: "checked_in" });
@@ -1578,7 +1566,7 @@ export function registerReservationsRoutes(app: Express) {
       const isHistorical = diffDays < -1;
 
       if (diffDays > 1) {
-        return res.status(400).json({ error: `No se puede hacer check-out: la fecha de salida es ${checkOutDate} y hoy es ${today}` });
+        return res.status(400).json({ error: `No se puede hacer check-out: la fecha de salida es ${formatDisplayDate(checkOutDate)} y hoy es ${formatDisplayDate(today)}` });
       }
 
       const forceCheckout = req.body.forceCheckout === true || isHistorical;
@@ -3031,8 +3019,9 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/payments/:id", async (req, res) => {
+  app.patch("/api/payments/:id", requireAuth, async (req, res) => {
     try {
+      if(Object.keys(req.body||{}).some(k=>!["notes","reference"].includes(k)))return res.status(409).json({error:"Los importes, medios y vínculos fiscales se modifican desde su acción de corrección o vinculación; no mediante edición directa."});
       const current = await db.execute(sql`SELECT reservation_id FROM payments WHERE id = ${req.params.id}`);
       const reservationId = String((current.rows[0] as any)?.reservation_id || "");
       const payment = await withInvoiceAdvisoryLock(
@@ -3307,9 +3296,9 @@ export function registerReservationsRoutes(app: Express) {
       } catch {
         throw Object.assign(new Error("El vínculo fiscal existente del pago no es válido"), { statusCode: 409 });
       }
-      const preservedRef = priorReapplications.length
-        ? { ...canonicalRef, reapplications: priorReapplications }
-        : canonicalRef;
+      const preservedRef = {...canonicalRef,
+        ...(priorReapplications.length?{reapplications:priorReapplications}:{}),
+        ...(previousRef?.fundingReleases?{fundingReleases:previousRef.fundingReleases}:{})};
       const alreadyLinkedToTarget = Number(previousRef?.id) === Number(invoice.id);
       if (!alreadyLinkedToTarget) {
         const applied = await db.execute(sql`
@@ -3413,7 +3402,7 @@ export function registerReservationsRoutes(app: Express) {
       const linked = await db.transaction(async (tx) => {
         const paymentResult = await tx.execute(sql`
           UPDATE payments
-          SET invoice_ref = ${recoveryState.invoiceRef}, invoice_link_failed = ${recoveryState.invoiceLinkFailed}
+          SET invoice_ref = (COALESCE(invoice_ref::jsonb,'{}'::jsonb) || ${recoveryState.invoiceRef}::jsonb)::text, invoice_link_failed = ${recoveryState.invoiceLinkFailed}
           WHERE id = ${req.params.id}
             AND reservation_id = ${reservationId}
           RETURNING *
@@ -3577,6 +3566,7 @@ export function registerReservationsRoutes(app: Express) {
           preservedInvoiceData = {
             ...previousRef,
             ...invoiceData,
+            ...(previousRef.fundingReleases?{fundingReleases:previousRef.fundingReleases}:{}),
             id: previousRef.id,
             tipoComprobante: previousRef.tipoComprobante ?? previousRef.tipo_comprobante,
             puntoVenta: previousRef.puntoVenta ?? previousRef.punto_venta,

@@ -8,10 +8,18 @@ const state = vi.hoisted(() => ({
   emittedCalls: [] as any[],
   emitirError: null as string | null,
 }));
+const groupFiscalCash = vi.hoisted(() => vi.fn());
+vi.mock("../billing/groupFiscalCash", () => ({
+  ensureGroupFiscalCashInformation: groupFiscalCash,
+}));
 
 vi.mock("../db", () => ({
   db: {
-    execute: vi.fn(async () => state.responses.shift() ?? { rows: [] }),
+    execute: vi.fn(async (query:any) => {
+      const {PgDialect}=await import("drizzle-orm/pg-core");
+      if(new PgDialect().sqlToQuery(query).sql.includes("SELECT group_id FROM group_reservation_links"))return {rows:[]};
+      return state.responses.shift() ?? {rows:[]};
+    }),
     transaction: vi.fn(async (callback: any) => callback({
       execute: async () => {
         state.transactionExecutions++;
@@ -204,7 +212,7 @@ describe("reservation credit-note reconciliation recovery", () => {
     // +1 vs. the invoice-update/charge-insert/reconciliation-status writes:
     // reconcileReservationCreditNote also checks for a cuenta-corriente cargo
     // to credit back, even though none exists in this fixture.
-    expect(state.transactionExecutions).toBe(4);
+    expect(state.transactionExecutions).toBe(5);
   });
 
   it("reuses the persisted NC id and number when authorization itself must be retried", async () => {
@@ -229,7 +237,7 @@ describe("reservation credit-note reconciliation recovery", () => {
       recoverableCreditNote: true,
       puntoVentaOverride: 1,
     });
-    expect(state.transactionExecutions).toBe(4);
+    expect(state.transactionExecutions).toBe(5);
   });
 
   it("lets finance staff resolve the same pending NC from the reconciliation queue", async () => {
@@ -254,7 +262,7 @@ describe("reservation credit-note reconciliation recovery", () => {
     });
 
     expect(state.emittedCalls).toHaveLength(0);
-    expect(state.transactionExecutions).toBe(4);
+    expect(state.transactionExecutions).toBe(5);
   });
 
   it("returns the persisted reconciliation error in the pending queue", async () => {
@@ -348,7 +356,7 @@ describe("reservation debit note reversing a credit note", () => {
       reservaId: "reservation-1",
       sourceChargeAmounts: { "charge-1": 40 },
     });
-    expect(state.transactionExecutions).toBe(3);
+    expect(state.transactionExecutions).toBe(5);
   });
 
   it("rejects a second ND when the NC has no reversible balance", async () => {
@@ -411,7 +419,7 @@ describe("reservation debit note reversing a credit note", () => {
     });
 
     expect(state.emittedCalls).toHaveLength(0);
-    expect(state.transactionExecutions).toBe(3);
+    expect(state.transactionExecutions).toBe(5);
   });
 });
 
@@ -734,14 +742,14 @@ describe("group-payment credit notes", () => {
     expect(state.emittedCalls[0].items[0].groupCompositionSources).toEqual([
       expect.objectContaining(compositionSources[1]),
     ]);
-    // Un grupo no tiene área propia (se factura por punto de venta), así
-    // que la NC cae en "recepcion" como el resto de los comprobantes de
-    // grupo — informativa, sigue sin mover plata por sí misma.
+    // Group fiscal evidence shares the idempotent, transactional writer with
+    // recovery; the generic monetary cash writer must not run.
     const { storage } = await import("../db-storage");
-    expect(storage.registerCashMovement).toHaveBeenCalledTimes(1);
-    expect(storage.registerCashMovement).toHaveBeenCalledWith(
-      "recepcion", "nota_credito", "90", expect.stringContaining("NCB-00000015"),
-      "nc", "30.00", "informational", expect.anything(), expect.anything(),
+    expect(storage.registerCashMovement).not.toHaveBeenCalled();
+    expect(groupFiscalCash).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: 90, groupId: "group-1", tipoComprobante: "NCB", montoTotal: "30.00" }),
+      "Admin",
     );
   });
 
@@ -880,4 +888,10 @@ describe("group debit notes", () => {
       "nd", "12.34", "informational", expect.anything(), expect.anything(),
     );
   });
+});
+
+it("blocks another group NC while the original attempt awaits recovery",async()=>{
+ const groupInvoice={...multiChargeInvoice,reserva_id:null,group_id:'group-pending'};
+ state.responses=[{rows:[groupInvoice]},{rows:[groupInvoice]},{rows:[{id:90}]}];
+ await withServer(async base=>{const response=await fetch(`${base}/api/billing/invoices/12/nota-credito`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo:'Reintento',items:[{sourceId:'accommodation',amount:100}]})});expect(response.status).toBe(409);expect(await response.json()).toMatchObject({pendingCreditNoteId:90,error:expect.stringContaining('Reintentar y conciliar')});});expect(state.emittedCalls).toHaveLength(0);
 });

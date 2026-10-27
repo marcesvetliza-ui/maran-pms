@@ -1,3 +1,4 @@
+import { consultationFixture, authorizationFixture } from "./helpers/wsfeConsultationFixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { ExternalCommsBlockedError } from "../external-comms-policy";
@@ -81,7 +82,7 @@ describe("ARCA real (wsfevClient) — bloqueo por ambiente antes de cualquier fe
   it("feCompConsultar: APP_ENV=production preserva el comportamiento actual (sí invoca fetch)", async () => {
     initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     global.fetch = vi.fn(async () => new Response(
-      `<soap:Envelope><Resultado>A</Resultado><CAE>12345678901234</CAE><CAEFchVto>20260831</CAEFchVto></soap:Envelope>`,
+      consultationFixture({CbteTipo:"8",PtoVta:"1",CbteDesde:"15",CbteHasta:"15"}),
       { status: 200 },
     )) as any;
 
@@ -94,7 +95,7 @@ describe("ARCA real (wsfevClient) — bloqueo por ambiente antes de cualquier fe
   it("feCAESolicitar: APP_ENV=production preserva el comportamiento actual (sí invoca fetch)", async () => {
     initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     global.fetch = vi.fn(async () => new Response(
-      `<soap:Envelope><Resultado>A</Resultado><CAE>98765432109876</CAE><CAEFchVto>20260930</CAEFchVto></soap:Envelope>`,
+      authorizationFixture(1,20,"","20260930").replace("12345678901234","98765432109876"),
       { status: 200 },
     )) as any;
 

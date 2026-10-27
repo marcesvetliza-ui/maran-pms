@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -83,7 +84,7 @@ function ReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               {r.guest?.lastName} {r.guest?.firstName} · Hab. {r.room?.roomNumber}
               {(r.room as any)?.roomType?.name && ` · ${(r.room as any).roomType.name}`}
             </p>
-            <p className="text-muted-foreground text-xs">{r.checkInDate} → {r.checkOutDate} ({r.nights}n)</p>
+            <p className="text-muted-foreground text-xs">{formatDisplayDate(r.checkInDate)} → {formatDisplayDate(r.checkOutDate)} ({r.nights}n)</p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -114,7 +115,7 @@ function ReservationDetailRow({ r }: { r: ReservationWithDetails }) {
               <p className="text-xs font-semibold text-muted-foreground mb-1">Pagos</p>
               {activePayments.map(p => (
                 <div key={p.id} className="flex justify-between text-xs">
-                  <span>{payMethodLabel[p.method || ""] || p.method} · {p.date}</span>
+                  <span>{payMethodLabel[p.method || ""] || p.method} · {formatDisplayDate(p.date)}</span>
                   <span className="text-green-700 dark:text-green-400">${fmtMoney(p.amount)}</span>
                 </div>
               ))}
@@ -524,7 +525,7 @@ export default function CompaniesPage() {
       </Card>
 
       <Dialog open={showForm} onOpenChange={(open) => { if (!open) { setShowForm(false); setEditingCompany(null); } }}>
-        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="operational-dialog">
           <DialogHeader>
             <DialogTitle>{editingCompany ? "Editar Empresa" : "Nueva Empresa"}</DialogTitle>
             <DialogDescription>
@@ -532,10 +533,10 @@ export default function CompaniesPage() {
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={form.handleSubmit(handleSubmit)} className="operational-form"><div className="operational-body space-y-5">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <FormField control={form.control} name="razonSocial" render={({ field }) => (
-                  <FormItem className="col-span-2">
+                  <FormItem className="sm:col-span-2 lg:col-span-3">
                     <FormLabel>Razón Social *</FormLabel>
                     <FormControl><Input {...field} data-testid="input-company-razon-social" /></FormControl>
                     <FormMessage />
@@ -614,7 +615,7 @@ export default function CompaniesPage() {
 
               <div className="border-t pt-4">
                 <h3 className="text-sm font-medium mb-3">Persona de Contacto</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <FormField control={form.control} name="contactName" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Nombre</FormLabel>
@@ -641,7 +642,7 @@ export default function CompaniesPage() {
 
               <div className="border-t pt-4">
                 <h3 className="text-sm font-medium mb-3">Condiciones Comerciales</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <FormField control={form.control} name="regimenHospedaje" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Régimen</FormLabel>
@@ -704,7 +705,7 @@ export default function CompaniesPage() {
                 </FormItem>
               )} />
 
-              <DialogFooter>
+              </div><DialogFooter className="operational-footer">
                 <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingCompany(null); }}>
                   Cancelar
                 </Button>
@@ -777,7 +778,7 @@ export default function CompaniesPage() {
                 <TableBody>
                   {accountData.movements.map((mov) => (
                     <TableRow key={mov.id} data-testid={`movement-row-${mov.id}`}>
-                      <TableCell className="text-sm">{mov.date}</TableCell>
+                      <TableCell className="text-sm">{formatDisplayDate(mov.date)}</TableCell>
                       <TableCell>
                         <div>
                           <p className="text-sm">{cleanAccountMovementDescription(mov.description, mov.reservationCode)}</p>

@@ -1,10 +1,11 @@
+import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import {InventoryPriceComparison} from "@/components/inventory-price-comparison";
 import {stockReportHtml,stockReportCsv,type StockReport} from "@/lib/inventory-stock-report";
 import {InventoryPreparation} from "@/components/inventory-preparation";
 import {INVENTORY_AREAS,INVENTORY_SELECTABLE_AREAS,inventoryAreaLabel} from "@shared/inventoryAreas";
 import {InventoryLocations, type InventoryLocation, locationCsv} from "@/components/inventory-locations";
 import {InventorySourceReversal} from '@/components/inventory-source-reversal';
-import {InventoryUnitConversions} from "@/components/inventory-unit-conversions";
+import {InventoryUnitConversions, type InventoryConversionDraft} from "@/components/inventory-unit-conversions";
 import {InventoryPendingConsumptions} from "@/components/inventory-pending-consumptions";
 import { InventoryMovementDetail } from "@/components/inventory-movement-detail";
 import { Fragment, useState, useEffect } from "react";
@@ -105,6 +106,7 @@ type InventoryItem = {
   currentStock: number;
   location: string | null;
   isActive: string | null;
+  purchaseEnabled?: boolean;
   itemKind?: "materia_prima" | "venta_directa" | "plato" | "activo_fijo" | "semielaborado" | null;
   abcClass?: "A" | "B" | "C" | null;
   ivaRate?: string | null;
@@ -622,7 +624,7 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
                           <SelectTrigger aria-label={`Depósito de origen ${idx+1}`} data-testid={`select-im-warehouse-${idx}`}><SelectValue /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="__choose__">Elegir depósito</SelectItem>
-                            {consumptionWarehouses.filter(w=>w.isActive === "true").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
+                            {consumptionWarehouses.filter(isActiveWarehouse).map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                         {row.itemId && <p className="text-xs text-muted-foreground">{originsLoading ? "Consultando último destino…" : originsError ? "No se pudo consultar el origen" : !originFor(row) ? "Elegí un depósito activo" : row.warehouseId === undefined ? `Última transferencia · Disponible: ${origins.find(o=>o.itemId===row.itemId)?.stock || "0"}` : "Depósito elegido manualmente"}</p>}
@@ -834,6 +836,7 @@ export default function InventoryPage() {
   const editArticle = (item:InventoryItem) => {setEditingArticle(item);};
   const openInventoryAction = (action:NonNullable<typeof inventoryAction>) => {setInventoryAction(action);setActionReason("");setActionQuantity(action.quantity || "");setActionNotes(action.notes || "");};
   const editArticleMutation = useMutation({mutationFn:async(data:Partial<InventoryItem>)=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,data);},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
+  const purchaseStateMutation = useMutation({mutationFn:async(item:any)=>apiRequest("PATCH",`/api/inventory/items/${item.id}/purchasing`,{purchaseEnabled:item.purchaseEnabled === false}),onSuccess:()=>{refreshInventory();toast({title:"Estado de compras actualizado; stock conservado"});},onError:(e:any)=>toast({title:"No se pudo cambiar el estado",description:e.message,variant:"destructive"})});
   const reactivateItemMutation = useMutation({mutationFn:async(item:{id:string;name:string;minStock:unknown})=>{await apiRequest("PATCH",`/api/inventory/items/${item.id}/metadata`,{name:item.name,minStock:item.minStock,isActive:"true"});},onSuccess:()=>{refreshInventory();toast({title:"Artículo reactivado"});},onError:(e:any)=>toast({title:"No se pudo reactivar",description:e.message,variant:"destructive"})});
   const inventoryActionMutation = useMutation({mutationFn:async()=>{const action=inventoryAction!;await apiRequest("POST",action.kind === "deactivate" ? `/api/inventory/items/${action.id}/deactivate` : `/api/inventory/movements/${action.id}/${action.kind}`,{reason:actionReason.trim(),quantity:actionQuantity,notes:actionNotes});},onSuccess:()=>{refreshInventory();setInventoryAction(null);toast({title:"Operación registrada con historial"});},onError:(e:any)=>toast({title:"No se pudo completar",description:e.message,variant:"destructive"})});
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
@@ -1304,7 +1307,7 @@ export default function InventoryPage() {
                   />
                 </div>
               </div>
-              <div className="space-y-1"><Label>Depósito</Label><Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-1"><Label>Depósito</Label><Select value={locationFilter} onValueChange={setLocationFilter}><SelectTrigger data-testid="select-location-filter" className="w-[220px]"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Stock global · todos los depósitos</SelectItem>{warehouses.filter(isActiveWarehouse).map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
               <div className="space-y-1"><Label>Fecha de stock</Label><Input aria-label="Fecha de stock" type="date" max={today} value={stockDate} onChange={e=>setStockDate(e.target.value||today)} className="w-[165px]"/></div>
               <div className="space-y-1"><Label>Área</Label><Select value={areaFilter} onValueChange={(value) => { setAreaFilter(value); setGroupFilter("all"); setCategoryFilter("all"); }}>
                 <SelectTrigger className="w-[160px]" data-testid="select-area-filter">
@@ -1400,21 +1403,22 @@ export default function InventoryPage() {
             </Card>
           ) : (
             <div className="border rounded-md overflow-x-auto">
-              <table className="w-full table-fixed min-w-[680px]">
+              <table className="w-full table-fixed min-w-[1080px]">
                 <thead className="bg-muted/50">
                   <tr className="text-left">
-                    <th className="p-3 font-medium w-[28%]">Articulo</th>
-                    <th className="p-3 font-medium w-[23%]">Subagrupamiento</th>
-                    <th className="p-3 font-medium text-right">Stock</th>
-                    <th className="p-3 font-medium text-right">Min</th>
-                    <th className="p-3 font-medium text-right">Costo</th><th className="p-2 w-32"><span className="sr-only">Detalle</span></th>
+                    <th className="p-3 font-medium">Articulo</th>
+                    <th className="p-3 font-medium w-[24%]">Subagrupamiento</th>
+                    <th className="px-2 py-3 w-32 font-medium text-right">Stock</th>
+                    <th className="px-2 py-3 w-16 font-medium text-right">Min</th>
+                    <th className="p-3 w-40 font-medium text-right">Costo</th>
+                    <th className="p-3 w-72 font-medium text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredItems.map((item) => (
                     <Fragment key={item.id}><tr className="border-t" data-testid={`row-item-${item.id}`}>
                       <td className="p-3">
-                        <div className="font-medium break-words">{item.name}</div>{item.isActive === "false" && <Badge variant="destructive" className="text-[10px] mt-1">Inactivo</Badge>}
+                        <div className="font-medium break-words">{item.name}</div>{(item as any).purchaseEnabled === false && <Badge variant="secondary">Discontinuado · no comprar</Badge>}{item.isActive === "false" && <Badge variant="destructive" className="text-[10px] mt-1">Inactivo</Badge>}
                         {item.sku && (
                           <div className="text-xs text-muted-foreground">SKU: {item.sku}</div>
                         )}
@@ -1445,19 +1449,19 @@ export default function InventoryPage() {
 
                         </div>
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="px-2 py-3 text-right tabular-nums break-words">
                         <span className={locationFilter === "all" ? "" : ["zero","critical","low"].includes(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.status || "") ? "text-red-600 font-semibold" : ""}>
                           {item.currentStock===null?"Sin información histórica":Number(item.currentStock).toLocaleString("es-AR",{maximumFractionDigits:3})}
                         </span>
                         <span className="text-muted-foreground text-xs ml-1">{item.unit}</span>
                       </td>
-                      <td className="p-3 text-right text-muted-foreground">
+                      <td className="px-2 py-3 text-right tabular-nums text-muted-foreground break-words">
                         {locationFilter === "all" ? Number(item.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}) : (locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock == null ? "—" : Number(locations.find(l=>l.itemId===item.id&&l.warehouseId===locationFilter)?.minStock).toLocaleString("es-AR",{maximumFractionDigits:3}))}
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right tabular-nums whitespace-nowrap">
                         {canCost && !historical ? `$${parseFloat(item.costPrice).toLocaleString("es-AR", { minimumFractionDigits: 2 })}` : "—"}
                       </td>
-                      <td className="p-2"><div className="flex justify-end"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
+                      <td className="p-3"><div className="flex flex-wrap items-center justify-end gap-1"><Button permission="catalog" variant="ghost" size="icon" aria-label={`Editar ${item.name}`} onClick={() => editArticle(items.find(i=>i.id===item.id)!)}><Pencil className="h-4 w-4" /></Button>{item.isActive === "false" ? <Button permission="catalog" variant="ghost" size="sm" disabled={reactivateItemMutation.isPending} aria-label={`Activar ${item.name}`} onClick={() => reactivateItemMutation.mutate(item)}>Activar</Button> : <Button permission="catalog" variant="ghost" size="icon" aria-label={`Dar de baja ${item.name}`} onClick={() => openInventoryAction({kind:"deactivate",id:item.id,name:item.name})}><Trash2 className="h-4 w-4" /></Button>}<Button permission="catalog" variant="ghost" size="sm" disabled={purchaseStateMutation.isPending || item.isActive === "false"} onClick={()=>purchaseStateMutation.mutate(items.find(i=>i.id===item.id))}>{(item as any).purchaseEnabled === false ? "Habilitar compras" : "No comprar"}</Button><Button variant="ghost" size="icon" aria-label={`Ver movimientos de ${item.name}`} aria-expanded={expandedItems.has(item.id)} onClick={() => toggleExpanded(item.id, setExpandedItems)}>{expandedItems.has(item.id) ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</Button></div></td>
                     </tr>
                     {expandedItems.has(item.id) && <tr><td colSpan={6} className="p-4 bg-muted/20">
                       <h4 className="font-medium mb-3">Historial de {item.name}</h4>
@@ -2478,7 +2482,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
               <Label>Fecha *</Label>
               <Input type="date" value={newCountDate} onChange={e => setNewCountDate(e.target.value)} data-testid="input-count-date" />
             </div>
-            <div className="space-y-1"><Label>Depósito *</Label><Select value={newCountWarehouse} onValueChange={setNewCountWarehouse}><SelectTrigger data-testid="select-count-warehouse"><SelectValue placeholder="Elegir depósito"/></SelectTrigger><SelectContent>{warehouses.filter(w=>w.is_active!=="false").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">Incluye artículos físicos con ubicación o configurados para este depósito.</p></div>
+            <div className="space-y-1"><Label>Depósito *</Label><Select value={newCountWarehouse} onValueChange={setNewCountWarehouse}><SelectTrigger data-testid="select-count-warehouse"><SelectValue placeholder="Elegir depósito"/></SelectTrigger><SelectContent>{warehouses.filter(isActiveWarehouse).map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">Incluye artículos físicos con ubicación o configurados para este depósito.</p></div>
             <div className="space-y-1">
               <Label>Área <span className="text-muted-foreground font-normal">(opcional — filtra artículos)</span></Label>
               <Select value={newCountArea || "__all__"} onValueChange={v => setNewCountArea(v === "__all__" ? "" : v)}>
@@ -2798,11 +2802,12 @@ export function NewItemForm({
   brands: Brand[];
   suppliers: AccountingSupplier[];
   existingItems: InventoryItem[];
-  onSubmit: (data: Partial<InventoryItem>) => void;
+  onSubmit: (data: Partial<InventoryItem> & {conversions?:InventoryConversionDraft[]}) => void;
   isPending: boolean;
   onCancel: () => void;
 }) {
   const { toast } = useToast();
+  const [conversions,setConversions]=useState<InventoryConversionDraft[]>([]);
   const [sku, setSku] = useState(initialItem?.sku || "");
   const [active, setActive] = useState(initialItem?.isActive !== "false");
   const [name, setName] = useState(initialItem?.name || "");
@@ -2845,14 +2850,14 @@ export function NewItemForm({
     : [];
 
   // Un artículo nuevo no puede quedar sin estos datos — ver pedido de administración.
-  // Nota: "Agrupamiento" no se exige por separado — hay áreas sin agrupamientos
-  // configurados todavía y el Subagrupamiento ya puede quedar sin padre (igual
-  // que categorías legadas existentes).
+  // Las altas requieren clasificación completa; las fichas históricas pueden revisarse sin reclasificarlas automáticamente.
   const missingRequiredFields = initialItem ? [] : [
     !categoryId && "Subagrupamiento",
-    supplierIds.length === 0 && "Proveedor",
+    categoryId && !categories.find(c=>c.id===categoryId)?.parentId && "Agrupamiento del subagrupamiento",
+    ["materia_prima","venta_directa"].includes(itemKind) && supplierIds.length === 0 && "Proveedor",
     minStock.trim() === "" && "Stock Mínimo",
     criticalStock.trim() === "" && "Stock Crítico",
+    Number(criticalStock)>Number(minStock) && "Stock crítico menor o igual al mínimo",
     abcClass === "__none__" && "Clasificación ABC",
     ivaRate === "__none__" && "Alícuota de IVA",
   ].filter((v): v is string => typeof v === "string");
@@ -3044,7 +3049,7 @@ export function NewItemForm({
         </div>
         <div className="space-y-2">
           <Label>Unidad</Label>
-          <Select value={unit} onValueChange={setUnit} disabled={!!initialItem}>
+          <Select value={unit} onValueChange={value=>{setUnit(value);setConversions([]);}} disabled={!!initialItem}>
             <SelectTrigger data-testid="select-unit">
               <SelectValue />
             </SelectTrigger>
@@ -3123,6 +3128,7 @@ export function NewItemForm({
         </Select>
         <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
       </div>
+      {!initialItem && <InventoryUnitConversions stockUnit={unit} value={conversions} onChange={setConversions}/>}
       {!initialItem && missingRequiredFields.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="text-missing-required-fields">
           Falta completar: {missingRequiredFields.join(", ")}.
@@ -3136,6 +3142,7 @@ export function NewItemForm({
           onClick={() => {
             onSubmit({
               name,
+              ...(!initialItem ? {conversions} : {}),
               ...(initialItem ? {sku:sku.trim() || null,isActive:active ? "true" : "false"} : {}),
               categoryId: categoryId || undefined,
               accountingSupplierIds: supplierIds,
@@ -3298,7 +3305,7 @@ export function TransferForm({
           <Select value={fromWarehouseId} onValueChange={setFromWarehouseId}>
             <SelectTrigger data-testid="select-from-warehouse"><SelectValue placeholder="Depósito origen..." /></SelectTrigger>
             <SelectContent>
-              {warehouses.filter(w => w.id && w.is_active !== "false").map(w => (
+              {warehouses.filter(isActiveWarehouse).map(w => (
                 <SelectItem key={w.id} value={w.id} disabled={w.id === toWarehouseId}>{w.name}</SelectItem>
               ))}
             </SelectContent>
@@ -3309,7 +3316,7 @@ export function TransferForm({
           <Select value={toWarehouseId} onValueChange={setToWarehouseId}>
             <SelectTrigger data-testid="select-to-warehouse"><SelectValue placeholder="Depósito destino..." /></SelectTrigger>
             <SelectContent>
-              {warehouses.filter(w => w.id && w.is_active !== "false").map(w => (
+              {warehouses.filter(isActiveWarehouse).map(w => (
                 <SelectItem key={w.id} value={w.id} disabled={w.id === fromWarehouseId}>{w.name}</SelectItem>
               ))}
             </SelectContent>

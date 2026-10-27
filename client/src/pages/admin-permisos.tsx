@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ShieldCheck } from "lucide-react";
-import { AccommodationUserPermissions } from "@/components/accommodation-user-permissions";
 
 type PermissionsCatalogResponse = {
   roles: string[];
@@ -70,7 +69,12 @@ export default function AdminPermisosPage() {
     mutationFn: ({ role, resourceKey, grant }: { role: string; resourceKey: string; grant: boolean }) =>
       apiRequest("POST", `/api/admin/role-permissions/${grant ? "grant" : "revoke"}`, { role, resourceKey }),
     onMutate: ({ role, resourceKey }) => setPendingKey(`${role}:${resourceKey}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["/api/permissions/mine"] }),
+      ]);
+    },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
     onSettled: () => setPendingKey(null),
   });
@@ -84,12 +88,16 @@ export default function AdminPermisosPage() {
         <div>
           <h1 className="text-2xl font-bold">Permisos por Rol</h1>
           <p className="text-sm text-muted-foreground">
-            Qué puede ver cada rol en el menú del sistema. Los cambios se aplican al instante.
+            Qué puede ver y qué acciones puede realizar cada rol. Los cambios se aplican al instante.
           </p>
         </div>
       </div>
 
-      <AccommodationUserPermissions />
+      <p className="text-sm text-muted-foreground">
+        Para usar Revenue, habilitá el acceso al módulo y la consulta. Los permisos de eventos,
+        tarifas de competencia y configuración se asignan por separado.
+      </p>
+
       <Input
         placeholder="Buscar sección o ítem…"
         value={filter}

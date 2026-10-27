@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { getArgentinaToday, toArgentinaDateStr } from "@/lib/date-utils"
@@ -19,11 +20,7 @@ export { getArgentinaToday, toArgentinaDateStr };
 export const getLocalToday = getArgentinaToday;
 
 export function formatDateAR(dateStr: string | null | undefined): string {
-  if (!dateStr) return "—";
-  const parts = dateStr.split("T")[0].split("-");
-  if (parts.length !== 3) return dateStr;
-  const [year, month, day] = parts;
-  return `${day}/${month}/${year}`;
+  return formatDisplayDate(dateStr);
 }
 
 export function folioDateSortValue(value: string | Date | null | undefined): number {
@@ -34,9 +31,5 @@ export function folioDateSortValue(value: string | Date | null | undefined): num
 }
 
 export function formatFolioDateAR(value: string | Date | null | undefined): string {
-  if (!value) return "—";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDateAR(value);
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
+  return formatDisplayDate(value);
 }

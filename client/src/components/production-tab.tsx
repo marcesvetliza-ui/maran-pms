@@ -1,3 +1,5 @@
+import { isActiveWarehouse } from "@/lib/inventory-warehouse";
+import { formatDisplayDate } from "@shared/date-display";
 import {ProductionStock} from "./production-stock";
 import {ProductionPreparationEditor} from "./production-preparation-editor";
 import { useState } from "react";
@@ -29,6 +31,7 @@ type FormulaLine = {
 };
 
 type Formula = {
+  isActive?: string;
   recipeId: string;
   name: string;
   productionUnit: string | null;
@@ -81,7 +84,7 @@ function RegisterRunTab() {
   const [requestId,setRequestId]=useState(()=>crypto.randomUUID());
   const [outputWarehouseId,setOutputWarehouseId]=useState("");
   const [inputWarehouses,setInputWarehouses]=useState<Record<string,string>>({});
-  const {data: warehouses=[]}=useQuery<Array<{id:string;name:string;isActive:string}>>({queryKey:["/api/inventory/warehouses"]});
+  const {data: warehouses=[],isError:warehouseError,isLoading:warehouseLoading}=useQuery<Array<{id:string;name:string;isActive:string}>>({queryKey:["/api/inventory/warehouses"]});
 
   const { data: formulas = [], isLoading } = useQuery<Formula[]>({ queryKey: ["/api/production/formulas"] });
   const formula = formulas.find(f => f.recipeId === recipeId) || null;
@@ -179,7 +182,7 @@ function RegisterRunTab() {
           <Select value={recipeId} onValueChange={pickFormula}>
             <SelectTrigger data-testid="select-production-formula"><SelectValue placeholder="Elegí una preparación" /></SelectTrigger>
             <SelectContent>
-              {formulas.map(f => (
+              {formulas.filter(f=>f.isActive !== "false").map(f => (
                 <SelectItem key={f.recipeId} value={f.recipeId}>
                   {f.name} → {f.outputItemName}
                 </SelectItem>
@@ -231,9 +234,9 @@ function RegisterRunTab() {
           </Card>
 
           <div className="space-y-2 border rounded p-3">
-            <Label>Depósito de destino de lo producido *</Label>
-            <Select value={outputWarehouseId || "__choose__"} onValueChange={v=>setOutputWarehouseId(v==="__choose__"?"":v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="__choose__">Elegir depósito</SelectItem>{warehouses.filter(w=>w.isActive==="true").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
-            {formula.lines.map(line=><div key={line.recipeIngredientId}><Label>Origen de {line.ingredientName} *</Label><Select value={inputWarehouses[line.recipeIngredientId] || "__choose__"} onValueChange={v=>setInputWarehouses({...inputWarehouses,[line.recipeIngredientId]:v==="__choose__"?"":v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="__choose__">Elegir depósito</SelectItem>{warehouses.filter(w=>w.isActive==="true").map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>)}
+            <Label>Depósito de destino de lo producido *</Label>{warehouseLoading ? <p>Cargando depósitos…</p> : warehouseError ? <p role="alert">No se pudieron cargar los depósitos.</p> : !warehouses.some(isActiveWarehouse) ? <p role="alert">No hay depósitos activos.</p> : null}
+            <Select value={outputWarehouseId || "__choose__"} onValueChange={v=>setOutputWarehouseId(v==="__choose__"?"":v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="__choose__">Elegir depósito</SelectItem>{warehouses.filter(isActiveWarehouse).map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
+            {formula.lines.map(line=><div key={line.recipeIngredientId}><Label>Origen de {line.ingredientName} *</Label><Select value={inputWarehouses[line.recipeIngredientId] || "__choose__"} onValueChange={v=>setInputWarehouses({...inputWarehouses,[line.recipeIngredientId]:v==="__choose__"?"":v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="__choose__">Elegir depósito</SelectItem>{warehouses.filter(isActiveWarehouse).map(w=><SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>)}
           </div>
           <div className="flex flex-wrap items-end gap-4">
             <div className="space-y-1">
@@ -307,7 +310,7 @@ function HistoryTab() {
       <TableBody>
         {history.map(run => (
           <TableRow key={run.id} data-testid={`production-run-row-${run.id}`}>
-            <TableCell>{run.date}</TableCell>
+            <TableCell>{formatDisplayDate(run.date)}</TableCell>
             <TableCell>{run.recipeName}</TableCell>
             <TableCell>{run.outputItemName}</TableCell>
             <TableCell className="text-right">{run.outputQuantity.toLocaleString("es-AR")} {run.outputUnit}</TableCell>
@@ -323,9 +326,17 @@ function HistoryTab() {
 
 export function ProductionTab() {
  const [tab,setTab]=useState('stock');
+ const [state,setState]=useState('active');
+ const [search,setSearch]=useState('');
+ const {toast}=useToast();
+ const lifecycle=useMutation({
+  mutationFn:async(f:Formula)=>apiRequest('PATCH',`/api/restaurant/recipes/${f.recipeId}`,{isActive:f.isActive==='false'?'true':'false'}),
+  onSuccess:()=>{queryClient.invalidateQueries({queryKey:['/api/production/formulas']});queryClient.invalidateQueries({queryKey:['/api/restaurant/recipes']});toast({title:'Estado actualizado'});},
+  onError:(e:Error)=>toast({title:'No se pudo cambiar el estado',description:e.message,variant:'destructive'}),
+ });
  const {data:formulas=[],isLoading,isError}=useQuery<Formula[]>({queryKey:['/api/production/formulas']});
  return <Tabs value={tab} onValueChange={setTab}><TabsList className="flex h-auto flex-wrap justify-start"><TabsTrigger value="stock">Stock de preparaciones</TabsTrigger><TabsTrigger value="formulas" data-testid="tab-production-formulas">Preparaciones</TabsTrigger><TabsTrigger value="registrar" data-testid="tab-production-registrar">Registrar producción</TabsTrigger><TabsTrigger value="historial" data-testid="tab-production-historial">Historial</TabsTrigger></TabsList>
  <TabsContent value="stock" className="mt-4">{isError?<p role="alert">No se pudieron consultar las preparaciones.</p>:isLoading?<p>Cargando preparaciones…</p>:<ProductionStock formulas={formulas} onProduce={()=>setTab('registrar')}/>}</TabsContent>
- <TabsContent value="formulas" className="mt-4 space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Preparaciones con stock</h3><p className="text-sm text-muted-foreground">Creá la fórmula y registrá después cada producción real.</p></div><ProductionPreparationEditor formulas={formulas}/></div>{formulas.map(f=><Card key={f.recipeId}><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4"><div><h4 className="font-medium">{f.name}</h4><p className="text-sm text-muted-foreground">Rendimiento: {f.productionYield} {f.productionUnit} · {f.lines.length} ingredientes</p></div><ProductionPreparationEditor formula={f} formulas={formulas}/></CardContent></Card>)}</TabsContent>
+ <TabsContent value="formulas" className="mt-4 space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Preparaciones con stock</h3><p className="text-sm text-muted-foreground">Creá la fórmula y registrá después cada producción real.</p></div><ProductionPreparationEditor formulas={formulas}/></div><div className="flex flex-wrap gap-3"><Input aria-label="Buscar preparación" placeholder="Buscar preparación…" value={search} onChange={e=>setSearch(e.target.value)}/><Select value={state} onValueChange={setState}><SelectTrigger aria-label="Estado de preparaciones" className="w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="active">Activas</SelectItem><SelectItem value="inactive">Inactivas</SelectItem><SelectItem value="all">Todas</SelectItem></SelectContent></Select></div>{formulas.filter(f=>(state==='all'||(f.isActive==='false'?state==='inactive':state==='active'))&&f.name.toLocaleLowerCase('es').includes(search.toLocaleLowerCase('es'))).map(f=><Card key={f.recipeId}><CardContent className="flex flex-wrap items-center justify-between gap-3 p-4"><div><h4 className="font-medium">{f.name}</h4><p className="text-sm text-muted-foreground">Rendimiento: {f.productionYield} {f.productionUnit} · {f.lines.length} ingredientes</p></div><div className="flex gap-2"><ProductionPreparationEditor formula={f} formulas={formulas}/><Button permission="catalog" variant="outline" disabled={lifecycle.isPending} onClick={()=>lifecycle.mutate(f)}>{f.isActive==='false'?'Reactivar':'Desactivar'}</Button></div></CardContent></Card>)}</TabsContent>
  <TabsContent value="registrar" className="mt-4"><RegisterRunTab/></TabsContent><TabsContent value="historial" className="mt-4"><HistoryTab/></TabsContent></Tabs>;
 }

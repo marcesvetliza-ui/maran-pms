@@ -1,0 +1,210 @@
+import { assertOpenSpaCashShift, listOpenSpaCashShifts } from "./spaCashShift";
+import { ReservationPaymentCorrections } from "./reservationCorrections";
+import type { Express, Request, RequestHandler } from "express";
+import type { Pool } from "pg";
+import { FundingError, fundingRequestSchema, identifier, requirePermission } from "../contracts";
+import { mountPaymentFunding } from "../integration";
+import { fundingErrorResponse } from "../routes";
+import { PersistentFiscalGateway, type FiscalTransport } from "./fiscalGateway";
+import { createFirstSpaClose } from "./spaClosure";
+import { prepareSpaDocument } from "./preparation";
+import { sessionFundingActor } from "./access";
+import { checkSpaHomologation } from "./homologation";
+import { SqlFundingAdapter } from "../adapters";
+import { enrollAllSpaAccounts, enrollSpaAccount, scheduleSpaEnrollment } from "./rollout";
+import { getSpaRecipient, saveSpaRecipient } from "./recipient";
+import { executeSpaAccountCommand, spaAccountView } from "./account";
+import { applySpaPreferences } from "./preferences";
+import { spaChargeCatalog } from "./catalog";
+import { issueSpaVoucher } from "./voucher";
+
+/** Call immediately after the application's auth gate, BEFORE every legacy
+ * financial writer. Default disabled: no DDL, no reads, no routes, no transport.
+ * Operational activation remains explicit and restricted to homologation.
+ */
+export function mountOperationalSpaFunding(app:Express,options:{
+ enabled?:boolean;pool:Pool;authenticate:RequestHandler;
+ hasPermission:(role:string,key:string)=>boolean;transport:FiscalTransport;schema?:string;
+ reviewedExtensions?:boolean; fullRollout?:boolean;
+}) {
+ if(options.enabled!==true) return null;
+ const schema=options.schema??"public",s=identifier(schema);
+ const actor=(req:Request)=>sessionFundingActor(req,options.hasPermission);
+ app.use("/api/payment-funding",options.authenticate,async(req,res,next)=>{
+   try {
+     const automaticScope=req.path.match(/^\/(?:scopes\/spa|spa)\/([^/]+)(?:\/|$)/);
+     if(options.fullRollout && automaticScope) {
+       requirePermission(actor(req),req.method==="GET"?"funding:read":"funding:write");
+       await enrollSpaAccount(service,decodeURIComponent(automaticScope[1]),schema);
+     }
+     if(req.method!=="POST" || !["/previews","/operations"].includes(req.path)) return next();
+     const who=actor(req);requirePermission(who);
+     const request=fundingRequestSchema.parse(req.path==="/previews"?req.body:req.body?.request);
+     if(req.path==="/operations" && typeof req.body?.operationId==="string") {
+       // Existing UUID still goes through the engine's fingerprint check;
+       // a closed shift must not break replay of an already persisted plan.
+       if((await options.pool.query("SELECT id FROM payment_funding.operations WHERE id::text=$1",[req.body.operationId])).rowCount)
+         return next();
+     }
+     if(request.scope.kind==="spa") {
+       for(const row of request.newCollections) {
+         await assertOpenSpaCashShift(options.pool,row.shiftId,schema,false);
+       }
+     }
+     next();
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ const service=mountPaymentFunding(app,{
+   enabled:true,pool:options.pool,authenticate:options.authenticate,actor,operationalSchema:schema,
+   fiscal:new PersistentFiscalGateway(options.pool,options.transport,schema),firstSpaClose:createFirstSpaClose(schema),allSpaAccounts:options.fullRollout,
+ })!;
+ // Reviewed additive endpoints used by the connected SPA client remain independently gated.
+ // The explicit homologation activation and isolated tests opt in; a UI flag cannot.
+ if(options.reviewedExtensions!==true) return service;
+ const reservationCorrections=new ReservationPaymentCorrections(service.store,schema);
+ app.post("/api/payment-funding/reservations/:id/payment-corrections/preview",options.authenticate,async(req,res)=>{
+  try {res.json({ok:true,data:await reservationCorrections.preview(req.params.id,req.body,actor(req))});}catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/reservations/:id/payment-corrections",options.authenticate,async(req,res)=>{
+  try {res.json({ok:true,data:await reservationCorrections.confirm(req.params.id,req.body.operationId,req.body.previewHash,req.body.request,actor(req),req.user?.fullName||req.user?.username||req.user?.id)});}catch(error){fundingErrorResponse(res,error);}
+ });
+
+ app.get("/api/payment-funding/spa/:accountId/prefactura-context",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const config=(await options.pool.query(`SELECT arca_ambiente AS environment,punto_venta_homolog AS point FROM ${s}.billing_config ORDER BY id LIMIT 1`)).rows[0];
+     const voucherPoints=(await options.pool.query(`SELECT DISTINCT numero FROM ${s}.pos_configs WHERE area='spa' AND activo=true AND tipo='electronico' ORDER BY numero`)).rows;
+     const companies=(await options.pool.query(`SELECT id,razon_social AS name,cuil_cuit AS cuit,condicion_iva AS "vatCondition",direccion AS address FROM ${s}.companies ORDER BY razon_social,id`)).rows;
+     res.json({ok:true,data:{...config,voucherPoint:voucherPoints.length===1?voucherPoints[0].numero:null,companies}});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/prefactura-options",options.authenticate,async(req,res)=>{
+   try {
+     const who=actor(req);
+     await service.store.transaction({kind:"spa",id:req.params.accountId},null,c=>applySpaPreferences(service,c,req.params.accountId,req.body,who,schema));
+     res.json({ok:true,data:{saved:true}});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/voucher",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await issueSpaVoucher(service,req.params.accountId,req.body,actor(req),schema)});}
+   catch(error){fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/account",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await spaAccountView(service,req.params.accountId,actor(req),schema)});}
+   catch(error){fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/account",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await executeSpaAccountCommand(service,req.params.accountId,req.body,actor(req),schema)});}
+   catch(error){fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/room-targets",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const rows=(await options.pool.query(`SELECT r.id,rm.room_number AS "roomNumber",g.first_name AS "firstName",g.last_name AS "lastName"
+       FROM ${s}.reservations r JOIN ${s}.rooms rm ON rm.id=r.room_id JOIN ${s}.guests g ON g.id=r.guest_id
+       WHERE r.status='checked_in' ORDER BY rm.room_number,r.id`)).rows;
+     res.json({ok:true,data:rows});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/product-catalog",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     res.json({ok:true,data:await spaChargeCatalog(options.pool,schema)});
+   }catch(error){fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/recipients/:guestId",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const g=(await options.pool.query(`SELECT id AS "guestId",'guest' AS kind,first_name AS "firstName",last_name AS "lastName",
+       document_type AS "documentType",document_number AS "documentNumber",vat_condition AS "vatCondition",
+       cuil_cuit AS cuit,direccion AS address,true AS editable FROM ${s}.guests WHERE id=$1`,[req.params.guestId])).rows[0];
+     if(!g) throw new FundingError("NOT_FOUND","Cliente inexistente.",404);
+     res.json({ok:true,data:g});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/recipient",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await getSpaRecipient(service,req.params.accountId,actor(req),schema)});}
+   catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/recipient",options.authenticate,async(req,res)=>{
+   try {res.json({ok:true,data:await saveSpaRecipient(service,req.params.accountId,req.body,actor(req),schema)});}
+   catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.get("/api/payment-funding/spa/:accountId/enrollment",options.authenticate,async(req,res)=>{
+   try {
+     requirePermission(actor(req),"funding:read");
+     const adopted=(await options.pool.query("SELECT 1 FROM payment_funding.scopes WHERE kind='spa' AND id=$1",[req.params.accountId])).rowCount!==0;
+     res.json({ok:true,data:{adopted}});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/adopt-unbilled",options.authenticate,async(req,res)=>{
+   try {
+     const who=actor(req);requirePermission(who,"funding:historical");requirePermission(who);
+     if(!req.body || Object.keys(req.body).length)
+       throw new FundingError("INVALID_REQUEST","La vinculación sólo acepta el ID de cuenta y un body vacío.",422);
+     const scope={kind:"spa" as const,id:req.params.accountId};
+     await service.store.transaction(scope,null,async c=>{
+       // Same scope lock as the legacy fence: no payment can race the import.
+       await checkSpaHomologation(c,schema);
+       if((await c.query("SELECT 1 FROM payment_funding.scopes WHERE kind='spa' AND id=$1",[scope.id])).rowCount) return;
+       // No history callback: any prior invoice, NC or fiscal payment reference
+       // fails closed. Existing payments must identify the exact Caja/folio IDs.
+       const adapter=service.adapter(scope);
+       if(!(adapter instanceof SqlFundingAdapter)) throw new Error("Missing SQL SPA adapter");
+       await adapter.adoptScope(c,scope);
+       await service.store.event(c,null,`adopted:spa:${scope.id}`,"unbilled_spa_adopted",{scopeKey:`spa:${scope.id}`},who.id);
+     });
+     res.json({ok:true,data:{accountId:scope.id}});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ // Server-prepared documents and authorized shifts; no browser-supplied fiscal snapshots.
+ app.get("/api/payment-funding/spa/:accountId/collection-shifts",options.authenticate,async(req,res)=>{
+   try {
+     const who=actor(req);requirePermission(who,"funding:read");
+     const data=await service.store.transaction({kind:"spa",id:req.params.accountId},null,async c=>{
+       await service.store.assertAdopted(c,{kind:"spa",id:req.params.accountId});
+       return listOpenSpaCashShifts(c,schema);
+     });
+     res.json({ok:true,data});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ app.post("/api/payment-funding/spa/:accountId/prepare-document",options.authenticate,async(req,res)=>{
+   try {
+     if(req.body&&Object.keys(req.body).length) {
+       const who=actor(req);
+       const result=await service.store.transaction({kind:"spa",id:req.params.accountId},null,async c=>{
+         await applySpaPreferences(service,c,req.params.accountId,req.body,who,schema);
+         return prepareSpaDocument(service,req.params.accountId,who,schema,c);
+       });
+       return res.json({ok:true,data:result});
+     }
+     if(!req.body || Object.keys(req.body).length) throw new FundingError("INVALID_REQUEST","Esta preparación sólo acepta el ID de cuenta y un body vacío.",422);
+     res.json({ok:true,data:await prepareSpaDocument(service,req.params.accountId,actor(req),schema)});
+   } catch(error) {fundingErrorResponse(res,error);}
+ });
+ return service;
+}
+/** Explicit runtime opt-in, after session middleware and before legacy writers.
+ * The UI build flag alone never enables the financial backend.
+ */
+export async function mountConfiguredOperationalSpaFunding(app:Express,enabled=false,reviewedExtensions=false) {
+ if(!enabled) return null;
+ const [{pool},{requireAuth},{hasPermission},{configuredArcaTransport}]=await Promise.all([
+   import("../../../db"),import("../../../auth"),import("../../../permissions"),import("./arcaTransport"),
+ ]);
+ // Fail startup rather than expose a partly installed/fallback financial flow.
+ const ready=(await pool.query(`SELECT to_regclass('payment_funding.fiscal_claims') IS NOT NULL
+   AND to_regclass('payment_funding.scopes') IS NOT NULL AS ready`)).rows[0].ready;
+ if(!ready) throw new Error("Funding schema requires explicit reviewed installation before opt-in.");
+ const client=await pool.connect();
+ try {await checkSpaHomologation(client);} finally {client.release();}
+ const service=mountOperationalSpaFunding(app,{enabled:true,pool,authenticate:requireAuth,hasPermission,
+   transport:configuredArcaTransport(),reviewedExtensions,fullRollout:true})!;
+ scheduleSpaEnrollment(async()=>{
+   const enrolled=await enrollAllSpaAccounts(service);
+   console.info("[SPA funding] Incorporación de cuentas finalizada.",{cuentasIncorporadas:enrolled.accounts,pendientes:enrolled.failed});
+ }, error=>console.error("[SPA funding] Incorporación pendiente; se reintentará al abrir el folio.",
+   {code:(error as {code?:string})?.code??"ENROLLMENT_FAILED"}));
+ console.info("[SPA funding] Motor general listo; incorporación en segundo plano.");
+ return service;
+}

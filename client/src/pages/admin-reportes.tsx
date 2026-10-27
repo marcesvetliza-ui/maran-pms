@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, startOfMonth, endOfMonth } from "date-fns";
@@ -294,7 +295,7 @@ function EstadoResultadosReport() {
           </div>
           <div className="space-y-2">{data.desgloseAdministrativo.registros.map((r:any)=><div key={r.id} className="rounded-lg border p-3 text-sm">
             <div className="flex flex-wrap justify-between gap-2"><strong>{r.proveedor_nombre} · {r.numero_comprobante}</strong><strong>${fPeso(Number(r.monto_total))}</strong></div>
-            <p className="text-muted-foreground">{r.fecha_emision} · {r.tipo_comprobante==='RETENCION'?'Retención recibida':r.tipo_comprobante==='RESUMEN-BANCO'?'Resumen bancario':'Liquidación de tarjeta'}</p>
+            <p className="text-muted-foreground">{formatDisplayDate(r.fecha_emision)} · {r.tipo_comprobante==='RETENCION'?'Retención recibida':r.tipo_comprobante==='RESUMEN-BANCO'?'Resumen bancario':'Liquidación de tarjeta'}</p>
             {r.tipo_comprobante==='RETENCION'?<p>{r.subtipo_retencion?.toUpperCase()} {r.special_details.jurisdiction} · {r.special_details.paymentMovementId?'Cobro vinculado':'Pendiente de asociar a un cobro'}</p>:<p>Neto y exento: ${fPeso(Number(r.monto_neto)+Number(r.monto_exento))} · IVA: ${fPeso(Number(r.monto_iva21)+Number(r.monto_iva105))} · Percepción IVA: ${fPeso(Number(r.percepcion_iva))}{Number(r.ley25413)>0&&` · Ley 25.413: $${fPeso(Number(r.ley25413))}`}{Number(r.retencion_iibb)>0&&` · Retención IIBB: $${fPeso(Number(r.retencion_iibb))}`}</p>}
           </div>)}</div>
         </CardContent>
@@ -351,7 +352,7 @@ function KpisReport() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="fecha" tick={{ fontSize: 9 }} tickFormatter={d => d?.slice(8)} />
                 <YAxis tick={{ fontSize: 9 }} domain={[0, 100]} tickFormatter={v => `${v}%`} />
-                <Tooltip formatter={(v: number) => `${v.toFixed(1)}%`} />
+                <Tooltip labelFormatter={formatDisplayDate} formatter={(v: number) => `${v.toFixed(1)}%`} />
                 <Line type="monotone" dataKey="pct" stroke="#3B82F6" dot={false} strokeWidth={2} name="Ocupación %" />
               </LineChart>
             </ResponsiveContainer>
@@ -438,7 +439,7 @@ function OcupacionReport() {
             <CardContent>
               <div className="flex flex-wrap gap-1">
                 {(data.porDia ?? []).map((d: any, i: number) => (
-                  <div key={i} title={`${d.fecha}: ${d.porcentaje?.toFixed(1)}% (${d.ocupadas}/${d.disponibles})`}
+                  <div key={i} title={`${formatDisplayDate(d.fecha)}: ${d.porcentaje?.toFixed(1)}% (${d.ocupadas}/${d.disponibles})`}
                     className={`w-8 h-8 rounded flex items-center justify-center text-xs font-bold ${getHeatColor(d.porcentaje ?? 0)}`}>
                     {new Date(d.fecha + "T12:00:00").getDate()}
                   </div>
@@ -465,7 +466,7 @@ function OcupacionReport() {
                     <XAxis dataKey="fecha" tick={{ fontSize: 8 }} tickFormatter={d => d?.slice(8)} />
                     <YAxis yAxisId="left" tick={{ fontSize: 9 }} domain={[0, 100]} tickFormatter={v => `${v}%`} />
                     <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9 }} tickFormatter={v => `$${Math.round(v / 1000)}k`} />
-                    <Tooltip />
+                    <Tooltip labelFormatter={formatDisplayDate} />
                     <Bar yAxisId="left" dataKey="porcentaje" name="Ocupación %" fill="#3B82F6" opacity={0.8} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -557,7 +558,7 @@ function IngresosReport() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="fecha" tick={{ fontSize: 8 }} tickFormatter={d => d?.slice(8)} />
                 <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `$${Math.round(v / 1000)}k`} />
-                <Tooltip formatter={(v: number) => `$${fPeso(v)}`} />
+                <Tooltip labelFormatter={formatDisplayDate} formatter={(v: number) => `$${fPeso(v)}`} />
                 <Line type="monotone" dataKey="alojamiento" stroke="#3B82F6" dot={false} name="Alojamiento" />
                 <Line type="monotone" dataKey="restaurant" stroke="#F59E0B" dot={false} name="Restaurant" />
                 <Line type="monotone" dataKey="spa" stroke="#10B981" dot={false} name="Spa" />
@@ -916,7 +917,7 @@ function VentasRestaurantReport() {
     { name: "Por Mozo",  data: porMozo.map((d: any) => ({ Mozo: d.mozo, Ordenes: d.ordenes, Cubiertos: d.cubiertos, TicketPromedio: d.ticketPromedio, Facturacion: d.revenue, PctTotal: d.pct })) },
     { name: "Por Categoria", data: porCategoria.map((d: any) => ({ Categoria: d.nombre, Unidades: d.cantidad, Facturacion: d.revenue, PctTotal: d.pctRevenue })) },
     { name: "Por Metodo de Pago", data: porMetodoPago.map((d: any) => ({ Metodo: d.metodo, Facturacion: d.revenue, Cantidad: d.cantidad, Pct: d.pct })) },
-    { name: "Tendencia Diaria", data: tendenciaDiaria.map((d: any) => ({ Fecha: d.fecha, Ventas: d.revenue, Ordenes: d.ordenes, Cubiertos: d.cubiertos })) },
+    { name: "Tendencia Diaria", data: tendenciaDiaria.map((d: any) => ({ Fecha: formatDisplayDate(d.fecha), Ventas: d.revenue, Ordenes: d.ordenes, Cubiertos: d.cubiertos })) },
     { name: "Pico Horario", data: porHora.map((d: any) => ({ Hora: d.hora, Ordenes: d.ordenes })) },
   ]);
 

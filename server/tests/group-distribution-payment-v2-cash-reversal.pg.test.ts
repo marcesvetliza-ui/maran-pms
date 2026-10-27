@@ -20,6 +20,7 @@ import { verifyFinancialSchema } from "../migrate";
  */
 
 vi.mock("../auth", () => ({
+  requirePermission: (_resource: string) => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, _res: any, next: () => void) => {
     req.user = { username: "cajera-pg-tester-v2" };
     next();

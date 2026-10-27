@@ -103,6 +103,8 @@ export const rooms = pgTable("rooms", {
   floor: integer("floor").notNull().default(1),
   status: text("status").$type<RoomStatus>().notNull().default("available"),
   bedConfig: text("bed_config"),
+  housekeepingServiceDate: text("housekeeping_service_date"),
+  bedConfigRevision: integer("bed_config_revision").notNull().default(0),
   allowedBedConfigs: text("allowed_bed_configs").array().$type<BedConfig[]>(),
   features: text("features").array(),
   maxOccupancy: integer("max_occupancy").default(2),
@@ -278,6 +280,7 @@ export const reservations = pgTable("reservations", {
   stayDetails: jsonb("stay_details").$type<StaySelection>(),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   housekeepingPreparation: jsonb("housekeeping_preparation").$type<HousekeepingPreparation>(),
+  housekeepingBedPreparation: jsonb("housekeeping_bed_preparation").$type<import("./housekeepingPlanning").BedPreparation>(),
   reservationCode: text("reservation_code").notNull(),
   guestId: varchar("guest_id").notNull(),
   companyId: varchar("company_id"),
@@ -441,6 +444,18 @@ export type HousekeepingTaskStatus = "pending" | "in_progress" | "completed" | "
 export type HousekeepingTaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
 export type HousekeepingPriority = "low" | "normal" | "high" | "urgent";
 
+export const housekeepingStaffAvailability = pgTable("housekeeping_staff_availability", {
+  userId: varchar("user_id").notNull().references(() => systemUsers.id),
+  scheduledDate: text("scheduled_date").notNull(),
+  status: text("status").notNull(),
+  shift: text("shift"),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
+  notes: text("notes").notNull().default(""),
+  updatedBy: varchar("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", {withTimezone: true}).notNull().defaultNow(),
+}, table => [primaryKey({columns: [table.userId, table.scheduledDate]})]);
+
 export const housekeepingTasks = pgTable("housekeeping_tasks", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   roomId: varchar("room_id").notNull(),
@@ -490,6 +505,10 @@ export type ReservationWithDetails = Reservation & {
   isGroup?: boolean;
   contactName?: string;
   contactPhone?: string;
+  // Populated by buildGroupWithDetails (group rooming) from reservation_companions —
+  // the one real source of named companions for a reservation. Absent on other
+  // enrichReservations callers, which don't need it.
+  companions?: ReservationCompanion[];
 };
 
 export type RoomWithType = Room & {
@@ -1465,6 +1484,7 @@ export type RestaurantTimeSlot = typeof restaurantTimeSlots.$inferSelect;
 
 // Recipes (ingredients per dish, or standalone base "elaboraciones")
 export const recipes = pgTable("recipes", {
+  isActive: text("is_active").notNull().default("true"),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   menuItemId: varchar("menu_item_id"),   // nullable — null when isBase=true
   notes: text("notes"),
@@ -1589,6 +1609,7 @@ export type InsertBrand = z.infer<typeof insertBrandSchema>;
 export type Brand = typeof brands.$inferSelect;
 
 export const inventoryItems = pgTable("inventory_items", {
+  purchaseEnabled: boolean("purchase_enabled").notNull().default(true),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sku: text("sku").unique(),
   name: text("name").notNull(),

@@ -86,11 +86,21 @@ export function editNights(existing: PricedNight[], edit: NightlyEdit): PricedNi
   return result;
 }
 
-/** Used only during creation AFTER activation; refuses unexplained totals. */
+/** Used only during creation; refuses unexplained totals. */
 export function initialNightlyPricing(reservation: Record<string, any>): PricedNight[] {
   const dates = calendarNights(reservation.checkInDate, reservation.checkOutDate);
   const net = moneyCents(reservation.totalRoomAmount ?? amountString(moneyCents(reservation.finalRatePerNight ?? "0") * dates.length));
   const base = moneyCents(reservation.baseRatePerNight ?? reservation.finalRatePerNight ?? "0");
+  // Package editors save an exact total and its rounded average. Preserve
+  // that total without inventing a discount or rejecting a rounding cent.
+  const final = moneyCents(reservation.finalRatePerNight ?? amountString(base));
+  if (reservation.discountType === "none" && Number(reservation.discountValue || 0) === 0 &&
+      final === base && base === Math.round(net / dates.length)) {
+    const floor = Math.floor(net / dates.length), remainder = net % dates.length;
+    const lines = dates.map((date, index) => ({date, rateCents: floor + (index < remainder ? 1 : 0), discountCents: 0}));
+    nightlyTotal(lines);
+    return lines;
+  }
   const gross = base * dates.length;
   if (net > gross) pricingError("El total contratado supera las tarifas informadas. Revisá el desglose antes de crear la reserva.");
   const discounts = allocateCents(gross - net, dates.map(() => base));

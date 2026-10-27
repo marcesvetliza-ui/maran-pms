@@ -74,6 +74,8 @@ async function fundAndCloseEvent(eventId: string, amount: number, method: string
   const paid = await request("POST", `/api/events/${eventId}/payments`, { amount, method });
   expect(paid.status, JSON.stringify(paid.body)).toBe(201);
   await waitForFolioTotals(eventId, amount, amount);
+  // New Event payments must not create or mirror cash into any drawer.
+  expect((await pool!.query("SELECT id FROM cash_movements WHERE source_id = $1", [eventId])).rows).toEqual([]);
   const closed = await request("POST", `/api/events/${eventId}/close`, { receiptType: "factura_b" });
   expect(closed.status, JSON.stringify(closed.body)).toBe(200);
   return Number(closed.body.invoiceId);
@@ -82,7 +84,11 @@ async function fundAndCloseEvent(eventId: string, amount: number, method: string
 async function cleanup(eventId: string | undefined, eventRoomId: string | undefined, invoiceId: number | undefined) {
   if (invoiceId) await pool!.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
   if (eventId) {
+    const legacyShifts = await pool!.query("SELECT DISTINCT shift_id FROM cash_movements WHERE source_type = 'event' AND source_id = $1", [eventId]);
     await pool!.query("DELETE FROM cash_movements WHERE source_type = 'event' AND source_id = $1", [eventId]);
+    for (const row of legacyShifts.rows) {
+      await pool!.query("DELETE FROM cash_shifts WHERE id = $1 AND shift_number = 950101", [row.shift_id]);
+    }
     await pool!.query(`
       DELETE FROM folio_movements WHERE folio_id IN (SELECT id FROM folios WHERE entity_type = 'event' AND entity_id = $1)
     `, [eventId]);
@@ -128,6 +134,13 @@ suite("PostgreSQL real: edición de forma de pago de facturas de Evento", () => 
       ({ eventId, eventRoomId } = await createEvent());
       invoiceId = await fundAndCloseEvent(eventId, 800, "efectivo");
 
+      // Explicit legacy fixture: old receipts remain editable without reopening Events.
+      const legacyShiftId = randomUUID();
+      await pool.query("INSERT INTO cash_shifts (id, area, shift_number, status) VALUES ($1, 'eventos', 950101, 'open')", [legacyShiftId]);
+      await pool.query(`INSERT INTO cash_movements
+        (id, shift_id, area, source_type, source_id, source_label, payment_method, amount, movement_type)
+        VALUES ($1, $2, 'eventos', 'event', $3, 'Cobro histórico', 'efectivo', '800.00', 'income')`,
+        [randomUUID(), legacyShiftId, eventId]);
       const oldCash = await pool.query("SELECT id FROM cash_movements WHERE source_type = 'event' AND source_id = $1 AND anulado = false", [eventId]);
       expect(oldCash.rows).toHaveLength(1);
 
@@ -156,6 +169,8 @@ suite("PostgreSQL real: edición de forma de pago de facturas de Evento", () => 
       const folioAfter = await pool.query(`SELECT total_charges, total_payments, balance FROM folios WHERE entity_type = 'event' AND entity_id = $1`, [eventId]);
       expect(folioAfter.rows[0]).toMatchObject({ total_charges: "800.00", total_payments: "800.00", balance: "0.00" });
 
+      expect((await pool.query("SELECT DISTINCT shift_id, area FROM cash_movements WHERE source_id = $1", [eventId])).rows)
+        .toEqual([{ shift_id: legacyShiftId, area: "eventos" }]);
       const invoiceRow = await pool.query("SELECT cash_forma_pago FROM sales_invoices WHERE id = $1", [invoiceId]);
       expect(invoiceRow.rows[0].cash_forma_pago).toBe("transferencia");
     } finally {

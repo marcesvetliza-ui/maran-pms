@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "../shared/date-display";
 import PDFDocument from "pdfkit";
 import { applyPilotPdfWatermark } from "./utils/pilotPdfWatermark";
 
@@ -69,7 +70,7 @@ export async function generateGroupPaymentReceiptPdf(data: GroupPaymentReceiptDa
 
     doc.font("Helvetica-Bold").fontSize(19).fillColor("#143d52").text("RECIBO DE PAGO GRUPAL");
     doc.moveDown(.25).font("Helvetica").fontSize(9).fillColor("#333")
-      .text(`Recibo Nº ${data.receiptNumber ?? `LEG-${data.legacyId}`}   |   Fecha: ${data.payment.date}`);
+      .text(`Recibo Nº ${data.receiptNumber ?? `LEG-${data.legacyId}`}   |   Fecha: ${formatDisplayDate(data.payment.date)}`);
     write(`Grupo: ${data.group.name}${data.group.code ? ` (${data.group.code})` : ""}`, true);
     heading("Desglose del cobro");
     if (breakdownUnavailable) {

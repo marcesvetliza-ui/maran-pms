@@ -1,6 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setRolePermissionsCacheForTests } from "../permissions";
 
 const state = vi.hoisted(() => ({
   reservation: {} as any,
@@ -60,6 +61,10 @@ const { registerReservationsRoutes } = await import("../routes/reservations");
 async function withServer(run: (baseUrl: string) => Promise<void>) {
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.user = { id: "zero-rate-admin", role: "admin", username: "synthetic-admin" } as any;
+    next();
+  });
   registerReservationsRoutes(app);
   const server = await new Promise<Server>((resolve) => {
     const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
@@ -105,9 +110,43 @@ beforeEach(() => {
   storage.getRoom.mockResolvedValue({ id: "room-1", isActive: true });
   vi.clearAllMocks();
   state.reservation = { ...baseReservation };
+  setRolePermissionsCacheForTests([{role:"admin",resourceKey:"reservations:edit-accommodation"}]);
 });
 
 describe("reservation zero-rate API guard", () => {
+  it("rejects a pricing change before writing when the actor lacks the role permission", async () => {
+    setRolePermissionsCacheForTests([]);
+    await withServer(async (baseUrl) => {
+      const result = await request(baseUrl, "PATCH", {finalRatePerNight:"1200", totalRoomAmount:"1200"});
+      expect(result.status).toBe(403);
+      expect(storage.updateReservation).not.toHaveBeenCalled();
+    });
+  });
+  it("does not use an incoming group flag to bypass the zero-rate guard",async()=>{
+    await withServer(async(baseUrl)=>{
+      const result=await request(baseUrl,'PATCH',{groupId:'claimed-group',isGroup:true,finalRatePerNight:'0'});
+      expect(result.status).toBe(400);expect(result.body.error).toMatch(/motivo/i);
+      expect(storage.updateReservation).not.toHaveBeenCalled();
+    });
+  });
+  it("moves an existing zero-rate group reservation without requiring a courtesy reason",async()=>{
+    state.reservation={...baseReservation,groupId:'group-master',finalRatePerNight:'0',totalRoomAmount:'0'};
+    await withServer(async(baseUrl)=>{
+      const result=await request(baseUrl,'PATCH',{roomId:'room-2'});
+      expect(result.status).toBe(200);
+      expect(storage.updateReservation).toHaveBeenCalledWith('reservation-zero',expect.objectContaining({roomId:'room-2'}));
+      expect(state.reservation.finalRatePerNight).toBe('0');
+      expect(state.reservation.specialRateReason).toBeNull();
+    });
+  });
+  it("allows a linked group rate of zero but still rejects negative and invalid rates",async()=>{
+    state.reservation={...baseReservation,groupId:'group-master'};
+    await withServer(async(baseUrl)=>{
+      expect((await request(baseUrl,'PATCH',{finalRatePerNight:'0',totalRoomAmount:'0'})).status).toBe(200);
+      expect((await request(baseUrl,'PATCH',{finalRatePerNight:'-1'})).status).toBe(400);
+      expect((await request(baseUrl,'PATCH',{finalRatePerNight:'not-a-rate'})).status).toBe(400);
+    });
+  });
   it("uses the persisted group link when extending from the generic reservation editor", async () => {
     state.reservation = {
       ...baseReservation,

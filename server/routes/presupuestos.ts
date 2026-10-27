@@ -1,3 +1,4 @@
+import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 import type { Express, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
@@ -6,7 +7,7 @@ import { presupuestos, presupuestoItems, quoteCatalogItems, quoteConditions } fr
 import { requireAuth } from "../auth";
 import { eq, desc, like, and, asc } from "drizzle-orm";
 import PDFDocument from "pdfkit";
-import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
+import { presupuestoRecipientLayout } from "../presupuestoRecipientLayout";
 import { assetPath } from "../utils/assetPath";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 
@@ -424,13 +425,14 @@ function generateHockeyPdf(doc: any, pres: any, items: any[], conditions: string
   doc.moveTo(M, y).lineTo(M + contentW, y).strokeColor(BORDER).lineWidth(0.5).stroke();
   y += 10;
 
-  const infoH = 64;
+  const recipientDetails = getRecipientDetails(pres);
+  const recipientLayout = presupuestoRecipientLayout(doc, pres.para, recipientDetails, 220, 220, 20, 64);
+  const infoH = recipientLayout.height;
   doc.roundedRect(M, y, contentW, infoH, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
-  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
-  const recipientDetails = getRecipientDetails(pres);
+  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220, characterSpacing: 0 });
   if (recipientDetails) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 38, { width: 220 });
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + recipientLayout.detailsTop, { width: 220, characterSpacing: 0 });
   }
   const c2 = M + 280, c3 = M + 390;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EMISIÓN", c2, y + 8, { characterSpacing: 0.5 });
@@ -613,12 +615,13 @@ export function generateEventosPdf(doc: any, pres: any, items: any[], conditions
   y = headerH + 16;
 
   // Info header box
-  const infoH2 = 64;
+  const recipientLayout = presupuestoRecipientLayout(doc, pres.para, recipientDetails, 220, 240, 20, 64);
+  const infoH2 = recipientLayout.height;
   doc.roundedRect(M, y, contentW, infoH2, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 8, { characterSpacing: 1 });
-  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220 });
+  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 20, { width: 220, characterSpacing: 0 });
   if (recipientDetails) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 38, { width: 240 });
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + recipientLayout.detailsTop, { width: 240, characterSpacing: 0 });
   }
   const c2e = M + 280, c3e = M + 390;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA INGRESO", c2e, y + 8, { characterSpacing: 0.5 });
@@ -1069,12 +1072,13 @@ function generateGeneralPdf(doc: any, pres: any, items: any[], conditions: strin
   doc.moveTo(M, y).lineTo(M + contentW, y).strokeColor(BORDER).lineWidth(0.5).stroke();
   y += 10;
 
-  const infoH = 70;
+  const recipientLayout = presupuestoRecipientLayout(doc, pres.para, recipientDetails, 250, 250, 22, 70);
+  const infoH = recipientLayout.height;
   doc.roundedRect(M, y, contentW, infoH, 6).fillAndStroke(LIGHT_BG, BORDER);
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("DIRIGIDO A", M + 12, y + 10, { characterSpacing: 1 });
-  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 22, { width: 250 });
+  doc.fillColor(DARK).fontSize(12).font("Helvetica-Bold").text(pres.para, M + 12, y + 22, { width: 250, characterSpacing: 0 });
   if (recipientDetails) {
-    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + 40, { width: 250 });
+    doc.fillColor(MUTED).fontSize(7).font("Helvetica").text(recipientDetails, M + 12, y + recipientLayout.detailsTop, { width: 250, characterSpacing: 0 });
   }
   const c2x = M + 295, c3x = M + 395;
   doc.fillColor(MUTED).fontSize(7).font("Helvetica-Bold").text("FECHA EMISIÓN", c2x, y + 10, { characterSpacing: 0.5 });

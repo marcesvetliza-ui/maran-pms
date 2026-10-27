@@ -1,3 +1,5 @@
+import { IssuerSearch } from "@/components/issuer-search";
+import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -159,7 +161,7 @@ export function SpecialPurchaseForm({
                 setPayment("none");
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger aria-label="Tipo de agente">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -177,24 +179,9 @@ export function SpecialPurchaseForm({
                 ? "Banco"
                 : "Tarjeta / Procesadora"}
           </Label>
-          <Select
-            value={issuerId}
-            onValueChange={(v) => {
-              setIssuerId(v);
-              setPayment("none");
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Elegir emisor" />
-            </SelectTrigger>
-            <SelectContent>
-              {issuers.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name} · {e.cuit}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <IssuerSearch items={issuers} value={issuerId}
+            label={ret ? "Empresa / Agencia que retuvo" : bank ? "Banco" : "Tarjeta / Procesadora"}
+            onChange={(id) => { setIssuerId(id); setPayment("none"); }} />
           {entityError && ret && (
             <p className="text-destructive text-xs">
               No se pudieron cargar los agentes.
@@ -273,7 +260,7 @@ export function SpecialPurchaseForm({
                   <SelectItem value="none">Pendiente de asociar</SelectItem>
                   {payments.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.date} · {p.description} · $
+                      {formatDisplayDate(p.date)} · {p.description} · $
                       {fmtMoney(Math.abs(Number(p.amount)))}
                     </SelectItem>
                   ))}

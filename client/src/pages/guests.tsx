@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import { GuestStayProfileEditor } from "@/components/guest-stay-profile";
 import { getGuestStayProfile, guestStayProfileSchema } from "@shared/guestStayProfile";
 import { useState, useEffect, useRef } from "react";
@@ -907,7 +908,7 @@ function ReservationExpandedDetail({ r }: { r: ReservationWithDetails }) {
           <div className="space-y-1">
             {activePayments.map(p => (
               <div key={p.id} className="flex justify-between text-xs">
-                <span>{paymentMethodLabel[p.method || ""] || p.method} · {p.date}</span>
+                <span>{paymentMethodLabel[p.method || ""] || p.method} · {formatDisplayDate(p.date)}</span>
                 <span className="font-medium text-green-700 dark:text-green-400">${fmtMoney(p.amount)}</span>
               </div>
             ))}
@@ -1386,7 +1387,7 @@ function GuestDetailDialog({
                             </p>
                             <p className="text-muted-foreground text-xs font-mono">{reservation.reservationCode}</p>
                             <p className="text-muted-foreground text-xs">
-                              {reservation.checkInDate} → {reservation.checkOutDate} ({reservation.nights} noche{reservation.nights !== 1 ? "s" : ""})
+                              {formatDisplayDate(reservation.checkInDate)} → {formatDisplayDate(reservation.checkOutDate)} ({reservation.nights} noche{reservation.nights !== 1 ? "s" : ""})
                             </p>
                           </div>
                         </div>

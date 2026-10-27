@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {PreparationBadge} from "@/components/housekeeping-preparation";
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
 import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
@@ -232,23 +233,6 @@ export default function PlanningPage() {
     },
     onError: () => {
       toast({ title: "Error al actualizar camaje", variant: "destructive" });
-    },
-  });
-
-  const updateRoomStatusMutation = useMutation({
-    mutationFn: async ({ roomId, status }: { roomId: string; status: string }) => {
-      const res = await apiRequest("PATCH", `/api/rooms/${roomId}`, { status });
-      return res.json();
-    },
-    onSuccess: (_data, vars) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      setRoomPopoverOpen(null);
-      const opt = ROOM_STATUS_OPTIONS.find(o => o.value === vars.status);
-      toast({ title: `Estado actualizado: ${opt?.label ?? vars.status}` });
-    },
-    onError: () => {
-      toast({ title: "Error al actualizar estado", variant: "destructive" });
     },
   });
 
@@ -912,7 +896,7 @@ export default function PlanningPage() {
                                 {block.quantity - block.assigned} hab. {block.roomTypeName}
                                 {block.roomTypeCode ? ` (${block.roomTypeCode})` : ""}
                               </span>
-                              <span className="text-orange-500">({block.checkIn} → {block.checkOut})</span>
+                              <span className="text-orange-500">({formatDisplayDate(block.checkIn)} → {formatDisplayDate(block.checkOut)})</span>
                             </button>
                           ))}
                         </div>
@@ -1224,8 +1208,6 @@ export default function PlanningPage() {
                                 open={roomPopoverOpen === room.id}
                                 onOpenChange={(o) => setRoomPopoverOpen(o ? room.id : null)}
                                 onEditBedConfig={setEditingBedConfig}
-                                onUpdateStatus={({ roomId, status }) => updateRoomStatusMutation.mutate({ roomId, status })}
-                                isPendingStatusUpdate={updateRoomStatusMutation.isPending}
                                 maintenanceAlertRoomIds={maintenanceAlertRoomIds}
                                 maintenanceConflictRoomIds={maintenanceConflictRoomIds}
                               />
@@ -1399,7 +1381,7 @@ export default function PlanningPage() {
                                             )}
                                             <div className="font-medium">{reservation.guestName}</div>
                                             <div className="text-muted-foreground">
-                                              {reservation.checkIn} → {reservation.checkOut}
+                                              {formatDisplayDate(reservation.checkIn)} → {formatDisplayDate(reservation.checkOut)}
                                             </div>
                                             <div className="flex items-center gap-2 text-muted-foreground">
                                               {reservation.numberOfGuests != null && (

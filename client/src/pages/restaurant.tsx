@@ -1,3 +1,4 @@
+import { formatDisplayDate } from "@shared/date-display";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useCallback, useRef, useEffect } from "react";
 import { fmtMoney, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
@@ -456,7 +457,7 @@ function AdvanceDialog({
           </DialogTitle>
           {reservation && (
             <p className="text-sm text-muted-foreground">
-              {reservation.guestName} — {reservation.reservationDate} {reservation.reservationTime}
+              {reservation.guestName} — {formatDisplayDate(reservation.reservationDate)} {reservation.reservationTime}
               {reservation.partySize > 1 ? ` (${reservation.partySize}p)` : ""}
             </p>
           )}
@@ -522,7 +523,7 @@ function AdvanceDialog({
                         <hr class="sep">
                         <div class="row"><span class="label">Reserva a nombre de:</span></div>
                         <div class="row"><span class="val">${reservation.guestName}</span></div>
-                        <div class="row"><span class="label">Fecha reserva:</span><span class="val">${reservation.reservationDate} ${reservation.reservationTime}</span></div>
+                        <div class="row"><span class="label">Fecha reserva:</span><span class="val">${formatDisplayDate(reservation.reservationDate)} ${reservation.reservationTime}</span></div>
                         <div class="row"><span class="label">Cubiertos:</span><span class="val">${reservation.partySize}</span></div>
                         <hr class="sep">
                         <div class="row"><span class="label">Fecha pago:</span><span class="val">${fecha}</span></div>
@@ -2549,6 +2550,7 @@ export default function RestaurantPage() {
           <p className="text-muted-foreground">Gestiona mesas, pedidos y menu</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <InventoryPendingConsumptions area="restaurant" readOnly compact label="Consumos pendientes de stock"/>
           <Link href="/mozo">
             <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-mozo">
               <Smartphone className="h-4 w-4" />
@@ -2601,7 +2603,6 @@ export default function RestaurantPage() {
         </DialogContent>
       </Dialog>
 
-      <InventoryPendingConsumptions area="restaurant" readOnly/>
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="floor" data-testid="tab-floor">
@@ -3234,7 +3235,7 @@ export default function RestaurantPage() {
                   if (w) {
                     const [y,m,d] = date.split("-").map(Number);
                     const dateStr = format(new Date(y,m-1,d), "EEEE d/MM/yyyy", { locale: es });
-                    w.document.write(`<html><head><title>Reservas ${date}</title><style>body{font-family:monospace;padding:20px}h1{font-size:16px}pre{white-space:pre;line-height:1.8}</style></head><body><h1>Reservas del día — ${dateStr}</h1><pre>${lines || "Sin reservas"}</pre></body></html>`);
+                    w.document.write(`<html><head><title>Reservas ${formatDisplayDate(date)}</title><style>body{font-family:monospace;padding:20px}h1{font-size:16px}pre{white-space:pre;line-height:1.8}</style></head><body><h1>Reservas del día — ${dateStr}</h1><pre>${lines || "Sin reservas"}</pre></body></html>`);
                     w.document.close();
                     w.print();
                   }
@@ -3270,7 +3271,7 @@ export default function RestaurantPage() {
                   }).join("");
                   const w = window.open("", "_blank", "width=900,height=750");
                   if (w) {
-                    w.document.write(`<!DOCTYPE html><html><head><title>Reservas ${date}</title>
+                    w.document.write(`<!DOCTYPE html><html><head><title>Reservas ${formatDisplayDate(date)}</title>
                     <style>
                       body{font-family:Arial,sans-serif;padding:30px;color:#111;font-size:13px}
                       h1{font-size:20px;margin:0 0 4px}p.sub{color:#666;font-size:13px;margin:0 0 20px}
@@ -3393,7 +3394,7 @@ export default function RestaurantPage() {
                 <CalendarDays className="h-10 w-10 text-muted-foreground mb-3" />
                 <h3 className="font-semibold mb-1">Sin reservas</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  {reservationViewMode === "day" ? `No hay reservas para ${reservationDateFilter === todayForFilter ? "hoy" : reservationDateFilter}` : "No hay reservas que coincidan con los filtros"}
+                  {reservationViewMode === "day" ? `No hay reservas para ${reservationDateFilter === todayForFilter ? "hoy" : formatDisplayDate(reservationDateFilter)}` : "No hay reservas que coincidan con los filtros"}
                 </p>
                 <Button size="sm" onClick={() => setIsReservationDialogOpen(true)} data-testid="button-add-first-reservation">
                   <Plus className="h-4 w-4 mr-2" />
@@ -5053,7 +5054,7 @@ export default function RestaurantPage() {
 
                 if (menuSearch.trim()) {
                   const visibleItems = menuItems.filter(item =>
-                    item.isAvailable !== "false" && (
+                    item.isActive !== "false" && item.isAvailable !== "false" && (
                       item.name.toLowerCase().includes(menuSearch.toLowerCase()) ||
                       (item.description || "").toLowerCase().includes(menuSearch.toLowerCase())
                     )
@@ -5081,7 +5082,7 @@ export default function RestaurantPage() {
                   return (
                     <div className="grid gap-2 sm:grid-cols-2">
                       {menuItems
-                        .filter((item) => item.categoryId === effectiveCategory && item.isAvailable !== "false")
+                        .filter((item) => item.categoryId === effectiveCategory && item.isActive !== "false" && item.isAvailable !== "false")
                         .map((item) => (
                           <button
                             key={item.id}
@@ -5411,14 +5412,14 @@ export default function RestaurantPage() {
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
-        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto flex flex-col">
+        <DialogContent className="operational-dialog restaurant-checkout">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
               Cerrar - {getUpdatedOrder()?.orderLabel || currentOrder?.orderNumber}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="restaurant-close-grid operational-body"><section className="min-w-0 space-y-4" aria-label="Consumos y total de la mesa">
             {getOrderItems().some(i => i.status === "waiting_course") && (
               <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md p-3">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -5514,6 +5515,7 @@ export default function RestaurantPage() {
               })()}
             </div>
 
+          </section><section className="min-w-0 space-y-4" aria-label="Cliente y cobro">
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -6554,8 +6556,10 @@ export default function RestaurantPage() {
 
               </div>
             )}
-          </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          </section></div>
+          <DialogFooter className="operational-footer flex-col sm:flex-row gap-2">
+            <div className="mr-auto min-w-0 text-sm" aria-label="Total a cobrar de la mesa"><span className="block text-muted-foreground">A cobrar</span><strong className="text-xl">${Math.max(0, parseFloat(getUpdatedOrder()?.total || "0") - (closeDiscountType === "percent" ? parseFloat(getUpdatedOrder()?.total || "0") * parseFloat(closeDiscount || "0") / 100 : parseFloat(closeDiscount || "0")) - totalAdvanceCredit).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
+
             <Button
               variant="outline"
               onClick={() => {
