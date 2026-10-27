@@ -811,7 +811,8 @@ export default function SpaPage() {
   const selectedTreatmentId = form.watch("treatmentId");
   const selectedAppointmentDate = form.watch("appointmentDate");
   const selectedTreatment = treatments.find((treatment) => treatment.id === selectedTreatmentId);
-  const resourceCabins = activeCabins.filter((cabin) => !!cabin.resourceType);
+  // Every active physical cabin can be reserved by a circuit, not only special facilities.
+  const resourceCabins = activeCabins;
   // Any plain (non-circuit) active treatment can be bundled as a circuit
   // resource — a circuit is always excluded here (isCircuit), so this never
   // offers nesting a circuit inside itself.
@@ -4185,7 +4186,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                 </SelectContent>
               </Select>
               <p className="mt-1 text-xs text-muted-foreground">
-                Un circuito puede reservar Sauna e Hidromasaje además del gabinete principal.
+                Un circuito puede reservar cualquier gabinete activo, además de Sauna e Hidromasaje.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -4215,7 +4216,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                   <div>
                     <p className="text-sm font-semibold">Recursos incluidos en el circuito</p>
                     <p className="text-xs text-muted-foreground">
-                      Definí el recurso sugerido y su duración. El recurso y el horario podrán ajustarse al reservar.
+                      Definí el recurso sugerido y su duración. Para reservar espacio para los masajes, agregá sus gabinetes y horarios al crear el turno.
                     </p>
                   </div>
                   <Badge variant="outline">Configuración base</Badge>
@@ -4254,7 +4255,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                                 }}
                               >
                                 <SelectTrigger data-testid={`select-template-resource-${index}`}>
-                                  <SelectValue placeholder="Sauna, Hidromasaje o un tratamiento" />
+                                  <SelectValue placeholder="Gabinete o tratamiento" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectGroup>

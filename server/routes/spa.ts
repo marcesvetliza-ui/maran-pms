@@ -201,7 +201,7 @@ async function normalizeSpaResourceBookings(
       label = treatment.name;
     } else {
       const cabin = input.cabinId ? cabinMap.get(input.cabinId) : undefined;
-      if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+      if (!cabin || cabin.isActive !== "true") {
         throw Object.assign(new Error("El recurso seleccionado no está disponible para circuitos."), { statusCode: 400 });
       }
       cabinId = cabin.id;
@@ -702,8 +702,8 @@ export function registerSpaRoutes(app: Express) {
           };
         }
         const cabin = cabinMap.get(row?.defaultCabinId);
-        if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
-          throw Object.assign(new Error("Seleccioná un recurso SPA activo (Sauna, Hidromasaje o un tratamiento)."), { statusCode: 400 });
+        if (!cabin || cabin.isActive !== "true") {
+          throw Object.assign(new Error("Seleccioná un gabinete SPA activo."), { statusCode: 400 });
         }
         return {
           treatmentId: req.params.id,
@@ -748,7 +748,7 @@ export function registerSpaRoutes(app: Express) {
       }
 
       const [cabin] = await db.select().from(spaCabins).where(eq(spaCabins.id, cabinId));
-      if (!cabin || cabin.isActive !== "true" || !cabin.resourceType) {
+      if (!cabin || cabin.isActive !== "true") {
         return res.status(400).json({ error: "Recurso SPA inválido" });
       }
 
