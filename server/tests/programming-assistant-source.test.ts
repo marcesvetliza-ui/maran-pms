@@ -208,6 +208,14 @@ describe("read-only code investigator", () => {
     expect((await source.inspectSymbol("absentSymbol")).definitions).toEqual([]);
     await expect(source.inspectSymbol("../../secrets")).rejects.toThrow();
   });
+  it("does not let an earlier invocation evict the exported definition", async () => {
+    const source=await fixture();
+    await writeFile(path.join(directory,"server","a-caller.ts"),"  convertInventoryQuantity(2, 3);\n");
+    await writeFile(path.join(directory,"server","z-definition.ts"),"export function convertInventoryQuantity(q:number,f:number){return q*f;}\n");
+    const result=await source.inspectSymbol("convertInventoryQuantity",{maxDefinitions:1,maxTests:0,lines:20});
+    expect(result.definitions.map(read=>read.path)).toEqual(["server/z-definition.ts"]);
+    expect(source.validates(result.definitions[0])).toBe(true);
+  });
   it("finds the real conversion functions missing from the preview diagnosis", async () => {
     const source=new CodeSource(process.cwd(),"a".repeat(40));
     for(const symbol of ["unitFactor","planIngredientsWithActualQuantities","convertInventoryQuantity"]){

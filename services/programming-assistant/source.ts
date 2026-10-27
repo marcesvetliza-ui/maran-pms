@@ -133,7 +133,14 @@ export class CodeSource {
       if (isTest && tests.length>=limits.maxTests) continue;
       if (!isTest && definitions.length>=limits.maxDefinitions) continue;
       const lines=(await this.content(file)).split("\n");
-      const index=lines.findIndex(line=>isTest ? occurrence.test(line) : definition.test(line));
+      const index=lines.findIndex(line=>{
+        if(isTest)return occurrence.test(line);
+        if(!definition.test(line))return false;
+        // A plain invocation ending in ; is not a method declaration. Without
+        // this guard an earlier caller evicts the actual exported definition.
+        const declaration=/^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|class)\s+/.test(line);
+        return declaration || !/;\s*$/.test(line);
+      });
       if(index<0) continue;
       const start=Math.max(1,index+1-3);
       // A short function must not drag in the next unrelated operation.

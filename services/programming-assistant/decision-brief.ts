@@ -10,8 +10,8 @@ const decisions = [
     id: "capacity",
     question: "¿Importe disponible o cantidad de documentos? ¿Qué estados restan capacidad?",
     path: "server/billing/routes.ts",
-    anchor: "El cargo seleccionado ya no tiene saldo suficiente",
-    windows: [{before:40,after:-18},{before:8,after:4}],
+    anchor: "saldo suficiente para facturar",
+    windows: [{before:58,after:-18},{before:8,after:4}],
   },
   {
     id: "discard",

@@ -1,3 +1,4 @@
+import {sourceRange} from "./helpers/assistantSourceEvidence";
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
 import {auditDiagnosis,diagnosisStatements,auditReport} from '../../services/programming-assistant/semantic-audit';
@@ -5,12 +6,13 @@ import {diagnose} from '../../services/programming-assistant/diagnose';
 import {financialConsistencyIssues} from '../../services/programming-assistant/consistency';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
 const version='a'.repeat(40);
+const capacity=sourceRange('server/billing/routes.ts','saldo suficiente para facturar',2,3);
 const ticket={version,title:'Error al facturar',actual:'Dos personas intentaron facturar el mismo cargo.',expected:'Saber qué implica el rechazo y qué verificar.',module:'facturacion',messages:[]} as SupportTicket;
 const unsafe='El cargo fue facturado por otra operación, por lo que no se ha duplicado la facturación ni el cobro.';
-const report=(proposal=unsafe):SupportDiagnosis=>({summary:'El código valida el saldo antes de emitir. No se dispone de registros para confirmar los cobros reales.',certainty:'sustentado_en_codigo',cause:'El servidor rechaza un importe superior al saldo facturable.',proposal,proposedTests:[],questions:[],dataRepair:'',limitations:['No hay registro operativo real que pruebe ausencia de doble cobro.'],evidence:[{path:'server/billing/routes.ts',start:1672,end:1684,explanation:'El saldo se valida antes de permitir facturar.'}]});
+const report=(proposal=unsafe):SupportDiagnosis=>({summary:'El código valida el saldo antes de emitir. No se dispone de registros para confirmar los cobros reales.',certainty:'sustentado_en_codigo',cause:'El servidor rechaza un importe superior al saldo facturable.',proposal,proposedTests:[],questions:[],dataRepair:'',limitations:['No hay registro operativo real que pruebe ausencia de doble cobro.'],evidence:[{...capacity,explanation:'El saldo se valida antes de permitir facturar.'}]});
 const rejection={approved:false,issues:[{statementId:'proposal_1_1',problem:'Afirma un resultado operativo que el resumen y las limitaciones declaran desconocido.',correction:'Separar protección implementada de hechos del incidente; consultar registros antes de concluir.'}]};
 const response=(content:unknown,tokens=500)=>({usage:{total_tokens:tokens,prompt_tokens:100},choices:[{message:{role:'assistant',content:JSON.stringify(content)}}]});
-async function setup(){const source=new CodeSource(process.cwd(),version);await source.read('server/billing/routes.ts',1672,1684);return source;}
+async function setup(){const source=new CodeSource(process.cwd(),version);await source.read(capacity.path,capacity.start,capacity.end);return source;}
 it('sends the entire report to an isolated, read-only review context',async()=>{
  const source=await setup();let calls=0;
  const client={chat:{completions:{create:async(request:any)=>{

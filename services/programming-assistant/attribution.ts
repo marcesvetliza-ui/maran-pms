@@ -14,12 +14,23 @@ export async function checkErrorAttribution(report:SupportDiagnosis,source:CodeS
  const path=(await source.files()).find(path=>path==='server/inventoryUnits.ts');
  if(!path)return [];
  const read=await source.read(path,1,160);
- const lines=read.content.split('\n').map(line=>line.replace(/^\d+: /,''));
- const code=lines.join('\n');
- const declarations=[...code.matchAll(/\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)];
- const functions=declarations.map((match,index)=>{
-  const start=match.index!,end=declarations[index+1]?.index??code.length;
-  return {symbol:match[1],start:read.start+code.slice(0,start).split('\n').length-1,end:read.start+code.slice(0,end).trimEnd().split('\n').length-1,body:code.slice(start,end)};
+ const reads=[read];
+ // Follow explicit named re-exports through authorized source inspection. Main
+ // moved inventoryUnitFactor to shared; the wrapper still owns conversion.
+ const exports=[...read.content.matchAll(/export\s*\{([^}]+)\}\s*from/g)]
+   .flatMap(match=>match[1].split(',').map(name=>name.trim()).filter(name=>/^[A-Za-z_$][\w$]*$/.test(name))).slice(0,4);
+ for(const symbol of exports){
+  const found=await source.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:80});
+  for(const definition of found.definitions)
+   if(!reads.some(item=>item.path===definition.path && item.start<=definition.start && item.end>=definition.end))reads.push(definition);
+ }
+ const functions=reads.flatMap(read=>{
+  const code=read.content.split('\n').map(line=>line.replace(/^\d+: /,'')).join('\n');
+  const declarations=[...code.matchAll(/\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)];
+  return declarations.map((match,index)=>{
+   const start=match.index!,end=declarations[index+1]?.index??code.length;
+   return {path:read.path,symbol:match[1],start:read.start+code.slice(0,start).split('\n').length-1,end:read.start+code.slice(0,end).trimEnd().split('\n').length-1,body:code.slice(start,end)};
+  });
  });
  // This module's direct throw is small and locally inspectable. Do not infer
  // ownership from comments, import names or propagation through other modules.
@@ -39,7 +50,7 @@ export async function checkErrorAttribution(report:SupportDiagnosis,source:CodeS
    const prefix=normalized(claim.text.slice(Math.max(0,mention.index!-45),mention.index!));
    if(/(?:no es|no corresponde a|no proviene de|en vez de)\s*['"`]*$/.test(prefix)||/\bno (?:lanza|arroja|origina|produce|detecta|busca|consulta|genera|es responsable)\b/.test(text))continue;
    if(!/\b(?:lanza|arroja|origina|produce|detecta|genera|devuelve)\b|no encuentra/.test(text))continue;
-   errors.push({field:claim.field,attributedSymbol:mention[0],origin:{path,symbol:owner.symbol,start:owner.start,end:owner.end,statement},reason:'La función nombrada no es la que construye el mensaje de equivalencia faltante en este módulo. Corregir la atribución y citar la definición real; no conservar la explicación equivocada con menor certeza.'});
+   errors.push({field:claim.field,attributedSymbol:mention[0],origin:{path:owner.path,symbol:owner.symbol,start:owner.start,end:owner.end,statement},reason:'La función nombrada no es la que construye el mensaje de equivalencia faltante en este módulo. Corregir la atribución y citar la definición real; no conservar la explicación equivocada con menor certeza.'});
   }
  }
  return errors.slice(0,6);

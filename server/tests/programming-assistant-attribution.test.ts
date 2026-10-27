@@ -1,3 +1,4 @@
+import {sourceRange} from "./helpers/assistantSourceEvidence";
 // These protocol tests isolate the earlier stages. Semantic review has its own
 // tests with explicit reject/approve responses and independent request checks.
 vi.mock('../../services/programming-assistant/semantic-audit',async(importOriginal)=>({...await importOriginal<typeof import("../../services/programming-assistant/semantic-audit")>(),auditDiagnosis:vi.fn(async()=>({approved:true,issues:[],tokens:0}))}));
@@ -10,7 +11,10 @@ import {checkErrorAttribution} from '../../services/programming-assistant/attrib
 import {diagnose} from '../../services/programming-assistant/diagnose';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
 const source=()=>new CodeSource(process.cwd(),'a'.repeat(40));
-const report=(cause:string):SupportDiagnosis=>({summary:'El catch muestra un error genérico.',certainty:'sustentado_en_codigo',cause,proposal:'Usar el parser existente',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[{path:'server/inventoryUnits.ts',start:11,end:19,explanation:'Validaciones de unidades'}]});
+const conversion=sourceRange('server/inventoryUnits.ts','export function convertInventoryQuantity',1,5);
+const equivalence=sourceRange('shared/inventoryUnits.ts','export function inventoryUnitFactor',0,10);
+async function readEvidence(s:CodeSource){for(const ref of [conversion,equivalence])await s.read(ref.path,ref.start,ref.end);}
+const report=(cause:string):SupportDiagnosis=>({summary:'El catch muestra un error genérico.',certainty:'sustentado_en_codigo',cause,proposal:'Usar el parser existente',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[{...conversion,explanation:'Conversión numérica'},{...equivalence,explanation:'Validación de equivalencias'}]});
 
 it.each([
  'La función convertInventoryQuantity usa equivalencias. Esta función lanza un error específico cuando no encuentra equivalencia explícita.',
@@ -19,7 +23,7 @@ it.each([
 ])('rejects the actual repeated misattribution: %s',async(cause)=>{
  const s=source();const errors=await checkErrorAttribution(report(cause),s);
  expect(errors).toHaveLength(1);
- expect(errors[0]).toMatchObject({field:'cause',attributedSymbol:'convertInventoryQuantity',origin:{symbol:'inventoryUnitFactor',path:'server/inventoryUnits.ts'}});
+ expect(errors[0]).toMatchObject({field:'cause',attributedSymbol:'convertInventoryQuantity',origin:{symbol:'inventoryUnitFactor',path:'shared/inventoryUnits.ts'}});
  expect(errors[0].origin.statement).toContain('throw fail(`Falta equivalencia explícita');
  expect(s.validates(errors[0].origin)).toBe(true);
 });
@@ -45,7 +49,7 @@ it('derives the origin from source rather than a hardcoded function name',async(
  }finally{await rm(root,{recursive:true,force:true});}
 });
 it('does not publish a stubborn model answer after repeated attribution failures',async()=>{
- const s=source();await s.read('server/inventoryUnits.ts',1,19);
+ const s=source();await readEvidence(s);
  const wrong=report('convertInventoryQuantity lanza un error si falta equivalencia explícita.');
  let requests=0;
  const client={chat:{completions:{create:async()=>{requests++;return {choices:[{message:{role:'assistant',content:JSON.stringify(wrong)}}]};}}}};
@@ -53,10 +57,10 @@ it('does not publish a stubborn model answer after repeated attribution failures
  expect(requests).toBe(3);
 });
 it('feeds the direct throw to correction and then accepts a corrected, reviewed report',async()=>{
- const s=source();await s.read('server/inventoryUnits.ts',1,19);
+ const s=source();await readEvidence(s);
  const wrong=report('convertInventoryQuantity lanza un error si falta equivalencia explícita.');
  const corrected=report('inventoryUnitFactor lanza Falta equivalencia explícita; convertInventoryQuantity multiplica cantidades.');
- corrected.evidence=[{path:'server/inventoryUnits.ts',start:4,end:19,explanation:'Se distinguen origen del mensaje y conversión numérica'}];
+ corrected.evidence=[{...conversion,explanation:'Conversión numérica'},{...equivalence,explanation:'Origen del mensaje'}];
  let requests=0;
  const client={chat:{completions:{create:async(request:any)=>{
   const current=requests++;

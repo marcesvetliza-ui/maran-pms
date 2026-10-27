@@ -6,9 +6,9 @@ export async function orientInvoiceConflict(source:CodeSource) {
  const reads:Awaited<ReturnType<CodeSource['read']>>[]=[];
  const anchors=[
   {path:'server/billing/routes.ts',term:'app.post("/api/billing/invoices"',before:0,after:20},
-  {path:'server/billing/routes.ts',term:'El cargo seleccionado ya no tiene saldo suficiente',before:65,after:10},
+  {path:'server/billing/routes.ts',term:'saldo suficiente para facturar',before:65,after:10},
   {path:'client/src/components/PrefacturaDialog.tsx',term:'const completed = await submission.current!.run',before:5,after:20},
-  {path:'client/src/components/PrefacturaDialog.tsx',term:'setSubmitError(err.message',before:20,after:5},
+  {path:'client/src/components/PrefacturaDialog.tsx',term:'setSubmitError(parseApiError(err))',before:20,after:5},
  ];
  for(const anchor of anchors){
   if(!files.includes(anchor.path))continue;

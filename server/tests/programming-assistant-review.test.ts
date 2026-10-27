@@ -1,3 +1,4 @@
+import {sourceRange} from "./helpers/assistantSourceEvidence";
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
 import {buildCoverageReview,buildResearchClosure,coverageReviewInstruction} from '../../services/programming-assistant/review';
@@ -6,12 +7,14 @@ import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-supp
 
 it('supplies the cited code instead of treating the erroneous explanation as evidence',async()=>{
  const source=new CodeSource(process.cwd(),'a'.repeat(40));
- await source.read('server/inventoryUnits.ts',1,20);
- const draft:SupportDiagnosis={summary:'convertInventoryQuantity arroja Falta equivalencia explícita',certainty:'sustentado_en_codigo',cause:'',proposal:'',proposedTests:[],questions:['¿Existe alguna pantalla para configurar equivalencias?'],dataRepair:'',limitations:[],evidence:[{path:'server/inventoryUnits.ts',start:11,end:20,explanation:'convertInventoryQuantity detecta falta de configuración'}]};
+ const ref=sourceRange('shared/inventoryUnits.ts','export function inventoryUnitFactor',0,10);
+ await source.read(ref.path,ref.start,ref.end);
+ const draft:SupportDiagnosis={summary:'convertInventoryQuantity arroja Falta equivalencia explícita',certainty:'sustentado_en_codigo',cause:'',proposal:'',proposedTests:[],questions:['¿Existe alguna pantalla para configurar equivalencias?'],dataRepair:'',limitations:[],evidence:[{...ref,explanation:'convertInventoryQuantity detecta falta de configuración'}]};
  const review=await buildCoverageReview(draft,source);
  expect(review.citedCode[0].content).toContain('throw fail(`Falta equivalencia explícita');
- expect(review.citedCode[0].content).toContain('export function convertInventoryQuantity');
- expect(review.citedCode[0].content).toContain("throw fail('Cantidad o equivalencia inválida')");
+ const conversion=await source.inspectSymbol('convertInventoryQuantity',{maxDefinitions:1,maxTests:0,lines:30});
+ expect(conversion.definitions[0].content).toContain('export function convertInventoryQuantity');
+ expect(conversion.definitions[0].content).toContain("throw fail('Cantidad o equivalencia inválida')");
  expect(review.citedCode[0].content).not.toContain('detecta falta de configuración');
  expect(review.citedCode[0].incomplete).toBe(false);
  expect(coverageReviewInstruction).toContain('instrucción exacta');
