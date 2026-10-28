@@ -1,4 +1,4 @@
-import {isCreditNoteRecoveryCoverage} from "./credit-note-recovery";
+import {isCreditNoteRecoveryCoverage,isFiscalDatesRecoveryCoverage} from "./credit-note-recovery";
 import OpenAI from 'openai';
 import {z} from 'zod';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
@@ -53,12 +53,14 @@ En diagnosis.statements, CADA text contiene UN campo/elemento COMPLETO, sin cort
 
 const recoveryAuditInstruction="En este caso hay una NC pendiente informada. Verificá que cada cita respalde su explicación y corresponda a esa operación. Un guard de borrar pagos o reemplazar facturas no demuestra la causa de una conciliación fallida; una asociación documental no demuestra recuperación. Contrastá la propuesta con las ramas de recuperación y la pantalla leídas. No presupongas que falta crear otro comprobante ni que pendiente significa autorizado o rechazado. Si el error exacto falta, no afirmes que coincide con un guard concreto de otra operación.";
 
+const fiscalDatesAuditInstruction="El caso pregunta por fechas fiscales. Contrastá las afirmaciones de ausencia o asignación con date_builder, date_serialization y fiscal_call y sus lecturas. Que un wrapper no reciba campos explícitos no demuestra que el cliente fiscal no los calcule. Si el XML ya los incorpora, rechazar una causa que diga que no se completan. Tampoco deducir que el incidente está resuelto ni que ARCA aceptó esos valores. No derivar al usuario preguntas sobre la lógica disponible en el código ni afirmar ausencia de pruebas ya leídas. Una limitación que admite no haber inspeccionado la asignación no respalda una causa confirmada.";
+
 export async function prepareAudit(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,coverage:readonly string[] = []) {
   const {citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief}=await buildCoverageReview(report,source,coverage);
   const diagnosis=auditReport(report);
   const statementById=new Map(diagnosisStatements(report).statements.map(item=>[item.id,item]));
   const payload=JSON.stringify({case:investigationCase(ticket),diagnosis,evidence:{citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief},capabilities:{codeInspectionOnly:true,testsExecuted:false,operationalDatabaseAccess:false}});
- return {diagnosis,statementById,payload,request:{messages:[{role:'system' as const,content:auditInstruction+(isCreditNoteRecoveryCoverage(coverage)?'\n'+recoveryAuditInstruction:'')},{role:'user' as const,content:payload}],max_completion_tokens:AUDIT_OUTPUT,response_format:{type:'json_schema' as const,json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema([...statementById.keys()])}}}};
+ return {diagnosis,statementById,payload,request:{messages:[{role:'system' as const,content:auditInstruction+(isCreditNoteRecoveryCoverage(coverage)?'\n'+recoveryAuditInstruction:'')+(isFiscalDatesRecoveryCoverage(coverage)?'\n'+fiscalDatesAuditInstruction:'')},{role:'user' as const,content:payload}],max_completion_tokens:AUDIT_OUTPUT,response_format:{type:'json_schema' as const,json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema([...statementById.keys()])}}}};
 }
 export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,client:OpenAI,options:{model:string;signal:AbortSignal;remainingTokens:number;coverageChecklist?:readonly string[];prepared?:Awaited<ReturnType<typeof prepareAudit>>;estimate?:typeof requestCost;observe?:(request:unknown,promptTokens:unknown)=>void}) {
  const {statementById,request}=options.prepared || await prepareAudit(ticket,report,source,options.coverageChecklist);

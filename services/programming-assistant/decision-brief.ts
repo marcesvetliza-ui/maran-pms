@@ -1,4 +1,4 @@
-import {creditNoteRecoveryDecisions,isCreditNoteRecoveryCoverage} from "./credit-note-recovery";
+import {creditNoteDecisionsFor,isCreditNoteRecoveryCoverage} from "./credit-note-recovery";
 import type {CodeSource} from "./source";
 import {citedScreens} from "../../shared/programming-support-scope";
 
@@ -51,7 +51,7 @@ export async function buildDecisionBrief(
   const readings:Array<{path:string;start:number;end:number;content:string;incomplete:boolean}> = [];
   let remaining=8000;
   const checks = [];
-  for (const decision of (isCreditNoteRecoveryCoverage(coverage) ? creditNoteRecoveryDecisions : decisions)) {
+  for (const decision of (isCreditNoteRecoveryCoverage(coverage) ? creditNoteDecisionsFor(coverage) : decisions)) {
     const {path,anchor,windows,...check} = decision;
     const match = files.includes(path)
       ? (await source.search(anchor,path)).matches.find(item=>item.path===path)

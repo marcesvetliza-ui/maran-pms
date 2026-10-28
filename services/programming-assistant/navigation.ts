@@ -1,4 +1,4 @@
-import {creditNoteRecoveryChecklist,orientCreditNoteRecovery} from "./credit-note-recovery";
+import {creditNoteRecoveryChecklist,orientCreditNoteRecovery,fiscalDatesRecoveryRequirement} from "./credit-note-recovery";
 import {orientInvoiceConflict,invoiceConflictChecklist} from "./invoice-conflict";
 import { CodeSource } from "./source";
 import type { SupportTicket } from "../../shared/programming-support";
@@ -100,13 +100,14 @@ export async function orientInvestigation(
     const use=uses.matches.find(match=>!match.path.includes(".test."));
     if(use)workflowReads.push(await source.read(use.path,Math.max(1,use.line-4),use.line+4));
   }
-  if(creditNoteRecovery)workflowReads.push(...await orientCreditNoteRecovery(source));
-  const coverageChecklist=creditNoteRecovery ? creditNoteRecoveryChecklist : invoiceConflict && !purchases ? invoiceConflictChecklist : [];
+  const fiscalDatesRecovery=creditNoteRecovery && /fchservdesde|fchservhasta|fchvtopago|10049|fechas? (?:de (?:servicio|prestacion)|fiscales?|obligatorias)/.test(text);
+  const coverageChecklist=creditNoteRecovery ? [...creditNoteRecoveryChecklist,...(fiscalDatesRecovery?[fiscalDatesRecoveryRequirement]:[])] : invoiceConflict && !purchases ? invoiceConflictChecklist : [];
+  if(creditNoteRecovery)workflowReads.push(...await orientCreditNoteRecovery(source,coverageChecklist));
   if(invoiceConflict && !purchases)workflowReads.push(...await orientInvoiceConflict(source));
   return {
     decisionBrief:await buildDecisionBrief(source,coverageChecklist,workflowReads),
     coverageChecklist,
-    investigationFocus: creditNoteRecovery ? creditNoteRecoveryChecklist.join(" ") : errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : roomMove ? "Seguir el PATCH de la reserva, checkOverbooking y updateReservation. Distinguir pruebas de función pura de integración: nombrar exactamente la función probada y citar su aserción, sin atribuirla a checkOverbooking ni al PATCH por semejanza. Leer el catch de la pantalla: diferenciar un texto fijo del detalle enviado por el servidor y verificar qué cierra la edición en éxito o error. Explicar las comparaciones de fechas que permiten egreso/ingreso el mismo día. Si faltan pruebas del cambio de habitación, buscarlas sin inferir que no existen. No expandir automáticamente otras operaciones cercanas." : invoiceConflict && !purchases ? invoiceConflictChecklist.join(" ") : undefined,
+    investigationFocus: creditNoteRecovery ? coverageChecklist.join(" ") : errorFlow ? "Seguir el mensaje: error del endpoint → apiRequest → catch de la pantalla → utilidad existente para presentar errores. Leer el parser y su ejemplo antes de proponer una solución o preguntar por convenciones de la aplicación. No releer cálculos o persistencia ajenos a ese requisito. Las pruebas operativas no se precargaron en este recorrido; no inferir que no existen." : roomMove ? "Seguir el PATCH de la reserva, checkOverbooking y updateReservation. Distinguir pruebas de función pura de integración: nombrar exactamente la función probada y citar su aserción, sin atribuirla a checkOverbooking ni al PATCH por semejanza. Leer el catch de la pantalla: diferenciar un texto fijo del detalle enviado por el servidor y verificar qué cierra la edición en éxito o error. Explicar las comparaciones de fechas que permiten egreso/ingreso el mismo día. Si faltan pruebas del cambio de habitación, buscarlas sin inferir que no existen. No expandir automáticamente otras operaciones cercanas." : invoiceConflict && !purchases ? invoiceConflictChecklist.join(" ") : undefined,
     endpointContext,
     entryPoints: ["server/routes.ts", "server/storage.ts", "shared/schema.ts"].filter((p) => files.includes(p)),
     candidateFiles: candidates,

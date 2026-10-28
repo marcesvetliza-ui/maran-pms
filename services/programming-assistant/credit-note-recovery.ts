@@ -16,10 +16,23 @@ export const creditNoteRecoveryDecisions = [
   {id:"recovery_screen",question:"¿Qué acción ofrece Facturación sobre la NC pendiente y qué mensaje muestra?",path:"client/src/pages/billing.tsx",anchor:'Reintentar y conciliar',windows:[{before:18,after:3}]},
 ] as const;
 
-export async function orientCreditNoteRecovery(source:CodeSource) {
+export const fiscalDatesRecoveryRequirement="Fechas fiscales de NC: seguir authorize → emitirFactura → feCAESolicitar → armado del XML. Contrastar asignación, formato, Concepto y pruebas existentes antes de afirmar que faltan campos; no preguntar al usuario lógica que está en esas funciones.";
+export const isFiscalDatesRecoveryCoverage=(coverage:readonly string[])=>coverage.includes(fiscalDatesRecoveryRequirement);
+export function creditNoteDecisionsFor(coverage:readonly string[]){
+ if(!isFiscalDatesRecoveryCoverage(coverage))return creditNoteRecoveryDecisions;
+ return [
+  {id:"date_builder",question:"¿Dónde se construyen y validan las tres fechas, y qué valores calcula realmente esta revisión?",path:"server/billing/wsfevClient.ts",anchor:"function buildServiceDates(fecha:",windows:[{before:0,after:18}]},
+  {id:"date_serialization",question:"¿Se agregan esas fechas al XML de Concepto 2 enviado al proveedor?",path:"server/billing/wsfevClient.ts",anchor:"<ar:Concepto>2</ar:Concepto>",windows:[{before:16,after:22}]},
+  {id:"fiscal_call",question:"¿Qué fecha y número persistidos usa la recuperación y cuándo consulta antes de autorizar?",path:"server/billing/invoiceService.ts",anchor:"const fecha = String(pendingInvoice?.fechaEmision",windows:[{before:0,after:51}]},
+  {...creditNoteRecoveryDecisions[1],anchor:"export async function recoverGroupCreditNote(",windows:[{before:0,after:64}]},
+  creditNoteRecoveryDecisions[0],creditNoteRecoveryDecisions[3],
+ ];
+}
+
+export async function orientCreditNoteRecovery(source:CodeSource,coverage:readonly string[]=creditNoteRecoveryChecklist) {
   const reads:Awaited<ReturnType<CodeSource['read']>>[]=[];
   const files=await source.files();
-  for(const decision of creditNoteRecoveryDecisions){
+  for(const decision of creditNoteDecisionsFor(coverage)){
     if(!files.includes(decision.path))continue;
     const match=(await source.search(decision.anchor,decision.path)).matches.find(item=>item.path===decision.path);
     if(!match)continue;
@@ -37,5 +50,13 @@ export async function orientCreditNoteRecovery(source:CodeSource) {
   }
   const test="server/tests/group-credit-recovery.pg.test.ts";
   if(files.includes(test))reads.push(await source.read(test,1,56));
+  if(isFiscalDatesRecoveryCoverage(coverage)){
+   const test="server/tests/wsfev-cbtes-asoc.test.ts";
+   if(files.includes(test)){
+    reads.push(await source.read(test,1,36));
+    const match=(await source.search('describe("WSFEv1 — fechas de prestación',test)).matches.find(item=>item.path===test);
+    if(match)reads.push(await source.read(test,match.line,match.line+46));
+   }
+  }
   return reads;
 }

@@ -1,4 +1,4 @@
-import {isCreditNoteRecoveryCoverage} from "./credit-note-recovery";
+import {isCreditNoteRecoveryCoverage,isFiscalDatesRecoveryCoverage} from "./credit-note-recovery";
 import type {SupportDiagnosis} from '../../shared/programming-support';
 import type {CodeSource} from './source';
 const norm=(text:string)=>text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -23,6 +23,19 @@ export async function validateReportClaims(report:SupportDiagnosis,source:CodeSo
    }
   }
   if(!backend || !screen)issues.push({field:"evidence",code:"RECOVERY_WORKFLOW_NOT_SUPPORTED",missing:{backend:!backend,screen:!screen},guidance:"La conclusión sobre una NC pendiente debe contrastarse y citarse contra el handler real de recuperación y la acción de Facturación. Los guards para borrar pagos, reemplazar facturas o las referencias de Caja de Restaurant no demuestran esa conciliación. Usar las lecturas verificadas de orientación, investigar lo que falte antes de concluir; cambiar sólo la certeza no respalda el circuito ni autoriza otra operación. No inventar la causa del incidente."});
+ }
+ if(isFiscalDatesRecoveryCoverage(coverage)){
+  let caller=false,builder=false,serialization=false;
+  for(const ref of report.evidence){
+   if(!["server/billing/invoiceService.ts","server/billing/wsfevClient.ts"].includes(ref.path))continue;
+   const read=await source.read(ref.path,ref.start,Math.min(ref.end,ref.start+159));
+   if(ref.path==="server/billing/invoiceService.ts")caller ||= read.content.includes("const fecha = String(pendingInvoice?.fechaEmision") && read.content.includes("feCAESolicitar(");
+   if(ref.path==="server/billing/wsfevClient.ts"){
+    builder ||= read.content.includes("function buildServiceDates(") && ["FchServDesde","FchServHasta","FchVtoPago"].every(tag=>read.content.includes(tag));
+    serialization ||= read.content.includes("serviceDates +") && read.content.includes("<ar:Concepto>2</ar:Concepto>");
+   }
+  }
+  if(!caller || !builder || !serialization)issues.push({field:"evidence",code:"FISCAL_PAYLOAD_CHAIN_NOT_SUPPORTED",missing:{caller:!caller,builder:!builder,serialization:!serialization},guidance:"No inferir ausencia de fechas por no verlas en recoverGroupCreditNote. Seguir el alias authorize a emitirFactura, la fecha enviada a feCAESolicitar, buildServiceDates y su inserción en el XML. Citar esas implementaciones, contrastar su contenido con la causa y revisar las aserciones existentes. Si el código ya arma los campos, eso no prueba la causa histórica ni su aceptación fiscal: acotar la conclusión, sin inventar ausencia ni preguntar la lógica al usuario."});
  }
  const endpoints=[...new Set([...`${report.summary}\n${report.cause}`.matchAll(/\/api\/[A-Za-z0-9_/:.-]+/g)].map(match=>match[0].replace(/[.,]+$/,'')))];
  const tests:Array<{path:string;content:string}>=[];

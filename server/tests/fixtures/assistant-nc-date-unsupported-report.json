@@ -1,0 +1,58 @@
+{
+  "summary": "El sistema actualmente impide hacer una nota de crédito repetida para el mismo grupo si ya existe una pendiente y devuelve el error de conciliación con detalle específico, manteniendo la NC en estado \"pendiente\" hasta que se corrijan datos obligatorios y se concilie. Esto coincide con la situación reportada donde al intentar conciliar aparece un error sobre fechas obligatorias FchServDesde, FchServHasta y FchVtoPago en la NC de grupo recuperada.",
+  "cause": "La nota de crédito recuperada del grupo no posee los campos de fechas FchServDesde, FchServHasta y FchVtoPago correctamente completados, aunque son obligatorios cuando el campo Concepto fiscal es 2 o 3, lo que genera que el sistema de conciliación fiscal arroje error al intentar procesar dicha NC. Este dato no se llena automáticamente en la recuperación y autorización de la NC de grupo, evidenciado en el código que valida estados, autorización y conciliación sin completar esos campos, causando que la conciliación local quede en estado pendiente con un mensaje de error persistido y mostrado en la interfaz.",
+  "proposal": "Para resolver este problema sin emitir otro comprobante, se debe asegurar que al recuperar una nota de crédito del grupo se completen correctamente los campos FchServDesde, FchServHasta y FchVtoPago con fechas válidas en formato aaaaMMdd. Esto requiere revisar el proceso de autorización y recuperación para completar estos campos con valores coherentes según la información original de la factura o los conceptos involucrados, garantizando que esos campos no queden vacíos o erróneos antes de la autorización fiscal y conciliación. Además, la interfaz ya ofrece botón para reintentar conciliación demostrando que el flujo acepta intentar corregir cuando el error se soluciona.",
+  "certainty": "sustentado_en_codigo",
+  "proposedTests": [
+    "Simular recuperación de una NC de grupo con Concepto 2 o 3 y verificar que FchServDesde, FchServHasta y FchVtoPago queden asignados correctamente antes de la autorización.",
+    "Intentar conciliar una NC de grupo con esos campos vacíos y verificar que se genere el error especificado.",
+    "Verificar que luego de completar esos campos la conciliación cambia de estado \"pendiente\" a \"conciliada\" sin emitir una nueva NC."
+  ],
+  "questions": [
+    "¿Cuáles son los datos operativos originales respecto a las fechas FchServDesde, FchServHasta y FchVtoPago para la NC de grupo en cuestión?",
+    "¿Se dispone de códigos o parámetros explícitos para asignar esas fechas en la recuperación/autorización?",
+    "¿Qué lógica específica debería usarse para obtener esas fechas cuando se recupera una NC de grupo?"
+  ],
+  "dataRepair": "",
+  "limitations": [
+    "No se tiene evidencia del código exacto que asigna o deja vacíos los campos de fechas obligatorias en la recuperación o autorización fiscal de la NC de grupo.",
+    "No está claro el proceso interno o reglas para determinar estas fechas cuando la NC es para Concepto 2 o 3 y cómo se deben derivar del original o del grupo.",
+    "La confirmación del formato y validación estricta del campo Concepto fiscal y sus consecuencias en la lógica interna no están explícitas, sólo se infiere por el mensaje de error.",
+    "No se encontró evidencia de prueba automatizada que valide la asignación correcta de estas fechas en un caso de NC de grupo con Concepto 2 o 3.",
+    "La evidencia de interfaz citada corresponde a: Facturación. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+    "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+    "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+  ],
+  "evidence": [
+    {
+      "path": "server/billing/routes.ts",
+      "start": 858,
+      "end": 916,
+      "explanation": "Contiene el endpoint que recupera la NC para conciliación y que llama a recoverGroupCreditNote si es grupo sin reserva, validando estados y autorizaciones."
+    },
+    {
+      "path": "server/billing/routes.ts",
+      "start": 919,
+      "end": 939,
+      "explanation": "Manejo del error en conciliación con persistencia del mensaje en la base y respuesta 409 con el mensaje detallado que incluye error sobre campos de fechas obligatorios."
+    },
+    {
+      "path": "server/billing/groupCreditRecovery.ts",
+      "start": 144,
+      "end": 176,
+      "explanation": "En el proceso de recuperación de NC de grupo no se muestra llenado explícito de fechas FchServDesde, FchServHasta y FchVtoPago, sólo llamadas a authorize y validaciones que denotan estado y autorización pendiente o emitida."
+    },
+    {
+      "path": "server/billing/groupCreditRecovery.ts",
+      "start": 130,
+      "end": 215,
+      "explanation": "Lógica para validar y actualizar estado de NC luego de autorización, sin indicios de asignar esos campos de fechas obligatorias, se asume que puede faltar que se completen."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 452,
+      "end": 473,
+      "explanation": "Interfaz que muestra la NC pendiente con error de conciliación y brinda botón para reintentar conciliación, evidenciando que el sistema espera resolución local de errores."
+    }
+  ]
+}
