@@ -45,7 +45,7 @@ it("audits a corrected explanation against the full fiscal chain rather than app
  const client={chat:{completions:{create:async(req:any)=>{
   if(req.response_format.json_schema.name==="maran_diagnosis_audit"){
    audits++;const payload=JSON.parse(req.messages[1].content);
-   expect(req.messages[0].content).toContain("wrapper");
+   expect(req.messages[0].content).toContain("Calcular campos en el XML actual");
    expect(payload.evidence.decisionBrief.checks.map((c:any)=>c.id)).toContain("date_serialization");
    const code=[...payload.evidence.decisionBrief.readings,...payload.evidence.citedCode].map((r:any)=>r.content).join("\n");
    expect(code).toContain("serviceDates +");expect(code).toContain("function buildServiceDates");

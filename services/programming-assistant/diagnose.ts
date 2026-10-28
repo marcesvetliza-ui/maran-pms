@@ -1,3 +1,4 @@
+import {inferenceLimitIssues} from "./inference-limits";
 import { operationalQuestions, type OperationalFact } from "../../shared/programming-support-clarification";
 import {auditDiagnosis,prepareAudit,auditReport} from "./semantic-audit";
 import {CASE_TOKENS,AUTHOR_OUTPUT,AUDIT_OUTPUT,RequestBudget,correctionCycleCost,fits,StageTelemetry,type DiagnosisStage} from "./lifecycle";
@@ -385,12 +386,12 @@ export async function diagnose(
         messages.push({role:"user",content:JSON.stringify({validationError:"Atribución incompatible con el origen del mensaje leído en el código.",attributionErrors})});
         continue;
       }
-      const consistencyErrors=financialConsistencyIssues(report);
+      const consistencyErrors=[...financialConsistencyIssues(report),...inferenceLimitIssues(report)];
       if(consistencyErrors.length) {
         telemetry.record("validation","invalid",validating,0,tokens,{reason:"consistency",issueCount:consistencyErrors.length});
-        if(consistencyCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: la conclusión financiera o el consejo de reintento contradicen el alcance de la investigación."),{code:"evidence_inconsistent"});
+        if(consistencyCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: la conclusión o la reparación propuesta contradicen el alcance de la investigación."),{code:"evidence_inconsistent"});
         messages.push({...answer,role:"assistant"});
-        messages.push({role:"system",content:"Corregir la coherencia del informe completo antes de entregarlo. El asistente sólo leyó código: no conoce la cantidad real de facturas ni cobros del incidente. No afirmar un resultado operativo y negarlo luego en limitaciones. Una prueba simulada no es una emisión real. Ante estado incierto, consultar y recuperar la misma operación pendiente; no recomendar otra emisión por la duda. No basta rebajar la certeza."});
+        messages.push({role:"system",content:"Corregir la coherencia del informe completo antes de entregarlo. El asistente sólo leyó código: no conoce la cantidad real de facturas ni cobros del incidente. No afirmar un resultado operativo y negarlo luego en limitaciones. Una prueba simulada no es una emisión real. Ante estado incierto, consultar y recuperar la misma operación pendiente; no recomendar otra emisión por la duda. No basta rebajar la certeza. Leer el código actual no verifica el envío histórico ni descarta su fallo. No recomendar cambios en un mecanismo que el propio informe admite no haber inspeccionado; no hace falta inventar otra causa para completar el diagnóstico."});
         messages.push({role:"user",content:JSON.stringify({validationError:"Conclusión o recomendación incompatible con el alcance de sólo lectura.",consistencyErrors})});
         continue;
       }

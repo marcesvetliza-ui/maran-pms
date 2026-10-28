@@ -1,0 +1,65 @@
+{
+  "summary": "El código muestra que las fechas FchServDesde, FchServHasta y FchVtoPago se generan correctamente en el formato y lógica requeridos para Concepto 2 a partir de la fecha de emisión (buildServiceDates), y se incluyen en el XML enviado al proveedor fiscal (server/billing/wsfevClient.ts). Al recuperar una Nota de Crédito (NC) de grupo pendiente, el sistema verifica su estado y si está en \"autorizacion_pendiente\", la vuelve a autorizar (server/billing/groupCreditRecovery.ts). La conciliación local se realiza mediante un endpoint específico que bloquea la operación y usa funciones transaccionales para aplicar la NC y mover los fondos de cuenta corriente (server/billing/routes.ts y client/src/pages/billing.tsx). El mensaje de error 10049 indica que las fechas fiscales están ausentes o mal formateadas, pero la emisión fiscal del XML las está generando correctamente, lo que descarta el error en armado de la petición a ARCA. Por lo tanto, la causa probable es que al recuperar la NC de grupo para conciliación local, esos campos no se hayan persistido o comunicado adecuadamente en la base, o que la conciliación local use datos incompletos o desactualizados que no incluyan esas fechas requeridas.",
+  "cause": "La estructura de fechas fiscales requeridas (FchServDesde, FchServHasta, FchVtoPago) se crea bien y se envía al proveedor, pero al recuperar una NC de grupo y reintentar la conciliación local, dichos campos no estarían presentes o validados correctamente en la base o en la conciliación local, generando el error 10049 al intentar emitir o conciliar desde el estado pendiente.",
+  "proposal": "1) Verificar en la base que la NC de grupo pendiente posee guardadas correctamente las fechas fiscales obligatorias y en formato AAAAMMDD. 2) Revisar el código que realiza la conciliación local para asegurar que usa esos campos y los valida antes de llamar a ARCA. 3) Implementar validaciones o copias adicionales al persistir/recuperar la NC para conservar esas fechas o reglas que las establecen, evitando que estén ausentes o erróneas al momento de la conciliación. No se propone emitir otro comprobante sino corregir la gestión interna de datos que produce el error.",
+  "certainty": "hipotesis",
+  "proposedTests": [
+    "Probar que al crear una NC de grupo, las fechas FchServDesde, FchServHasta y FchVtoPago se guardan en la base y se conservan hasta la conciliación.",
+    "Verificar con un test que el endpoint /api/billing/credit-notes/:id/reconcile recupera y usa correctamente estas fechas y no falla con el error 10049.",
+    "Consultar la respuesta fiscal simulada para asegurarse que el XML formado incluye las fechas en el bloque correcto con Concepto 2."
+  ],
+  "questions": [],
+  "dataRepair": "",
+  "limitations": [
+    "No se revisó el código exacto de persistencia de las fechas en la base, solo su generación para el XML y recuperación parcial de la NC pendientede grupo.",
+    "No se dispone de logs concretos del error 10049 durante la conciliación para confirmar si es en emisión o conciliación local.",
+    "No se inspeccionó el código detallado que arma la NC al recuperarse para conciliación, solo la parte de autorización y el endpoint que gestiona la conciliación.",
+    "La evidencia de interfaz citada corresponde a: Facturación. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+    "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+    "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+  ],
+  "evidence": [
+    {
+      "path": "server/billing/wsfevClient.ts",
+      "start": 127,
+      "end": 145,
+      "explanation": "La función buildServiceDates genera correctamente los campos FchServDesde (fecha de emisión), FchServHasta (día siguiente) y FchVtoPago (fecha 60 días después), en formato AAAAMMDD para el XML."
+    },
+    {
+      "path": "server/billing/wsfevClient.ts",
+      "start": 195,
+      "end": 233,
+      "explanation": "En el XML enviado a ARCA para la solicitud FECAESolicitar, el bloque serviceDates que contiene esas fechas se concatena de forma correcta para comprobantes con Concepto 2."
+    },
+    {
+      "path": "server/billing/invoiceService.ts",
+      "start": 572,
+      "end": 623,
+      "explanation": "Al autorizar una factura o NC, se consulta ARCA para recuperar el estado si ya fue autorizado o solicitar nuevo CAE. Se construye y usa la fecha que será enviada (formato AAAAMMDD) y se usa el bloque cbteAsoc para RG 4540/19, identificando el comprobante original."
+    },
+    {
+      "path": "server/billing/groupCreditRecovery.ts",
+      "start": 112,
+      "end": 176,
+      "explanation": "Al recuperar una NC de grupo (reconciliation_status pendente y estado autorizacion_pendiente), se vuelve a llamar al authorize con los datos recuperados, lo que implica que debe estar la información necesaria para emitir la NC; si falta info puede causar error."
+    },
+    {
+      "path": "server/billing/routes.ts",
+      "start": 858,
+      "end": 916,
+      "explanation": "El endpoint POST /api/billing/credit-notes/:id/reconcile gestiona la conciliación local. Si la NC está en estado pendiente, se bloquea la operación con la reserva, se recarga la NC y la factura original y se llama resumeReservationCreditNote, que debería validar y aplicar descuento. Error 10049 podría ocurrir si datos faltan en esta etapa."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 452,
+      "end": 473,
+      "explanation": "La pantalla muestra el botón para reintentar conciliación y actualiza la cola. Ofrece mensajes con resultados y errores luego de llamar al endpoint que implementa la conciliación."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 293,
+      "end": 321,
+      "explanation": "La mutación React-query que dispara la conciliación maneja el éxito y error, entre ellos se muestran errores persistidos (como el 10049) que llegan del backend y actualizan la UI y cola de NC pendientes."
+    }
+  ]
+}

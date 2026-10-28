@@ -25,6 +25,7 @@ export function creditNoteDecisionsFor(coverage:readonly string[]){
   {id:"date_serialization",question:"¿Se agregan esas fechas al XML de Concepto 2 enviado al proveedor?",path:"server/billing/wsfevClient.ts",anchor:"<ar:Concepto>2</ar:Concepto>",windows:[{before:16,after:22}]},
   {id:"fiscal_call",question:"¿Qué fecha y número persistidos usa la recuperación y cuándo consulta antes de autorizar?",path:"server/billing/invoiceService.ts",anchor:"const fecha = String(pendingInvoice?.fechaEmision",windows:[{before:0,after:51}]},
   {...creditNoteRecoveryDecisions[1],anchor:"export async function recoverGroupCreditNote(",windows:[{before:0,after:64}]},
+  {id:"local_application",question:"¿Qué valida y escribe la conciliación local una vez confirmada la autorización? ¿Depende de fechas XML separadas o de otros datos?",path:"server/billing/groupCreditRecovery.ts",anchor:"return db.transaction(async (tx) => {",windows:[{before:0,after:61}]},
   creditNoteRecoveryDecisions[0],creditNoteRecoveryDecisions[3],
  ];
 }
