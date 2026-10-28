@@ -2,7 +2,8 @@ import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanupWithTimers } from "@/test/cleanup-with-timers";
 
 const GROUP_ID = "group-payment-dialog-mode-ui-001";
 const RESERVATION_ID = "reservation-payment-dialog-mode-ui-001";
@@ -119,6 +120,7 @@ function renderPage() {
 
 describe("Pago Grupal dialog entry-point modes", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
     queryClient.clear();
     pendingFiscalCollections = [];
@@ -156,6 +158,15 @@ describe("Pago Grupal dialog entry-point modes", () => {
     apiRequestMock.mockImplementation(async () => jsonResponse({ success: true }));
   });
 
+  afterEach(async () => {
+    queryClient.clear();
+    try {
+      await cleanupWithTimers();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("uses the nightly editor from Groups and saves only schedules through the legacy route", async () => {
     groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0],
       pricingScheme: "nightly_v1", finalRatePerNight: "92500.00", totalRoomAmount: "185000.00", pricingRevision: 0,
@@ -165,7 +176,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
         { date: "2026-10-29", rateCents: 9500000, discountCents: 0 },
       ],
     }] };
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
     await user.click(await screen.findByTestId("tab-reservations"));
     await user.click(await screen.findByTestId(`button-edit-rate-${RESERVATION_ID}`));
@@ -178,7 +189,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
 
   it("guarda early check-in con hora y conserva late check-out al editar tarifa", async () => {
     groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0], finalRatePerNight: "100.00", lateCheckOut: true, lateCheckOutTime: "16:00" }] };
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
     await user.click(await screen.findByTestId("tab-reservations"));
     await user.click(await screen.findByTestId(`button-edit-rate-${RESERVATION_ID}`));
@@ -197,7 +208,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
 
   it("precarga early check-in y permite quitarlo sin conservar la hora", async () => {
     groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0], finalRatePerNight: "100.00", earlyCheckIn: true, earlyCheckInTime: "09:00" }] };
-    const user = userEvent.setup(); renderPage();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime }); renderPage();
     await user.click(await screen.findByTestId("tab-reservations"));
     await user.click(await screen.findByTestId(`button-edit-rate-${RESERVATION_ID}`));
     expect(screen.getByTestId("checkbox-early-checkin")).toBeChecked();
@@ -243,7 +254,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
   });
 
   it("opens from Pago Grupal in Detallados and clears the previous operation on reopen", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
     await screen.findByTestId("text-group-name");
 
@@ -302,7 +313,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
   });
 
   it("opens from Pagar Folio Maestro in Sin desglose and resets before opening Pago Grupal", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
     await screen.findByTestId("text-group-name");
 
@@ -327,7 +338,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
   });
 
   it("keeps a master-folio settlement entry point visible after all rooms checked out", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     groupFixtureForTest = {
       ...GROUP_FIXTURE,
       status: "finished",
@@ -343,7 +354,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
   });
 
   it("updates receipt concepts when manually switching destinations repeatedly", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
     await screen.findByTestId("text-group-name");
 
@@ -385,7 +396,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
   });
 
   it("keeps the gross fiscal total separate from a prior advance and returns Edit to the payment draft", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
     await screen.findByTestId("text-group-name");
 
