@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canInvoiceReservationPayment, getReservationFinancialSummary, getReservationRateAuditEvent } from "./reservationFolio";
+import { getNetReservationInvoicedTotal, getNetReservationDocumentedTotal, getAvailableReservationAdvanceTotal, canInvoiceReservationPayment, getReservationFinancialSummary, getReservationRateAuditEvent } from "./reservationFolio";
 
 describe("reservation payment invoice eligibility", () => {
   it("allows only active payments without fiscal recovery/link state", () => {
@@ -138,5 +138,45 @@ describe("reservation rate chronology", () => {
     }]);
     expect(summary.netInvoiced).toBe(0);
     expect(summary.pendingInvoicing).toBe(1000);
+  });
+});
+
+describe("room voucher closes the operation without becoming a fiscal invoice", () => {
+  const voucher = { id: 1203, tipo_comprobante: "cierre_habitacion", monto_total: "144000.00", monto_acreditado: "0", estado: "emitida" };
+  const payment = { id: "cash-1203", status: "active", amount: "144000.00", method: "efectivo", invoiceRef: JSON.stringify({ id: 1203, tipoComprobante: "cierre_habitacion" }) };
+  it("recognizes documented total and leaves collection and documentation at zero", () => {
+    expect(getReservationFinancialSummary(144000, [], [payment], [voucher])).toMatchObject({
+      netInvoiced: 0, documentedTotal: 144000, nonFiscalDocumentedTotal: 144000,
+      historicalPayments: 144000, operationalFolioBalance: 0,
+      pendingInvoicing: 0, newCollectionNeeded: 0, availableReleasedCredit: 0,
+    });
+    expect(getNetReservationInvoicedTotal([voucher])).toBe(0);
+    expect(getNetReservationDocumentedTotal([voucher])).toBe(144000);
+    expect(getAvailableReservationAdvanceTotal([payment], [voucher])).toBe(0);
+  });
+  it("leaves only new services outstanding after the voucher", () => {
+    expect(getReservationFinancialSummary(144000, [{ amount: 5000, category: "restaurant" }], [payment], [voucher])).toMatchObject({
+      pendingInvoicing: 5000, operationalFolioBalance: 5000, newCollectionNeeded: 5000,
+    });
+  });
+  it("does not close with an annulled voucher or another area's voucher", () => {
+    expect(getNetReservationDocumentedTotal([{ ...voucher, estado: "anulada" }])).toBe(0);
+    expect(getNetReservationDocumentedTotal([{ ...voucher, tipo_comprobante: "cierre_spa" }])).toBe(0);
+  });
+});
+
+
+it.each(["FA", "FB", "FC", "FT", "FM", "FMB"])("a fully paid %s closes the documented balance", type => {
+  const invoice = { id: 1, tipo_comprobante: type, monto_total: 144000, monto_acreditado: 0, estado: "emitida" };
+  expect(getReservationFinancialSummary(144000, [], [{ amount: 144000, status: "active", invoiceRef: JSON.stringify({ id: 1 }) }], [invoice])).toMatchObject({
+    netInvoiced: 144000, documentedTotal: 144000, pendingInvoicing: 0, newCollectionNeeded: 0, operationalFolioBalance: 0,
+  });
+});
+
+
+it.each(["FB", "cierre_habitacion"])("an issued %s does not hide an unpaid balance", type => {
+  const invoice = { id: 1, tipo_comprobante: type, monto_total: 144000, estado: "emitida" };
+  expect(getReservationFinancialSummary(144000, [], [{ amount: 50000, status: "active", invoiceRef: JSON.stringify({ id: 1 }) }], [invoice])).toMatchObject({
+    documentedTotal: 144000, pendingInvoicing: 0, operationalFolioBalance: 94000, newCollectionNeeded: 94000,
   });
 });

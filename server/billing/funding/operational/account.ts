@@ -182,7 +182,7 @@ export async function spaAccountView(service:PaymentFundingService,id:string,act
   if(transferred&&cancelled)transferred.cancelled={reason:cancelled.payload.reason,createdAt:cancelled.createdAt};
   const preferences=events.filter(e=>e.kind==="spa_prefactura_saved").at(-1)?.payload.settings??null;
   return {id,chargeVersion:hash(items),preferences,guestName:a.guest_name,status:a.status,totalCents,paidCents,balanceCents:transferred?0:Math.max(0,totalCents-paidCents),items,payments,movements,
-   readOnly:history||a.status!=="open"||operations.length>0,canInvoice:!history&&!transferred&&!a.invoice_id,transferred:transferred??null,operations,
+   readOnly:history||a.status!=="open"||operations.length>0,canInvoice:!history&&!transferred&&a.status==="open"&&!a.invoice_id,transferred:transferred??null,operations,
    invoices,events:events.filter(e=>["spa_account_command","spa_room_charge_voided"].includes(e.kind)).map(e=>({action:e.kind==="spa_room_charge_voided"?"room-charge-void":e.payload.request.action,reason:e.payload.reason??e.payload.request?.reason??e.payload.request?.notes??"",createdAt:e.createdAt}))};
  });
 }

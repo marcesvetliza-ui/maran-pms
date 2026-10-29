@@ -620,7 +620,13 @@ export function AppSidebar() {
         })}
       </SidebarContent>
 
-      <SidebarFooter />
+      <SidebarFooter>
+        <SidebarMenu><SidebarMenuItem>
+          <SidebarMenuButton asChild isActive={location === "/manuales"} data-testid="nav-manuales">
+            <Link href="/manuales"><BookOpen className="h-4 w-4" /><span>Manuales y ayuda</span></Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem></SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

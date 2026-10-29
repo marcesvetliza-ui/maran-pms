@@ -20,8 +20,8 @@ const inputSchema = spaPrefacturaInputSchema.extend({
   newCollections: fundingRequestSchema.shape.newCollections,
 });
 /** Local receipt, never a CAE or a fiscal claim. Settings, collections, stock,
- * counter, receipt and close commit together. Unapplied receipts remain available
- * for a later fiscal invoice without collecting the same money again. */
+ * counter, receipt and final close commit together. The voucher completes the
+ * operation; consultation and exact retries never create another collection. */
 export async function issueSpaVoucher(
   service: PaymentFundingService,
   id: string,

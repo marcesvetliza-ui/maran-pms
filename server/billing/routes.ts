@@ -1699,7 +1699,7 @@ export function registerBillingRoutes(app: Express) {
             FROM sales_invoices si
             WHERE si.reserva_id = ${reservationId}
             AND (${paymentId || null}::text IS NULL OR si.payment_id IS DISTINCT FROM ${paymentId || null})
-            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
+            AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB', 'cierre_habitacion')
             AND (
               si.estado IN ('emitida', 'parcial')
               OR (si.estado = 'anulada' AND si.credit_reapplication_intent->'checkoutDiscount' IS NOT NULL)

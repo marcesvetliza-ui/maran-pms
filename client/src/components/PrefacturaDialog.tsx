@@ -109,6 +109,8 @@ export interface SelectedFolioItem {
 }
 
 type InvoiceSource = {
+  tipo_comprobante?: string | null;
+  estado?: string | null;
   credit_reapplication_intent?: unknown;
   source_charge_ids?: unknown;
   source_charge_amounts?: unknown;
@@ -138,6 +140,7 @@ export function getInvoicedAmountsByCharge(invoices: InvoiceSource[]): Record<st
   const amounts: Record<string, number> = {};
 
   for (const invoice of invoices) {
+    if (invoice.tipo_comprobante === "cierre_habitacion" && invoice.estado === "anulada") continue;
     for (const [id, amount] of Object.entries(checkoutDiscountFromInvoice(invoice)?.sourceAmounts || {})) amounts[id] = (amounts[id] || 0) + Number(amount);
     const total = parseFloat(String(invoice.monto_total || 0)) || 0;
     const credited = parseFloat(String(invoice.monto_acreditado || 0)) || 0;

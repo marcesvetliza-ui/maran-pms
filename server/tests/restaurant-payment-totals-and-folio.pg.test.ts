@@ -148,6 +148,19 @@ suite("PostgreSQL: restaurant payment totals, room validation and partial folio"
     expect((await folio(o.id))!.movements.filter((m) => m.type === "payment")).toHaveLength(3);
   });
 
+  it.each(["ticket", "voucher_justo", "voucher_room_service"])("fully paid %s closes once without pending folio balance", async receiptType => {
+    const o = await order();
+    const body = { paymentMethod: "efectivo", receiptType };
+    const paid = await request("POST", `/api/restaurant/orders/${o.id}/close`, body);
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+    expect((await storage.getRestaurantOrder(o.id))?.status).toBe("closed");
+    expect(await folio(o.id)).toMatchObject({ totalCharges: "100.01", totalPayments: "100.01", balance: "0.00" });
+    const before = (await pool!.query("SELECT id FROM cash_movements WHERE source_id=$1", [o.id])).rows;
+    const replay = await request("POST", `/api/restaurant/orders/${o.id}/close`, body);
+    expect(replay.status).toBeGreaterThanOrEqual(400);
+    expect((await pool!.query("SELECT id FROM cash_movements WHERE source_id=$1", [o.id])).rows).toEqual(before);
+  });
+
   it("combined tenders with the same method are not deduplicated", async () => {
     const o = await order();
     const r = await request("POST", `/api/restaurant/orders/${o.id}/close`, {

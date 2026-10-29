@@ -14,6 +14,7 @@ import LoginPage from "@/pages/login";
 import { LogOut, User, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+const ManualLibraryPage = lazy(() => import("@/pages/manual-library"));
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const OperacionesPage = lazy(() => import("@/pages/operaciones"));
 const PlanningPage = lazy(() => import("@/pages/planning"));
@@ -282,6 +283,7 @@ function Router() {
         </Route>
         <Route path="/seguridad" component={SeguridadPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
+        <Route path="/manuales" component={ManualLibraryPage} />
         <Route path="/mozo" component={MozoPage} />
         <Route component={NotFound} />
       </Switch>

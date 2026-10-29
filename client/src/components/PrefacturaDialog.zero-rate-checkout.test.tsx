@@ -266,3 +266,22 @@ describe("PrefacturaDialog — check-out de reserva sin nada para facturar (tari
     expect(screen.getByTestId("button-registrar-emitir")).toBeEnabled();
   });
 });
+
+
+describe("PrefacturaDialog — existing non-fiscal room closure", () => {
+  it("allows checkout without another collection or document after a paid room voucher", async () => {
+    const voucher = { id: 1203, tipo_comprobante: "cierre_habitacion", monto_total: "144000.00", monto_acreditado: "0", estado: "emitida", source_charge_ids: ["accommodation"], source_charge_amounts: { accommodation: 144000 } };
+    const folio = { ...ZERO_RATE_FOLIO, roomTotal: 144000, grandTotal: 144000, roomRate: "144000", balance: 0,
+      totalPayments: 144000, payments: [{ id: "payment-1203", status: "active", amount: "144000", method: "efectivo", invoiceRef: JSON.stringify({ id: 1203, tipoComprobante: "cierre_habitacion" }) }] };
+    const fetchMock = buildFetchMock(folio, 200, [voucher]);
+    vi.stubGlobal("fetch", fetchMock);
+    renderDialog();
+    const checkout = await screen.findByRole("button", { name: /dar check-out/i });
+    expect(screen.queryByTestId("button-registrar-emitir")).not.toBeInTheDocument();
+    expect(screen.getByTestId("new-charge-required")).toHaveTextContent("$0,00");
+    await userEvent.click(checkout);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => String(url).includes("/check-out") && options?.method === "POST")).toBe(true));
+    const writes = fetchMock.mock.calls.filter(([, options]) => options?.method === "POST").map(([url]) => String(url));
+    expect(writes.every(url => url.includes("/check-out"))).toBe(true);
+  });
+});
