@@ -14,6 +14,9 @@ describe("Housekeeping planning evidence", () => {
     expect(compareBeds("MAT", "TPL", null)).toBe("review");
     expect(compareBeds("MAT", "DBL", "Cuna y almohada extra")).toBe("review");
     expect(compareBeds("MAT", null, null)).toBe("unspecified");
+    expect(compareBeds("CUSTOM", "CUSTOM", null)).toBe("same");
+    expect(compareBeds("CUSTOM", "OTHER", null)).toBe("review");
+    expect(compareBeds("CUSTOM", "CUSTOM", "Revisar cuna")).toBe("review");
   });
   it("requires room, request and physical revision to remain unchanged", () => {
     const p: BedPreparation = {

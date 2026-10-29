@@ -32,9 +32,10 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
 import type { Guest, Company, Agency, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, InsertAgency } from "@shared/schema";
-import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
+import { useBedCatalog } from "@/hooks/use-bed-catalog";
 
 export default function NewReservationPage() {
+  const bedCatalog = useBedCatalog();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const search = useSearch();
@@ -633,7 +634,7 @@ export default function NewReservationPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin especificar</SelectItem>
-                    {BED_CONFIG_OPTIONS.map((opt) => (
+                    {bedCatalog.options().map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
                       </SelectItem>

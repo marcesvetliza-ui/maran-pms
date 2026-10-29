@@ -1,7 +1,14 @@
-import {render,screen} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import {render as baseRender,screen} from "@testing-library/react";
 import {describe,it,expect} from "vitest";
 import {HousekeepingBedSummary} from "./housekeeping-bed-summary";
 const request:any={bedTypeName:"Twin",bedTypeNotes:"Camas separadas",bedPreparation:null,preparationCurrent:false};
+function withCatalog({children}: {children: ReactNode}) {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false, gcTime:0, queryFn:async () => []}}});
+  client.setQueryData(["/api/bed-types"], []);
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 describe("Requested and prepared beds",()=>{
  it("does not imply preparation simply because a bed was requested",()=>{
   render(<HousekeepingBedSummary request={request}/>);
@@ -15,3 +22,5 @@ describe("Requested and prepared beds",()=>{
   expect(screen.getByText(current?"Preparado para esta reserva":"Confirmación anterior: requiere revisión")).toBeInTheDocument();
  });
 });
+
+function render(ui: React.ReactElement) { return baseRender(ui, {wrapper:withCatalog}); }

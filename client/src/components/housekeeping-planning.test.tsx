@@ -76,6 +76,11 @@ const fixture: HousekeepingPlanning = {
 };
 beforeEach(() => {
   queryClient.clear();
+  queryClient.setQueryDefaults(["/api/bed-types"], {queryFn:async () => [
+    {id:"mat",code:"MAT",name:"Matrimonial",isActive:true},
+    {id:"twin",code:"TWIN",name:"Twin (2 camas)",isActive:true},
+    {id:"custom",code:"CUSTOM",name:"Triple configurable",isActive:true},
+  ]});
   mode = "future";
   vi.mocked(apiRequest)
     .mockReset()

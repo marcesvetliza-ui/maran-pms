@@ -1,3 +1,5 @@
+import { bedLabel, validateRoomBeds } from "@shared/bedCatalog";
+import { bedTypes } from "@shared/schema";
 import type { Express } from "express";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
@@ -8,7 +10,6 @@ import { validCalendarDate } from "./stayEligibility";
 import { loadHousekeepingDailyReport } from "./housekeepingDailyReport";
 import {
   compareBeds,
-  physicalBedLabels,
   preparationIsCurrent,
   type BedPreparation,
   type HousekeepingPlanning,
@@ -146,14 +147,7 @@ const confirmation = z
   .object({
     acknowledgeRequest: z.literal(true),
     roomId: z.string().min(1),
-    bedConfig: z.enum([
-      "MAT",
-      "TWIN",
-      "MAT_CC",
-      "TWIN_CC",
-      "MAT_EXTRA",
-      "MAT_CC_EXTRA",
-    ]),
+    bedConfig: z.string().min(1),
     expectedCurrentBedConfig: z.string().nullable(),
     expectedBedConfigRevision: z.number().int().nonnegative(),
     expectedBedTypeId: z.string().nullable(),
@@ -238,6 +232,11 @@ export function registerHousekeepingPlanning(app: Express) {
               new Error("Ese camaje no está permitido para la habitación."),
               { statusCode: 400 },
             );
+          const catalog = await db.select().from(bedTypes);
+          const catalogError = validateRoomBeds(catalog, { bedConfig: data.bedConfig }, {
+            bedConfig: room.bed_config, allowedBedConfigs: room.allowed_bed_configs,
+          });
+          if (catalogError) throw Object.assign(new Error(catalogError), { statusCode: 400 });
           const other = (
             await db.execute(
               sql`SELECT id FROM reservations WHERE room_id=${room.id} AND status='checked_in' AND id<>${r.id} LIMIT 1`,
@@ -286,7 +285,7 @@ export function registerHousekeepingPlanning(app: Express) {
             sql`UPDATE reservations SET housekeeping_bed_preparation=${JSON.stringify(value)}::jsonb WHERE id=${r.id}`,
           );
           await db.execute(
-            sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion) VALUES (${r.id},${req.user!.username},'housekeeping',${`Camaje confirmado físicamente: ${physicalBedLabels[data.bedConfig]}. Habitación ${room.room_number}. No modifica Limpia — No mover.`})`,
+            sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion) VALUES (${r.id},${req.user!.username},'housekeeping',${`Camaje confirmado físicamente: ${bedLabel(data.bedConfig, catalog)}. Habitación ${room.room_number}. No modifica Limpia — No mover.`})`,
           );
           await db.execute(
             sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES (${req.user!.id},${req.user!.username},'bed_preparation','housekeeping','reservation',${r.id},'Confirmación física de camaje',${JSON.stringify({ before: { bedConfig: room.bed_config, confirmation: r.housekeeping_bed_preparation }, after: value })},NOW())`,

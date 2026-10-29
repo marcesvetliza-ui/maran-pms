@@ -9,7 +9,7 @@ import {HousekeepingPlanningView} from "@/components/housekeeping-planning";
 import {type TaskEditor, HousekeepingTaskManager} from "@/components/housekeeping-task-manager";
 import {HousekeepingInventory} from "@/components/housekeeping-inventory";
 import { PrintShippingLabelButton } from "@/components/print-shipping-label-button";
-import { getAllowedBedConfigOptions, getBedConfigLabel } from "@/lib/planning-utils";
+import { useBedCatalog } from "@/hooks/use-bed-catalog";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -165,6 +165,7 @@ function RoomCard({
   onOpenDetails: (roomId: string) => void;
   onEditBedConfig: (roomId: string, currentConfig: string) => void;
 }) {
+  const { label: getBedConfigLabel } = useBedCatalog();
   const [, navigate] = useLocation();
   const [preparationOpen,setPreparationOpen]=useState(false);
   const config = statusConfig[room.status] ?? { label: room.status, icon: AlertCircle, className: "text-gray-500", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" };
@@ -1117,6 +1118,7 @@ function MobileRoomCard({
   isUpdating: boolean;
   canManage: boolean;
 }) {
+  const { label: getBedConfigLabel } = useBedCatalog();
   const [, navigate] = useLocation();
   const config = statusConfig[room.status] ?? { label: room.status, icon: AlertCircle, className: "text-gray-500", bgClass: "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800" };
   const Icon = config.icon;
@@ -1412,6 +1414,7 @@ function MobileRoomCard({
 // ===================== HOUSEKEEPING MAIN =====================
 
 export default function Housekeeping() {
+  const bedCatalog = useBedCatalog();
   const { user, hasPermission } = useAuth();
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -2837,13 +2840,14 @@ export default function Housekeeping() {
           </DialogHeader>
           <div className="grid gap-3 py-2">
             <Label>Tipo de camaje</Label>
-            <Select value={bedConfigValue} onValueChange={setBedConfigValue}>
+            {!bedCatalog.ready && <p role="status" className="text-sm text-muted-foreground">{bedCatalog.error ? "No se pudo cargar Tipos de Camaje. Actualizá la pantalla para reintentar." : "Cargando Tipos de Camaje…"}</p>}
+            <Select disabled={!bedCatalog.ready} value={bedConfigValue} onValueChange={setBedConfigValue}>
               <SelectTrigger data-testid="select-bed-config-housekeeping">
                 <SelectValue placeholder="Seleccionar camaje" />
               </SelectTrigger>
               <SelectContent>
-                {getAllowedBedConfigOptions(rooms?.find(r => r.id === bedConfigRoomId)?.allowedBedConfigs).map(opt => (
-                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                {bedCatalog.forRoom(rooms?.find(r => r.id === bedConfigRoomId)?.allowedBedConfigs, rooms?.find(r => r.id === bedConfigRoomId)?.bedConfig).map(opt => (
+                  <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -2854,7 +2858,7 @@ export default function Housekeeping() {
             </Button>
             <Button
               onClick={() => bedConfigRoomId && updateBedConfigMutation.mutate({ roomId: bedConfigRoomId, bedConfig: bedConfigValue })}
-              disabled={updateBedConfigMutation.isPending}
+              disabled={updateBedConfigMutation.isPending || !bedCatalog.ready || !bedConfigValue}
               data-testid="button-save-bed-config"
             >
               {updateBedConfigMutation.isPending ? "Guardando..." : "Guardar"}

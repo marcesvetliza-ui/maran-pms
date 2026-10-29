@@ -84,7 +84,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
 import type { RoomWithType, RoomType, InsertRoom, RoomStatus, BedConfig, ChargeType } from "@shared/schema";
-import { BED_CONFIG_OPTIONS } from "@/lib/planning-utils";
+import { useBedCatalog } from "@/hooks/use-bed-catalog";
 
 // Roles que pueden crear/editar habitaciones y gestionar cargos
 // Etapa 3 del ABM de usuarios: mismo array de roles de antes, ahora vía
@@ -263,6 +263,8 @@ function RoomFormDialog({
 }) {
   const { toast } = useToast();
   const isEditing = !!room;
+  const bedCatalog = useBedCatalog();
+  const bedOptions = bedCatalog.options([room?.bedConfig || "", ...(room?.allowedBedConfigs || [])]);
 
   const [formData, setFormData] = useState<Partial<InsertRoom>>({
     roomNumber: room?.roomNumber || "",
@@ -318,10 +320,10 @@ function RoomFormDialog({
       onSuccess();
       onOpenChange(false);
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Error",
-        description: "No se pudo guardar la habitación. Intente nuevamente.",
+        description: error.message || "No se pudo guardar la habitación. Intente nuevamente.",
         variant: "destructive",
       });
     },
@@ -375,8 +377,10 @@ function RoomFormDialog({
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="bedConfig">Camaje</Label>
+              <Label htmlFor="bedConfig">Camaje físico actual</Label>
+              {!bedCatalog.ready && <p role="status" className="text-sm text-muted-foreground">{bedCatalog.error ? "No se pudo cargar Tipos de Camaje. Actualizá la pantalla para reintentar." : "Cargando Tipos de Camaje…"}</p>}
               <Select
+                disabled={!bedCatalog.ready}
                 value={formData.bedConfig || undefined}
                 onValueChange={(value) => setFormData({ ...formData, bedConfig: value as BedConfig })}
               >
@@ -384,8 +388,8 @@ function RoomFormDialog({
                   <SelectValue placeholder="Seleccionar camaje" />
                 </SelectTrigger>
                 <SelectContent>
-                  {BED_CONFIG_OPTIONS.map(({ value, label }) => (
-                    <SelectItem key={value} value={value}>
+                  {bedOptions.map(({ value, label, disabled }) => (
+                    <SelectItem key={value} value={value} disabled={disabled}>
                       {label}
                     </SelectItem>
                   ))}
@@ -395,11 +399,12 @@ function RoomFormDialog({
             <div className="grid gap-2 sm:col-span-2">
               <Label>Camajes que admite la habitación</Label>
               <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
-                {BED_CONFIG_OPTIONS.map(({ value, label }) => (
+                {bedOptions.map(({ value, label, disabled }) => (
                   <label key={value} className="flex items-center gap-2 text-sm font-normal">
                     <Checkbox
                       checked={(formData.allowedBedConfigs || []).includes(value)}
                       onCheckedChange={() => toggleAllowedBedConfig(value)}
+                      disabled={disabled || !bedCatalog.ready}
                       data-testid={`checkbox-allowed-bedconfig-${value}`}
                     />
                     {label}
