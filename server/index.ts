@@ -223,6 +223,17 @@ app.use((req, res, next) => {
       logger.error("[startup] Falló un paso de inicialización — la aplicación sigue levantando igual.", err);
       return;
     }
+    // Optional staging integration: failure must not block hotel operation.
+    try {
+      const { pool } = await import("./db");
+      const { ensureChannexAriSchema } = await import("./channex/ariSchema");
+      const { startChannexAriWorker } = await import("./channex/ariWorker");
+      await ensureChannexAriSchema(pool);
+      const stopChannexAri = startChannexAriWorker(pool);
+      httpServer.once("close", stopChannexAri);
+    } catch {
+      logger.warn("[channex-ari] Integración de pruebas inactiva: no se pudo preparar la cola");
+    }
     startupReady = true;
 
     const { seedDatabase, refreshRealData } = await import("./seed");

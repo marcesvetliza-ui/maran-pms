@@ -16,6 +16,8 @@ import { ChannexApiError, fetchChannexProperties } from "../channex/client";
 import { encryptChannexApiKey } from "../channex/credentials";
 import { confirmBookings, importBooking, InvalidRevisionSelectionError, markForReview, recomputeMappedFlags, retryBooking, syncBookings, syncCatalog } from "../channex/sync";
 import { z } from "zod";
+import { pool } from "../db";
+import { registerChannexAriRoutes } from "../channex/ariRoutes";
 
 /**
  * Config de conexión y mapeo: solo quienes pueden decidir cómo se conecta
@@ -44,6 +46,7 @@ function handleError(res: any, err: unknown, fallback: string) {
 }
 
 export function registerChannexRoutes(app: Express) {
+  registerChannexAriRoutes(app, pool);
   // --- Conexiones (config restringida) ---
 
   // Lectura de conexiones: cualquier usuario autenticado (la bandeja necesita
