@@ -190,6 +190,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * que cualquier resourceKey agregado después del seed inicial.
  */
 export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
+  "api:manuals:restricted": ["admin"],
   "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
   // conexiones y mapeos (crear/editar/borrar/sincronizar catálogo).
@@ -408,6 +409,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   // Etapa 3 — resourceKey de API_RESOURCE_PERMISSIONS, agrupados en
   // secciones "API — ..." propias para no mezclarse en la matriz con los
   // permisos que controlan el sidebar.
+  "api:manuals:restricted": { label: "Consultar y descargar manuales de Configuración y Técnica", section: "Manuales y ayuda" },
   "api:channex:config": { label: "Configurar conexiones y mapeos", section: "API — Channex" },
   "api:billing:nc-reconciliation": { label: "Conciliar Notas de Crédito pendientes", section: "API — Facturación" },
   "api:spa:write": { label: "Turnos, cuentas y pagos de Spa", section: "API — Spa" },
