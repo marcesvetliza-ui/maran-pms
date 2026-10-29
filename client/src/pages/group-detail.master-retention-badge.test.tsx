@@ -16,11 +16,16 @@
  * scenario end to end through the real HTTP routes.
  */
 
+import { cleanupWithTimers } from "@/test/cleanup-with-timers";
+import { toast } from "@/hooks/use-toast";
+import { act } from "@testing-library/react";
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
 
 const GROUP_ID = "group-retention-badge-ui-001";
 const RESERVATION_ID = "reservation-retention-badge-ui-001";
@@ -318,4 +323,34 @@ describe("Folio Maestro retention badge — Pago Grupal dialog", () => {
     expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
     expect(screen.queryByTestId("text-items-payment-mismatch")).not.toBeInTheDocument();
   });
+
+  it("executes late toast callbacks before jsdom teardown", async () => {
+    renderPage();
+    await screen.findByTestId("text-group-name");
+    let notice: ReturnType<typeof toast>;
+    act(() => { notice = toast({ title: "Aviso antes de desmontar", duration: 1 }); });
+    expect(screen.getByText("Aviso antes de desmontar")).toBeInTheDocument();
+    // Dismiss schedules the real store removal, in addition to Radix timers.
+    act(() => { notice!.dismiss(); });
+    let callbackRan = false;
+    setTimeout(() => { callbackRan = true; }, 50);
+    await queryClient.cancelQueries();
+    queryClient.clear();
+    await cleanupWithTimers();
+    expect(callbackRan).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    render(<Toaster />);
+    expect(screen.queryByText("Aviso antes de desmontar")).not.toBeInTheDocument();
+  });
+});
+
+afterEach(async () => {
+  await queryClient.cancelQueries();
+  queryClient.clear();
+  try {
+    await cleanupWithTimers();
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
 });

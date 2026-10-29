@@ -21,6 +21,8 @@
  * C) Multiple companions — both are attempted; only failed names appear in toast
  */
 
+import { cleanupWithTimers } from "@/test/cleanup-with-timers";
+import { toast } from "@/hooks/use-toast";
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
@@ -232,6 +234,7 @@ async function addCompanionViaUI(firstName: string, lastName: string) {
 // ── Setup / teardown ──────────────────────────────────────────────────────────
 
 beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   mockedApiRequest.mockReset();
 
   // jsdom doesn't implement matchMedia — shim it so Radix doesn't crash
@@ -250,7 +253,12 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  try {
+    await cleanupWithTimers();
+  } finally {
+    vi.useRealTimers();
+  }
   vi.clearAllMocks();
 });
 
@@ -490,4 +498,20 @@ describe("ReservationFormDialog — companion failure in full component render",
       expect(toastDesc).toBeNull();
     });
   });
+});
+
+it("executes late toast callbacks before jsdom teardown", async () => {
+    render(<Toaster />);
+    let notice: ReturnType<typeof toast>;
+    act(() => { notice = toast({ title: "Aviso antes de desmontar", duration: 1 }); });
+    expect(screen.getByText("Aviso antes de desmontar")).toBeInTheDocument();
+    // Dismiss schedules the real store removal, in addition to Radix timers.
+    act(() => { notice!.dismiss(); });
+    let callbackRan = false;
+    setTimeout(() => { callbackRan = true; }, 50);
+    await cleanupWithTimers();
+    expect(callbackRan).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    render(<Toaster />);
+    expect(screen.queryByText("Aviso antes de desmontar")).not.toBeInTheDocument();
 });
