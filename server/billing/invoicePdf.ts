@@ -892,6 +892,8 @@ export interface VoucherHabitacionData {
   totalPayments: number;
   balance: number;
   netInvoiced?: number;
+  documentedTotal?: number;
+  hasRoomVoucher?: boolean;
   availableAdvance?: number;
   pendingBilling?: number;
   historicalPayments?: number;
@@ -1075,9 +1077,9 @@ export async function generarVoucherHabitacionPDF(
        doc.rect(x0, y, W, 58).fillColor("#e8f0fe").fill()
           .rect(x0, y, W, 58).strokeColor("#90b4d4").lineWidth(0.5).stroke();
       doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(8)
-         .text(`Facturado neto: $${fPeso(data.netInvoiced ?? 0)}`, x0 + 10, y + 7, { width: W / 2 - 15 })
+         .text(`${data.hasRoomVoucher ? "Comprobantes emitidos (neto)" : "Facturado neto"}: $${fPeso(data.documentedTotal ?? data.netInvoiced ?? 0)}`, x0 + 10, y + 7, { width: W / 2 - 15 })
          .text(`Anticipo disponible: $${fPeso(data.availableAdvance ?? 0)}`, x0 + W / 2, y + 7, { width: W / 2 - 10, align: "right" })
-          .text(`Pendiente de facturación (bruto): $${fPeso(data.pendingBilling ?? 0)}`, x0 + 10, y + 23, { width: W - 20 })
+          .text(`${data.hasRoomVoucher ? "Pendiente de comprobante" : "Pendiente de facturación (bruto)"}: $${fPeso(data.pendingBilling ?? 0)}`, x0 + 10, y + 23, { width: W - 20 })
           .text(`Cobros históricos: $${fPeso(data.historicalPayments ?? data.totalPayments)}`, x0 + 10, y + 39, { width: W / 2 - 15 })
           .text(`Nuevo cobro requerido: $${fPeso(data.newCollectionNeeded ?? data.balance)}`, x0 + W / 2, y + 39, { width: W / 2 - 10, align: "right" });
        y += 64;

@@ -1123,7 +1123,7 @@ export function registerReservationsRoutes(app: Express) {
           SELECT id, tipo_comprobante, punto_venta, numero, monto_total, monto_acreditado, estado
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','cierre_habitacion')
             AND estado IN ('emitida','parcial','anulada')
         `),
         db.execute(sql`
@@ -1160,9 +1160,9 @@ export function registerReservationsRoutes(app: Express) {
         0, financialSummary.availableReleasedCredit - reservedReleasedCredit,
       ).toFixed(2));
       financialSummary.releasedAvailableAdvance = financialSummary.availableReleasedCredit;
-      financialSummary.newCollectionNeeded = Number(Math.max(
-        0, financialSummary.pendingInvoicing - financialSummary.availableReleasedCredit,
-      ).toFixed(2));
+      // Documentation never cancels an unpaid amount, and an unavailable
+      // fiscal allocation must never turn collected cash into a second debt.
+      financialSummary.newCollectionNeeded = financialSummary.operationalFolioBalance;
 
       res.json({
         reservationCode: reservation.reservationCode,
@@ -1202,7 +1202,7 @@ export function registerReservationsRoutes(app: Express) {
                  monto_acreditado, estado, nota_credito_id, cae
           FROM sales_invoices
           WHERE reserva_id = ${req.params.id}
-            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','NCA','NCB','NCC','NCT','NCM','NCMB')
+            AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','cierre_habitacion','NCA','NCB','NCC','NCT','NCM','NCMB')
             AND estado IN ('emitida','parcial','anulada')
           ORDER BY created_at ASC
         `),
@@ -1273,7 +1273,9 @@ export function registerReservationsRoutes(app: Express) {
         balance,
         netInvoiced,
         availableAdvance,
-        pendingBilling: Math.max(0, grandTotal - netInvoiced),
+        documentedTotal: financialSummary.documentedTotal,
+        hasRoomVoucher: emittedInvoices.some(invoice => invoice.tipo_comprobante === "cierre_habitacion" && invoice.estado !== "anulada"),
+        pendingBilling: financialSummary.pendingInvoicing,
         historicalPayments: financialSummary.historicalPayments,
         newCollectionNeeded: financialSummary.newCollectionNeeded,
         printedAt,
@@ -1287,7 +1289,7 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  // GET /api/reservations/:id/invoices — facturas fiscales emitidas para una reserva
+  // GET /api/reservations/:id/invoices — facturas y vouchers de cierre de la reserva
   app.get("/api/reservations/:id/invoices", requireAuth, async (req, res) => {
     try {
       const rows = await db.execute(sql`
@@ -1312,7 +1314,7 @@ export function registerReservationsRoutes(app: Express) {
                ), '[]'::jsonb) AS debit_source_charge_amounts
         FROM sales_invoices si
         WHERE si.reserva_id = ${req.params.id}
-          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
+          AND tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB', 'cierre_habitacion')
           AND estado IN ('emitida', 'parcial', 'anulada')
           AND COALESCE(monto_total::numeric, 0) > 0
         ORDER BY si.created_at DESC

@@ -80,7 +80,7 @@ export async function seedSyntheticScope(service:PaymentFundingService,id:string
       VALUES($1,$2,$3,$4,$5,$6,$7)`,[folio,isSpa?"spa_account":"reservation",id,isSpa&&!options.partial?"closed":"open",amount(total),amount(paid),amount(total-paid)]);
     if (isSpa) {
       await c.query(`INSERT INTO funding_demo.spa_accounts(id,guest_name,status,total_paid,charged_to,receipt_type)
-        VALUES($1,'Huésped sintético',$2,$3,'direct','voucher')`,[id,options.partial?"open":"closed",amount(paid)]);
+        VALUES($1,'Huésped sintético',$2,$3,'direct',NULL)`,[id,options.partial?"open":"closed",amount(paid)]);
       await c.query("INSERT INTO funding_demo.spa_account_items(id,account_id,description,subtotal) VALUES($1,$2,'Tratamiento sintético',$3)",[`${id}:item`,id,amount(total)]);
     }
     for (const p of payments) {

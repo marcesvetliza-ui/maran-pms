@@ -120,3 +120,11 @@ describe("Folio con información operativa", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 });
+
+
+it("labels a fully paid non-fiscal room closure as documented, not as a fiscal invoice", () => {
+  render(<ReservationFolioSummary lodging={144000} consumptions={0} payments={144000} total={144000} pendingCollection={0} pendingBilling={0} hasRoomVoucher />);
+  expect(screen.getByText("Documentado")).toBeInTheDocument();
+  expect(screen.getByText("Pendiente de comprobante")).toBeInTheDocument();
+  expect(screen.queryByText("Facturado")).not.toBeInTheDocument();
+});
