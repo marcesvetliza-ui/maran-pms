@@ -33,6 +33,12 @@ type SpaClient = {
   createdAt: string;
 };
 
+function clientDisplayName(client: SpaClient): string {
+  return client.tipoPersona === "juridica"
+    ? `${client.firstName}${client.lastName && client.lastName !== "-" ? ` (${client.lastName})` : ""}`.trim()
+    : `${client.lastName || ""} ${client.firstName}`.trim();
+}
+
 function formatCuit(v: string): string {
   const d = v.replace(/\D/g, "").slice(0, 11);
   if (d.length <= 2) return d;
@@ -78,7 +84,10 @@ export default function SpaClientsPage() {
       (c.lastName || "").toLowerCase().includes(s) ||
       (c.phone || "").includes(s) ||
       (c.email || "").toLowerCase().includes(s);
-  });
+  }).sort((a, b) => clientDisplayName(a).localeCompare(clientDisplayName(b), "es", {
+    sensitivity: "base",
+    numeric: true,
+  }));
 
   const createMutation = useMutation({
     mutationFn: async (data: typeof form) => {
@@ -223,9 +232,7 @@ export default function SpaClientsPage() {
                         <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       )}
                       <p className="font-semibold truncate" data-testid={`text-client-name-${client.id}`}>
-                        {client.tipoPersona === "juridica"
-                          ? `${client.firstName}${client.lastName && client.lastName !== "-" ? ` (${client.lastName})` : ""}`
-                          : `${client.lastName || ""} ${client.firstName}`.trim()}
+                        {clientDisplayName(client)}
                       </p>
                     </div>
                     {client.vatCondition && (
