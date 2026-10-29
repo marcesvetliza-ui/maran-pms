@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { calendarEffective } from "@shared/rate-calendar";
 
 export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number };
 export type AriValue = { property_id: string; date_from: string; date_to: string;[key: string]: string | number | boolean };
@@ -78,13 +79,20 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
     const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text
     FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 ORDER BY m.channex_rate_plan_id`, [connection.id])).rows;
     if (!plans.length) throw new AriConfigurationError('Falta mapear los planes tarifarios');
+    const overrides = (await c.query('SELECT *,stay_date::text AS day FROM rate_calendar_entries WHERE rate_plan_id=ANY($1::varchar[]) AND stay_date=ANY($2::date[])', [plans.map(p => p.rate_plan_id).filter(Boolean), dates])).rows;
+    const byDay = new Map(overrides.map(o => [`${o.rate_plan_id}:${o.day}`, o]));
     for (const p of plans) {
       const room = mappings.find(m => m.channex_room_type_id === p.channex_room_type_id);
       if (!room || p.room_type_id !== room.room_type_id || !p.rate_plan_id) throw new AriConfigurationError('El plan tarifario no coincide con su categoría mapeada');
       for (const day of dates) if (affected(p.room_type_id, day, p.rate_plan_id)) {
         if (p.currency !== connection.currency) throw new AriConfigurationError('La moneda del plan debe coincidir con la moneda configurada para Channex');
-        if ((p.valid_from && day < p.valid_from) || (p.valid_to && day > p.valid_to) || !/^\d+(\.\d{1,2})?$/.test(p.base_rate) || Number(p.base_rate) <= 0) throw new AriConfigurationError('Falta una tarifa vigente y positiva para las fechas a publicar');
-        values.push({ property_id: connection.channex_property_id, rate_plan_id: p.channex_rate_plan_id, date_from: day, date_to: day, rate: p.base_rate });
+        const calendar = calendarEffective({ id: p.rate_plan_id, base_rate: p.base_rate, currency: p.currency }, day, byDay.get(`${p.rate_plan_id}:${day}`));
+        if ((p.valid_from && day < p.valid_from) || (p.valid_to && day > p.valid_to) || !/^\d+(\.\d{1,2})?$/.test(calendar.rate) || Number(calendar.rate) <= 0) throw new AriConfigurationError('Falta una tarifa vigente y positiva para las fechas a publicar');
+        values.push({
+          property_id: connection.channex_property_id, rate_plan_id: p.channex_rate_plan_id, date_from: day, date_to: day, rate: calendar.rate,
+          min_stay_arrival: calendar.minStayArrival, min_stay_through: calendar.minStayThrough, max_stay: calendar.maxStay,
+          stop_sell: calendar.stopSell, closed_to_arrival: calendar.closedToArrival, closed_to_departure: calendar.closedToDeparture
+        });
       }
     }
   }

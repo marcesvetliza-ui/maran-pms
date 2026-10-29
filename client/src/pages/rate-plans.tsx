@@ -1,3 +1,5 @@
+import { RateCalendar } from "@/components/rate-calendar";
+import { useAuth } from "@/App";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { subDays } from "date-fns";
@@ -393,6 +395,8 @@ function RatePlanFormDialog({
 
 export default function RatePlansPage() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [roomTypeFilter, setRoomTypeFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -462,11 +466,17 @@ export default function RatePlansPage() {
             Gestiona los planes de precios para cada tipo de habitación
           </p>
         </div>
-        <Button onClick={handleNewRatePlan} data-testid="button-new-rate-plan">
-          <Plus className="mr-2 h-4 w-4" />
-          Nuevo Plan
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={!ratePlans?.length} onClick={() => setCalendarOpen(open => !open)}>
+            {calendarOpen ? "Ocultar calendario" : "Calendario de venta"}
+          </Button>
+          <Button onClick={handleNewRatePlan} data-testid="button-new-rate-plan">
+            <Plus className="mr-2 h-4 w-4" />
+            Nuevo Plan
+          </Button>
+        </div>
       </div>
+      {calendarOpen && ratePlans && <RateCalendar plans={ratePlans} canEdit={hasPermission("api:rates:write")} />}
 
       <Card>
         <CardContent className="p-4">

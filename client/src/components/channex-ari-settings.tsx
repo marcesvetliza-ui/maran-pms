@@ -14,7 +14,7 @@ export function ChannexAriSettings({ connectionId }: { connectionId: string }) {
   const { data, error, isLoading, refetch } = useQuery<AriStatus>({ queryKey: ['/api/channex/connections', connectionId, 'ari'], queryFn: async () => (await apiRequest('GET', `/api/channex/connections/${connectionId}/ari`)).json() });
   return <Card><CardHeader><CardTitle className="text-base">Inventario y envíos a Channex</CardTitle></CardHeader><CardContent className="space-y-4">
     {isLoading ? <p>Cargando alcance…</p> : error ? <p role="alert">No se pudo consultar la integración. <Button variant="outline" onClick={() => refetch()}>Volver a consultar</Button></p> : data ? <>
-      <p className="text-sm">Etapa de preparación para Channex staging. Las habitaciones de otros pisos quedan fuera del inventario publicado. Se usa la tarifa base de cada plan, sin conversión de moneda.</p>
+      <p className="text-sm">Etapa de preparación para Channex staging. Las habitaciones de otros pisos quedan fuera del inventario publicado. Se usa el calendario de venta y, en las noches sin precio especial, la tarifa base del plan. No se convierte la moneda.</p>
       <p className="text-sm font-medium">{data.dispatchEnabled ? 'Envíos al entorno de prueba habilitados en el servidor.' : 'Envíos externos deshabilitados. Podés configurar el alcance y registrar cambios sin enviarlos.'}</p>
       <InventoryEditor key={`${connectionId}:${data.settings.updated_at ?? 'new'}`} connectionId={connectionId} initial={data.settings} />
       <div className="text-sm flex flex-wrap gap-4">{data.summary.map(s => <span key={s.status}>{({ pending: 'Pendientes', delivered: 'Procesados', blocked: 'Requieren revisión' } as Record<string, string>)[s.status]}: {s.count}</span>)}</div>

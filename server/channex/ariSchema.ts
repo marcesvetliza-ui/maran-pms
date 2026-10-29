@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { rateCalendarSchemaSql } from "../rates/calendarSchema";
 
 /** Additive, transactional installation. Triggers record changes, never call a network service. */
 export const ariSchemaSql = `
@@ -10,7 +11,7 @@ CREATE TABLE IF NOT EXISTS channex_ari_settings (
 );
 ALTER TABLE channex_ari_settings ADD COLUMN IF NOT EXISTS capture_started_at timestamptz;
 CREATE TABLE IF NOT EXISTS channex_ari_outbox (
- id bigserial PRIMARY KEY, connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+ id bigserial PRIMARY KEY, batch_id bigint NOT NULL DEFAULT txid_current(), connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
  kind text NOT NULL CHECK(kind IN ('availability','restrictions')),
  date_from date NOT NULL, date_to date NOT NULL CHECK(date_to>=date_from),
  room_type_id varchar, rate_plan_id varchar, reason text NOT NULL,
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS channex_ari_outbox (
  attempts integer NOT NULL DEFAULT 0, run_after timestamptz NOT NULL DEFAULT now(),
  task_ids jsonb, last_error text, created_at timestamptz NOT NULL DEFAULT now(), delivered_at timestamptz
 );
+ALTER TABLE channex_ari_outbox ADD COLUMN IF NOT EXISTS batch_id bigint NOT NULL DEFAULT txid_current();
 CREATE INDEX IF NOT EXISTS channex_ari_outbox_pending ON channex_ari_outbox(connection_id,kind,run_after,id) WHERE status='pending';
 CREATE TABLE IF NOT EXISTS channex_ari_published (
  connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
@@ -87,6 +89,28 @@ BEGIN
  END IF;
  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END $body$;
+
+CREATE OR REPLACE FUNCTION channex_capture_calendar() RETURNS trigger LANGUAGE plpgsql AS $body$
+DECLARE payload jsonb; today date:=(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM channex_ari_settings WHERE capture_started_at IS NOT NULL) THEN RETURN NULL; END IF;
+ IF TG_OP='INSERT' THEN
+  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload FROM calendar_new;
+ ELSIF TG_OP='DELETE' THEN
+  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload FROM calendar_old;
+ ELSE
+  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload
+   FROM(SELECT rate_plan_id,stay_date FROM calendar_old UNION ALL SELECT rate_plan_id,stay_date FROM calendar_new) changed;
+ END IF;
+ INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,room_type_id,rate_plan_id,reason)
+  SELECT s.connection_id,'restrictions',GREATEST(min(x.day),today),LEAST(max(x.day),today+499),p.room_type_id,x.plan,'rate_calendar:'||lower(TG_OP)
+  FROM jsonb_to_recordset(COALESCE(payload,'[]'::jsonb)) AS x(plan varchar,day date)
+  LEFT JOIN rate_plans p ON p.id=x.plan CROSS JOIN channex_ari_settings s
+  JOIN channex_connections c ON c.id=s.connection_id
+  WHERE s.capture_started_at IS NOT NULL AND c.is_active AND x.day BETWEEN today AND today+499
+  GROUP BY s.connection_id,p.room_type_id,x.plan;
+ RETURN NULL;
+END $body$;
 `;
 const triggerColumns: Record<string, string> = {
   reservations: "room_id,check_in_date,check_out_date,status",
@@ -103,6 +127,7 @@ export async function ensureChannexAriSchema(pool: Pool) {
     await client.query("BEGIN");
     await client.query("SET LOCAL lock_timeout='3s'");
     await client.query("SELECT pg_advisory_xact_lock(1296126535, 902)");
+    await client.query(rateCalendarSchemaSql);
     await client.query(ariSchemaSql);
     for (const [table, columns] of Object.entries(triggerColumns)) {
       // Only recreate this integration's triggers, never any hotel/pricing triggers.
@@ -119,6 +144,11 @@ export async function ensureChannexAriSchema(pool: Pool) {
       await client.query(`DROP TRIGGER IF EXISTS channex_ari_mapping_change ON ${table}`);
       const captureEvents = table === 'channex_connections' ? 'UPDATE OF environment,base_url,channex_property_id,is_active' : events;
       await client.query(`CREATE TRIGGER channex_ari_mapping_change AFTER ${captureEvents} ON ${table} FOR EACH ROW EXECUTE FUNCTION channex_capture_ari()`);
+    }
+    for (const event of ['INSERT', 'UPDATE', 'DELETE']) {
+      const transition = event === 'INSERT' ? 'NEW TABLE AS calendar_new' : event === 'DELETE' ? 'OLD TABLE AS calendar_old' : 'OLD TABLE AS calendar_old NEW TABLE AS calendar_new';
+      await client.query(`DROP TRIGGER IF EXISTS channex_calendar_${event.toLowerCase()} ON rate_calendar_entries`);
+      await client.query(`CREATE TRIGGER channex_calendar_${event.toLowerCase()} AFTER ${event} ON rate_calendar_entries REFERENCING ${transition} FOR EACH STATEMENT EXECUTE FUNCTION channex_capture_calendar()`);
     }
     await client.query("COMMIT");
   } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }

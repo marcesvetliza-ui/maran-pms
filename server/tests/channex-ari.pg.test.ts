@@ -38,11 +38,13 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     await ensureChannexAriSchema(pool); await ensureChannexAriSchema(pool);
     const { registerChannexAriRoutes } = await import('../channex/ariRoutes');
     const app = express(); app.use(express.json()); registerChannexAriRoutes(app, pool);
+    const { registerRateCalendarRoutes } = await import('../rates/calendarRoutes');
+    registerRateCalendarRoutes(app, async () => pool);
     server = createServer(app); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); origin = `http://127.0.0.1:${(server.address() as any).port}`;
   });
   afterAll(async () => { if (server) await new Promise<void>(resolve => server.close(() => resolve())); await pool?.end(); if (root) { await root.query(`DROP SCHEMA ${schema} CASCADE`); await root.end(); } });
   beforeEach(async () => {
-    await pool.query(`TRUNCATE channex_ari_outbox,channex_ari_settings,channex_connections,room_types,rooms,reservations,rate_plans,maintenance_blocks,groups,group_room_blocks,group_reservation_links,channex_room_type_mappings,channex_rate_plan_mappings CASCADE;
+    await pool.query(`TRUNCATE rate_calendar_edits,rate_calendar_entries,channex_ari_outbox,channex_ari_settings,channex_connections,room_types,rooms,reservations,rate_plans,maintenance_blocks,groups,group_room_blocks,group_reservation_links,channex_room_type_mappings,channex_rate_plan_mappings CASCADE;
    UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 minute';
    INSERT INTO channex_connections VALUES('connection','demo','https://staging.channex.io/api/v1',true,'property','synthetic');
    INSERT INTO room_types VALUES('twin','Twin');
@@ -146,6 +148,97 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     expect((await configure(true)).status).toBe(200);
     expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE reason='full_sync'")).rows[0].n).toBe(2);
     expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE reason='rate_plans:update'")).rows[0].n).toBe(2);
+  });
+
+  async function calendarRequest(path: string, body: any) {
+    const response = await fetch(`${origin}/api/rate-calendar/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }
+  it('reviews and saves dated prices and restrictions through the normal PMS API as one atomic batch', async () => {
+    await pool.query(`INSERT INTO rate_plans VALUES('breakfast','twin',120,'USD',NULL,NULL); INSERT INTO channex_rate_plan_mappings VALUES('connection','remote-twin','remote-breakfast','breakfast')`);
+    await enable();
+    const changes = {
+      changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: addDays(day, 1), values: { rate: '179.90', minStayArrival: 3, closedToArrival: true } },
+      { ratePlanIds: ['breakfast'], dateFrom: addDays(day, 2), dateTo: addDays(day, 3), values: { rate: '219.25', minStayThrough: 2, stopSell: true } }]
+    };
+    const preview = await calendarRequest('preview', changes); expect(preview.status).toBe(200); expect(preview.body.changedCells).toBe(4);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_entries')).rows[0].n).toBe(0);
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(0);
+    const saved = await calendarRequest('apply', { ...changes, previewToken: preview.body.previewToken }); expect(saved.status).toBe(200);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_entries')).rows[0].n).toBe(4);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_edits')).rows[0].n).toBe(1);
+    expect((await pool.query('SELECT base_rate FROM rate_plans ORDER BY id')).rows.map(r => r.base_rate)).toEqual(['100.00', '120.00']);
+    const events = (await pool.query('SELECT kind,rate_plan_id,date_to-date_from AS span FROM channex_ari_outbox ORDER BY rate_plan_id')).rows;
+    expect(events).toEqual([{ kind: 'restrictions', rate_plan_id: 'bar', span: 1 }, { kind: 'restrictions', rate_plan_id: 'breakfast', span: 1 }]);
+    const send = vi.fn(async () => ['calendar-task']); expect((await dispatchChannexAri(pool, send, true)).state).toBe('delivered'); expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][2]).toEqual([
+      expect.objectContaining({ rate_plan_id: 'remote-bar', date_from: day, date_to: addDays(day, 1), rate: '179.90', min_stay_arrival: 3, min_stay_through: 1, closed_to_arrival: true }),
+      expect.objectContaining({ rate_plan_id: 'remote-breakfast', date_from: addDays(day, 2), date_to: addDays(day, 3), rate: '219.25', min_stay_through: 2, stop_sell: true })]);
+  });
+  it('rejects an outdated calendar review without overwriting another operator', async () => {
+    const request = { changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: day, values: { rate: '170' } }] };
+    const first = await calendarRequest('preview', request);
+    const other = { changes: [{ ...request.changes[0], values: { rate: '180' } }] }; const second = await calendarRequest('preview', other);
+    expect((await calendarRequest('apply', { ...other, previewToken: second.body.previewToken })).status).toBe(200);
+    expect((await calendarRequest('apply', { ...request, previewToken: first.body.previewToken })).status).toBe(409);
+    expect((await pool.query('SELECT rate FROM rate_calendar_entries')).rows[0].rate).toBe('180.00');
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_edits')).rows[0].n).toBe(1);
+  });
+  it('preserves untouched rules and explicitly restores false, zero and the base rate', async () => {
+    await enable();
+    const set = { changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: day, values: { rate: '180', minStayArrival: 2, maxStay: 5, stopSell: true, closedToDeparture: true } }] };
+    const preview = await calendarRequest('preview', set); await calendarRequest('apply', { ...set, previewToken: preview.body.previewToken });
+    const clear = { changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: day, values: { rate: null, maxStay: 0, stopSell: false } }] };
+    const reviewed = await calendarRequest('preview', clear); expect((await calendarRequest('apply', { ...clear, previewToken: reviewed.body.previewToken })).status).toBe(200);
+    const row = (await pool.query('SELECT * FROM rate_calendar_entries')).rows[0]; expect(row).toMatchObject({ rate: null, min_stay_arrival: 2, max_stay: 0, stop_sell: false, closed_to_departure: true });
+    const payload = await buildAriValues(pool as any, connection, [event('restrictions')], day);
+    expect(payload[0]).toMatchObject({ rate: '100.00', min_stay_arrival: 2, max_stay: 0, stop_sell: false, closed_to_departure: true });
+  });
+  it('rolls back calendar, audit and outbox together if any part of saving fails', async () => {
+    await enable(); const request = { changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: addDays(day, 2), values: { rate: '180' } }] };
+    const reviewed = await calendarRequest('preview', request);
+    await pool.query(`CREATE FUNCTION reject_calendar_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic audit failure'; END $$;
+      CREATE TRIGGER reject_calendar_audit BEFORE INSERT ON rate_calendar_edits FOR EACH ROW EXECUTE FUNCTION reject_calendar_audit()`);
+    try {
+      expect((await calendarRequest('apply', { ...request, previewToken: reviewed.body.previewToken })).status).toBe(503);
+      for (const table of ['rate_calendar_entries', 'rate_calendar_edits', 'channex_ari_outbox']) expect((await pool.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n).toBe(0);
+    } finally { await pool.query('DROP TRIGGER reject_calendar_audit ON rate_calendar_edits; DROP FUNCTION reject_calendar_audit()'); }
+  });
+  it('validates stay consistency and plan validity and refuses saving without review', async () => {
+    const change = { ratePlanIds: ['bar'], dateFrom: day, dateTo: day, values: { minStayArrival: 4, maxStay: 2 } };
+    expect((await calendarRequest('preview', { changes: [change] })).status).toBe(400);
+    expect((await calendarRequest('apply', { changes: [{ ...change, values: { rate: '170' } }] })).status).toBe(400);
+    await pool.query('UPDATE rate_plans SET valid_to=$1 WHERE id=$2', [addDays(day, -1), 'bar']);
+    expect((await calendarRequest('preview', { changes: [{ ...change, values: { rate: '170' } }] })).status).toBe(400);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_entries')).rows[0].n).toBe(0);
+  });
+  it('never splits a committed batch when there are more than 1000 outbox events', async () => {
+    await enable(); await pool.query(`INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,rate_plan_id,reason) SELECT 'connection','restrictions',$1,$1,'bar','synthetic_batch' FROM generate_series(1,1201)`, [day]);
+    const send = vi.fn(async () => ['batch-task']); expect((await dispatchChannexAri(pool, send, true)).state).toBe('delivered'); expect(send).toHaveBeenCalledTimes(1);
+    expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE status='delivered'")).rows[0].n).toBe(1201);
+  });
+
+  it('restores explicit channel defaults when a dated override is removed', async () => {
+    await enable(); await pool.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate,stop_sell,min_stay_through) VALUES('bar',$1,180,true,3)`, [day]);
+    await pool.query(`DELETE FROM rate_calendar_entries WHERE rate_plan_id='bar' AND stay_date=$1`, [day]);
+    expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE reason='rate_calendar:delete'")).rows[0].n).toBe(1);
+    expect((await buildAriValues(pool as any, connection, [event('restrictions')], day))[0]).toMatchObject({ rate: '100.00', stop_sell: false, min_stay_arrival: 1, min_stay_through: 1, max_stay: 0, closed_to_arrival: false, closed_to_departure: false });
+  });
+  it('keeps dated overrides when a base plan price changes', async () => {
+    await enable(); await pool.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate) VALUES('bar',$1,180)`, [day]);
+    await pool.query(`UPDATE rate_plans SET base_rate=135 WHERE id='bar'`);
+    const payload = await buildAriValues(pool as any, connection, [{ ...event('restrictions'), date_to: addDays(day, 1) }], day);
+    expect(payload.map(p => p.rate)).toEqual(['180.00', '135.00']);
+  });
+
+  it('serializes simultaneous confirmations and keeps only one accepted revision', async () => {
+    await enable();
+    const requests = [170, 180].map(rate => ({ changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: day, values: { rate: String(rate) } }] }));
+    const previews = await Promise.all(requests.map(body => calendarRequest('preview', body)));
+    const results = await Promise.all(requests.map((body, i) => calendarRequest('apply', { ...body, previewToken: previews[i].body.previewToken })));
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_edits')).rows[0].n).toBe(1);
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(1);
   });
 
 });

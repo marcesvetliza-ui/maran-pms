@@ -223,6 +223,13 @@ app.use((req, res, next) => {
       logger.error("[startup] Falló un paso de inicialización — la aplicación sigue levantando igual.", err);
       return;
     }
+    try {
+      const { pool } = await import("./db");
+      const { ensureRateCalendarSchema } = await import("./rates/calendarSchema");
+      await ensureRateCalendarSchema(pool);
+    } catch {
+      logger.warn("[rate-calendar] Calendario no disponible: no se pudo preparar el esquema");
+    }
     // Optional staging integration: failure must not block hotel operation.
     try {
       const { pool } = await import("./db");

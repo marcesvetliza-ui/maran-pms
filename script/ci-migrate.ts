@@ -13,7 +13,9 @@
  * Usage: DATABASE_URL=postgres://... npx tsx script/ci-migrate.ts
  */
 import { runMigrations, verifyFinancialSchema } from "../server/migrate";
-import { db } from "../server/db";
+import { db, pool } from "../server/db";
+import { ensureRateCalendarSchema } from "../server/rates/calendarSchema";
+import { ensureChannexAriSchema } from "../server/channex/ariSchema";
 import { sql } from "drizzle-orm";
 import { ensureRoomPreventiveSchema } from "../server/maintenance/roomPreventiveSchema";
 import { ensureSupplierExpenseSchema } from "../server/accounting/supplierExpenseSchema";
@@ -37,6 +39,8 @@ async function main() {
   await runMigrations();
   await ensureRoomPreventiveSchema();
   await ensureSupplierExpenseSchema();
+  await ensureRateCalendarSchema(pool);
+  await ensureChannexAriSchema(pool);
 
   console.log("[ci-migrate] Verificando esquema financiero contra el catálogo real...");
   const status = await verifyFinancialSchema();

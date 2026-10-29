@@ -44,8 +44,9 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
     if (!job) return { state: 'idle' };
     const connection = (await c.query(`SELECT c.id,c.environment,c.base_url,c.channex_property_id,c.api_key_encrypted,s.floor,s.currency
     FROM channex_connections c JOIN channex_ari_settings s ON s.connection_id=c.id WHERE c.id=$1 AND s.enabled AND c.is_active`, [job.connection_id])).rows[0];
-    const events: AriEvent[] = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,room_type_id,rate_plan_id,attempts,reason
-    FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now() ORDER BY id LIMIT 1000`, [job.connection_id, job.kind])).rows;
+    const events: AriEvent[] = (await c.query(`WITH batches AS(SELECT batch_id FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now() ORDER BY id LIMIT 1000)
+    SELECT id::text,kind,date_from::text,date_to::text,room_type_id,rate_plan_id,attempts,reason
+    FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now() AND batch_id IN(SELECT batch_id FROM batches) ORDER BY id`, [job.connection_id, job.kind])).rows;
     if (!connection || !events.length) return { state: 'idle' };
     const ids = events.map(e => e.id);
     try {
