@@ -92,6 +92,10 @@ async function buildAll() {
     entryPoints: ["script/install-spa-funding.ts"], platform: "node", bundle: true,
     format: "esm", outfile: "dist/install-spa-funding.mjs", packages: "external",
   });
+  await esbuild({
+    entryPoints: ["script/diagnose-billing-incident.ts"], platform: "node", bundle: true,
+    format: "esm", outfile: "dist/diagnose-billing-incident.mjs", packages: "external",
+  });
   await mkdir("dist/funding-sql/operational", { recursive: true });
   for (const file of ["schema.sql", "operational/schema.sql"]) {
     await writeFile(`dist/funding-sql/${file}`, await readFile(`server/billing/funding/${file}`));
