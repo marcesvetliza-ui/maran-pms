@@ -1,3 +1,4 @@
+import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 /** Regression tests derived from Codex's independent reproducers.
  * Real PostgreSQL max=2, real legacy emitter, billing config and WSAA cache.
  * Only financial readiness and the remote SOAP service are substituted. */
@@ -63,7 +64,7 @@ function soap() {
     const pv = Number(body.match(/<ar:PtoVta>(\d+)/)?.[1]);
     if (String((options?.headers as any)?.SOAPAction).includes("FECompUltimoAutorizado")) {
       await barrier?.();
-      return new Response(`<Envelope><CbteNro>${last.get(pv) ?? 0}</CbteNro></Envelope>`);
+      return new Response(lastAuthorizedForRequest(last.get(pv) ?? 0, options));
     }
     // A missing DB cache would try WSAA with invalid synthetic certs and fail.
     expect(body).toContain("<ar:FECAESolicitar>");

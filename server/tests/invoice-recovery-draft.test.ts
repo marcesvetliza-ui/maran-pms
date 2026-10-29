@@ -1,3 +1,5 @@
+import { feCAESolicitar } from "../billing/wsfevClient";
+import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const originalFetch = global.fetch;
@@ -248,8 +250,8 @@ describe("recoverable reservation credit-note emission", () => {
       arcaCuit: "30-12345678-9",
     };
     state.authorizationError = "ARCA no responde";
-    global.fetch = vi.fn(async () => new Response(
-      "<soap:Envelope><CbteNro>6</CbteNro></soap:Envelope>",
+    global.fetch = vi.fn(async (_url, init) => new Response(
+      lastAuthorizedForRequest(6, init),
       { status: 200 },
     )) as any;
 
@@ -313,4 +315,21 @@ describe("recoverable reservation credit-note emission", () => {
     expect(state.events).toEqual([]);
     expect(state.insertValues).toEqual([]);
   });
+  it.each(["missing-number", "http-error", "timeout"])("stops before counter/draft/authorization writes when numbering fails: %s", async failure => {
+    state.billingConfig={arcaAmbiente:"homologacion",puntoVenta:5,puntoVentaHomolog:5,arcaCuit:"30-12345678-9"};
+    vi.mocked(feCAESolicitar).mockClear();
+    global.fetch=vi.fn(async () => {
+      if (failure === "timeout") throw new DOMException("Timed out", "TimeoutError");
+      return new Response("<soap:Envelope><soap:Body>Servicio no disponible</soap:Body></soap:Envelope>", {status:failure === "http-error" ? 503 : 200});
+    }) as any;
+    await expect(emitirFactura({
+      tipoComprobante:"FA",cliente:{razonSocial:"Synthetic recipient",condicionIva:"Consumidor Final"},
+      items:[{descripcion:"Synthetic lodging",cantidad:1,precioUnitario:100,alicuotaIva:"no_gravado",subtotalNeto:0,subtotal:100}],
+      reservaId:"synthetic-reservation",paymentId:"synthetic-payment",
+    })).rejects.toMatchObject({code:"FISCAL_NUMBER_LOOKUP_FAILED",statusCode:failure === "timeout" ? 504 : 502});
+    expect(state.events).toEqual([]);
+    expect(state.insertValues).toEqual([]);
+    expect(feCAESolicitar).not.toHaveBeenCalled();
+  });
+
 });

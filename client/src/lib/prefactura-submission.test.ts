@@ -61,4 +61,15 @@ describe("Prefactura persisted payment intent", () => {
     expect(await submission.discardRejectedInvoice("r", new Error("400: Invalid recipient"), async () => false)).toBe(true);
     expect(submission.pending("r")).toBeNull();
   });
+  it.each([502,504])("retains the exact pending invoice and payment IDs after a numbering failure (%s)",async status=>{
+    const submission=createPrefacturaSubmission(sessionStorage);
+    const original=submission.prepare("reservation",{tipoComprobante:"FA",puntoVentaOverride:5,creditOperationId:crypto.randomUUID()},[{amount:"260000.00",method:"efectivo"}]);
+    let calls=0;
+    await expect(submission.run("reservation",async()=>{calls++;throw new Error(`${status}: No se pudo consultar ARCA`);})).rejects.toThrow("No se pudo consultar ARCA");
+    expect(calls).toBe(1);
+    const reopened=createPrefacturaSubmission(sessionStorage);
+    expect(await reopened.discardRejectedInvoice("reservation",new Error(`${status}: No se pudo consultar ARCA`),async()=>false)).toBe(false);
+    expect(reopened.pending("reservation")).toEqual(original);
+  });
+
 });

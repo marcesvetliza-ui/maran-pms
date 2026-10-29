@@ -1,3 +1,4 @@
+import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
@@ -100,7 +101,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (!url.includes("afip.gov.ar")) return originalFetch(input as any, init);
-      const body = `<soap:Envelope><CbteNro>${lastAuthorized}</CbteNro></soap:Envelope>`;
+      const body = lastAuthorizedForRequest(lastAuthorized, init);
       lastAuthorized += 1;
       return new Response(body, { status: 200 });
     }) as any;
