@@ -1,6 +1,6 @@
 # Diagnóstico acotado de facturación, 29/10/2026
 
-Estado: preparado y probado localmente; no ejecutado en Railway.
+Estado: ejecutado en Railway el 29/10/2026 a las 13:28 UTC. Despliegue 28c7af02-3697-47e9-8016-9f240de1e1bf, revisión 3b401fd4.
 
 Habitaciones 205 y 1005. Las últimas peticiones observadas fallaron en FECompUltimoAutorizado, antes de reservar numeración. No se ha establecido el estado de los intentos anteriores que devolvieron conflicto de unicidad.
 
@@ -17,3 +17,11 @@ Lee reservas, facturas y pagos exclusivamente mediante transacciones BEGIN READ 
 El resultado no autoriza por sí solo a conciliar: una consulta fiscal positiva confirma existencia del número, no identidad completa del destinatario, importe e intención original. Antes de cualquier recuperación debe verificarse esa identidad y conservarse la operación original del navegador.
 
 Validación: siete pruebas unitarias de límites, rollback ante errores, tickets vencidos/incorrectos, entorno fiscal y ocultamiento de secretos; TypeScript completo y compilación de producción correctos. No se ha probado contra la base operativa ni ARCA real.
+
+## Resultado operativo
+
+La estadía de 205 con salida 29/10 e importe 260000 y la de 1005 con salida 29/10 e importe 288000 no tenían filas de facturas ni pagos. Se encontró además la siguiente reserva de 205, separada de la estadía afectada; tampoco tenía facturas ni pagos.
+
+ARCA homologación respondió correctamente para PV 5: último FA 50, último FB 89. No había filas locales ocupando el siguiente número de ninguna de esas series. No se emitió ni concilió ningún comprobante. El operador debe completar la intención pendiente original del navegador; no se borró ese estado.
+
+Se retiró la tarea de predespliegue y se verificó preDeployCommand=[] con startCommand y healthcheckPath aún null. Railway ignoró el primer intento de restaurar null; la lista vacía desactiva explícitamente las tareas. El estado final es sin tarea de predespliegue; no el valor null original.
