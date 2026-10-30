@@ -20,7 +20,9 @@ let testPool: pg.Pool;
 let server: http.Server | undefined;
 let baseUrl = "";
 let cookie = "";
-const username = `flow-${randomUUID()}`;
+// This isolated database creates its own approved cash operator; the role
+// alone intentionally does not grant shift initialization/opening.
+const username = "admin";
 const password = randomUUID(); // Synthetic, only used in this disposable test.
 const realFetch = globalThis.fetch;
 

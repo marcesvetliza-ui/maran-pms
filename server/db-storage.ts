@@ -5079,8 +5079,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRestaurantOrder(order: InsertRestaurantOrder): Promise<RestaurantOrder> {
-    const [created] = await db.insert(restaurantOrders).values(order as any).returning();
-    return created;
+    return db.transaction(async tx => {
+      const name = order.waiterName?.trim();
+      if (name) {
+        const [knownEventual] = await tx.select({ id: eventualWaiters.id }).from(eventualWaiters)
+          .where(sql`lower(btrim(${eventualWaiters.fullName}))=lower(${name})`).limit(1);
+        if (knownEventual) {
+          const [permanent] = await tx.select({ id: systemUsers.id }).from(systemUsers).where(and(eq(systemUsers.esMozo, "true"),
+            sql`(lower(btrim(${systemUsers.fullName}))=lower(${name}) OR lower(${systemUsers.username})=lower(${name}))`)).limit(1);
+          if (!permanent) {
+            const [shift] = await tx.select().from(cashShifts).where(and(eq(cashShifts.status, "open"), inArray(cashShifts.area, getCashShiftAreaVariants("restaurant"))))
+              .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id)).limit(1).for("share");
+            const [available] = shift ? await tx.select({ id: eventualWaiters.id }).from(eventualWaiters).where(and(
+              eq(eventualWaiters.cashShiftId, shift.id), eq(eventualWaiters.isActive, "true"), sql`lower(btrim(${eventualWaiters.fullName}))=lower(${name})`
+            )).limit(1) : [];
+            if (!available) throw Object.assign(new Error("Este mozo eventual ya no está disponible. Registralo para el turno actual de Restaurante."), { statusCode: 409 });
+          }
+        }
+      }
+      const [created] = await tx.insert(restaurantOrders).values(order as any).returning();
+      return created;
+    });
   }
 
   async updateRestaurantOrder(id: string, order: Partial<InsertRestaurantOrder>): Promise<RestaurantOrder | undefined> {
@@ -5103,18 +5122,41 @@ export class DatabaseStorage implements IStorage {
 
   async getEventualWaiters(activeOnly = false): Promise<EventualWaiter[]> {
     return activeOnly
-      ? db.select().from(eventualWaiters).where(eq(eventualWaiters.isActive, "true"))
+      ? db.select().from(eventualWaiters).where(and(eq(eventualWaiters.isActive, "true"), sql`${eventualWaiters.cashShiftId} = (
+          SELECT id FROM cash_shifts WHERE ${inArray(cashShifts.area, getCashShiftAreaVariants("restaurant"))} AND status='open'
+          ORDER BY opened_at DESC,id ASC LIMIT 1
+        )`))
       : db.select().from(eventualWaiters);
   }
 
   async createEventualWaiter(waiter: InsertEventualWaiter): Promise<EventualWaiter> {
-    const [created] = await db.insert(eventualWaiters).values(waiter as any).returning();
-    return created;
+    return db.transaction(async tx => {
+      // Same shift row lock used by closeShift: creation either precedes its
+      // closure or is rejected after the shift closes. Never delete history.
+      const [shift] = await tx.select().from(cashShifts).where(and(eq(cashShifts.status, "open"), inArray(cashShifts.area, getCashShiftAreaVariants("restaurant"))))
+        .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id)).limit(1).for("update");
+      if (!shift) throw Object.assign(new Error("Abrí un turno de Restaurante antes de registrar un mozo eventual."), { statusCode: 409 });
+      const fullName = waiter.fullName.trim().replace(/\s+/g, " ");
+      const [existing] = await tx.select().from(eventualWaiters).where(and(eq(eventualWaiters.cashShiftId, shift.id), eq(eventualWaiters.isActive, "true"), sql`lower(btrim(${eventualWaiters.fullName}))=lower(${fullName})`));
+      if (existing) return existing;
+      const [created] = await tx.insert(eventualWaiters).values({ fullName, isActive: "true", cashShiftId: shift.id }).returning();
+      return created;
+    });
   }
 
   async updateEventualWaiter(id: string, waiter: Partial<InsertEventualWaiter>): Promise<EventualWaiter | undefined> {
-    const [updated] = await db.update(eventualWaiters).set(waiter as any).where(eq(eventualWaiters.id, id)).returning();
-    return updated;
+    return db.transaction(async tx => {
+      if (waiter.isActive === "true") {
+        const [shift] = await tx.select().from(cashShifts).where(and(eq(cashShifts.status, "open"), inArray(cashShifts.area, getCashShiftAreaVariants("restaurant"))))
+          .orderBy(desc(cashShifts.openedAt), asc(cashShifts.id)).limit(1).for("update");
+        const [current] = await tx.select().from(eventualWaiters).where(eq(eventualWaiters.id, id));
+        if (!current) return undefined;
+        if (!shift || current.cashShiftId !== shift.id) throw Object.assign(new Error("El mozo pertenece a otro turno. Registralo nuevamente para el turno actual."), { statusCode: 409 });
+      }
+      const { cashShiftId: _ignored, ...patch } = waiter;
+      const [updated] = await tx.update(eventualWaiters).set(patch).where(eq(eventualWaiters.id, id)).returning();
+      return updated;
+    });
   }
 
   generateOrderNumber(): string {

@@ -609,7 +609,7 @@ function CostosReport() {
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando costos...</div>;
   if (!data) return null;
 
-  const COLORS_DEPTO = ["#EF4444","#F97316","#F59E0B","#84CC16","#06B6D4","#8B5CF6","#EC4899"];
+  const COLORS_DEPTO = ["#EF4444","#F97316","#F59E0B","#84CC16","#06B6D4","#8B5CF6","#EC4899","#14B8A6","#64748B"];
 
   return (
     <div className="space-y-5">

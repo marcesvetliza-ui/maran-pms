@@ -1031,6 +1031,9 @@ export default function RestaurantPage() {
   const restaurantUsers = allUsers.filter(u => u.esMozo === "true");
   const { data: eventualWaiters = [] } = useQuery<{ id: string; fullName: string; isActive: string }[]>({
     queryKey: ["/api/restaurant/eventual-waiters"],
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15000,
   });
   // Selector de mozo unificado: usuarios reales (esMozo === "true") + mozos
   // eventuales (sin usuario del sistema, ver eventualWaiters arriba). Ambos
@@ -1042,12 +1045,19 @@ export default function RestaurantPage() {
     })),
     ...eventualWaiters.map(w => ({ id: w.id, fullName: w.fullName, username: null as string | null, eventual: true })),
   ];
+  useEffect(() => {
+    const available = new Set(mozoOptions.map(option => option.fullName));
+    if (newWaiterName && !available.has(newWaiterName)) setNewWaiterName("");
+    if (transferNewWaiter && !available.has(transferNewWaiter)) setTransferNewWaiter("");
+  }, [eventualWaiters, allUsers]);
   // Selector de mozo compartido por los 3 diálogos que asignan uno (nuevo
   // pedido, pedido directo y transferencia a nueva cuenta) — un botón "+" al
   // lado abre el diálogo de alta de mozo eventual (setAddingMozoFor).
   const renderMozoSelect = (value: string, onValueChange: (v: string) => void, testId: string, context: "new" | "direct" | "transfer") => (
     <div className="flex gap-2">
-      <Select value={value} onValueChange={onValueChange}>
+      <Select value={value} onValueChange={onValueChange} onOpenChange={open => {
+        if (open) void queryClient.invalidateQueries({ queryKey: ["/api/restaurant/eventual-waiters"] });
+      }}>
         <SelectTrigger data-testid={testId} className="flex-1">
           <SelectValue placeholder="Seleccionar mozo..." />
         </SelectTrigger>
@@ -1332,13 +1342,14 @@ export default function RestaurantPage() {
       return res.json();
     },
     onSuccess: (created: { id: string; fullName: string }) => {
+      queryClient.setQueryData(["/api/restaurant/eventual-waiters"], (old: any[] | undefined) => [...(old || []).filter(w => w.id !== created.id), created]);
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/eventual-waiters"] });
       if (addingMozoFor === "new" || addingMozoFor === "direct") setNewWaiterName(created.fullName);
       if (addingMozoFor === "transfer") setTransferNewWaiter(created.fullName);
       setAddingMozoFor(null);
       setNewMozoEventualName("");
     },
-    onError: () => toast({ title: "Error al crear mozo eventual", variant: "destructive" }),
+    onError: (error: any) => toast({ title: "No se pudo registrar el mozo eventual", description: parseApiError(error), variant: "destructive" }),
   });
 
   const createOrderMutation = useMutation({
@@ -4411,7 +4422,7 @@ export default function RestaurantPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Agregar mozo eventual</DialogTitle>
-            <DialogDescription>Para personal ocasional sin usuario del sistema. Queda disponible para elegir de nuevo la próxima vez.</DialogDescription>
+            <DialogDescription>Para personal ocasional sin usuario del sistema. Queda disponible solo durante el turno abierto de Restaurante. La próxima vez se registra nuevamente; los pedidos anteriores conservan su nombre.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Label htmlFor="mozo-eventual-name">Nombre y apellido</Label>

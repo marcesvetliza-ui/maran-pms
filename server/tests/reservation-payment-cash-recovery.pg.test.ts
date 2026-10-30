@@ -5,7 +5,11 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("../auth", () => ({
-  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requireAuth: (req: any, _res: any, next: () => void) => {
+    // Authentication establishes the actor before global cash authorization.
+    req.user = { id: "cash-recovery-test", username: "tester", fullName: "Tester", role: "admin" };
+    next();
+  },
   requireRole: (_roles: string[]) => (req: any, _res: any, next: () => void) => {
     req.user = { id: "cash-recovery-test", username: "tester", fullName: "Tester", role: "admin" };
     next();

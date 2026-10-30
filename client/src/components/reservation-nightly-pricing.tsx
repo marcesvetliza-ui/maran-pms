@@ -118,7 +118,7 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       <p className="wf-footnote">Las tarifas incluyen IVA. El desglose fiscal se realiza al facturar.</p>
     </section>
     <Dialog open={!!mode} onOpenChange={open => { if (!save.isPending && !open) setMode(null); }}>
-      <DialogContent className="wf-production wf-tariff-modal dark max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
+      <DialogContent className="wf-production wf-tariff-modal max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
         <DialogHeader><DialogTitle>{mode === "stay" ? "Modificar estadía" : `Editar ${selected.length} ${selected.length === 1 ? "noche" : "noches"}`}</DialogTitle><DialogDescription>Revisá las noches afectadas y su impacto. No se modifica nada hasta confirmar. Los cobros permanecen intactos.</DialogDescription></DialogHeader>
         <div className="overflow-y-auto min-h-0 space-y-4 px-1">
           {mode === "rates" ? <div className="grid gap-4 sm:grid-cols-2">
