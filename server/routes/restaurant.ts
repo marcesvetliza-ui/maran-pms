@@ -3,7 +3,7 @@ import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
 import { restaurantPaymentTransaction, afterRestaurantPaymentCommit } from "../restaurantPaymentTransaction";
-import { db, pool } from "../db";
+import { db, pool, withDatabaseTransaction } from "../db";
 import { restaurantOrders, orderItems, orderSplits, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
@@ -271,7 +271,7 @@ export function registerRestaurantRoutes(app: Express) {
       const waiter = await storage.createEventualWaiter({ fullName, isActive: "true" });
       res.status(201).json(waiter);
     } catch (error) {
-      res.status(500).json({ error: "Error creating eventual waiter" });
+      res.status((error as any)?.statusCode === 409 ? 409 : 500).json({ error: (error as any)?.statusCode === 409 ? (error as Error).message : "Error creating eventual waiter" });
     }
   });
 
@@ -282,7 +282,7 @@ export function registerRestaurantRoutes(app: Express) {
       if (!waiter) return res.status(404).json({ error: "Eventual waiter not found" });
       res.json(waiter);
     } catch (error) {
-      res.status(500).json({ error: "Error updating eventual waiter" });
+      res.status((error as any)?.statusCode === 409 ? 409 : 500).json({ error: (error as any)?.statusCode === 409 ? (error as Error).message : "Error updating eventual waiter" });
     }
   });
 
@@ -380,7 +380,9 @@ export function registerRestaurantRoutes(app: Express) {
         // nueva se serializan por mesa: sin el lock, dos requests concurrentes
         // podían pasar el chequeo antes de que cualquiera insertara, y la mesa
         // terminaba con dos órdenes activas en simultáneo.
-        const result = await withTableOpenLock(tableId, async () => {
+        // Rejecting a waiter from an expired shift must also roll back the
+        // existing stale-order cleanup; no previous order is lost on failure.
+        const result = await withTableOpenLock(tableId, () => withDatabaseTransaction(async () => {
           // Verificar si hay una orden activa de HOY para esta mesa
           const activeToday = await db
             .select({ id: restaurantOrders.id, orderNumber: restaurantOrders.orderNumber })
@@ -415,7 +417,7 @@ export function registerRestaurantRoutes(app: Express) {
               .where(inArray(restaurantOrders.id, staleIds));
           }
           return { order: await createOrder() };
-        });
+        }));
         if (result.conflict) {
           return res.status(409).json({
             error: "ORDEN_ACTIVA_EXISTENTE",
@@ -429,7 +431,7 @@ export function registerRestaurantRoutes(app: Express) {
       const order = await createOrder();
       res.status(201).json(order);
     } catch (error) {
-      res.status(500).json({ error: "Error creating order" });
+      res.status((error as any)?.statusCode === 409 ? 409 : 500).json({ error: (error as any)?.statusCode === 409 ? (error as Error).message : "Error creating order" });
     }
   });
 
@@ -1548,7 +1550,7 @@ export function registerRestaurantRoutes(app: Express) {
       res.json({ targetOrderId: finalTargetOrderId, targetOrder: updatedTarget });
     } catch (error) {
       console.error("Error transferring items:", error);
-      res.status(500).json({ error: "Error al transferir ítems" });
+      res.status((error as any)?.statusCode === 409 ? 409 : 500).json({ error: (error as any)?.statusCode === 409 ? (error as Error).message : "Error al transferir ítems" });
     }
   });
 
