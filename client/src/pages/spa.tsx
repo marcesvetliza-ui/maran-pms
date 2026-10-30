@@ -812,11 +812,12 @@ export default function SpaPage() {
   const selectedAppointmentDate = form.watch("appointmentDate");
   const selectedTreatment = treatments.find((treatment) => treatment.id === selectedTreatmentId);
   // Every active physical cabin can be reserved by a circuit, not only special facilities.
-  const resourceCabins = activeCabins;
+  const resourceCabins = [...activeCabins].sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base", numeric: true }));
   // Any plain (non-circuit) active treatment can be bundled as a circuit
   // resource — a circuit is always excluded here (isCircuit), so this never
   // offers nesting a circuit inside itself.
-  const resourceTreatments = treatments.filter((treatment) => treatment.isActive === "true" && !treatment.isCircuit);
+  const resourceTreatments = treatments.filter((treatment) => treatment.isActive === "true" && !treatment.isCircuit)
+    .sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base", numeric: true }));
 
   const { data: selectedCircuitTemplates = EMPTY_SPA_TREATMENT_RESOURCES, isFetching: isFetchingCircuitTemplates } = useQuery<SpaTreatmentResource[]>({
     queryKey: ["/api/spa/treatments", selectedTreatmentId, "resources"],

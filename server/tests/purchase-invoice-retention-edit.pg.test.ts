@@ -22,7 +22,10 @@ import { verifyFinancialSchema } from "../migrate";
  */
 
 vi.mock("../auth", () => ({
-  requireAuth: (_req: any, _res: any, next: () => void) => next(),
+  requireAuth: (req: any, _res: any, next: () => void) => {
+    req.user = { id: "test-actor", username: "test-actor", role: req.headers["x-test-role"] || "admin" };
+    next();
+  },
   requireRole: (_roles: string[]) => (_req: any, _res: any, next: () => void) => next(),
   requirePermission: (_resourceKey: string) => (_req: any, _res: any, next: () => void) => next(),
 }));
@@ -160,10 +163,11 @@ async function requestInvoice(
   method: "POST" | "PATCH",
   path: string,
   body: Record<string, unknown>,
+  role = "admin",
 ): Promise<{ status: number; body: InvoiceResponse & Record<string, unknown> }> {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-test-role": role },
     body: JSON.stringify(body),
   });
   return {
@@ -244,6 +248,38 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
     await testPool?.end();
     const { pool } = await import("../db");
     await pool.end();
+  });
+
+  it("permite a Responsable de Administración corregir pagadas sin reabrir deuda ni duplicar pagos", async () => {
+    const fixture = await createFixture();
+    try {
+      const accountId = (await testPool!.query("SELECT id FROM accounting_accounts WHERE codigo='4.2.1.08.05.02'")).rows[0].id;
+      const created = await requestInvoice("POST", "/api/purchase-invoices", {
+        tipoComprobante: "FACT-A", supplierId: fixture.supplierId,
+        numeroComprobante: `PG-PAID-EDIT-${randomUUID()}`, fechaEmision: "2026-08-31",
+        cuentaContableId: accountId, periodo: "08/2026", condicionPago: "cuenta_corriente", montoNeto: "100",
+      });
+      expect(created.status).toBe(201);
+      const id = Number(created.body.id); fixture.facturaInvoiceId = id;
+      // Synthetic settled fixture: no operational payment is created.
+      await testPool!.query("UPDATE purchase_invoices SET estado='pagado', saldo_pendiente=0 WHERE id=$1", [id]);
+      const beforeItems = await testPool!.query("SELECT * FROM payment_order_items WHERE invoice_id=$1", [id]);
+      expect((await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "100", observaciones: "corrección" }, "manager")).status).toBe(403);
+      const corrected = await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "100", observaciones: "corrección" }, "resp_administracion");
+      expect(corrected.status).toBe(200);
+      expect(corrected.body).toMatchObject({ estado: "pagado", saldo_pendiente: "0.00", observaciones: "corrección" });
+      const entry = await readAccountingLines(Number(corrected.body.asiento_id));
+      const totals = accountingTotals(entry);
+      expect(totals.debe).toBeCloseTo(totals.haber, 2);
+      const rejected = await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "90" }, "resp_administracion");
+      expect(rejected.status).toBe(409);
+      const saved = await testPool!.query("SELECT monto_total, saldo_pendiente, estado FROM purchase_invoices WHERE id=$1", [id]);
+      expect(saved.rows[0]).toMatchObject({ monto_total: "100.00", saldo_pendiente: "0.00", estado: "pagado" });
+      expect((await testPool!.query("SELECT * FROM payment_order_items WHERE invoice_id=$1", [id])).rows).toEqual(beforeItems.rows);
+      const partial = await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "120" }, "resp_administracion");
+      expect(partial.status).toBe(200);
+      expect(partial.body).toMatchObject({ estado: "parcial", saldo_pendiente: "20.00" });
+    } finally { await cleanupFixture(fixture); }
   });
 
   it("exige proveedor del ABM y total positivo para una factura, incluso al editarla", async () => {

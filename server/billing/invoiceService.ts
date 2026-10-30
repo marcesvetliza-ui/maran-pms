@@ -1,4 +1,5 @@
 import { assertExternalCommAllowed } from "../external-comms-policy";
+import { FiscalNumberLookupError, readLastAuthorizedNumber } from "./lastAuthorizedNumber";
 import { db, pool } from "../db";
 import { eq, sql } from "drizzle-orm";
 import { salesInvoices, invoiceCounters } from "@shared/schema";
@@ -285,18 +286,23 @@ async function getNextInvoiceNumberFromAfip(
     `<ar:PtoVta>${puntoVenta}</ar:PtoVta><ar:CbteTipo>${cbteTipo}</ar:CbteTipo>` +
     `</ar:FECompUltimoAutorizado></soapenv:Body></soapenv:Envelope>`;
 
-  const resp = await fetch(wsfeUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "text/xml; charset=utf-8",
-      SOAPAction: '"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"',
-    },
-    body: envelope,
-    signal: AbortSignal.timeout(10000),
-  });
-  const text = await resp.text();
-  const nroM = text.match(/<CbteNro>(\d+)<\/CbteNro>/);
-  const ultimoAfip = nroM ? Number(nroM[1]) : 0;
+  let ultimoAfip: number;
+  try {
+    const resp = await fetch(wsfeUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/xml; charset=utf-8",
+        SOAPAction: '"http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado"',
+      },
+      body: envelope,
+      signal: AbortSignal.timeout(10000),
+    });
+    ultimoAfip = await readLastAuthorizedNumber(resp, { pointOfSale: puntoVenta, documentType: cbteTipo });
+  } catch (error: any) {
+    if (error instanceof FiscalNumberLookupError) throw error;
+    const timedOut = ["TimeoutError", "AbortError"].includes(error?.name);
+    throw new FiscalNumberLookupError(timedOut ? 504 : 502, timedOut ? "tiempo de espera agotado" : "conexión no disponible");
+  }
   const proximo = ultimoAfip + 1;
 
   // Sincronizar contador local con AFIP

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 vi.mock("../db", () => ({
+  pool: {},
   db: {
     insert: () => ({ values: () => ({ returning: () => Promise.resolve([{ id: "conn-1", label: "Booking.com" }]) }) }),
   },
@@ -80,4 +81,12 @@ describe("channex config routes — migradas a requirePermission(api:channex:con
     });
     expect(response.status).toBe(403);
   });
+  it("rechaza cambios de alcance, full sync y reintentos sin permiso de configuración", async () => {
+    app = await startApp("reception");
+    for (const [method,path] of [["PATCH",""],["POST","/full-sync"],["POST","/retry"]]) {
+      const response=await fetch(`${app.baseUrl}/api/channex/connections/conn-1/ari${path}`, {method,headers:{"Content-Type":"application/json"},body:JSON.stringify({floor:2,currency:"USD",enabled:true})});
+      expect(response.status).toBe(403);
+    }
+  });
+
 });

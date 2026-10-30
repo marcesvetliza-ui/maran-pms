@@ -94,7 +94,8 @@ export type RatePlan = typeof ratePlans.$inferSelect;
 // Rooms
 export type RoomStatus = "available" | "occupied" | "dirty" | "cleaning" | "maintenance" | "oos" | "inspected" | "limpia_ocupada" | "no_molestar";
 export type RoomFeature = "accessible" | "balcony" | "separable_bed" | "sofa_bed" | "shower_only" | "extra_bed" | "twin_config" | "living_room";
-export type BedConfig = "MAT" | "TWIN" | "MAT_CC" | "TWIN_CC" | "MAT_EXTRA" | "MAT_CC_EXTRA";
+// Codes come from the editable bed_types catalog; legacy codes remain valid saved identities.
+export type BedConfig = string;
 
 export const rooms = pgTable("rooms", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1407,11 +1408,13 @@ export type RestaurantOrder = typeof restaurantOrders.$inferSelect;
 // Mozos eventuales: personal ocasional sin usuario del sistema (sin login,
 // sin email). restaurant_orders.waiter_name ya es un snapshot de texto libre
 // (no una FK a system_users), así que estos solo alimentan el selector de
-// mozo con un nombre — no hace falta que sean "joinables" en ningún lado.
+// mozo con un nombre. La disponibilidad para nuevas mesas se limita al turno
+// de Restaurante en que se registran; los registros anteriores se conservan.
 export const eventualWaiters = pgTable("eventual_waiters", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   fullName: text("full_name").notNull(),
   isActive: text("is_active").notNull().default("true"),
+  cashShiftId: varchar("cash_shift_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

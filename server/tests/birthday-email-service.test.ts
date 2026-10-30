@@ -1,3 +1,4 @@
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 const state = vi.hoisted(() => ({
   cfg: {} as any,
@@ -21,6 +22,10 @@ const message = {
   idempotencyKey: "synthetic-key",
 };
 beforeEach(() => {
+  // Exercise the provider boundary with synthetic network/SMTP transports;
+  // the pilot guard is tested separately below and remains enabled in Xenia.
+  resetAppEnvForTests();
+  initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
   state.cfg = {
     globalEnabled: true,
     provider: "resend",
@@ -31,8 +36,17 @@ beforeEach(() => {
   state.send.mockReset();
   state.close.mockReset();
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); resetAppEnvForTests(); });
 describe("Birthday provider boundary · simulated network only", () => {
+  it("blocks birthday providers in pilot before any simulated network call", async () => {
+    resetAppEnvForTests();
+    initAppEnv({ APP_ENV: "pilot", NODE_ENV: "production" });
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    expect((await birthdayEmailReadiness()).ok).toBe(false);
+    expect((await sendBirthdayEmail(message)).status).toBe("failed");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(state.send).not.toHaveBeenCalled();
+  });
   it("sends exactly one personalized recipient and escapes plain text in HTML", async () => {
     const fetcher = vi
       .fn()

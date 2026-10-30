@@ -86,6 +86,13 @@ const ROOM_TYPE = { id: "type-1", name: "Doble Standard", code: "DBL" };
 const ROOM_ID = "room-1";
 
 let currentBedConfig = "MAT";
+let allowedBedConfigs: string[] = [];
+let catalog = [
+  {id:"b1",code:"MAT",name:"Matrimonial",isActive:true},
+  {id:"b2",code:"TWIN",name:"Twin (2 camas)",isActive:true},
+  {id:"b3",code:"TRIPLE",name:"Tres camas individuales",isActive:true},
+  {id:"b4",code:"OLD",name:"Camaje anterior",isActive:false},
+];
 
 function buildRoom() {
   return {
@@ -96,6 +103,7 @@ function buildRoom() {
     floor: 1,
     status: "available",
     bedConfig: currentBedConfig,
+    allowedBedConfigs,
     notes: "",
     isActive: true,
     isVirtual: false,
@@ -130,10 +138,12 @@ describe("edición de habitaciones — el Camaje persiste al reabrir el formular
     vi.clearAllMocks();
     queryClient.clear();
     currentBedConfig = "MAT";
+    allowedBedConfigs = [];
 
     apiRequestMock.mockImplementation(async (method: string, url: string, data?: any) => {
       if (method === "PATCH" && url === `/api/rooms/${ROOM_ID}`) {
         if (data?.bedConfig) currentBedConfig = data.bedConfig;
+        if (data?.allowedBedConfigs) allowedBedConfigs = data.allowedBedConfigs;
         return jsonResponse({ ...buildRoom(), ...data });
       }
       return jsonResponse({ error: `Solicitud inesperada: ${method} ${url}` }, 404);
@@ -141,6 +151,7 @@ describe("edición de habitaciones — el Camaje persiste al reabrir el formular
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === "/api/bed-types") return jsonResponse(catalog);
       if (url === "/api/rooms") return jsonResponse([buildRoom()]);
       if (url === "/api/room-types") return jsonResponse([ROOM_TYPE]);
       if (url === "/api/maintenance/work-orders") return jsonResponse([]);
@@ -178,4 +189,26 @@ describe("edición de habitaciones — el Camaje persiste al reabrir el formular
     expect(reopenedTrigger).toHaveTextContent("Twin (2 camas)");
     expect(reopenedTrigger).not.toHaveTextContent("Matrimonial");
   });
+  it("loads configured names and custom codes, saves allowed beds and retains inactive history", async () => {
+    currentBedConfig = "OLD";
+    allowedBedConfigs = ["OLD"];
+    const user = userEvent.setup();
+    renderPage();
+    const trigger = await openEditDialog(user);
+    await waitFor(() => expect(trigger).toHaveTextContent("Camaje anterior"));
+    expect(screen.getByTestId("checkbox-allowed-bedconfig-OLD")).toBeChecked();
+    expect(screen.getByTestId("checkbox-allowed-bedconfig-OLD")).toBeDisabled();
+    expect(screen.queryByTestId("checkbox-allowed-bedconfig-MAT_CC_EXTRA")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("checkbox-allowed-bedconfig-TRIPLE"));
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: "Tres camas individuales" }));
+    fireEvent.click(screen.getByTestId("button-submit-room"));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("PATCH", `/api/rooms/${ROOM_ID}`,
+      expect.objectContaining({bedConfig:"TRIPLE", allowedBedConfigs:["OLD","TRIPLE"]})));
+    const reopened = await openEditDialog(user);
+    expect(reopened).toHaveTextContent("Tres camas individuales");
+    expect(screen.getByTestId("checkbox-allowed-bedconfig-TRIPLE")).toBeChecked();
+    expect(screen.getByTestId("checkbox-allowed-bedconfig-OLD")).toBeChecked();
+  });
+
 });

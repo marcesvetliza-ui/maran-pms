@@ -623,7 +623,7 @@ export function registerFolioRoutes(app: Express) {
                    monto_acreditado, estado
             FROM sales_invoices
             WHERE reserva_id = ${entityId}
-              AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB')
+              AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','cierre_habitacion')
               AND estado IN ('emitida','parcial','anulada')
           `),
         ]);

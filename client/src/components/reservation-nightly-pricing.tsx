@@ -118,7 +118,7 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       <p className="wf-footnote">Las tarifas incluyen IVA. El desglose fiscal se realiza al facturar.</p>
     </section>
     <Dialog open={!!mode} onOpenChange={open => { if (!save.isPending && !open) setMode(null); }}>
-      <DialogContent className="wf-production wf-tariff-modal dark max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
+      <DialogContent className="wf-production wf-tariff-modal max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
         <DialogHeader><DialogTitle>{mode === "stay" ? "Modificar estadía" : `Editar ${selected.length} ${selected.length === 1 ? "noche" : "noches"}`}</DialogTitle><DialogDescription>Revisá las noches afectadas y su impacto. No se modifica nada hasta confirmar. Los cobros permanecen intactos.</DialogDescription></DialogHeader>
         <div className="overflow-y-auto min-h-0 space-y-4 px-1">
           {mode === "rates" ? <div className="grid gap-4 sm:grid-cols-2">
@@ -138,9 +138,9 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
   </>;
 });
 
-export function ReservationFolioSummary({ lodging, consumptions, payments, total, pendingCollection, pendingBilling, nights, chargesCount }: {
+export function ReservationFolioSummary({ lodging, consumptions, payments, total, pendingCollection, pendingBilling, hasRoomVoucher = false, nights, chargesCount }: {
   lodging: number; consumptions: number; payments: number; total: number; pendingCollection: number; pendingBilling: number;
-  nights?: number; chargesCount?: number;
+  nights?: number; chargesCount?: number; hasRoomVoucher?: boolean;
 }) {
   const display = (n: number) => money(Math.round(n * 100));
   return <aside className="wf-account" aria-label="Resumen de cuenta">
@@ -153,8 +153,8 @@ export function ReservationFolioSummary({ lodging, consumptions, payments, total
     </div>
     <div className="wf-outstanding-grid">
       <div><span>{payments > total ? "Saldo a favor" : "Pendiente de cobro"}<small>Saldo luego de pagos</small></span><strong>{display(payments > total ? payments - total : pendingCollection)}</strong></div>
-      <div><span>Pendiente de facturación<small>Importe sin factura emitida</small></span><strong>{display(pendingBilling)}</strong></div>
+      <div><span>{hasRoomVoucher ? "Pendiente de comprobante" : "Pendiente de facturación"}<small>{hasRoomVoucher ? "Importe sin documentar" : "Importe sin factura emitida"}</small></span><strong>{display(pendingBilling)}</strong></div>
     </div>
-    <div className="wf-invoice-state"><FileText size={16}/><span>Facturación<small>{pendingBilling > 0 ? `Pendiente ${display(pendingBilling)}` : "Sin importe pendiente"}</small></span><span className="wf-account-badge">{total === 0 ? "Sin cargos" : pendingBilling <= 0 ? "Facturado" : pendingBilling < total ? "Parcial" : "Sin facturar"}</span></div>
+    <div className="wf-invoice-state"><FileText size={16}/><span>{hasRoomVoucher ? "Comprobantes" : "Facturación"}<small>{pendingBilling > 0 ? `Pendiente ${display(pendingBilling)}` : "Sin importe pendiente"}</small></span><span className="wf-account-badge">{total === 0 ? "Sin cargos" : pendingBilling <= 0 ? (hasRoomVoucher ? "Documentado" : "Facturado") : pendingBilling < total ? "Parcial" : "Sin facturar"}</span></div>
   </aside>;
 }

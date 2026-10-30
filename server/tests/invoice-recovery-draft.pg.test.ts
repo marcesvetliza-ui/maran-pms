@@ -1,3 +1,4 @@
+import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
@@ -228,8 +229,8 @@ runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito A
       recoverableCreditNote: true,
     };
 
-    global.fetch = vi.fn(async () => new Response(
-      "<soap:Envelope><CbteNro>6</CbteNro></soap:Envelope>",
+    global.fetch = vi.fn(async (_url, init) => new Response(
+      lastAuthorizedForRequest(6, init),
       { status: 200 },
     )) as any;
     mocks.feCAESolicitar.mockRejectedValueOnce(new Error(firstError));
@@ -360,7 +361,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     if(!pool)throw Error("Test DB required");
     const suffix=randomUUID(), pv=8000+(parseInt(suffix.slice(0,6),16)%900);
     const input={tipoComprobante:"NCB" as const,cliente:{razonSocial:"Synthetic",condicionIva:"Consumidor Final"},items:[{descripcion:"Prueba",cantidad:1,precioUnitario:100,alicuotaIva:"no_gravado" as const,subtotalNeto:0,subtotal:100}],reservaId:`date-${suffix}`,facturaOriginalId:777777,sourceChargeIds:["accommodation"],sourceChargeAmounts:{accommodation:100},puntoVentaOverride:pv,recoverableCreditNote:true};
-    global.fetch=vi.fn(async()=>new Response("<soap:Envelope><CbteNro>6</CbteNro></soap:Envelope>",{status:200})) as any;
+    global.fetch=vi.fn(async(_url,init)=>new Response(lastAuthorizedForRequest(6,init),{status:200})) as any;
     try {
       mocks.feCAESolicitar.mockRejectedValueOnce(new Error("simulated rejection"));
       await expect(emitirFactura(input)).rejects.toThrow("simulated rejection");

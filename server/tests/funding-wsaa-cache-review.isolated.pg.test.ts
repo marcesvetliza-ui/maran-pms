@@ -1,3 +1,4 @@
+import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 /** R5 regression derived from Codex d323b886. Synthetic Unix-socket DB only.
  * Real configured transport, WSAA signer/cache, gateway, store and finalizer.
  * No operational DATABASE_URL, certificate or remote service is used. */
@@ -91,7 +92,7 @@ beforeEach(async()=>{
     expect(body).toContain("<ar:Token>synthetic-ticket</ar:Token>");
     const action=String((options?.headers as any)?.SOAPAction);
     if(action.includes("FECompUltimoAutorizado"))
-      return new Response(`<Envelope><CbteNro>${lastNumber}</CbteNro></Envelope>`);
+      return new Response(lastAuthorizedForRequest(lastNumber, options));
     if(action.includes("FECompConsultar")) {
       const number=Number(body.match(/<ar:CbteNro>(\d+)/)?.[1]);
       expect(number).toBe(lastNumber);

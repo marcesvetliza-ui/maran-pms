@@ -6,6 +6,17 @@ export function handleSessionExpired() {
   window.location.href = "/auth?session_expired=1";
 }
 
+function isHtmlError(body: string) {
+  return /<!doctype\s+html\b|<(?:html|head|body|title|script|style)\b/i.test(body);
+}
+
+function gatewayErrorMessage(status?: number) {
+  if (status === 504 || status === 524) {
+    return `El servidor no respondió a tiempo (HTTP ${status}). No se pudo confirmar el resultado de la solicitud.`;
+  }
+  return `El servidor no pudo completar la solicitud${status ? ` (HTTP ${status})` : ""}. No se pudo confirmar su resultado.`;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     if (res.status === 401) {
@@ -13,7 +24,12 @@ async function throwIfResNotOk(res: Response) {
       throw new Error("Sesión expirada");
     }
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    // Proxies can return HTML instead of our JSON API contract. Preserve the
+    // HTTP status (financial retries depend on it), but never surface the page.
+    const body = isHtmlError(text) || res.headers.get("content-type")?.includes("text/html")
+      ? JSON.stringify({ error: gatewayErrorMessage(res.status) })
+      : text;
+    throw new Error(`${res.status}: ${body}`);
   }
 }
 
@@ -137,8 +153,13 @@ export function parseApiError(err: unknown): string {
   const raw: string = (err as any)?.message || "Error inesperado";
   const match = raw.match(/^\d+:\s*([\s\S]+)$/);
   if (match) {
+    const status = Number(raw.match(/^\d+/)?.[0]);
+    if (isHtmlError(match[1])) return gatewayErrorMessage(status);
     try {
       const parsed = JSON.parse(match[1]);
+      // Also handle HTML nested inside an API/proxy error envelope.
+      const message = typeof parsed?.error === "object" ? parsed?.error?.message : (parsed?.error || parsed?.message);
+      if (typeof message === "string" && isHtmlError(message)) return gatewayErrorMessage(status);
       if (parsed?.error) {
         if (parsed.code === "GROUP_BLOCK_SHORTAGE" && parsed.warning) {
           const warning = parsed.warning;
@@ -164,7 +185,7 @@ export function parseApiError(err: unknown): string {
       return match[1].trim() || raw;
     }
   }
-  return raw;
+  return isHtmlError(raw) ? gatewayErrorMessage() : raw;
 }
 
 export const queryClient = new QueryClient({

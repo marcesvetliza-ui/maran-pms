@@ -1,3 +1,4 @@
+import { useBedCatalog } from "@/hooks/use-bed-catalog";
 import {HousekeepingBedSummary} from "./housekeeping-bed-summary";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {
@@ -19,7 +20,6 @@ import { formatDisplayDate } from "@shared/date-display";
 import {
   compareBeds,
   durationLabel,
-  physicalBedLabels,
   taskDuration,
   type HousekeepingPlanning,
   type PlanningRequest,
@@ -72,6 +72,7 @@ export function HousekeepingPlanningView({
   onEditTask?: (task: PlanningTask) => void;
 }) {
   const { toast } = useToast();
+  const bedCatalog = useBedCatalog();
   const [date, setDate] = useState(getArgentinaToday),
     [floor, setFloor] = useState("all"),
     [filter, setFilter] = useState("all");
@@ -418,9 +419,7 @@ export function HousekeepingPlanningView({
                       <p className="text-sm">
                         Camaje físico actual:{" "}
                         <strong>
-                          {physicalBedLabels[room.currentBed || ""] ||
-                            room.currentBed ||
-                            "Sin registrar"}
+                          {room.currentBed ? bedCatalog.label(room.currentBed) : "Sin registrar"}
                         </strong>
                       </p>
                     </header>
@@ -510,23 +509,17 @@ export function HousekeepingPlanningView({
               </p>
               <label className="text-sm">
                 Camaje realmente preparado
+                {!bedCatalog.ready && <span role="status" className="block text-muted-foreground">{bedCatalog.error ? "No se pudo cargar Tipos de Camaje. Actualizá la pantalla para reintentar." : "Cargando Tipos de Camaje…"}</span>}
                 <select
                   className={`${input} w-full mt-1`}
+                  disabled={!bedCatalog.ready}
                   value={bed}
                   onChange={(e) => setBed(e.target.value)}
                 >
                   <option value="">Seleccionar</option>
-                  {Object.entries(physicalBedLabels)
-                    .filter(
-                      ([key]) =>
-                        !confirmation.room.allowedBeds?.length ||
-                        confirmation.room.allowedBeds.includes(key),
-                    )
-                    .map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
+                  {bedCatalog.forRoom(confirmation.room.allowedBeds, confirmation.room.currentBed).map(option => (
+                    <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="flex items-start gap-2 text-sm">
@@ -560,6 +553,7 @@ export function HousekeepingPlanningView({
             <Button
               disabled={
                 save.isPending ||
+                !bedCatalog.ready ||
                 !bed ||
                 !reviewed ||
                 (!!confirmation &&

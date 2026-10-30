@@ -24,6 +24,9 @@ vi.mock("../db-storage", () => ({
   getArgentinaToday: () => "2026-09-12",
 }));
 vi.mock("../db", () => ({
+  // Channex mounts its routes with the pool; denied pilot requests must never
+  // reach a database operation through those registered handlers.
+  pool: { query: vi.fn(async () => { throw new Error("Unexpected pool query in authorization test"); }) },
   db: {
     execute: vi.fn(async () => ({ rows: [] })),
     select: vi.fn(() => ({ from: () => ({ where: async () => [] }) })),

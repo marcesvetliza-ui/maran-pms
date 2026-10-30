@@ -1,3 +1,4 @@
+import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -382,15 +383,17 @@ function NotificationBell() {
 }
 
 function TurnoAlert() {
+  const { user } = useAuth();
   const { data: autocreados = [] } = useQuery<any[]>({
     queryKey: ["/api/cash/shifts/autocreados"],
+    enabled: canViewCash(user?.username),
     queryFn: async () => {
       const res = await apiRequest("GET", "/api/cash/shifts/autocreados");
       return res.json();
     },
     refetchInterval: 60000,
   });
-  if (!autocreados.length) return null;
+  if (!canViewCash(user?.username) || !autocreados.length) return null;
   return (
     <span
       title={`${autocreados.length} turno(s) sin operador asignado`}
@@ -621,7 +624,13 @@ export function AppSidebar() {
         })}
       </SidebarContent>
 
-      <SidebarFooter />
+      <SidebarFooter>
+        <SidebarMenu><SidebarMenuItem>
+          <SidebarMenuButton asChild isActive={location === "/manuales"} data-testid="nav-manuales">
+            <Link href="/manuales"><BookOpen className="h-4 w-4" /><span>Manuales y ayuda</span></Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem></SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

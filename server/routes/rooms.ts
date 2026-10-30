@@ -1,3 +1,4 @@
+import { validateRoomBeds } from "@shared/bedCatalog";
 import type { Express } from "express";
 import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
 import { createHash } from "node:crypto";
@@ -921,6 +922,10 @@ export function registerRoomsRoutes(app: Express) {
 
   app.post("/api/rooms", requirePermission(ROOMS_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
+      if ("bedConfig" in req.body || "allowedBedConfigs" in req.body) {
+        const error = validateRoomBeds(await storage.getBedTypes(), req.body);
+        if (error) return res.status(400).json({ error });
+      }
       const room = await storage.createRoom(req.body);
       res.status(201).json(room);
     } catch (error) {
@@ -938,6 +943,12 @@ export function registerRoomsRoutes(app: Express) {
         }
       }
       const { status: _status, ...roomData } = req.body;
+      if ("bedConfig" in roomData || "allowedBedConfigs" in roomData) {
+        const previous = await storage.getRoom(req.params.id);
+        if (!previous) return res.status(404).json({ error: "Room not found" });
+        const error = validateRoomBeds(await storage.getBedTypes(), roomData, previous);
+        if (error) return res.status(400).json({ error });
+      }
       const room = await storage.updateRoom(req.params.id, roomData);
       if (!room) {
         return res.status(404).json({ error: "Room not found" });

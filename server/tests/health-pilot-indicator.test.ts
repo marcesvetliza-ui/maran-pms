@@ -16,6 +16,7 @@ vi.mock("../db-storage", () => ({
   getArgentinaToday: () => "2026-09-11",
 }));
 vi.mock("../db", () => ({
+  pool: { query: vi.fn(async () => { throw new Error("Unexpected pool query in health test"); }) },
   db: {
     execute: vi.fn(async () => ({ rows: [{ "?column?": 1 }] })),
     select: vi.fn(),

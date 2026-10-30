@@ -1,6 +1,7 @@
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { ReservationNightlyPricing, ReservationFolioSummary, type ReservationNightlyPricingHandle } from "@/components/reservation-nightly-pricing";
 import { ReservationFolioHeader } from "@/components/reservation-folio-header";
+import { ReservationChannexSettlement } from "@/components/channex-settlement";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -14,7 +15,7 @@ import {
   canInvoiceReservationPayment,
   getAvailableReservationAdvancePayments,
   getAvailableReservationAdvanceTotal,
-  getNetReservationInvoicedTotal,
+  getNetReservationDocumentedTotal,
   isReservationCreditNoteAdjustment,
   parseReservationInvoiceRef,
 } from "@shared/reservationFolio";
@@ -3175,18 +3176,19 @@ export function ReservationDetailDialog({
   const totalNdAmount = folioNdMovements.reduce((sum: number, m: any) => sum + parseFloat(m.amount || "0"), 0);
   const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
-  const totalInvoiced = getNetReservationInvoicedTotal(folioInvoices || []);
   const availableAdvancePayments = getAvailableReservationAdvancePayments(safePayments, folioInvoices || []);
   const paidPendingInvoice = getAvailableReservationAdvanceTotal(safePayments, folioInvoices || []);
   const pendingCollection = Math.max(0, totalToPay - totalPayments);
-  const pendingBilling = Math.max(0, totalToPay - totalInvoiced);
+  const totalDocumented = getNetReservationDocumentedTotal(folioInvoices || []);
+  const hasRoomVoucher = (folioInvoices || []).some((invoice: any) => invoice.tipo_comprobante === "cierre_habitacion" && invoice.estado !== "anulada");
+  const pendingBilling = Math.max(0, totalToPay - totalDocumented);
   const grossFolioBalance = Math.max(0, totalToPay);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={dialogContentRef}
-        className="reservation-wide-folio wf-production dark max-h-[94dvh] flex flex-col overflow-hidden gap-0"
+        className="reservation-wide-folio wf-production max-h-[94dvh] flex flex-col overflow-hidden gap-0"
       >
         <ReservationFolioHeader
           reservation={reservation}
@@ -3410,6 +3412,7 @@ export function ReservationDetailDialog({
               </div>
             </div>
 
+            {reservation.reservationCode?.startsWith("CHX-") && <ReservationChannexSettlement reservationId={reservation.id} open={open} />}
             {(reservation.notes || reservation.groupNotes) && (
               <div className="p-3 border rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">Observaciones</p>
@@ -4607,9 +4610,9 @@ export function ReservationDetailDialog({
               })()}
 
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 border-t text-sm">
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Facturado neto</span><span>${fmtMoney(totalInvoiced)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">{hasRoomVoucher ? "Comprobantes emitidos (neto)" : "Facturado neto"}</span><span>${fmtMoney(totalDocumented)}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobros registrados</span><span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">Pendiente de facturación</span><span className="text-blue-700 dark:text-blue-300">${fmtMoney(pendingBilling)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">{hasRoomVoucher ? "Pendiente de comprobante" : "Pendiente de facturación"}</span><span className="text-blue-700 dark:text-blue-300">${fmtMoney(pendingBilling)}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-muted-foreground">Anticipos disponibles</span><span className="text-amber-600">${fmtMoney(paidPendingInvoice)}</span></div>
               </div>
             </div>
@@ -4675,7 +4678,7 @@ export function ReservationDetailDialog({
                   </span>
                 </div>
                 <div className={`flex justify-between mt-2 rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 text-blue-800 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-200 ${pendingBilling > 0.01 ? "font-bold text-lg" : "font-medium text-sm"}`}>
-                  <span>PENDIENTE DE FACTURACIÓN</span>
+                  <span>{hasRoomVoucher ? "PENDIENTE DE COMPROBANTE" : "PENDIENTE DE FACTURACIÓN"}</span>
                   <span>${fmtMoney(pendingBilling)}</span>
                 </div>
                 {pendingBilling > 0.01 && !showAddPayment && !isLocked && (
@@ -4838,7 +4841,7 @@ export function ReservationDetailDialog({
                 transfer_in:  "border-violet-200 bg-violet-50/50 dark:bg-violet-900/10 dark:border-violet-800",
                 transfer_out: "border-violet-200 bg-violet-50/50 dark:bg-violet-900/10 dark:border-violet-800",
               };
-              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Factura", anulacion: "Anulación", nota_debito: "Nota de Débito", transfer_in: "Transferencia ↓", transfer_out: "Transferencia ↑" };
+              const labelMap = { cargo: "Cargo", pago: "Pago", factura: "Comprobante", anulacion: "Anulación", nota_debito: "Nota de Débito", transfer_in: "Transferencia ↓", transfer_out: "Transferencia ↑" };
               const amtColor = { cargo: "", pago: "text-green-600 dark:text-green-400", factura: "text-purple-700 dark:text-purple-300", anulacion: "text-orange-600 dark:text-orange-400", nota_debito: "text-sky-700 dark:text-sky-300", transfer_in: "text-violet-700 dark:text-violet-300", transfer_out: "text-violet-700 dark:text-violet-300" };
               return (
                 <div className="border rounded-lg">
@@ -4893,7 +4896,7 @@ export function ReservationDetailDialog({
               );
             })()}
             </div>
-            <ReservationFolioSummary lodging={subtotalRoom} consumptions={totalConsumptions + totalNdAmount} payments={totalPayments} total={totalToPay} pendingCollection={pendingCollection} pendingBilling={pendingBilling} nights={reservation.nights} chargesCount={activeConsumptionCharges.length + folioNdMovements.length} />
+            <ReservationFolioSummary lodging={subtotalRoom} consumptions={totalConsumptions + totalNdAmount} payments={totalPayments} total={totalToPay} pendingCollection={pendingCollection} pendingBilling={pendingBilling} hasRoomVoucher={hasRoomVoucher} nights={reservation.nights} chargesCount={activeConsumptionCharges.length + folioNdMovements.length} />
             </div>
           </TabsContent>
 

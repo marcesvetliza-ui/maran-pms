@@ -1,3 +1,6 @@
+import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit } from "@shared/purchase-invoice-edit";
+import { requireCashView, cashShiftAccess } from "./cash-user-access";
+import { canViewCash, canOperateCash } from "@shared/cash-user-access";
 import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
 import {createSpecialPurchase} from './specialPurchase';
 import {applyPurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
@@ -27,11 +30,12 @@ import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
 import { getAppEnv, isPilotEnv } from "./app-env";
 import { authorizePilotExternalRole } from "./pilot-external-role";
 import { registerProgrammingSupport } from "./routes/programming-support";
+import { registerChannexInboundWebhook } from "./channex/inboundRoutes";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerDebugAssetsApiRoute } from "./debug-assets-routes";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { voidSpaPayment } from "./spaCancellation";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
@@ -49,10 +53,13 @@ import { registerOtaRoutes } from "./routes/ota";
 import { registerChannexRoutes } from "./routes/channex";
 import { registerPlanningRoutes } from "./routes/planning";
 import { registerPackagesRoutes } from "./routes/packages";
+import { registerManualLibraryRoutes } from "./routes/manual-library";
 import { registerRoomsRoutes } from "./routes/rooms";
+import { registerRateCalendarRoutes } from "./rates/calendarRoutes";
 import { registerRevenueRoutes } from "./routes/revenue";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
 import { audit } from "./audit";
+import { kitchenPrintingKey, kitchenPrintingSchema, readKitchenPrinting } from "../shared/kitchen-printing";
 import { registerGuestsRoutes } from "./routes/guests";
 import { registerReservationsRoutes } from "./routes/reservations";
 import { registerReservationWaitlistRoutes } from "./routes/reservationWaitlist";
@@ -351,6 +358,8 @@ export async function registerRoutes(
   // demás rutas de 2FA ya traen su propio requireAuth.
   registerTwoFactorRoutes(app);
 
+  registerChannexInboundWebhook(app, pool);
+
   app.use("/api", (req, res, next) => {
     const publicPaths = [
       "/api/auth/login",
@@ -393,12 +402,22 @@ export async function registerRoutes(
   // del alcance de authorizePilotExternalRole por completo.
   registerDebugAssetsApiRoute(app);
   registerProgrammingSupport(app);
+  app.use(["/api/cash", "/api/admin/cash", "/api/admin-cash"], requireAuth, requireCashView);
+  app.use("/api/cash", requireAuth, cashShiftAccess(async id => {
+    const [shift] = await db.select({ area: cashShifts.area }).from(cashShifts).where(eq(cashShifts.id, id));
+    return shift?.area;
+  }));
 
   // Etapa 1 del ABM de usuarios: el sidebar (y, a futuro, los guards de ruta)
   // consultan esto en vez de traer sus propios arrays de roles hardcodeados.
   app.get("/api/permissions/mine", requireAuth, (req, res) => {
     const role = (req.user as Express.User).role;
-    res.json({ role, resourceKeys: permissionsForRole(role) });
+    const username = req.user?.username;
+    const resourceKeys = permissionsForRole(role).filter(key =>
+      canViewCash(username) || !["sidebar:/cash-register", "sidebar:/admin/caja", "sidebar:/admin/caja/configuracion"].includes(key));
+    if (canViewCash(username) && ["reception", "restaurant", "spa"].some(area => canOperateCash(username, area))
+      && !resourceKeys.includes("sidebar:/cash-register")) resourceKeys.push("sidebar:/cash-register");
+    res.json({ role, resourceKeys });
   });
 
   // Explicit homologation opt-in, before every legacy financial writer.
@@ -895,6 +914,25 @@ export async function registerRoutes(
   });
 
   // System Settings
+  app.get("/api/kitchen-printing/settings", requireAuth, requireRole(["admin"]), async (_req, res) => {
+    try {
+      const setting = await storage.getSystemSetting(kitchenPrintingKey);
+      res.json(readKitchenPrinting(setting?.value));
+    } catch {
+      res.status(500).json({ error: "No se pudo consultar la impresión de comandas" });
+    }
+  });
+  app.put("/api/kitchen-printing/settings", requireAuth, requireRole(["admin"]), async (req, res) => {
+    const parsed = kitchenPrintingSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Configuración inválida" });
+    try {
+      await storage.upsertSystemSetting({ key: kitchenPrintingKey, value: JSON.stringify(parsed.data), category: "printing", updatedBy: req.user!.id, updatedAt: new Date() });
+      await audit(req, "update", "settings", `Impresión de comandas: ${JSON.stringify(parsed.data)}`);
+      res.json(parsed.data);
+    } catch {
+      res.status(500).json({ error: "No se pudo guardar la impresión de comandas" });
+    }
+  });
   app.get("/api/admin/settings", async (req, res) => {
     try {
       const category = req.query.category as string | undefined;
@@ -921,6 +959,7 @@ export async function registerRoutes(
   });
 
   app.put("/api/admin/settings", async (req, res) => {
+    if (req.body?.key === kitchenPrintingKey) return res.status(400).json({ error: "Utilizá Configuración → Impresión de comandas" });
     try {
       const { key, value, category, description, updatedBy } = req.body;
       if (!key || value === undefined || value === null) {
@@ -945,6 +984,7 @@ export async function registerRoutes(
   });
 
   app.delete("/api/admin/settings/:key", async (req, res) => {
+    if (req.params.key === kitchenPrintingKey) return res.status(400).json({ error: "Utilizá Configuración → Impresión de comandas" });
     try {
       await storage.deleteSystemSetting(req.params.key);
       res.status(204).send();
@@ -3304,7 +3344,7 @@ export async function registerRoutes(
         FROM purchase_invoices WHERE id = ${id}
       `);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
-      if ((existing.rows[0] as any).estado !== "pendiente") {
+      if (!canEditPurchaseInvoice(req.user?.role, (existing.rows[0] as any).estado)) {
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
@@ -3334,9 +3374,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
       }
       const updatedInvoice = await db.transaction(async (tx) => {
-        const locked=(await tx.execute(sql`SELECT estado,descuento FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
-        if(!locked||locked.estado!=='pendiente')throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
+        const locked=(await tx.execute(sql`SELECT estado,descuento,monto_total,saldo_pendiente,condicion_pago,tipo_comprobante FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
+        if(!locked||!canEditPurchaseInvoice(req.user?.role, locked.estado))throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
         if(locked.descuento&&req.body.descuentoTipo===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el descuento del comprobante'),{statusCode:409});
+        const balance = purchaseInvoiceBalanceAfterEdit(locked, montoTotal, isSupplierPayableDocument(tipoComprobante));
         const result = await tx.execute(sql`
           UPDATE purchase_invoices SET
             monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
@@ -3350,7 +3391,7 @@ export async function registerRoutes(
             retencion_iva = ${n("retencionIva")}, retencion_suss = ${n("retencionSuss")},
             retencion_municipal = ${n("retencionMunicipal")},
             monto_total = ${montoTotal},
-            saldo_pendiente = CASE WHEN ${isSupplierPayableDocument(tipoComprobante)} THEN ${montoTotal} ELSE saldo_pendiente END,
+            saldo_pendiente = ${balance.saldo}, estado = ${balance.estado},
             cuenta_contable_id = ${body.cuentaContableId||null},
             centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
             descuento = ${body.descuento?JSON.stringify(body.descuento):null}::jsonb,
@@ -3402,7 +3443,7 @@ export async function registerRoutes(
         // El Remito no tiene datos de facturación (sin IVA ni total), así que
         // nunca genera asiento contable — ni al crearlo ni al editarlo.
         let entryId = previousEntryId ?? null;
-        if (tipoComprobante !== "REMITO") {
+        if (tipoComprobante !== "REMITO" && raw.estado !== "anulado") {
           entryId = await generarAsiento(invoiceForEntry, tx);
           await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
           if (previousEntryId && previousEntryId !== entryId) {
@@ -3940,6 +3981,8 @@ export async function registerRoutes(
   registerEventsRoutes(app);
   registerPresupuestosRoutes(app);
   registerRoomsRoutes(app);
+  registerRateCalendarRoutes(app);
+  registerManualLibraryRoutes(app);
   registerRevenueRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);

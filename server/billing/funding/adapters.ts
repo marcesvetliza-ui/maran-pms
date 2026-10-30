@@ -36,6 +36,13 @@ export class SqlFundingAdapter implements FundingAdapter {
     if (!a) throw new FundingError("NOT_FOUND","Cuenta SPA inexistente.",404);
     if (!["open","closed"].includes(a.status) || ["room","room_charge","cuenta_habitacion"].includes(a.charged_to))
       throw new FundingError("UNSUPPORTED_SETTLEMENT","La cuenta no corresponde al circuito directo SPA.");
+    if (a.status === "closed" && !a.invoice_id && !verifiedAdoption) {
+      const voucher = await c.query(`SELECT 1 FROM ${this.s}.sales_invoices
+        WHERE spa_account_id=$1 AND tipo_comprobante IN ('cierre_spa','cierre_spa_agustin','cierre_spa_cortesia')
+          AND estado IN ('emitida','parcial') LIMIT 1`, [scope.id]);
+      if (voucher.rowCount || /^(voucher|cierre_spa)/.test(String(a.receipt_type || "")))
+        throw new FundingError("DOCUMENT_ALREADY_ISSUED", "La cuenta SPA está saldada y cerrada con un voucher. Sus comprobantes se conservan para consulta.");
+    }
     if (a.invoice_id && !verifiedAdoption) {
       const owned=operationId && (await c.query("SELECT 1 FROM payment_funding.operations WHERE id=$1 AND invoice->>'invoiceId'=$2",[operationId,String(a.invoice_id)])).rowCount;
       if (!owned) throw new FundingError("DOCUMENT_ALREADY_ISSUED","La cuenta SPA ya tiene factura. No se factura de nuevo para cobrar.");

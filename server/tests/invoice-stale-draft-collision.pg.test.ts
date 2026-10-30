@@ -1,3 +1,4 @@
+import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,8 +63,8 @@ async function insertStaleDraft(puntoVenta: number, numero: number, suffix: stri
 }
 
 function mockAfipLastAuthorized(numero: number) {
-  global.fetch = vi.fn(async () => new Response(
-    `<soap:Envelope><CbteNro>${numero}</CbteNro></soap:Envelope>`,
+  global.fetch = vi.fn(async (_url, init) => new Response(
+    lastAuthorizedForRequest(numero, init),
     { status: 200 },
   )) as any;
 }

@@ -33,8 +33,8 @@ describe("code navigation", () => {
     expect(result.investigationFocus).toContain("catch de la pantalla");
     expect(result.endpointContext[0].callers[0].content).toContain("Error al cargar receta");
     expect(result.endpointContext[0].tests).toEqual([]);
-    expect(result.workflowReads.find(read=>read.path==="client/src/lib/queryClient.ts")?.content).toContain("await throwIfResNotOk(res)");
-    expect(result.workflowReads[0].content).toContain("res.status");
+    expect(result.workflowReads.some(read=>read.path==="client/src/lib/queryClient.ts" && read.content.includes("await throwIfResNotOk(res)"))).toBe(true);
+    expect(result.workflowReads.some(read=>read.path==="client/src/lib/queryClient.ts" && read.content.includes("res.status"))).toBe(true);
     expect(result.workflowReads.some(read=>read.content.includes("export function parseApiError"))).toBe(true);
     expect(result.workflowReads.some(read=>read.content.includes("return String(parsed.error)"))).toBe(true);
     expect(result.workflowReads.some(read=>read.path.startsWith("client/src/pages/") && read.content.includes("parseApiError("))).toBe(true);

@@ -1,12 +1,6 @@
 import type { HousekeepingPreparation } from "./schema";
-export const physicalBedLabels: Record<string, string> = {
-  MAT: "Matrimonial",
-  TWIN: "Twin (2 camas)",
-  MAT_CC: "Matrimonial + Cama cucheta",
-  TWIN_CC: "Twin + Cama cucheta",
-  MAT_EXTRA: "Matrimonial + Extra",
-  MAT_CC_EXTRA: "Matrimonial + Cama cucheta + Extra",
-};
+import { legacyBedLabels } from "./bedCatalog";
+export const physicalBedLabels = legacyBedLabels;
 export type BedPreparation = {
   roomId: string;
   bedConfig: string;
@@ -29,6 +23,7 @@ export function compareBeds(
     TWN: "TWIN",
     ...Object.fromEntries(Object.keys(physicalBedLabels).map((k) => [k, k])),
   };
+  if (requestedCode === current) return "same";
   const expected = requestedCode ? known[requestedCode] : null;
   return !expected || !physicalBedLabels[current]
     ? "review"

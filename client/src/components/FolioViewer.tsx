@@ -648,10 +648,10 @@ export default function FolioViewer({ entityType, entityId, allowVoid = false }:
             </div>
           </div>
           <div className="border-t pt-2">
-            <p className="font-semibold text-foreground mb-2">Fiscal / crédito</p>
+            <p className="font-semibold text-foreground mb-2">Comprobantes / crédito</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <div><span className="text-muted-foreground block">Neto facturado</span><strong>{formatCurrency(reservationSummary.netInvoiced)}</strong></div>
-              <div><span className="text-muted-foreground block">Pendiente de facturar</span><strong>{formatCurrency(reservationSummary.pendingInvoicing)}</strong></div>
+              <div><span className="text-muted-foreground block">Comprobantes emitidos (neto)</span><strong>{formatCurrency(reservationSummary.documentedTotal ?? reservationSummary.netInvoiced)}</strong></div>
+              <div><span className="text-muted-foreground block">Pendiente de comprobante</span><strong>{formatCurrency(reservationSummary.pendingInvoicing)}</strong></div>
               <div><span className="text-muted-foreground block">Crédito liberado disponible</span><strong>{formatCurrency(reservationSummary.availableReleasedCredit)}</strong></div>
             </div>
           </div>

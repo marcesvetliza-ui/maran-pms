@@ -420,7 +420,7 @@ it("one failed historical account does not stop enrollment of other SPA accounts
  } finally { transaction.mockRestore(); logged.mockRestore(); }
  await enrollSpaAccount(service,broken.scope.id,"funding_demo");
 });
-it("closed nonfiscal accounts remain invoiceable with the same receipts, no new collection or stock consumption",async()=>{
+it("closed accounts without any issued voucher retain their verified historical recovery path",async()=>{
  const f=await fixture(false),id=f.scope.id;
  await pool.query("DELETE FROM payment_funding.documents WHERE scope_id=$1",[id]);
  await pool.query("DELETE FROM payment_funding.receipts WHERE scope_id=$1",[id]);
@@ -958,7 +958,7 @@ it('rejects a fiscal type incompatible with the persisted recipient without prep
  expect(result.status).toBe(422);expect(result.body.error.code).toBe('INVALID_RECEIPT_TYPE');
  expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
 });
-it('issues an atomic non-fiscal voucher, replays the same identity and later invoices the same receipts',async()=>{
+it('issues a final non-fiscal voucher, replays it and rejects another fiscal document',async()=>{
  const f=await emptyAccount(),id=f.scope.id,n=sends;
  const request={...await prefactura(id,{receiptType:'cierre_spa',notes:'Voucher sintético'}),newCollections:[{rowId:'cash',method:'efectivo',amountCents:5000000,shiftId:`${id}:shift`},{rowId:'card',method:'tarjeta_debito',amountCents:4500000,shiftId:`${id}:shift`}]};
  const issued=await http(`/spa/${id}/voucher`,request);expect(issued.status,JSON.stringify(issued.body)).toBe(200);
@@ -966,16 +966,13 @@ it('issues an atomic non-fiscal voucher, replays the same identity and later inv
  const invoice=(await pool.query('SELECT * FROM funding_demo.sales_invoices WHERE id=$1',[issued.body.data.invoiceId])).rows[0];
  expect(invoice.tipo_comprobante).toBe('cierre_spa');expect(invoice.cae).toBeNull();expect(invoice.punto_venta).toBe(3);
  expect((await financialCounts(f.scope)).payments).toBe(2);
- const view=(await http(`/spa/${id}/account`)).body.data;expect(view.status).toBe('closed');expect(view.balanceCents).toBe(0);expect(view.canInvoice).toBe(true);
+ const view=(await http(`/spa/${id}/account`)).body.data;expect(view.status).toBe('closed');expect(view.balanceCents).toBe(0);expect(view.canInvoice).toBe(false);
  const second=await http(`/spa/${id}/voucher`,{...request,requestId:randomUUID()});expect(second.status).toBe(409);
- const fiscal=await http(`/spa/${id}/prepare-document`,await prefactura(id,{receiptType:'FB'}));expect(fiscal.status,JSON.stringify(fiscal.body)).toBe(200);
- const receipts=(await service.scope(f.scope,actor)).receipts;
- const plan={scope:f.scope,documentId:fiscal.body.data.documentId,applications:receipts.map((r:any)=>({receiptId:r.id,amountCents:r.freeCents})),newCollections:[]};
- const preview=await http('/previews',plan);expect(preview.status).toBe(200);
- const operationId=randomUUID();expect((await http('/operations',{operationId,previewHash:preview.body.data.previewHash,request:plan})).status).toBe(200);
- expect((await http(`/operations/${operationId}/authorize`,{})).status).toBe(202);
- expect((await http(`/operations/${operationId}/finalize`,{})).status).toBe(200);
- expect((await financialCounts(f.scope)).payments).toBe(2);expect(sends).toBe(n+1);
+ const before=await financialCounts(f.scope);
+ const fiscal=await http(`/spa/${id}/prepare-document`,await prefactura(id,{receiptType:'FB'}));
+ expect(fiscal.status,JSON.stringify(fiscal.body)).toBe(409);
+ expect(fiscal.body.error.code).toBe('DOCUMENT_ALREADY_ISSUED');
+ expect(await financialCounts(f.scope)).toEqual(before);expect(sends).toBe(n);
 });
 it('a voucher with a closed shift, stale charges, wrong sum or read-only actor creates no payment or receipt',async()=>{
  const f=await emptyAccount(),id=f.scope.id,before=await financialCounts(f.scope),n=sends;

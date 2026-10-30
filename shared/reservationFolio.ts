@@ -1,4 +1,4 @@
-const SALE_INVOICE_TYPES = new Set(["FA", "FB", "FC", "FT", "FM"]);
+const SALE_INVOICE_TYPES = new Set(["FA", "FB", "FC", "FT", "FM", "FMB"]);
 
 export type ReservationChargeLike = {
   amount?: string | number | null;
@@ -131,16 +131,26 @@ export function getOperationalReservationCharges<T extends ReservationChargeLike
   );
 }
 
-export function getNetReservationInvoicedTotal(invoices: ReservationInvoiceLike[] = []): number {
+function getNetReservationDocumentTotal(invoices: ReservationInvoiceLike[], includeRoomVoucher: boolean): number {
   return invoices.reduce((sum, invoice) => {
     const type = String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante") || "");
-    if (!SALE_INVOICE_TYPES.has(type)) return sum;
+    if (!SALE_INVOICE_TYPES.has(type) && !(includeRoomVoucher && type === "cierre_habitacion")) return sum;
     if (String(invoice.estado || "").toLowerCase() === "anulada") return sum;
     const total = Number(invoiceValue(invoice, "monto_total", "montoTotal") || 0);
     const credited = Number(invoiceValue(invoice, "monto_acreditado", "montoAcreditado") || 0);
     if (!Number.isFinite(total) || total <= 0) return sum;
     return sum + Math.max(0, total - (Number.isFinite(credited) ? credited : 0));
   }, 0);
+}
+
+/** Fiscal totals remain separate: a room voucher closes the commercial
+ * operation but must never be represented as an ARCA-authorized invoice. */
+export function getNetReservationInvoicedTotal(invoices: ReservationInvoiceLike[] = []): number {
+  return getNetReservationDocumentTotal(invoices, false);
+}
+
+export function getNetReservationDocumentedTotal(invoices: ReservationInvoiceLike[] = []): number {
+  return getNetReservationDocumentTotal(invoices, true);
 }
 
 function invoiceReleaseRatio(invoice: ReservationInvoiceLike): number {
@@ -251,11 +261,14 @@ export function getReservationFinancialSummary(
   const historicalPayments = activePayments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
   const netInvoiced = getNetReservationInvoicedTotal(invoices);
   const releasedAvailableAdvance = getAvailableReservationAdvanceTotal(activePayments, invoices);
-  const pendingGrossInvoice = Math.max(0, operationalServices - netInvoiced);
+  const documentedTotal = getNetReservationDocumentedTotal(invoices);
+  const pendingGrossInvoice = Math.max(0, operationalServices - documentedTotal);
 
   return {
     operationalServices: Number(operationalServices.toFixed(2)),
     netInvoiced: Number(netInvoiced.toFixed(2)),
+    documentedTotal: Number(documentedTotal.toFixed(2)),
+    nonFiscalDocumentedTotal: Number(Math.max(0, documentedTotal - netInvoiced).toFixed(2)),
     historicalPayments: Number(historicalPayments.toFixed(2)),
     // Stable names used by every financial view.  Keep the older names below
     // for consumers which still render the reservation folio contract.
@@ -268,7 +281,7 @@ export function getReservationFinancialSummary(
     appliedCreditForSelection: 0,
     // This is the operational balance before applying a released advance.
     pendingGrossCollection: Number(Math.max(0, operationalServices - historicalPayments).toFixed(2)),
-    newCollectionNeeded: Number(Math.max(0, pendingGrossInvoice - releasedAvailableAdvance).toFixed(2)),
+    newCollectionNeeded: Number(Math.max(0, operationalServices - historicalPayments).toFixed(2)),
   };
 }
 

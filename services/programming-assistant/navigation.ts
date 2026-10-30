@@ -79,7 +79,14 @@ export async function orientInvestigation(
     }
   }
   if (errorFlow && endpointContext.some(context => context.callers.some(read => /\bapiRequest\s*\(/.test(read.content))) && files.includes("client/src/lib/queryClient.ts")) {
-    workflowReads.push(await source.read("client/src/lib/queryClient.ts", 1, 40));
+    // Follow the actual transport definitions instead of fixed opening lines:
+    // new error-formatting helpers can move apiRequest below that window.
+    const transportPath = "client/src/lib/queryClient.ts";
+    for (const declaration of ["export async function apiRequest(", "async function throwIfResNotOk("]) {
+      const matches = await source.search(declaration, transportPath);
+      const match = matches.matches.find(item => item.path === transportPath);
+      if (match) workflowReads.push(await source.read(transportPath, Math.max(1, match.line - 3), match.line + 96));
+    }
     // Read the existing presentation helper, not just transport, plus one real use.
     const parser = await source.inspectSymbol("parseApiError", { maxDefinitions: 1, maxTests: 0, lines: 100 });
     workflowReads.push(...parser.definitions);

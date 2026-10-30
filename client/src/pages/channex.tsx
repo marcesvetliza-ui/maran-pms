@@ -1,3 +1,5 @@
+import { ChannexInboundSettings } from "@/components/channex-inbound-settings";
+import { ChannexAriSettings } from "@/components/channex-ari-settings";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -515,6 +517,8 @@ export default function ChannexPage() {
                   Sincronizar catálogo
                 </Button>
               </div>
+
+              {activeConnectionId && <><ChannexAriSettings key={activeConnectionId} connectionId={activeConnectionId} /><ChannexInboundSettings key={`inbound-${activeConnectionId}`} connectionId={activeConnectionId} /></>}
 
               <Card>
                 <CardHeader><CardTitle className="text-base">Habitaciones</CardTitle></CardHeader>

@@ -13,7 +13,7 @@ import {
 import {
   acknowledgeBookingRevision,
   ChannexApiError,
-  fetchChannexBooking,
+  fetchChannexBookingRevision,
   fetchChannexRatePlans,
   fetchChannexRoomTypes,
   fetchPendingBookingRevisions,
@@ -376,7 +376,9 @@ export async function retryBooking(bookingRowId: string): Promise<ChannexBooking
   const connection = await getConnectionOrThrow(row.connectionId);
   const credentials = toCredentials(connection);
 
-  const remote = await fetchChannexBooking(credentials, row.channexBookingId);
+  if (!row.channexRevisionId) throw new Error("La reserva no conserva una revisión. Volvé a consultar el feed.");
+  const remote = await fetchChannexBookingRevision(credentials, row.channexRevisionId);
+  if (remote && String(remote.attributes?.booking_id) !== String(row.channexBookingId)) throw new Error("La revisión no pertenece a esta reserva");
   if (!remote) throw new Error("Channex no devolvió esa reserva");
 
   const extracted = extractBookingFields(remote);

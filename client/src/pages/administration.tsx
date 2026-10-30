@@ -42,6 +42,7 @@ import { Bed, Check } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/App";
+import { KitchenPrintingSettingsPanel } from "@/components/configuration/kitchen-printing-settings";
 import type { SystemUser, SystemSetting, AuditLog, SystemUserRole, BedType, SystemIncident } from "@shared/schema";
 
 type DashboardStats = {
@@ -1156,7 +1157,7 @@ export default function AdministrationPage() {
   });
 
   const groupedSettings = settings
-    .filter(s => s.key !== "confirmation_terms_enabled")
+    .filter(s => s.key !== "confirmation_terms_enabled" && s.key !== "kitchen_printing_controls_v1")
     .reduce((acc, setting) => {
       const cat = setting.category || "general";
       if (!acc[cat]) acc[cat] = [];
@@ -1175,6 +1176,7 @@ export default function AdministrationPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="flex-wrap">
+          {isAdminOnly && <TabsTrigger value="kitchen-printing">Impresión de comandas</TabsTrigger>}
           {isAdminOnly && (
             <TabsTrigger value="dashboard" data-testid="tab-admin-dashboard">
               <Activity className="w-4 h-4 mr-2" />
@@ -1216,6 +1218,7 @@ export default function AdministrationPage() {
           )}
         </TabsList>
 
+        {isAdminOnly && <TabsContent value="kitchen-printing"><KitchenPrintingSettingsPanel /></TabsContent>}
         <TabsContent value="dashboard" className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <Card>

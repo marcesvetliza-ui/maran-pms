@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { getAllowedBedConfigOptions } from "@/lib/planning-utils";
+import { useBedCatalog } from "@/hooks/use-bed-catalog";
 import type { BedConfig } from "@shared/schema";
 
 // ─── MoveConfirmDialog ────────────────────────────────────────────────────────
@@ -138,7 +138,8 @@ export function PlanningBedConfigDialog({
   onConfirm,
   onCancel,
 }: BedConfigDialogProps) {
-  const options = getAllowedBedConfigOptions(editingBedConfig?.allowed);
+  const bedCatalog = useBedCatalog();
+  const options = bedCatalog.forRoom(editingBedConfig?.allowed, editingBedConfig?.current);
   return (
     <Dialog open={!!editingBedConfig} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="max-w-xs">
@@ -147,7 +148,9 @@ export function PlanningBedConfigDialog({
         </DialogHeader>
         <div className="py-4">
           <Label className="text-sm mb-2 block">Configuración de camas</Label>
+          {!bedCatalog.ready && <p role="status" className="text-sm text-muted-foreground">{bedCatalog.error ? "No se pudo cargar Tipos de Camaje. Actualizá la pantalla para reintentar." : "Cargando Tipos de Camaje…"}</p>}
           <Select
+            disabled={!bedCatalog.ready}
             value={editingBedConfig?.current || ""}
             onValueChange={onChange}
           >
@@ -156,7 +159,7 @@ export function PlanningBedConfigDialog({
             </SelectTrigger>
             <SelectContent>
               {options.map(opt => (
-                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled}>{opt.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -165,7 +168,7 @@ export function PlanningBedConfigDialog({
           <Button variant="outline" onClick={onCancel}>Cancelar</Button>
           <Button
             onClick={onConfirm}
-            disabled={isPending}
+            disabled={isPending || !bedCatalog.ready || !editingBedConfig?.current || options.find(o => o.value === editingBedConfig?.current)?.disabled}
             data-testid="button-confirm-bedconfig"
           >
             {isPending ? "Guardando..." : "Guardar"}

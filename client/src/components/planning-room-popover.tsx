@@ -1,6 +1,7 @@
+import { useBedCatalog } from "@/hooks/use-bed-catalog";
 import { AlertCircle, RefreshCw, CheckCircle2, Wrench, TriangleAlert, ShieldCheck, Ban } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { featureIconMap, getBedConfigLabel, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
+import { featureIconMap, ROOM_STATUS_OPTIONS } from "@/lib/planning-utils";
 import type { BedConfig, RoomWithType } from "@shared/schema";
 
 interface RoomPopoverProps {
@@ -20,6 +21,7 @@ export function RoomPopover({
   maintenanceAlertRoomIds,
   maintenanceConflictRoomIds,
 }: RoomPopoverProps) {
+  const { label: getBedConfigLabel } = useBedCatalog();
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>

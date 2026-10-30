@@ -4701,6 +4701,11 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)))
   );
 
+  // Unlinked legacy names remain in history, not in the current shift's roster.
+  await withTimeout("eventual_waiters.cash_shift_id", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("eventual_waiters", "cash_shift_id", "varchar REFERENCES cash_shifts(id)")))
+  );
+
   // backup_logs nunca había quedado en el script incremental (se creó a mano
   // en el momento, no por una migración) — en una base nueva (o recreada)
   // faltaba la tabla y el módulo de backup fallaba entero con "relation
