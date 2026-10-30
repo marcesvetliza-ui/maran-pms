@@ -34,7 +34,7 @@ export function ChannexReadiness({ connectionId }: { connectionId: string }) {
     {query.error && <p role="alert">No se pudo revisar la preparación para staging.</p>}
     {query.data && <>
       <p>Piso {query.data.floor ?? "sin definir"} · {query.data.roomCount} habitaciones físicas · Moneda {query.data.currency ?? "sin definir"}</p>
-      <p>{query.data.configurationReady ? "Configuración local completa para pruebas ARS." : "Hay pendientes en la configuración local."} {query.data.activationReady ? "Los controles locales de activación están habilitados." : "La activación tiene requisitos pendientes."}</p>
+      <p>{query.data.configurationReady ? "Configuración local completa para pruebas." : "Hay pendientes en la configuración local."} {query.data.activationReady ? "Los controles locales de activación están habilitados." : "La activación tiene requisitos pendientes."}</p>
       {(["configuration", "activation", "certification"] as const).map(area => <details key={area} open={area === "configuration"}>
         <summary className="cursor-pointer font-medium">{({ configuration: "Configuración", activation: "Activación de pruebas", certification: "Certificación pendiente" })[area]}</summary>
         <ul className="space-y-1 pt-2">{query.data!.checks.filter(check => check.area === area).map(check => <li key={check.id}>

@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ensureChannexInboundSchema } from "../channex/inboundSchema";
 import { ensureChannexAriSchema } from "../channex/ariSchema";
-import { STAGING_URL } from "../channex/ari";
+import { buildAriValues, STAGING_URL } from "../channex/ari";
 import { getChannexReadiness } from "../channex/readiness";
+import { saveSettlementRate } from "../channex/settlementConfig";
 const allowed = ["postgresql://postgres@127.0.0.1:55448/rate_calendar_boot_20261029", "postgresql://postgres@127.0.0.1:55448/channex_inbound_test"].includes(process.env.DATABASE_URL || "") ||
  (process.env.CI==="true"&&/^postgres(?:ql)?:\/\/[^@]*@(?:localhost|127\.0\.0\.1):5432\/maran_test$/.test(process.env.DATABASE_URL||""));
 const suite=allowed?describe:describe.skip;
@@ -31,6 +32,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  afterAll(async()=>{
   for(const id of owners){
    const rows=await linked({id});rows.forEach(r=>guestIds.add(r.guest_id));
+   await pool.query("DELETE FROM channex_inbound_settlements WHERE connection_id=$1",[id]);
    await pool.query("DELETE FROM channex_inbound_rooms WHERE connection_id=$1",[id]);
    await pool.query("DELETE FROM channex_inbound_revisions WHERE connection_id=$1",[id]);
    await pool.query("UPDATE channex_ari_settings SET enabled=false WHERE connection_id=$1",[id]);
@@ -69,6 +71,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   const f=await fixture(1);
   const before=(await pool.query("SELECT (SELECT count(*) FROM guests)::int AS guests,(SELECT count(*) FROM channex_ari_outbox WHERE connection_id=$1)::int AS events",[f.id])).rows[0];
   expect((await apply(f,revision(f.id,"booking-conflict","conflict","new",undefined,2))).status).toBe("review");
+  expect((await pool.query("SELECT revision_id FROM channex_inbound_settlements WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
   expect((await pool.query("SELECT (SELECT count(*) FROM guests)::int AS guests,(SELECT count(*) FROM channex_ari_outbox WHERE connection_id=$1)::int AS events",[f.id])).rows[0]).toEqual(before);
   expect(await linked(f)).toHaveLength(0);expect((await pool.query("SELECT id FROM reservations WHERE external_reservation_id='booking-conflict'")).rows).toHaveLength(0);
  });
@@ -86,6 +89,67 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  it("does not create a peso reservation from a USD booking",async()=>{
   const f=await fixture(),r=revision(f.id,"booking-usd","usd");r.attributes.currency="USD";
   expect((await apply(f,r)).review_code).toBe("UNSUPPORTED_CURRENCY");expect(await linked(f)).toHaveLength(0);
+ });
+ it("imports USD with a frozen audited quote, preserves originals and cancels without cash",async()=>{
+  const f=await fixture();
+  await pool.query("UPDATE rate_plans SET currency='USD' WHERE id=$1",[f.plan]);
+  await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);
+  await saveSettlementRate(pool,f.id,{rate:"1250.123456",reason:"Cotización manual de pruebas"},"Test operator");
+  const original=revision(f.id,"booking-fx","fx-new");original.attributes.currency="USD";
+  expect((await apply(f,original)).status).toBe("applied");
+  const [r]=await linked(f);expect(r.total_room_amount).toBe("312530.86");expect(r.rate_plan_id).toBeNull();
+  expect(r.nightly_pricing.map((night:any)=>night.rateCents)).toEqual([12501234,18751852]);
+  const snapshot=(await pool.query("SELECT * FROM channex_inbound_settlements WHERE connection_id=$1",[f.id])).rows[0];
+  expect(snapshot).toMatchObject({source_currency:"USD",source_total:"250.00",exchange_rate:"1250.123456",settlement_currency:"ARS",settlement_total:"312530.86"});
+  expect(snapshot.source_nights.map((night:any)=>night.rateCents)).toEqual([10000,15000]);
+  await saveSettlementRate(pool,f.id,{rate:"2000",reason:"Nueva cotización solo futuras reservas"},"Test operator");
+  const future=revision(f.id,"booking-fx-future","fx-future");future.attributes.currency="USD";
+  expect((await apply(f,future)).status).toBe("applied");
+  expect((await pool.query("SELECT total_room_amount FROM reservations WHERE external_reservation_id='booking-fx-future' AND id=ANY($1::varchar[])",[(await linked(f)).map(r=>r.id)])).rows[0].total_room_amount).toBe("500000.00");
+  await saveSettlementRate(pool,f.id,{rate:null,reason:"Pausar cotización para futuras reservas"},"Test operator");
+  const modified=revision(f.id,"booking-fx","fx-mod","modified","2026-10-30T01:00:00Z");modified.attributes.currency="USD";
+  modified.attributes.amount="270";modified.attributes.rooms[0].days["2026-11-11"]="170.00";
+  expect((await apply(f,modified)).status).toBe("applied");
+  expect((await pool.query("SELECT total_room_amount FROM reservations WHERE id=$1",[r.id])).rows[0].total_room_amount).toBe("337533.33");
+  expect((await pool.query("SELECT exchange_rate FROM channex_inbound_settlements WHERE connection_id=$1 AND revision_id='fx-mod'",[f.id])).rows[0].exchange_rate).toBe("1250.123456");
+  expect((await apply(f,revision(f.id,"booking-fx","fx-cancel","cancelled","2026-10-30T02:00:00Z"))).status).toBe("applied");
+  expect((await pool.query("SELECT status FROM reservations WHERE id=$1",[r.id])).rows[0].status).toBe("cancelled");
+  expect((await pool.query("SELECT id FROM payments WHERE reservation_id=$1",[r.id])).rows).toHaveLength(0);
+  expect((await pool.query("SELECT id FROM sales_invoices WHERE reserva_id=$1",[r.id])).rows).toHaveLength(0);
+  expect((await pool.query("SELECT * FROM channex_settlement_rate_edits WHERE connection_id=$1",[f.id])).rows).toHaveLength(3);
+  const today=(await pool.query("SELECT CURRENT_DATE::text AS day")).rows[0].day;
+  const outgoing=await buildAriValues(pool,{id:f.id,channex_property_id:f.id,floor:2,currency:"USD"},[{id:"test",kind:"restrictions",date_from:today,date_to:today,room_type_id:null,rate_plan_id:null,attempts:0}],today);
+  expect(outgoing[0].rate).toBe("100.00");
+ });
+ it("allows configuring a quote while reception remains paused",async()=>{
+  const f=await fixture();await pool.query("DELETE FROM channex_inbound_settings WHERE connection_id=$1",[f.id]);
+  await saveSettlementRate(pool,f.id,{rate:"1250",reason:"Preparar antes de activar recepción"},"Test operator");
+  expect((await pool.query("SELECT enabled,notification_pending,settlement_exchange_rate FROM channex_inbound_settings WHERE connection_id=$1",[f.id])).rows[0]).toMatchObject({enabled:false,notification_pending:false,settlement_exchange_rate:"1250.000000"});
+ });
+ it("requires review when the source changes currency on an existing booking",async()=>{
+  const f=await fixture();expect((await apply(f,revision(f.id,"booking-currency","currency-original"))).status).toBe("applied");
+  await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);await pool.query("UPDATE rate_plans SET currency='USD' WHERE id=$1",[f.plan]);
+  await saveSettlementRate(pool,f.id,{rate:"1250",reason:"Prueba de cambio de moneda"},"Test operator");
+  const changed=revision(f.id,"booking-currency","currency-changed","modified","2026-10-30T01:00:00Z");changed.attributes.currency="USD";
+  expect((await apply(f,changed)).review_code).toBe("SOURCE_CURRENCY_CHANGED");expect((await linked(f))[0].total_room_amount).toBe("250.00");
+ });
+ it("does not create a USD booking without a quote or when conversion overflows",async()=>{
+  const f=await fixture();await pool.query("UPDATE rate_plans SET currency='USD' WHERE id=$1",[f.plan]);await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);
+  const pending=revision(f.id,"booking-no-rate","no-rate");pending.attributes.currency="USD";
+  expect((await apply(f,pending)).review_code).toBe("SETTLEMENT_RATE_REQUIRED");
+  await saveSettlementRate(pool,f.id,{rate:"999999",reason:"Prueba de límite de importes"},"Test operator");
+  const overflow=revision(f.id,"booking-overflow","overflow");overflow.attributes.currency="USD";
+  expect((await apply(f,overflow)).review_code).toBe("SETTLEMENT_AMOUNT_EXCEEDS_LIMIT");expect(await linked(f)).toHaveLength(0);
+  expect((await pool.query("SELECT * FROM channex_inbound_settlements WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
+ });
+ it("rolls back a quote and its audit together if saving fails",async()=>{
+  const f=await fixture();
+  const failingPool={connect:async()=>{
+   const client=await pool.connect();return {release:()=>client.release(),query:async(q:string,args:any[])=>{const result=await client.query(q,args);if(q.startsWith("UPDATE channex_inbound_settings SET settlement_exchange_rate"))throw Error("Synthetic save failure");return result;}};
+  }};
+  await expect(saveSettlementRate(failingPool as any,f.id,{rate:"1250",reason:"Rollback de prueba"},"Test operator")).rejects.toThrow("Synthetic save failure");
+  expect((await pool.query("SELECT settlement_exchange_rate FROM channex_inbound_settings WHERE connection_id=$1",[f.id])).rows[0].settlement_exchange_rate).toBeNull();
+  expect((await pool.query("SELECT id FROM channex_settlement_rate_edits WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
  });
  it("checks the actual 500-day transformation without writing or declaring certification",async()=>{
   const f=await fixture();

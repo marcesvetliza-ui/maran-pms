@@ -2,7 +2,7 @@ import express from "express";
 import { createHash } from "node:crypto";
 import type { Server } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-vi.mock("../auth",()=>({requirePermission:()=> (req:any,res:any,next:any)=>req.headers["x-role"]==="admin"?next():res.sendStatus(403)}));
+vi.mock("../auth",()=>({requireAuth:(req:any,res:any,next:any)=>req.headers["x-role"]?next():res.sendStatus(401),requirePermission:()=> (req:any,res:any,next:any)=>req.headers["x-role"]==="admin"?next():res.sendStatus(403)}));
 import { registerChannexInboundRoutes, registerChannexInboundWebhook } from "../channex/inboundRoutes";
 let server:Server;
 afterEach(async()=>{vi.unstubAllEnvs();if(server)await new Promise<void>(r=>server.close(()=>r()));});
@@ -26,7 +26,7 @@ describe("inbound authenticated notifications and configuration",()=>{
  });
  it("requires the Channex configuration permission for enabling, retrying and secret generation",async()=>{
   const query=vi.fn(),base=await start(query);
-  for(const [path,method] of [["","PATCH"],["/retry","POST"],["/webhook-token","POST"],["/readiness","GET"]]){
+  for(const [path,method] of [["","PATCH"],["/retry","POST"],["/webhook-token","POST"],["/readiness","GET"],["/settlement-rate","PATCH"]]){
    expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{method,headers:{"content-type":"application/json"},...(method==="GET"?{}:{body:"{}"})})).status).toBe(403);
   }expect(query).not.toHaveBeenCalled();
  });
@@ -34,5 +34,17 @@ describe("inbound authenticated notifications and configuration",()=>{
   const query=vi.fn(async()=>({rows:[{connection_id:"conn"}],rowCount:1})),base=await start(query);
   const res=await fetch(`${base}/api/channex/connections/conn/inbound/webhook-token`,{method:"POST",headers:{"x-role":"admin"}});
   const body=await res.json();expect(body.token).toMatch(/^[a-f0-9]{64}$/);expect(query.mock.calls[0][1][1]).toBe(createHash("sha256").update(body.token).digest("hex"));expect(res.headers.get("cache-control")).toBe("private, no-store");
+ });
+ it("requires authentication to read the original channel amount",async()=>{
+  const query=vi.fn(async()=>({rows:[{source_currency:"USD",source_total:"250.00",exchange_rate:"1250.000000",settlement_currency:"ARS",settlement_total:"312500.00"}]})),base=await start(query);
+  expect((await fetch(`${base}/api/reservations/reservation/channex-settlement`)).status).toBe(401);expect(query).not.toHaveBeenCalled();
+  const response=await fetch(`${base}/api/reservations/reservation/channex-settlement`,{headers:{"x-role":"reception"}});
+  expect(response.status).toBe(200);expect(await response.json()).toMatchObject({source_currency:"USD",settlement_currency:"ARS"});expect(response.headers.get("cache-control")).toBe("private, no-store");
+ });
+ it("rejects implicit, zero or unaudited exchange rates before touching the database",async()=>{
+  const query=vi.fn(),base=await start(query);
+  for(const body of [{rate:"0",reason:"Invalid quote"},{rate:1250,reason:"Implicit numeric"},{rate:"1250",reason:""}]){
+   expect((await fetch(`${base}/api/channex/connections/conn/inbound/settlement-rate`,{method:"PATCH",headers:{"x-role":"admin","content-type":"application/json"},body:JSON.stringify(body)})).status).toBe(400);
+  }expect(query).not.toHaveBeenCalled();
  });
 });

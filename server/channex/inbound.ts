@@ -9,6 +9,7 @@ import { withNightlyWriter, withReservationFinancialLocks } from "../nightlyPric
 import { amountString } from "@shared/nightlyPricing";
 import { STAGING_URL } from "./ari";
 import { BookingReviewError, parseBookingRevision, redactBooking, revisionHash, review } from "./bookingRevision";
+import { settleBooking } from "./settlement";
 
 export function assertInboundStaging(connection: any) {
   if (!connection?.is_active || connection.environment !== "demo" || connection.base_url?.replace(/\/$/, "") !== STAGING_URL) return review("STAGING_ONLY");
@@ -61,7 +62,7 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
       return await withReservationFinancialLocks(priorLinks.map(row => row.reservation_id), () => withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
         const source = (await db.execute(sql`SELECT * FROM channex_inbound_revisions WHERE connection_id=${connectionId} AND revision_id=${revisionId} FOR UPDATE`)).rows[0] as any;
         if (source.status !== "pending") return;
-        const config = (await db.execute(sql`SELECT c.*,s.enabled,s.floor,s.currency FROM channex_connections c
+        const config = (await db.execute(sql`SELECT c.*,s.enabled,s.floor,s.currency,i.settlement_exchange_rate FROM channex_connections c
           JOIN channex_ari_settings s ON s.connection_id=c.id JOIN channex_inbound_settings i ON i.connection_id=c.id
           WHERE c.id=${connectionId} AND i.enabled FOR SHARE OF c,s,i`)).rows[0] as any;
         if (!config || !config.enabled) return;
@@ -94,9 +95,13 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
           if (money.rows.length) return review("LOCAL_FINANCIAL_HISTORY");
           existing.set(link.remote_room_id, r);
         }
-        // Never silently reinterpret channel currency as pesos. This PMS's
-        // reservation/folio amount model currently uses ARS.
-        if (booking.status !== "cancelled" && (booking.currency !== config.currency || booking.currency !== "ARS")) return review("UNSUPPORTED_CURRENCY");
+        if (booking.status !== "cancelled" && (booking.currency !== config.currency || !["ARS", "USD"].includes(booking.currency!))) return review("UNSUPPORTED_CURRENCY");
+        const priorCurrency = cursor.source_currency || (cursor.last_revision_id && !cursor.cancelled ? "ARS" : null);
+        if (booking.status !== "cancelled" && priorCurrency && priorCurrency !== booking.currency) return review("SOURCE_CURRENCY_CHANGED");
+        // A booking keeps its original conversion for all revisions. An
+        // operator's later quote changes affect only newly received bookings.
+        const settlementRate = booking.currency === "USD" ? cursor.settlement_exchange_rate || config.settlement_exchange_rate : "1.000000";
+        const settledRooms = booking.status === "cancelled" ? [] : settleBooking(booking, settlementRate);
         if (booking.status !== "cancelled" && cursor.cancelled) return review("CANCELLED_BOOKING_REOPEN");
         const wanted = new Set(booking.rooms.map(room => room.key));
         for (const [key, r] of existing) {
@@ -128,7 +133,7 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
             }
           }
           guestHash = guestFingerprint(profile);
-          for (const room of booking.rooms) {
+          for (const room of settledRooms) {
             const maps = (await db.execute(sql`SELECT rm.room_type_id,rp.rate_plan_id,rt.max_occupancy,p.currency,p.room_type_id AS plan_room_type
               FROM channex_room_type_mappings rm JOIN channex_rate_plan_mappings rp ON rp.connection_id=rm.connection_id AND rp.channex_room_type_id=rm.channex_room_type_id
               JOIN room_types rt ON rt.id=rm.room_type_id JOIN rate_plans p ON p.id=rp.rate_plan_id
@@ -145,7 +150,8 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
             if (!candidates.length) return review("NO_PILOT_ROOM_AVAILABLE");
             const average = amountString(Math.round(room.totalCents / room.nights.length));
             const patch = {
-              guestId, roomId: candidates[0].id, roomTypeId: map.room_type_id, ratePlanId: map.rate_plan_id,
+              // USD selling plans must not become peso repricing defaults.
+              guestId, roomId: candidates[0].id, roomTypeId: map.room_type_id, ratePlanId: booking.currency === "USD" ? null : map.rate_plan_id,
               checkInDate: booking.arrival!, checkOutDate: booking.departure!, nights: room.nights.length,
               totalRoomAmount: amountString(room.totalCents), baseRatePerNight: average, finalRatePerNight: average,
               discountType: "none" as const, discountValue: "0", status: "confirmed" as const, numberOfGuests: room.occupancy, lastModifiedBy: "Channex"
@@ -170,9 +176,14 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
             await db.execute(sql`INSERT INTO channex_inbound_rooms(connection_id,booking_id,remote_room_id,reservation_id,local_hash)
               VALUES(${connectionId},${booking.bookingId},${room.key},${saved.id},${localFingerprint(saved)})
               ON CONFLICT(connection_id,booking_id,remote_room_id) DO UPDATE SET local_hash=EXCLUDED.local_hash`);
+            const original = booking.rooms.find(sourceRoom => sourceRoom.key === room.key)!;
+            await db.execute(sql`INSERT INTO channex_inbound_settlements(connection_id,revision_id,remote_room_id,reservation_id,source_currency,source_total,source_nights,source_rate_plan_id,exchange_rate,settlement_total,settlement_nights)
+              VALUES(${connectionId},${revisionId},${room.key},${saved.id},${booking.currency},${amountString(original.totalCents)},${JSON.stringify(original.nights)}::jsonb,${original.remotePlan},${settlementRate},${amountString(room.totalCents)},${JSON.stringify(room.nights)}::jsonb)`);
           }
         }
         await db.execute(sql`UPDATE channex_inbound_bookings SET last_revision_id=${revisionId},last_inserted_at=${booking.insertedAt}::timestamptz,guest_hash=${guestHash},cancelled=${booking.status === "cancelled"} WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`);
+        if (booking.status !== "cancelled") await db.execute(sql`UPDATE channex_inbound_bookings SET source_currency=${booking.currency},settlement_exchange_rate=${settlementRate}
+          WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`);
         await db.execute(sql`UPDATE channex_inbound_revisions SET status='applied',applied_at=now(),review_code=NULL WHERE connection_id=${connectionId} AND revision_id=${revisionId}`);
       })));
     } catch (error) {

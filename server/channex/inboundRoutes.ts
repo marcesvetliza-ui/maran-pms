@@ -2,9 +2,10 @@ import type { Express } from "express";
 import type { Pool } from "pg";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import rateLimit from "express-rate-limit";
-import { requirePermission } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import { STAGING_URL } from "./ari";
 import { getChannexReadiness } from "./readiness";
+import { saveSettlementRate, settlementSettingsSchema } from "./settlementConfig";
 const tokenHash = (token: string) => createHash("sha256").update(token).digest();
 /** Mounted before the session gate; a notification only requests a feed read.
  * No guest payload, URL/query token or browser session can authorize a booking. */
@@ -27,6 +28,22 @@ export function registerChannexInboundWebhook(app: Express, pool: Pool) {
 export function registerChannexInboundRoutes(app: Express, pool: Pool) {
   const permission = requirePermission("api:channex:config");
   const root = "/api/channex/connections/:id/inbound";
+  app.get("/api/reservations/:id/channex-settlement", requireAuth, async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    try {
+      const row = (await pool.query(`SELECT source_currency,source_total,exchange_rate,settlement_currency,settlement_total,revision_id,created_at
+        FROM channex_inbound_settlements WHERE reservation_id=$1 ORDER BY created_at DESC,revision_id DESC LIMIT 1`, [req.params.id])).rows[0];
+      res.json(row || null);
+    } catch { res.status(503).json({ error: "No se pudo consultar el importe original del canal" }); }
+  });
+  app.patch(`${root}/settlement-rate`, permission, async (req, res) => {
+    const parsed = settlementSettingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Indicá pesos por dólar (hasta seis decimales) y el motivo o fuente de la cotización." });
+    try {
+      await saveSettlementRate(pool, req.params.id, parsed.data, (req as any).user?.username || "sistema");
+      res.json({ ok: true });
+    } catch { res.status(409).json({ error: "No se pudo guardar la cotización. Revisá la conexión staging y su configuración de recepción." }); }
+  });
   app.get(`${root}/readiness`, permission, async (req, res) => {
     res.setHeader("Cache-Control", "private, no-store");
     try {
@@ -38,7 +55,7 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
   app.get(root, permission, async (req, res) => {
     res.setHeader("Cache-Control", "private, no-store");
     try {
-      const settings = (await pool.query("SELECT enabled,token_hash IS NOT NULL AS has_token,fetch_attempts,notification_pending FROM channex_inbound_settings WHERE connection_id=$1", [req.params.id])).rows[0] ?? { enabled: false, has_token: false };
+      const settings = (await pool.query("SELECT enabled,token_hash IS NOT NULL AS has_token,fetch_attempts,notification_pending,settlement_exchange_rate,exchange_rate_updated_at FROM channex_inbound_settings WHERE connection_id=$1", [req.params.id])).rows[0] ?? { enabled: false, has_token: false };
       const revisions = (await pool.query("SELECT revision_id,booking_id,status,review_code,acked_at,created_at FROM channex_inbound_revisions WHERE connection_id=$1 ORDER BY created_at DESC LIMIT 50", [req.params.id])).rows;
       res.json({ settings, revisions, serverEnabled: process.env.CHANNEX_INBOUND_STAGING_ENABLED === "true" });
     } catch { res.status(503).json({ error: "No se pudo consultar la recepción de reservas" }); }

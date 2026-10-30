@@ -21,6 +21,15 @@ CREATE TABLE IF NOT EXISTS channex_inbound_bookings (
  PRIMARY KEY(connection_id,booking_id)
 );
 ALTER TABLE channex_inbound_bookings ADD COLUMN IF NOT EXISTS guest_hash text;
+ALTER TABLE channex_inbound_settings ADD COLUMN IF NOT EXISTS settlement_exchange_rate numeric(12,6) CHECK(settlement_exchange_rate>0);
+ALTER TABLE channex_inbound_settings ADD COLUMN IF NOT EXISTS exchange_rate_updated_at timestamptz;
+ALTER TABLE channex_inbound_bookings ADD COLUMN IF NOT EXISTS source_currency text;
+ALTER TABLE channex_inbound_bookings ADD COLUMN IF NOT EXISTS settlement_exchange_rate numeric(12,6) CHECK(settlement_exchange_rate>0);
+CREATE TABLE IF NOT EXISTS channex_settlement_rate_edits (
+ id bigserial PRIMARY KEY, connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
+ previous_rate numeric(12,6), new_rate numeric(12,6), reason text NOT NULL, actor text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS channex_inbound_rooms (
  connection_id varchar NOT NULL, booking_id text NOT NULL, remote_room_id text NOT NULL,
  reservation_id varchar NOT NULL UNIQUE REFERENCES reservations(id), local_hash text,
@@ -28,6 +37,16 @@ CREATE TABLE IF NOT EXISTS channex_inbound_rooms (
  FOREIGN KEY(connection_id,booking_id) REFERENCES channex_inbound_bookings(connection_id,booking_id)
 );
 CREATE TABLE IF NOT EXISTS channex_inbound_dispatch(id int PRIMARY KEY CHECK(id=1), next_request_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS channex_inbound_settlements (
+ connection_id varchar NOT NULL, revision_id text NOT NULL, remote_room_id text NOT NULL,
+ reservation_id varchar NOT NULL REFERENCES reservations(id), source_currency text NOT NULL CHECK(source_currency IN ('ARS','USD')),
+ source_total numeric(10,2) NOT NULL, source_nights jsonb NOT NULL, source_rate_plan_id text NOT NULL,
+ exchange_rate numeric(12,6) NOT NULL CHECK(exchange_rate>0), settlement_currency text NOT NULL DEFAULT 'ARS' CHECK(settlement_currency='ARS'),
+ settlement_total numeric(10,2) NOT NULL, settlement_nights jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(connection_id,revision_id,remote_room_id),
+ FOREIGN KEY(connection_id,revision_id) REFERENCES channex_inbound_revisions(connection_id,revision_id)
+);
+CREATE INDEX IF NOT EXISTS channex_settlement_reservation ON channex_inbound_settlements(reservation_id,created_at DESC);
 INSERT INTO channex_inbound_dispatch(id) VALUES(1) ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION channex_guard_inbound_history() RETURNS trigger LANGUAGE plpgsql AS $body$
 BEGIN
