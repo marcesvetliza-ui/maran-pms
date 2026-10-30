@@ -41,6 +41,8 @@ async function main() {
   await ensureSupplierExpenseSchema();
   await ensureRateCalendarSchema(pool);
   await ensureChannexAriSchema(pool);
+  const { ensureChannexInboundSchema } = await import("../server/channex/inboundSchema");
+  await ensureChannexInboundSchema(pool);
 
   console.log("[ci-migrate] Verificando esquema financiero contra el catálogo real...");
   const status = await verifyFinancialSchema();

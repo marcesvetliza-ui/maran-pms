@@ -23,10 +23,11 @@ import { permissionsForRole, hasPermission } from "./permissions";
 const DASHBOARD_BREAKFASTS_RESOURCE_KEY = "api:dashboard:breakfasts";
 const PURCHASE_INVOICES_WRITE_RESOURCE_KEY = "api:purchase-invoices:write";
 const NIGHT_AUDIT_RUN_RESOURCE_KEY = "api:night-audit:run";
+import { registerChannexInboundWebhook } from "./channex/inboundRoutes";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { voidSpaPayment } from "./spaCancellation";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
@@ -342,6 +343,8 @@ export async function registerRoutes(
   // una sesión "pending2FA" (que requireAuth del gate rechazaría), y las
   // demás rutas de 2FA ya traen su propio requireAuth.
   registerTwoFactorRoutes(app);
+
+  registerChannexInboundWebhook(app, pool);
 
   app.use("/api", (req, res, next) => {
     const publicPaths = [

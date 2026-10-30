@@ -13,6 +13,20 @@ export function withFinancialScopeLock<T>(key: string, action: () => Promise<T>)
   return withInvoiceAdvisoryLock(pool, key, () =>
     financialScope.run(new Set([...(held || []), key]), action));
 }
+/** Locks a compound booking on one session; nested canonical updates reuse
+ * the same scopes instead of exhausting the pool for many rooms. */
+export async function withReservationFinancialLocks<T>(ids: string[], action: () => Promise<T>): Promise<T> {
+  const keys = [...new Set(ids.map(id => `folio-invoice:${id}`))].sort();
+  const c = await pool.connect();
+  const acquired: string[] = [];
+  try {
+    for (const key of keys) { await c.query("SELECT pg_advisory_lock(hashtext($1))", [key]); acquired.push(key); }
+    return await financialScope.run(new Set([...(financialScope.getStore() || []), ...keys]), action);
+  } finally {
+    for (const key of acquired.reverse()) await c.query("SELECT pg_advisory_unlock(hashtext($1))", [key]).catch(() => undefined);
+    c.release();
+  }
+}
 export async function withReservationFinancialLock<T>(id: string, action: () => Promise<T>): Promise<T> {
   const links = await db.execute(sql`SELECT group_id FROM group_reservation_links WHERE reservation_id=${id}`);
   const groupId = (links.rows[0] as any)?.group_id;

@@ -236,6 +236,11 @@ app.use((req, res, next) => {
       const { ensureChannexAriSchema } = await import("./channex/ariSchema");
       const { startChannexAriWorker } = await import("./channex/ariWorker");
       await ensureChannexAriSchema(pool);
+      const { ensureChannexInboundSchema } = await import("./channex/inboundSchema");
+      const { startInboundWorker } = await import("./channex/inboundWorker");
+      await ensureChannexInboundSchema(pool);
+      const stopInbound = startInboundWorker(pool);
+      httpServer.once("close", stopInbound);
       const stopChannexAri = startChannexAriWorker(pool);
       httpServer.once("close", stopChannexAri);
     } catch {

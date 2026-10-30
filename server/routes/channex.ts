@@ -1,3 +1,4 @@
+import { registerChannexInboundRoutes } from "../channex/inboundRoutes";
 import type { Express } from "express";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
@@ -47,6 +48,7 @@ function handleError(res: any, err: unknown, fallback: string) {
 
 export function registerChannexRoutes(app: Express) {
   registerChannexAriRoutes(app, pool);
+  registerChannexInboundRoutes(app, pool);
   // --- Conexiones (config restringida) ---
 
   // Lectura de conexiones: cualquier usuario autenticado (la bandeja necesita

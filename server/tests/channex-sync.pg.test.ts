@@ -58,7 +58,7 @@ vi.mock("../channex/client", async (importOriginal) => {
     fetchChannexRoomTypes: vi.fn(),
     fetchChannexRatePlans: vi.fn(),
     fetchPendingBookingRevisions: vi.fn(),
-    fetchChannexBooking: vi.fn(),
+    fetchChannexBookingRevision: vi.fn(),
     acknowledgeBookingRevision: vi.fn(),
   };
 });

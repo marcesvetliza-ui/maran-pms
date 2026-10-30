@@ -2,7 +2,7 @@
 
 Fuente de requisitos: texto de «PMS Certification Tests» aportado por el usuario el 29/10/2026; URL https://docs.channex.io/api-v.1-documentation/pms-certification-tests. La guía separada de buenas prácticas y la especificación completa de payloads todavía deben contrastarse antes de una validación externa.
 
-Estado: captura ARI y calendario de venta por fecha implementados en el PMS, pendientes de conexión y validación real en staging. Los cambios siguen en una rama separada, sin desplegar en la operación actual. No se ha enviado la certificación, generado task IDs reales ni habilitado ningún canal. La configuración y el envío están desactivados por defecto. Esto no acredita la integración completa.
+Estado: captura ARI, calendario de venta y recepción entrante implementados en el PMS, pendientes de conexión y validación real en staging. Los cambios siguen en una rama separada, sin desplegar en la operación actual. No se ha enviado la certificación, generado task IDs reales ni habilitado ningún canal. La configuración y el envío están desactivados por defecto. Esto no acredita la integración completa.
 
 ## Flujo integrado en el producto
 
@@ -45,7 +45,7 @@ No existe una pantalla ni un script que reproduzca las tablas de certificación.
 | 2–4. Cambios de tarifas por fecha/período y varios planes | Calendario integrado en Planes Tarifarios, con edición conjunta, revisión y guardado atómico. Pruebas locales; pendiente de ejecución real contra staging. |
 | 5–8. Min stay, stop sell, CTA/CTD, max stay y períodos largos | Modelo diario, interfaz de venta y transformación implementados para mínimo de llegada y de estadía, máximo, cierres y períodos largos. Pendiente de validar los escenarios en staging. |
 | 9–10. Disponibilidad | Cálculo y eventos implementados para el alcance elegido. Falta demostrar los casos desde la UI contra staging. |
-| 11. Reservas | Sigue la bandeja de prueba existente: falta webhook y creación/modificación/cancelación real en el PMS, idempotencia y ACK después de persistir. El reintento actual con `/bookings/:id` debe pasar a revisiones. |
+| 11. Reservas | Receptor staging, inbox inmutable, ACK tras persistencia y altas/cambios/cancelaciones transaccionales implementados y probados localmente en ARS. Bandeja anterior conservada. Reintento migrado a `/booking_revisions/:id`. Falta validar payloads y webhook reales; reservas en otra moneda o con conflictos quedan para revisión. |
 | 12. Límites y reintentos | Implementados y probados localmente; falta comprobarlos contra staging. |
 | 13. Solo cambios | Captura transaccional y deltas implementados. Full sync manual/inicial y avance incremental del horizonte. |
 | 14. Declaración de capacidades | Ambos mínimos (arrival/through), stop sell, CTA, CTD y máximo implementados. Sigue pendiente decidir/validar tarifas por ocupación, tarjetas y alcance de PCI. |
@@ -75,3 +75,44 @@ El guardado actualiza `rate_calendar_entries` y su auditoría en una única tran
 Campos vacíos en la edición conservan valores; `false` abre un cierre y `0` elimina el máximo. Volver a tarifa base quita solo el precio especial y conserva las demás reglas. Los días fuera de la vigencia del plan se identifican en la consulta y no admiten edición. Se usa precio plano por plan; no se publican aún variantes por ocupación.
 
 La suite PostgreSQL comprueba la revisión sin escrituras, guardado múltiple con un envío agrupado, restauración de defaults, herencia del precio base, reversión de calendario/auditoría/outbox ante fallo, revisión vencida y confirmaciones simultáneas. Las pruebas HTTP llaman a las APIs normales del PMS en una base descartable; el transporte Channex está sustituido y no genera evidencia de certificación real.
+
+
+## Recepción de reservas — desarrollo del 29/10/2026
+
+La rama incorpora los cambios operativos publicados hasta `18fab56c`, sin promover el trabajo de Channex a main ni desplegarlo. La bandeja anterior sigue siendo un preview y nunca crea reservas. La nueva recepción aparece como control independiente junto al alcance de inventario.
+
+### Activación aislada
+
+- El servidor exige `CHANNEX_INBOUND_STAGING_ENABLED=true`, ausente por defecto. No se configuró durante este trabajo. Sin esa variable el webhook responde 404 y el worker no consulta base ni red.
+- La conexión debe estar activa, tener entorno `demo`, URL exacta `https://staging.channex.io/api/v1`, alcance ARI configurado y recepción explícitamente habilitada. Ninguno de esos controles habilita producción.
+- Desde la configuración de Channex se genera una clave de webhook. Solo se muestra una vez, se guarda su SHA-256 y se verifica en tiempo constante. Se configura como encabezado `X-Channex-Webhook-Token`, nunca como parámetro URL. El token se envía evitando el logger de cuerpos JSON del servidor. Registrar el webhook en el proveedor aún es un paso pendiente de staging; no se efectuó ninguna llamada de configuración remota.
+- `POST /api/channex/inbound/:id/notify` es una notificación autenticada y limitada, no una API que acepte reservas del cuerpo. Persiste la solicitud de consultar el feed. Las carreras con un fetch en curso se detectan por versión; el arranque del worker recupera avisos interrumpidos.
+
+### Persistencia y aplicación
+
+`inboundSchema.ts` instala tablas nuevas. La revisión sanitizada y su hash se guardan de forma inmutable por conexión e ID antes de cualquier ACK. El ACK confirma recepción durable, no aceptación comercial ni aplicación al PMS: una revisión conflictiva puede estar confirmada y continuar en la bandeja local de revisión. No se guardan tarjetas, garantías, claves, documentos o notas libres del payload. No se usa esta etapa para PCI.
+
+El worker usa `/booking_revisions/feed` y `/booking_revisions/:id/ack`. Los reintentos de la bandeja anterior usan `/booking_revisions/:id`; se retiró `/bookings/:id`. Los envíos respetan un espacio global persistido de 3,1 segundos y backoff; un 429 conserva Retry-After aun si la respuesta no es JSON. Las redirecciones HTTP no se siguen con credenciales. Una caída después de recibir una respuesta puede repetir el ACK del mismo ID, sin crear otra reserva.
+
+La aplicación usa `storage.createReservation` y `storage.updateReservation` del PMS. El bloqueo existente de inventario se vuelve reentrante dentro de una operación compuesta; los bloqueos financieros de sus reservas se toman en orden y en una única sesión. Habitaciones, huésped, precios nocturnos, auditoría, cursor de revisión y eventos ARI se confirman o revierten juntos. Los precios por noche se conservan exactamente, sin reemplazarlos por una media redondeada.
+
+Se asignan únicamente habitaciones físicas activas del piso configurado, con capacidad y disponibilidad válidas. El mapeo de tarifa debe pertenecer a la misma categoría y moneda. Una reserva múltiple requiere identidades estables por habitación; si falla una parte se revierte toda la revisión. Una referencia externa ya existente sin vínculo de Channex se deriva a revisión, no se fusiona ni se duplica.
+
+Las revisiones antiguas no deshacen las nuevas. Orden temporal ambiguo, colisión de ID, falta de inventario, reservas/huéspedes modificados por el hotel, historias financieras, vínculos grupales, estadías iniciadas o cerradas y reapertura de cancelaciones requieren revisión. No se eliminan ni devuelven cobros, no se emiten facturas y no se crea Caja. Una cancelación con historia financiera queda para intervención operativa, conservando reserva y dinero.
+
+El historial recibido impide eliminar su conexión y exige pausar la recepción antes de cambiar su identidad/credencial. La consulta muestra estados de aplicación y ACK por separado, motivos y reintento de las situaciones revisables. El registro original no se sobrescribe.
+
+### Límites para certificación
+
+El contrato se ha probado con fixtures sintéticos estrictos; no se dispone todavía de un payload completo contrastado de la conexión real ni se verificó la configuración del encabezado del webhook en el proveedor. Campos/identidades desconocidos se conservan de forma sanitizada para revisión y no se adivinan. El detalle de tarifas debe cubrir cada noche y sumar el total; impuestos, extras o descuentos que no coincidan exigen revisión.
+
+La importación automática está limitada a ARS porque el folio actual no modela moneda por reserva. Las pruebas oficiales proponen USD: antes de ejecutar ese escenario hay que resolver explícitamente el soporte de moneda en el PMS o acordar el entorno de validación con Channex. No se ingresan montos USD como si fueran pesos ni se usa un script para simular la aceptación del escenario.
+
+Quedan pendientes la validación real de contrato y mejores prácticas, alta del webhook en staging, observación de sus eventos/ACK, los escenarios completos desde pantallas normales, task IDs reales, formulario y revisión en vivo. Este desarrollo no acredita certificación ni conexión productiva.
+
+### Evidencia local de esta etapa
+
+- 878 pruebas cliente aprobadas, incluidos los controles de recepción.
+- 32 pruebas servidor aprobadas: contrato, rutas, autenticación, permisos, transporte de revisiones, credenciales y regresión ARI, sin llamadas externas.
+- 39 pruebas PostgreSQL aprobadas: 15 de recepción, 20 del motor nocturno y 4 de la bandeja anterior, con datos ficticios en una base nueva descartable.
+- Instalación de esquema completo, TypeScript y compilación de producción verificados localmente.
