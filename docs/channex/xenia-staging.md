@@ -30,3 +30,9 @@ Las capturas no muestran la conexión efectiva de la base, las variables de aisl
 - TypeScript, compilación del PMS y empaquetado del asistente verificados.
 
 Estos resultados no acreditan un despliegue, una conexión remota ni la certificación. No existen task IDs de esta etapa.
+
+## Corrección de moneda al reiniciar
+
+Se identificó que la migración histórica `rate_plans.fix_currency_ars` reemplazaba cualquier moneda no ARS en cada arranque. Se reemplazó por el completado de valores ausentes (NULL, vacío o espacios), conservando USD, EUR y los importes existentes. La regresión ejecuta dos veces las migraciones reales sobre una base descartable y comprueba que la moneda y el precio persistan.
+
+Las monedas que el arranque anterior ya sobrescribió no se pueden inferir del importe ni restaurar masivamente. Para los cuatro planes de certificación cuya carga original en USD confirmó el usuario, el formulario normal de Tarifas en el piloto permite la corrección explícita de ARS a USD, con aviso de que conserva los números y no aplica conversión. Los planes ARS ajenos a la certificación se conservan. Luego se revisa la preparación y se reintentan los eventos bloqueados; no se solicita otra sincronización completa.

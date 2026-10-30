@@ -28,10 +28,18 @@ it('keeps ARS as the creation default and offers no USD selector outside pilot',
   expect(screen.queryByRole('combobox', { name: 'Moneda' })).toBeNull();
   expect(screen.getByText('ARS')).toBeTruthy();
 });
-it('displays an existing USD plan accurately without allowing currency reinterpretation', async () => {
+it('preserves an existing USD plan when saving other fields', async () => {
   show({ id: 'usd-existing', name: 'USD BAR', roomTypeId: 'premium', baseRate: '100', currency: 'USD' });
-  expect(screen.queryByRole('combobox', { name: 'Moneda' })).toBeNull();
-  expect(screen.getByText('USD')).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: 'Moneda' })).toHaveTextContent('USD');
   fireEvent.click(screen.getByRole('button', { name: 'Guardar Cambios' }));
   await waitFor(() => expect(state.request).toHaveBeenCalledWith('PATCH', '/api/rate-plans/usd-existing', expect.objectContaining({ currency: 'USD', baseRate: '100' })));
+});
+
+it('allows explicit correction of an accidentally relabelled pilot plan without converting its amount', async () => {
+  show({ id: 'repair', name: 'Certificación Twin BAR', roomTypeId: 'premium', baseRate: '100', currency: 'ARS' });
+  fireEvent.pointerDown(screen.getByRole('combobox', { name: 'Moneda' }), { button: 0 });
+  fireEvent.click(await screen.findByRole('option', { name: 'USD — Dólar estadounidense' }));
+  expect(screen.getByRole('status')).toHaveTextContent('ARS a USD');
+  fireEvent.click(screen.getByRole('button', { name: 'Guardar Cambios' }));
+  await waitFor(() => expect(state.request).toHaveBeenCalledWith('PATCH', '/api/rate-plans/repair', expect.objectContaining({ currency: 'USD', baseRate: '100' })));
 });

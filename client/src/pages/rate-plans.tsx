@@ -232,7 +232,7 @@ export function RatePlanFormDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="currency">Moneda</Label>
-                {isPilot && !isEditing ? <Select value={formData.currency || "ARS"} onValueChange={currency => setFormData({ ...formData, currency })}>
+                {isPilot ? <Select value={formData.currency || "ARS"} onValueChange={currency => setFormData({ ...formData, currency })}>
                   <SelectTrigger id="currency"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ARS">ARS — Peso Argentino</SelectItem>
@@ -241,7 +241,8 @@ export function RatePlanFormDialog({
                 </Select> : <div id="currency" className="flex items-center h-10 px-3 rounded-md border bg-muted/50 text-sm text-muted-foreground">
                   {formData.currency || "ARS"}
                 </div>}
-                {isPilot && !isEditing && formData.currency === "USD" && <p className="text-xs text-muted-foreground">Ingresá los precios en USD. Esta selección no convierte importes.</p>}
+                {isPilot && formData.currency === "USD" && <p className="text-xs text-muted-foreground">Ingresá los precios en USD. Esta selección no convierte importes.</p>}
+                {isPilot && isEditing && formData.currency !== ratePlan.currency && <p role="status" className="text-sm text-amber-700 dark:text-amber-300">Vas a corregir la moneda de {ratePlan.currency} a {formData.currency}. Los importes se conservan: no se aplica conversión.</p>}
               </div>
             </div>
             {formData.roomTypeId && (

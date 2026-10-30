@@ -2839,8 +2839,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN special_rate_reason text`)))
   );
 
-  await withTimeout("rate_plans.fix_currency_ars", T, () =>
-    db.execute(sql`UPDATE rate_plans SET currency = 'ARS' WHERE currency IS NULL OR currency = '' OR currency != 'ARS'`)
+  // Fill only missing legacy values. A restart must never relabel a USD/EUR
+  // amount as pesos: doing so also invalidates Channex's currency mapping.
+  await withTimeout("rate_plans.fill_missing_currency", T, () =>
+    db.execute(sql`UPDATE rate_plans SET currency = 'ARS' WHERE currency IS NULL OR btrim(currency) = ''`)
   );
 
   // invoice_ref en payments (anticipo con factura electrónica vinculada)
