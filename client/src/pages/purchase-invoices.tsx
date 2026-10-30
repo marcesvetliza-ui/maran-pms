@@ -1,3 +1,5 @@
+import { useAuth } from "@/App";
+import { canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
 import { matchesIssuer } from "@/lib/issuer-search";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import { formatDisplayDate } from "@shared/date-display";
@@ -2799,6 +2801,7 @@ function OrdenesDePagoTab() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function PurchaseInvoices() {
+  const { user } = useAuth();
   const [tab, setTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("tab") || "comprobantes";
@@ -3050,7 +3053,7 @@ export default function PurchaseInvoices() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              {inv.estado === "pendiente" && (
+                              {canEditPurchaseInvoice(user?.role, inv.estado) && (
                                 <>
                                   <Button
                                     variant="ghost" size="icon"
