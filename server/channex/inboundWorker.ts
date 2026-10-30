@@ -69,7 +69,9 @@ export function startInboundWorker(pool: Pool) {
   const tick = async () => { if (running || stopped) return; running = true; try { await runInboundOnce(pool); } catch { /* retry from durable state, no payload/credential logs */ } finally { running = false; } };
   // Startup catch-up recovers webhook interruptions, without periodic source
   // table polling or activating a connection that has not opted in.
-  void pool.query("UPDATE channex_inbound_settings SET notification_pending=true,notification_version=notification_version+1 WHERE enabled").then(tick).catch(() => undefined);
+  void import("./inbound").then(({ recoverStoredInboundRevisions }) => recoverStoredInboundRevisions(pool))
+    .then(() => pool.query("UPDATE channex_inbound_settings SET notification_pending=true,notification_version=notification_version+1 WHERE enabled"))
+    .then(tick).catch(() => undefined);
   const timer = setInterval(tick, 3500); timer.unref();
   return () => { stopped = true; clearInterval(timer); };
 }

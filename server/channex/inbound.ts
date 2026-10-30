@@ -14,6 +14,18 @@ import { settleBooking } from "./settlement";
 export function assertInboundStaging(connection: any) {
   if (!connection?.is_active || connection.environment !== "demo" || connection.base_url?.replace(/\/$/, "") !== STAGING_URL) return review("STAGING_ONLY");
 }
+/** Revalidate durable, unacknowledged parser failures after a release. No remote
+ * re-delivery is required, and payloads/collision decisions remain immutable. */
+export async function recoverStoredInboundRevisions(target: Pool) {
+  const rows = (await target.query(`SELECT r.connection_id,r.payload FROM channex_inbound_revisions r
+    JOIN channex_connections c ON c.id=r.connection_id
+    JOIN channex_inbound_settings i ON i.connection_id=c.id
+    JOIN channex_ari_settings a ON a.connection_id=c.id
+    WHERE r.status='review' AND r.review_code='INVALID_REVISION' AND r.acked_at IS NULL
+      AND i.enabled AND a.enabled AND c.is_active AND c.environment='demo' AND c.base_url=$1
+    ORDER BY r.created_at`, [STAGING_URL])).rows;
+  for (const row of rows) await persistInboundRevision(target, row.connection_id, row.payload);
+}
 /** Immutable durable inbox. ACK is a separate post-commit action. */
 export async function persistInboundRevision(target: Pool, connectionId: string, input: unknown) {
   const payload = redactBooking(input);

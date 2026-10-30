@@ -63,7 +63,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   const before=(await pool.query("SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
   // State left by the previous release: durable payload, no trusted head, no ACK.
   await pool.query("UPDATE channex_inbound_revisions SET status='review',review_code='INVALID_REVISION',booking_id=NULL,inserted_at=NULL WHERE connection_id=$1",[f.id]);
-  await service.persistInboundRevision(pool,f.id,r);
+  await service.recoverStoredInboundRevisions(pool);
   const recovered=(await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
   expect(recovered).toMatchObject({status:"pending",review_code:null,booking_id:"booking-utc-recovery",payload:before.payload,payload_hash:before.payload_hash});
   await service.applyInboundRevision(f.id,r.id);await apply(f,r);
