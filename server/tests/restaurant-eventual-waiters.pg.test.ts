@@ -28,6 +28,7 @@ const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.
 let server: http.Server;
 let baseUrl: string;
 let shiftId: string;
+let inheritedOpenShiftIds: string[] = [];
 const shifts: string[] = [], waiters: string[] = [], orders: string[] = [];
 let storage: typeof import("../db-storage").storage;
 
@@ -45,6 +46,11 @@ async function request(method: string, path: string, body?: unknown) {
 suite("PostgreSQL real: mozos eventuales de Restaurant", () => {
   beforeAll(async () => {
     await pool!.query("ALTER TABLE eventual_waiters ADD COLUMN IF NOT EXISTS cash_shift_id varchar REFERENCES cash_shifts(id)");
+    // Other suites may leave open synthetic shifts in the shared CI database.
+    // Temporarily isolate this roster, restoring the prior state after the suite.
+    inheritedOpenShiftIds = (await pool!.query(
+      "UPDATE cash_shifts SET status='closed' WHERE area='restaurant' AND status='open' RETURNING id",
+    )).rows.map(row => row.id);
     storage = (await import("../db-storage")).storage;
     const { registerRoutes } = await import("../routes");
     const app = express();
@@ -71,6 +77,9 @@ suite("PostgreSQL real: mozos eventuales de Restaurant", () => {
       await pool.query("DELETE FROM eventual_waiters WHERE id=ANY($1::varchar[])", [waiters]);
       await pool.query("DELETE FROM cash_closing_summaries WHERE shift_id=ANY($1::varchar[])", [shifts]);
       await pool.query("DELETE FROM cash_shifts WHERE id=ANY($1::varchar[])", [shifts]);
+      if (inheritedOpenShiftIds.length) await pool.query(
+        "UPDATE cash_shifts SET status='open' WHERE id=ANY($1::varchar[])", [inheritedOpenShiftIds],
+      );
       await pool.end();
     }
   });
