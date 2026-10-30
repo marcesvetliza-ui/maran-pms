@@ -1,3 +1,4 @@
+import {activeSalesRecord} from "../salesArchive";
 import type { Express } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -543,7 +544,7 @@ export function registerReportsRoutes(app: Express) {
                SUM(monto_total::numeric) AS total_facturado,
                COUNT(*) AS cantidad_facturas
         FROM sales_invoices
-        WHERE tipo_comprobante = 'FA'
+        WHERE ${activeSalesRecord('invoice',sql`id`)} AND tipo_comprobante = 'FA'
           AND fecha_emision BETWEEN ${desde} AND ${hasta}
           AND estado = 'emitida'
         GROUP BY cliente_razon_social, cliente_cuit

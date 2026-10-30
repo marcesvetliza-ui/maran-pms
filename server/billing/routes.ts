@@ -10,6 +10,7 @@ import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges, posConfigs, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
+import { activeSalesRecord } from '../salesArchive';
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
 import { verifySaleCatalog } from "./verifySaleCatalog";
@@ -582,6 +583,20 @@ async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise
 }
 
 export function registerBillingRoutes(app: Express) {
+  // Historical references stay readable for vouchers and folios, but an
+  // archived document cannot start a new settlement or fiscal correction.
+  const requireActiveInvoice = async (req: any, res: any, next: any) => {
+    try {
+      const archived = await db.execute(sql`SELECT 1 FROM sales_control_archive WHERE kind='invoice' AND record_id=${String(req.params.id)} LIMIT 1`);
+      if (archived.rows.length) return res.status(409).json({ error: "El comprobante pertenece al archivo histórico de ventas y no admite nuevas operaciones" });
+      next();
+    } catch { res.status(503).json({ error: "No se pudo verificar el archivo de ventas" }); }
+  };
+  app.patch('/api/billing/invoices/:id', requireAuth, requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/settle-center', requireAuth, requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/nota-credito', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/nota-debito', requireAuth, requireActiveInvoice);
+  app.post('/api/billing/credit-notes/:id/reconcile', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
   registerGroupFiscalCashRecoveryRoutes(app);
   registerArcaCredentialDiagnosticRoutes(app);
 
@@ -798,7 +813,7 @@ export function registerBillingRoutes(app: Express) {
   app.get("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       const { desde, hasta, tipo, clienteCuit, area, cliente, reservaId } = req.query as Record<string, string>;
-      let whereClause = sql`1=1`;
+      let whereClause = activeSalesRecord('invoice', sql`si.id`);
       if (desde) whereClause = sql`${whereClause} AND si.fecha_emision >= ${desde}`;
       if (hasta) whereClause = sql`${whereClause} AND si.fecha_emision <= ${hasta}`;
       if (tipo) whereClause = sql`${whereClause} AND si.tipo_comprobante = ${tipo}`;
@@ -876,6 +891,7 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE (nc.reserva_id IS NOT NULL OR nc.group_id IS NOT NULL)
+          AND ${activeSalesRecord('invoice', sql`nc.id`)}
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.reconciliation_status = 'pendiente'
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
@@ -985,7 +1001,7 @@ export function registerBillingRoutes(app: Express) {
       const result = await db.execute(sql`
         SELECT COUNT(*)::int AS total
         FROM sales_invoices
-        WHERE tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
+        WHERE ${activeSalesRecord('invoice',sql`id`)} AND tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
           AND fecha_emision >= ${startDate}
           AND fecha_emision <= ${endDate}
       `);
@@ -1004,7 +1020,7 @@ export function registerBillingRoutes(app: Express) {
       }
       const result = await db.execute(sql`
         DELETE FROM sales_invoices
-        WHERE tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
+        WHERE ${activeSalesRecord('invoice',sql`id`)} AND tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
           AND fecha_emision >= ${startDate}
           AND fecha_emision <= ${endDate}
         RETURNING id

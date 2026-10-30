@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   responses: [] as Array<{ rows: any[] }>,
+  archived: false,
   transactionExecutions: 0,
   emittedCalls: [] as any[],
   emitirError: null as string | null,
@@ -17,6 +18,7 @@ vi.mock("../db", () => ({
   db: {
     execute: vi.fn(async (query:any) => {
       const {PgDialect}=await import("drizzle-orm/pg-core");
+      if(new PgDialect().sqlToQuery(query).sql.startsWith("SELECT 1 FROM sales_control_archive"))return {rows:state.archived ? [{exists:1}] : []};
       if(new PgDialect().sqlToQuery(query).sql.includes("SELECT group_id FROM group_reservation_links"))return {rows:[]};
       return state.responses.shift() ?? {rows:[]};
     }),
@@ -176,6 +178,7 @@ async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
 }
 
 beforeEach(() => {
+  state.archived = false;
   state.responses = [];
   state.transactionExecutions = 0;
   state.emittedCalls = [];
@@ -187,6 +190,19 @@ afterEach(() => {
 });
 
 describe("reservation credit-note reconciliation recovery", () => {
+  it("rejects new credit notes for archived invoices before fiscal emission", async () => {
+    state.archived = true;
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/billing/invoices/12/nota-credito`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ motivo: "Corrección" }),
+      });
+      expect(response.status).toBe(409);
+    });
+    expect(state.emittedCalls).toHaveLength(0);
+    expect(state.transactionExecutions).toBe(0);
+  });
   it("reconciles an already authorized pending NC instead of emitting another one", async () => {
     state.responses = [
       { rows: [originalInvoice] },

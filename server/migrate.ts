@@ -1,4 +1,5 @@
 import {ensureCcManualTrackingSchema} from './ccManualTracking';
+import { SALES_ARCHIVE_SCHEMA_SQL } from './salesArchive';
 import {importStockWorkbook} from './inventoryWorkbookImport';
 import initialStockWorkbook from './assets/initial-stock-20261008.json';
 import {ensureInventoryCountWarehouseSchema} from "./inventoryCountSchema";
@@ -5014,6 +5015,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     logger.info("Carga inicial de inventario verificada", result);
   }
   await ensureCcManualTrackingSchema();
+  await db.execute(sql.raw(SALES_ARCHIVE_SCHEMA_SQL));
   await ensureRevenueManagementSchema();
   const { ensureAccommodationPermissionsSchema } = await import("./accommodationPermissions");
   await ensureAccommodationPermissionsSchema();

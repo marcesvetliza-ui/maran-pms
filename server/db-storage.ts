@@ -1,3 +1,4 @@
+import { activeSalesRecord } from "./salesArchive";
 import {breakfastEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
@@ -7996,7 +7997,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const movements = await tx.select().from(cashMovements).where(
-      and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false))
+      and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false), activeSalesRecord("cash_movement", cashMovements.id))
     );
 
     // Normaliza tanto valores en español como en inglés almacenados históricamente
@@ -8173,17 +8174,17 @@ export class DatabaseStorage implements IStorage {
     const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, shiftId));
     if (!shift) throw new Error("Turno no encontrado");
     const movements = await db.select().from(cashMovements)
-      .where(eq(cashMovements.shiftId, shiftId))
+      .where(and(eq(cashMovements.shiftId, shiftId), activeSalesRecord("cash_movement", cashMovements.id)))
       .orderBy(asc(cashMovements.createdAt));
     const [summary] = await db.select().from(cashClosingSummaries)
-      .where(eq(cashClosingSummaries.shiftId, shiftId))
+      .where(and(eq(cashClosingSummaries.shiftId, shiftId), activeSalesRecord("cash_closing", cashClosingSummaries.id)))
       .limit(1);
     return { shift, movements, summary: summary || null };
   }
 
   async getCashMovements(shiftId: string): Promise<CashMovement[]> {
     return db.select().from(cashMovements)
-      .where(eq(cashMovements.shiftId, shiftId))
+      .where(and(eq(cashMovements.shiftId, shiftId), activeSalesRecord("cash_movement", cashMovements.id)))
       .orderBy(desc(cashMovements.createdAt));
   }
 
@@ -8400,7 +8401,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCashSummary(area?: string, from?: string, to?: string): Promise<any[]> {
-    const conditions: any[] = [];
+    const conditions: any[] = [activeSalesRecord("cash_closing", cashClosingSummaries.id)];
     if (area) conditions.push(eq(cashShifts.area, area));
     // The filter and the primary date shown in Historial both refer to
     // the closing day in Argentina, even when the shift opened before midnight.
@@ -8420,6 +8421,7 @@ export class DatabaseStorage implements IStorage {
       .from(accountMovements)
       .where(
         and(
+          activeSalesRecord("account_movement", accountMovements.id),
           eq(accountMovements.entityType, entityType),
           eq(accountMovements.entityId, entityId)
         )
@@ -8458,7 +8460,7 @@ export class DatabaseStorage implements IStorage {
   async getAccountMovementsByReservation(reservationId: string): Promise<AccountMovement[]> {
     return await db.select()
       .from(accountMovements)
-      .where(eq(accountMovements.reservationId, reservationId))
+      .where(and(eq(accountMovements.reservationId, reservationId), activeSalesRecord("account_movement", accountMovements.id)))
       .orderBy(desc(accountMovements.createdAt));
   }
 
@@ -8473,6 +8475,7 @@ export class DatabaseStorage implements IStorage {
       .from(accountMovements)
       .where(
         and(
+          activeSalesRecord("account_movement", accountMovements.id),
           eq(accountMovements.entityType, entityType),
           eq(accountMovements.entityId, entityId),
           eq(accountMovements.type, "cargo")
@@ -8548,6 +8551,7 @@ export class DatabaseStorage implements IStorage {
           SELECT id, amount::numeric AS amount
           FROM account_movements
           WHERE id IN (${idsSql})
+            AND ${activeSalesRecord('account_movement', sql`id`)}
             AND entity_type = ${entityType}
             AND entity_id = ${entityId}
             AND type = 'cargo'
@@ -8622,7 +8626,7 @@ export class DatabaseStorage implements IStorage {
     assertFinancialSchemaReady();
     return await db.transaction(async (tx) => {
       const originalResult = await tx.execute(sql`
-        SELECT * FROM account_movements WHERE id = ${movementId} FOR UPDATE
+        SELECT * FROM account_movements WHERE id = ${movementId} AND ${activeSalesRecord('account_movement',sql`id`)} FOR UPDATE
       `);
       const original = originalResult.rows[0] as any;
       if (!original) throw Object.assign(new Error("Recibo no encontrado"), { statusCode: 404 });
@@ -8743,7 +8747,7 @@ export class DatabaseStorage implements IStorage {
              COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
              MAX(m.date::text)                                        AS last_movement
       FROM companies c
-      LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company'
+      LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company' AND ${activeSalesRecord('account_movement', sql`m.id`)}
       GROUP BY c.id, c.nombre_fantasia, c.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -8755,7 +8759,7 @@ export class DatabaseStorage implements IStorage {
              COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
              MAX(m.date::text)                                        AS last_movement
       FROM agencies a
-      LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
+      LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency' AND ${activeSalesRecord('account_movement', sql`m.id`)}
       GROUP BY a.id, a.nombre_fantasia, a.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -8768,7 +8772,7 @@ export class DatabaseStorage implements IStorage {
              MAX(m.date::text)                   AS last_movement
       FROM account_movements m
       JOIN guests g ON g.id = m.entity_id
-      WHERE m.entity_type = 'guest'
+      WHERE m.entity_type = 'guest' AND ${activeSalesRecord('account_movement', sql`m.id`)}
       GROUP BY g.id, g.last_name, g.first_name
       HAVING SUM(m.amount::numeric) <> 0
       ORDER BY balance DESC
@@ -8825,7 +8829,7 @@ export class DatabaseStorage implements IStorage {
         SELECT DISTINCT e.id, ${nameExpr} AS name
         FROM account_movements m
         JOIN ${sql.raw(table)} e ON e.id = m.entity_id
-        WHERE m.entity_type = ${entityType} AND m.type = 'cargo' AND ${areaCondition}
+        WHERE m.entity_type = ${entityType} AND ${activeSalesRecord('account_movement', sql`m.id`)} AND m.type = 'cargo' AND ${areaCondition}
       `);
       return res.rows as { id: string; name: string }[];
     };

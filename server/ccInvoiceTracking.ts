@@ -1,4 +1,5 @@
 import {getCcManualTrackingRows} from './ccManualTracking';
+import { activeSalesRecord } from './salesArchive';
 import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
@@ -43,6 +44,7 @@ export type CcInvoiceTrackingFilters = {
  */
 export async function getCcInvoiceTrackingList(filters: CcInvoiceTrackingFilters = {}): Promise<CcInvoiceTrackingRow[]> {
   const conditions = [
+    activeSalesRecord('invoice', salesInvoices.id),
     eq(salesInvoices.estado, "emitida"),
     eq(salesInvoices.cashFormaPago, "cuenta_corriente"),
     sql`${salesInvoices.tipoComprobante} LIKE 'F%'`,
@@ -151,6 +153,7 @@ export async function backfillCcInvoiceRecipients(): Promise<CcInvoiceRecipientB
     numero: salesInvoices.numero,
     clienteCuit: salesInvoices.clienteCuit,
   }).from(salesInvoices).where(and(
+    activeSalesRecord("invoice", salesInvoices.id),
     eq(salesInvoices.estado, "emitida"),
     eq(salesInvoices.cashFormaPago, "cuenta_corriente"),
     sql`${salesInvoices.tipoComprobante} LIKE 'F%'`,
