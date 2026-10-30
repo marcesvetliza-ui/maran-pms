@@ -1,5 +1,24 @@
 # Preparación de certificación PMS de Channex
 
+## Reanudación y siguiente validación externa — 30/10/2026 UTC
+
+Se incorporó `main` hasta `bd57ec5c` en la rama `feature/channex-inventory-outbox`, conservando los cambios recientes del hotel (cajas por usuario, comprobantes, mozos eventuales, folio claro/oscuro y workflows). La integración permanece fuera de `main`. El usuario confirmó que dispone de acceso a Channex staging; eso no confirma todavía propiedad, permisos de API, mapeos o webhook.
+
+Validación tras la integración: 898 pruebas cliente, 47 pruebas de servidor Channex y 49 de PostgreSQL aprobadas, con transporte remoto simulado. La base `channex_inbound_test` se actualizó mediante las migraciones completas; las pruebas ARI usaron un esquema aislado en `channex_test`. Estos resultados son evidencia local, no task IDs de certificación ni pruebas contra Channex.
+
+### Secuencia para Xenia y la propiedad staging
+
+1. Publicar **esta rama** en una instancia Xenia de prueba con base independiente de Maran. Confirmar revisión publicada, dominio y base antes de activar los workers. El acceso Railway disponible en este entorno solo identifica el proyecto operativo Maran (`adventurous-amazement`); no permite verificar ni modificar Xenia (`observant-possibility`). No sustituir ese destino por producción.
+2. Contrastar la guía de buenas prácticas y los contratos vigentes. El documento de requisitos aportado sigue disponible; `docs.channex.io` continúa en un borrador de red, pero no en la política aplicada de este entorno. No declarar ese contraste realizado.
+3. En Channex staging, preparar la propiedad USD con dos categorías y cuatro planes conforme a los criterios de certificación. En el PMS de prueba cargar la credencial desde **Channex → Conexiones**, sincronizar catálogo y mapear las categorías y planes existentes. Las claves no se comparten por chat ni se incluyen en esta documentación.
+4. En **Inventario y envíos**, seleccionar piso 2 y USD, revisar todas las habitaciones físicas incluidas y las tarifas de los siguientes 500 días. Configurar cotización USD→ARS para recepción, con motivo, en **Recepción de reservas**. Los precios enviados conservan la moneda del plan; no se convierten automáticamente al publicar ARI.
+5. Usar **Revisar preparación** y resolver cada control de configuración. En Xenia, configurar las claves de cifrado/sesión y habilitar únicamente allí las variables `CHANNEX_ARI_STAGING_ENABLED` y `CHANNEX_INBOUND_STAGING_ENABLED`. Una marca local habilitada no demuestra conectividad remota ni instalación del webhook.
+6. Generar el acceso del webhook desde la pantalla de recepción y configurar en Channex la URL HTTPS y el encabezado que muestra el PMS. Verificar una notificación, persistencia de revisión y ACK. No usar canales operativos ni reservas reales para esta etapa.
+7. Ejecutar los escenarios desde **Planes Tarifarios/calendario de venta**, **Reservas** y **Planning**. Registrar los task IDs reales que figuren en **Últimos cambios y tareas de Channex**; conservar la acción, fecha y resultado remoto observado. Una tarea aceptada no basta para afirmar que su contenido quedó aplicado: comprobar también el estado en Channex. Para reservas, usar la cuenta Booking.com de prueba de Channex o Booking CRS según su documentación y verificar alta, modificación y cancelación.
+8. Completar formulario y revisión por pantalla compartida únicamente después de esa evidencia externa. El piloto comercial del piso 2 con Booking/Despegar es posterior a la certificación y a una habilitación productiva explícita; no lo activa esta rama.
+
+No se activaron flags, canales, sincronizaciones ni operaciones del hotel durante esta reanudación. No se publicaron cambios de Channex en Maran o Xenia.
+
 ## Revisión previa de staging — 30/10/2026 UTC
 
 En la configuración de recepción se incorpora **Revisar preparación**. Consulta el endpoint protegido `GET /api/channex/connections/:id/inbound/readiness`, solo bajo demanda y con permiso `api:channex:config`. No realiza llamadas a Channex, ACK, escrituras, altas de reserva ni activaciones. Lee una instantánea consistente de PostgreSQL en una transacción `READ ONLY`, con límite de consulta de 15 segundos.
