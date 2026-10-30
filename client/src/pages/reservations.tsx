@@ -3187,7 +3187,7 @@ export function ReservationDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={dialogContentRef}
-        className="reservation-wide-folio wf-production dark max-h-[94dvh] flex flex-col overflow-hidden gap-0"
+        className="reservation-wide-folio wf-production max-h-[94dvh] flex flex-col overflow-hidden gap-0"
       >
         <ReservationFolioHeader
           reservation={reservation}
