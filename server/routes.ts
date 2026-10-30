@@ -1,3 +1,5 @@
+import { requireCashView, cashShiftAccess } from "./cash-user-access";
+import { canViewCash, canOperateCash } from "@shared/cash-user-access";
 import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
 import {createSpecialPurchase} from './specialPurchase';
 import {applyPurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
@@ -371,11 +373,22 @@ export async function registerRoutes(
     requireAuth(req, res, next);
   });
 
+  app.use(["/api/cash", "/api/admin/cash", "/api/admin-cash"], requireAuth, requireCashView);
+  app.use("/api/cash", requireAuth, cashShiftAccess(async id => {
+    const [shift] = await db.select({ area: cashShifts.area }).from(cashShifts).where(eq(cashShifts.id, id));
+    return shift?.area;
+  }));
+
   // Etapa 1 del ABM de usuarios: el sidebar (y, a futuro, los guards de ruta)
   // consultan esto en vez de traer sus propios arrays de roles hardcodeados.
   app.get("/api/permissions/mine", requireAuth, (req, res) => {
     const role = (req.user as Express.User).role;
-    res.json({ role, resourceKeys: permissionsForRole(role) });
+    const username = req.user?.username;
+    const resourceKeys = permissionsForRole(role).filter(key =>
+      canViewCash(username) || !["sidebar:/cash-register", "sidebar:/admin/caja", "sidebar:/admin/caja/configuracion"].includes(key));
+    if (canViewCash(username) && ["reception", "restaurant", "spa"].some(area => canOperateCash(username, area))
+      && !resourceKeys.includes("sidebar:/cash-register")) resourceKeys.push("sidebar:/cash-register");
+    res.json({ role, resourceKeys });
   });
 
   // Explicit homologation opt-in, before every legacy financial writer.

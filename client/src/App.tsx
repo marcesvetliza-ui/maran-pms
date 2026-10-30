@@ -1,3 +1,4 @@
+import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, createContext, useContext, useCallback, lazy, Suspense } from "react";
 import { Switch, Route, useRoute, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
@@ -211,6 +212,11 @@ function PermissionRoute({ component: Component, resourceKey }: { component: Rea
   return <Component />;
 }
 
+function CashAccessRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user } = useAuth();
+  return canViewCash(user?.username) ? <Component /> : <p className="p-6">Tu cuenta no tiene acceso a cajas.</p>;
+}
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -257,15 +263,15 @@ function Router() {
         <Route path="/reports" component={ReportsPage} />
         <Route path="/revenue-management" component={RevenueManagementPage} />
         <Route path="/executive" component={DashboardExecutivePage} />
-        <Route path="/cash-register" component={CashRegisterPage} />
+        <Route path="/cash-register">{() => <CashAccessRoute component={CashRegisterPage} />}</Route>
         <Route path="/admin" component={AdminPage} />
         <Route path="/pos-configs" component={PosConfigsPage} />
         <Route path="/source-code">{() => <PermissionRoute component={SourceCodePage} resourceKey="sidebar:/source-code" />}</Route>
         <Route path="/accounting-suppliers" component={AccountingSuppliersPage} />
         <Route path="/purchase-invoices" component={PurchaseInvoicesPage} />
         <Route path="/admin/consultas" component={AdminConsultasPage} />
-        <Route path="/admin/caja" component={AdminCajaPage} />
-        <Route path="/admin/caja/configuracion" component={AdminCajaConfigPage} />
+        <Route path="/admin/caja">{() => <CashAccessRoute component={AdminCajaPage} />}</Route>
+        <Route path="/admin/caja/configuracion">{() => <CashAccessRoute component={AdminCajaConfigPage} />}</Route>
         <Route path="/billing" component={BillingPage} />
         <Route path="/admin/reportes" component={AdminReportesPage} />
         <Route path="/admin/cuentas" component={AdminCuentasPage} />

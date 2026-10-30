@@ -1,3 +1,4 @@
+import { canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
 import { formatDisplayDate } from "@shared/date-display";
 import { informationalSummary } from "@/lib/cash-informational-summary";
 import { Fragment, useState, useEffect, useMemo } from "react";
@@ -662,6 +663,7 @@ ${anulSection}
 function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: CashConfig; shiftRefreshToken: number }) {
   const { user, hasPermission } = useAuth();
   // Etapa 3 del ABM de usuarios: mismo resourceKey server-side.
+  const canOperate = canOperateCash(user?.username, area);
   const isAdmin = hasPermission("api:cash:area-admin");
   const { toast } = useToast();
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
@@ -941,7 +943,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
             <CircleDot className="h-5 w-5" />
             Estado del Turno - {config.areaLabel}
           </CardTitle>
-          {currentShift && (
+          {currentShift && canOperate && (
             <Button
               size="sm"
               variant="destructive"
@@ -962,6 +964,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
               <Button
                 className="bg-green-600 hover:bg-green-700 text-white no-default-hover-elevate"
                 onClick={() => setOpenShiftDialog(true)}
+                disabled={!canOperate}
                 data-testid={`btn-open-shift-${area}`}
               >
                 <Plus className="h-4 w-4 mr-2" />
@@ -988,7 +991,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                 {formatShiftLabel(currentShift)}
                 <span className="ml-1 text-xs text-muted-foreground font-normal">#{currentShift.shiftNumber}</span>
               </span>
-              {(!currentShift.openedBy || currentShift.autoCreado) && (
+              {canOperate && (!currentShift.openedBy || currentShift.autoCreado) && (
                 <Button
                   size="sm"
                   variant="outline"
@@ -3253,7 +3256,7 @@ export default function CashRegister() {
   // Etapa 3 del ABM de usuarios: resourceKey propio, no coincide con
   // api:night-audit:run server-side a propósito (se decidió mantener el
   // comportamiento actual del cliente para esta pestaña).
-  const isAdminOrManager = hasPermission("api:cash:global-view");
+  const isAdminOrManager = hasGlobalCashAccess(user?.username) || hasPermission("api:cash:global-view");
   // Etapa 3: mismos resourceKeys que ya usan sus endpoints server-side,
   // uno por pestaña para poder habilitarlas de forma independiente.
   const canSeePaymentRecoveryTab = hasPermission("api:cash:repair-movements");
@@ -3311,7 +3314,7 @@ export default function CashRegister() {
   // Admin/manager/global roles see all areas; others see their assigned department or role-matching area
   const visibleConfigs = isAdminOrManager
     ? allActiveConfigs
-    : allActiveConfigs.filter((c) => c.area === user?.department || c.area === user?.role);
+    : allActiveConfigs.filter((c) => c.area === user?.department || c.area === user?.role || canOperateCash(user?.username, c.area));
 
   if (isLoading) {
     return (
