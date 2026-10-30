@@ -1,3 +1,4 @@
+import { ChannexRatePlanMapping as ChannexRateMappingRow, type MappingRatePlan } from "@/components/channex-rate-plan-mapping";
 import { ChannexInboundSettings } from "@/components/channex-inbound-settings";
 import { ChannexAriSettings } from "@/components/channex-ari-settings";
 import { useMemo, useState } from "react";
@@ -242,7 +243,7 @@ export default function ChannexPage() {
   });
 
   const { data: allRoomTypes } = useQuery<{ id: string; name: string }[]>({ queryKey: ["/api/room-types"] });
-  const { data: allRatePlans } = useQuery<{ id: string; name: string }[]>({ queryKey: ["/api/rate-plans"] });
+  const { data: allRatePlans } = useQuery<MappingRatePlan[]>({ queryKey: ["/api/rate-plans"] });
 
   const filteredBookings = useMemo(() => {
     if (!bookings) return [];
@@ -552,23 +553,10 @@ export default function ChannexPage() {
                 <CardHeader><CardTitle className="text-base">Tarifas</CardTitle></CardHeader>
                 <CardContent className="space-y-2">
                   {(ratePlanMappings ?? []).map((m) => (
-                    <div key={m.id} className="flex items-center gap-3">
-                      <span className="w-48 truncate text-sm">{m.channexRatePlanTitle}</span>
-                      <Select
-                        value={m.ratePlanId ?? "none"}
-                        onValueChange={(value) => updateRatePlanMappingMutation.mutate({ id: m.id, ratePlanId: value === "none" ? null : value })}
-                      >
-                        <SelectTrigger className="w-64" data-testid={`select-rate-plan-mapping-${m.id}`}>
-                          <SelectValue placeholder="Sin mapear" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Sin mapear</SelectItem>
-                          {(allRatePlans ?? []).map((rp) => (
-                            <SelectItem key={rp.id} value={rp.id}>{rp.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <ChannexRateMappingRow key={m.id} id={m.id} title={m.channexRatePlanTitle}
+                      roomTitle={roomTypeTitleFor(m.channexRoomTypeId)} selected={m.ratePlanId}
+                      plans={allRatePlans ?? []} roomTypes={allRoomTypes ?? []}
+                      onChange={ratePlanId => updateRatePlanMappingMutation.mutate({ id: m.id, ratePlanId })} />
                   ))}
                   {(!ratePlanMappings || ratePlanMappings.length === 0) && (
                     <p className="text-sm text-muted-foreground">Sin datos — sincronizá el catálogo primero.</p>

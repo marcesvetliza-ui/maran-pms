@@ -1,3 +1,4 @@
+import { usePilotEnvironment } from "@/hooks/use-pilot-environment";
 import { RateCalendar } from "@/components/rate-calendar";
 import { useAuth } from "@/App";
 import { useState, useEffect } from "react";
@@ -56,7 +57,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import type { RatePlanWithRoomType, RoomType, InsertRatePlan } from "@shared/schema";
 
-function RatePlanFormDialog({
+export function RatePlanFormDialog({
   ratePlan,
   roomTypes,
   open,
@@ -71,6 +72,7 @@ function RatePlanFormDialog({
 }) {
   const { toast } = useToast();
   const isEditing = !!ratePlan;
+  const isPilot = usePilotEnvironment();
 
   const [formData, setFormData] = useState<Partial<InsertRatePlan>>({
     name: ratePlan?.name || "",
@@ -230,9 +232,16 @@ function RatePlanFormDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="currency">Moneda</Label>
-                <div className="flex items-center h-10 px-3 rounded-md border bg-muted/50 text-sm text-muted-foreground">
-                  ARS — Peso Argentino
-                </div>
+                {isPilot && !isEditing ? <Select value={formData.currency || "ARS"} onValueChange={currency => setFormData({ ...formData, currency })}>
+                  <SelectTrigger id="currency"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ARS">ARS — Peso Argentino</SelectItem>
+                    <SelectItem value="USD">USD — Dólar estadounidense</SelectItem>
+                  </SelectContent>
+                </Select> : <div id="currency" className="flex items-center h-10 px-3 rounded-md border bg-muted/50 text-sm text-muted-foreground">
+                  {formData.currency || "ARS"}
+                </div>}
+                {isPilot && !isEditing && formData.currency === "USD" && <p className="text-xs text-muted-foreground">Ingresá los precios en USD. Esta selección no convierte importes.</p>}
               </div>
             </div>
             {formData.roomTypeId && (
