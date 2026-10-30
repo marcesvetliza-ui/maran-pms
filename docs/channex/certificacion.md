@@ -1,5 +1,17 @@
 # Preparación de certificación PMS de Channex
 
+## Revisión previa de staging — 30/10/2026 UTC
+
+En la configuración de recepción se incorpora **Revisar preparación**. Consulta el endpoint protegido `GET /api/channex/connections/:id/inbound/readiness`, solo bajo demanda y con permiso `api:channex:config`. No realiza llamadas a Channex, ACK, escrituras, altas de reserva ni activaciones. Lee una instantánea consistente de PostgreSQL en una transacción `READ ONLY`, con límite de consulta de 15 segundos.
+
+La revisión comprueba entorno, conexión, posibilidad local de descifrar la credencial, alcance por piso, habitaciones y mapeos. Ejecuta la misma transformación de disponibilidad y tarifas/restricciones de 500 días que utiliza el dispatcher; detecta planes vencidos y monedas incompatibles sin publicar los valores. Nunca devuelve la credencial, su envoltorio cifrado ni la clave del webhook. Distingue configuración local, controles de activación y requisitos de certificación. Que una credencial se pueda descifrar o exista una clave de webhook no demuestra su validez o instalación en Channex.
+
+**Bloqueo de moneda confirmado:** el texto recibido solicita una propiedad de prueba USD; las reservas y folios locales no poseen un contrato completo de moneda por reserva, y el receptor se mantiene en ARS. Publicar tarifas USD no resuelve la importación de reservas USD. No se elimina la guarda ni se convierten números sin moneda/tipo de cambio. Antes de ejecutar los escenarios completos debe implementarse y verificarse el tratamiento monetario de extremo a extremo, o contar con una aceptación explícita de Channex para certificar en ARS. No se dispone de esa aceptación.
+
+La consulta a la documentación oficial devolvió un rechazo de red (proxy HTTP 403). `docs.channex.io` figura en el borrador de configuración del entorno, pero aún no en la política aplicada; no se sorteó el bloqueo. Tampoco hay una credencial de staging configurada para este entorno de desarrollo. No se realizaron pruebas remotas ni se activaron flags del hotel. La revisión devuelve `remoteVerified=false` y nunca declara la certificación completada.
+
+Validación de esta revisión: cinco pruebas de interfaz, ocho de HTTP/permisos y 18 de PostgreSQL para recepción/preparación. Comprueban la consulta bajo demanda, acceso restringido, ausencia de escrituras, vigencia de 500 días, bloqueo USD y separación entre preparación local y certificación externa. TypeScript y compilación se verifican antes de guardar la etapa en la rama aislada.
+
 Fuente de requisitos: texto de «PMS Certification Tests» aportado por el usuario el 29/10/2026; URL https://docs.channex.io/api-v.1-documentation/pms-certification-tests. La guía separada de buenas prácticas y la especificación completa de payloads todavía deben contrastarse antes de una validación externa.
 
 Estado: captura ARI, calendario de venta y recepción entrante implementados en el PMS, pendientes de conexión y validación real en staging. Los cambios siguen en una rama separada, sin desplegar en la operación actual. No se ha enviado la certificación, generado task IDs reales ni habilitado ningún canal. La configuración y el envío están desactivados por defecto. Esto no acredita la integración completa.

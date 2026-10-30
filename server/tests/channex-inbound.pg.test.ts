@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ensureChannexInboundSchema } from "../channex/inboundSchema";
 import { ensureChannexAriSchema } from "../channex/ariSchema";
 import { STAGING_URL } from "../channex/ari";
+import { getChannexReadiness } from "../channex/readiness";
 const allowed = ["postgresql://postgres@127.0.0.1:55448/rate_calendar_boot_20261029", "postgresql://postgres@127.0.0.1:55448/channex_inbound_test"].includes(process.env.DATABASE_URL || "") ||
  (process.env.CI==="true"&&/^postgres(?:ql)?:\/\/[^@]*@(?:localhost|127\.0\.0\.1):5432\/maran_test$/.test(process.env.DATABASE_URL||""));
 const suite=allowed?describe:describe.skip;
@@ -85,6 +86,52 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  it("does not create a peso reservation from a USD booking",async()=>{
   const f=await fixture(),r=revision(f.id,"booking-usd","usd");r.attributes.currency="USD";
   expect((await apply(f,r)).review_code).toBe("UNSUPPORTED_CURRENCY");expect(await linked(f)).toHaveLength(0);
+ });
+ it("checks the actual 500-day transformation without writing or declaring certification",async()=>{
+  const f=await fixture();
+  const before=(await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n;
+  const report=await getChannexReadiness(pool,f.id);
+  expect(report).toMatchObject({currency:"ARS",floor:2,configurationReady:false,certificationReady:false,remoteVerified:false});
+  expect(report!.roomCount).toBeGreaterThanOrEqual(2);
+  expect(report!.checks.find(c=>c.id==="ari_values")?.ok).toBe(true);
+  expect(report!.checks.find(c=>c.id==="credential")?.ok).toBe(false);
+  expect(report!.checks.find(c=>c.id==="certification_currency")?.ok).toBe(false);
+  expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n).toBe(before);
+  expect(await linked(f)).toHaveLength(0);
+  expect(JSON.stringify(report)).not.toContain("api_key_encrypted");
+ });
+ it("detects expired rates and separates USD publication from unsupported USD reception",async()=>{
+  const f=await fixture();
+  await pool.query("UPDATE rate_plans SET valid_to=CURRENT_DATE+10 WHERE id=$1",[f.plan]);
+  const expired=await getChannexReadiness(pool,f.id);
+  expect(expired!.checks.find(c=>c.id==="ari_values")).toMatchObject({ok:false,message:expect.stringContaining("vigente")});
+  await pool.query("UPDATE rate_plans SET valid_to=NULL,currency='USD' WHERE id=$1",[f.plan]);
+  await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);
+  const usd=await getChannexReadiness(pool,f.id);
+  expect(usd!.checks.find(c=>c.id==="ari_values")?.ok).toBe(true);
+  expect(usd!.checks.find(c=>c.id==="reservation_currency")?.ok).toBe(false);
+  expect(usd!.checks.find(c=>c.id==="certification_currency")?.ok).toBe(true);
+  expect(usd!.configurationReady).toBe(false);expect(usd!.certificationReady).toBe(false);
+  expect(await getChannexReadiness(pool,randomUUID())).toBeNull();
+ });
+ it("distinguishes complete local configuration from activation and remote certification",async()=>{
+  const f=await fixture();
+  vi.stubEnv("CHANNEX_CREDENTIALS_ENCRYPTION_KEY","isolated-readiness-test-key-not-a-real-credential");
+  vi.stubEnv("CHANNEX_ARI_STAGING_ENABLED","");vi.stubEnv("CHANNEX_INBOUND_STAGING_ENABLED","");
+  try {
+   const {encryptChannexApiKey}=await import("../channex/credentials");
+   await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1",[f.id]);
+   await pool.query("UPDATE channex_ari_settings SET enabled=false,floor=81 WHERE connection_id=$1",[f.id]);
+   await pool.query("UPDATE rooms SET floor=81 WHERE room_type_id=$1",[f.type]);
+   await pool.query("UPDATE channex_connections SET api_key_encrypted=$2 WHERE id=$1",[f.id,encryptChannexApiKey("synthetic-not-a-provider-key")]);
+   const report=await getChannexReadiness(pool,f.id);
+   expect(report).toMatchObject({configurationReady:true,activationReady:false,certificationReady:false,roomCount:2});
+   expect(JSON.stringify(report)).not.toContain("synthetic-not-a-provider-key");
+   await pool.query("UPDATE channex_ari_settings SET enabled=true WHERE connection_id=$1",[f.id]);
+   await pool.query("UPDATE channex_inbound_settings SET enabled=true,token_hash=$2 WHERE connection_id=$1",[f.id,"ab".repeat(32)]);
+   vi.stubEnv("CHANNEX_ARI_STAGING_ENABLED","true");vi.stubEnv("CHANNEX_INBOUND_STAGING_ENABLED","true");
+   expect(await getChannexReadiness(pool,f.id)).toMatchObject({configurationReady:true,activationReady:true,certificationReady:false,remoteVerified:false});
+  } finally {vi.unstubAllEnvs();}
  });
  it("updates its own guest contact but preserves manual profile edits",async()=>{
   const f=await fixture();await apply(f,revision(f.id,"booking-guest","guest-new"));

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/App";
+import { ChannexReadiness } from "./channex-readiness";
 const reasons: Record<string, string> = {
   UNLINKED_EXTERNAL_RESERVATION: "Ya existe una reserva con esta referencia externa; revisá su vínculo",
   INVALID_REVISION: "La revisión no tiene el formato esperado", INVALID_BOOKING: "Faltan datos de la reserva",
@@ -35,6 +36,7 @@ export function ChannexInboundSettings({ connectionId }: { connectionId: string 
   return <Card><CardHeader><CardTitle className="text-base">Recepción de reservas de Channex</CardTitle></CardHeader><CardContent className="space-y-3">
     <p className="text-sm">Solo entorno de pruebas. Este receptor crea y actualiza reservas del PMS de pruebas; la bandeja de previsualización sigue siendo independiente. Las revisiones se guardan antes de confirmar su recepción a Channex. Los cambios se aplican al piso configurado; los conflictos quedan para revisión.</p>
     <p className="text-sm font-medium">{query.data?.serverEnabled ? "Recepción habilitada en el servidor de pruebas." : "Conexión entrante desactivada en el servidor."}</p>
+    <ChannexReadiness key={connectionId} connectionId={connectionId} />
     {query.isLoading ? <p>Cargando estado…</p> : query.error ? <p role="alert">No se pudo consultar la recepción.</p> : query.data ? <>
       <p className="text-sm">Esta conexión: {query.data.settings.enabled ? "habilitada" : "pausada"}.</p>
       <div className="flex flex-wrap gap-2"><Button disabled={action.isPending} variant="outline" onClick={() => action.mutate({ method: "PATCH", body: { enabled: !query.data!.settings.enabled } })}>{query.data.settings.enabled ? "Pausar recepción" : "Habilitar recepción de prueba"}</Button>

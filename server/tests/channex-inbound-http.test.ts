@@ -26,8 +26,8 @@ describe("inbound authenticated notifications and configuration",()=>{
  });
  it("requires the Channex configuration permission for enabling, retrying and secret generation",async()=>{
   const query=vi.fn(),base=await start(query);
-  for(const [path,method] of [["","PATCH"],["/retry","POST"],["/webhook-token","POST"]]){
-   expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{method,headers:{"content-type":"application/json"},body:"{}"})).status).toBe(403);
+  for(const [path,method] of [["","PATCH"],["/retry","POST"],["/webhook-token","POST"],["/readiness","GET"]]){
+   expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{method,headers:{"content-type":"application/json"},...(method==="GET"?{}:{body:"{}"})})).status).toBe(403);
   }expect(query).not.toHaveBeenCalled();
  });
  it("stores only a token hash and avoids res.json body logging for the one-time secret",async()=>{

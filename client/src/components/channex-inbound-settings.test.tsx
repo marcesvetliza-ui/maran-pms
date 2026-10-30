@@ -4,6 +4,7 @@ const state=vi.hoisted(()=>({allowed:true}));
 vi.mock("@/App",()=>({useAuth:()=>({hasPermission:()=>state.allowed})}));
 vi.mock("@tanstack/react-query",()=>({useQuery:()=>({data:{serverEnabled:false,settings:{enabled:false,has_token:false},revisions:[{revision_id:"revision",booking_id:"booking",status:"review",review_code:"UNSUPPORTED_CURRENCY",acked_at:null}]},refetch:vi.fn()}),useMutation:()=>({mutate:vi.fn(),isPending:false})}));
 vi.mock("@/lib/queryClient",()=>({apiRequest:vi.fn(),queryClient:{invalidateQueries:vi.fn()}}));
+vi.mock("./channex-readiness",()=>({ChannexReadiness:()=>null}));
 import { ChannexInboundSettings } from "./channex-inbound-settings";
 afterEach(()=>{cleanup();state.allowed=true;});
 describe("Channex inbound operating controls",()=>{

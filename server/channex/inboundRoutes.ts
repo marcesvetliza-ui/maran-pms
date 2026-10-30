@@ -4,6 +4,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import rateLimit from "express-rate-limit";
 import { requirePermission } from "../auth";
 import { STAGING_URL } from "./ari";
+import { getChannexReadiness } from "./readiness";
 const tokenHash = (token: string) => createHash("sha256").update(token).digest();
 /** Mounted before the session gate; a notification only requests a feed read.
  * No guest payload, URL/query token or browser session can authorize a booking. */
@@ -26,6 +27,14 @@ export function registerChannexInboundWebhook(app: Express, pool: Pool) {
 export function registerChannexInboundRoutes(app: Express, pool: Pool) {
   const permission = requirePermission("api:channex:config");
   const root = "/api/channex/connections/:id/inbound";
+  app.get(`${root}/readiness`, permission, async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    try {
+      const readiness = await getChannexReadiness(pool, req.params.id);
+      if (!readiness) return res.status(404).json({ error: "Conexión no encontrada" });
+      res.json(readiness);
+    } catch { res.status(503).json({ error: "No se pudo revisar la preparación para staging" }); }
+  });
   app.get(root, permission, async (req, res) => {
     res.setHeader("Cache-Control", "private, no-store");
     try {
