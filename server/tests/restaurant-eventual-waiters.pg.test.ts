@@ -1,7 +1,7 @@
 /**
  * Mozos eventuales: personal ocasional de Restaurant sin usuario del sistema
  * (sin login, sin email) — se crean al vuelo desde el selector de mozo y
- * quedan disponibles para elegir de nuevo. restaurant_orders.waiter_name ya
+ * quedan disponibles solo en su turno. restaurant_orders.waiter_name ya
  * es un snapshot de texto libre (no una FK a system_users), así que un mozo
  * eventual solo necesita aportar un nombre para que todo lo demás (mostrar
  * en pantalla, comanda, PDF, reporte de ventas por mozo) siga funcionando
@@ -12,7 +12,7 @@ import express from "express";
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
@@ -21,10 +21,15 @@ vi.mock("../auth", () => ({
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 
-const suite = process.env.DATABASE_URL ? describe : describe.skip;
+const allowed = process.env.DATABASE_URL === "postgresql://postgres@127.0.0.1:55448/restaurant_eventual_test" ||
+  (process.env.CI === "true" && /^postgres(?:ql)?:\/\/[^@]*@(?:localhost|127\.0\.0\.1):5432\/maran_test$/.test(process.env.DATABASE_URL || ""));
+const suite = allowed ? describe : describe.skip;
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
 let server: http.Server;
 let baseUrl: string;
+let shiftId: string;
+const shifts: string[] = [], waiters: string[] = [], orders: string[] = [];
+let storage: typeof import("../db-storage").storage;
 
 async function request(method: string, path: string, body?: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -32,11 +37,15 @@ async function request(method: string, path: string, body?: unknown) {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  return { status: response.status, body: (await response.json()) as any };
+  const result = { status: response.status, body: (await response.json()) as any };
+  if (method === "POST" && path === "/api/restaurant/eventual-waiters" && result.status === 201) waiters.push(result.body.id);
+  return result;
 }
 
 suite("PostgreSQL real: mozos eventuales de Restaurant", () => {
   beforeAll(async () => {
+    await pool!.query("ALTER TABLE eventual_waiters ADD COLUMN IF NOT EXISTS cash_shift_id varchar REFERENCES cash_shifts(id)");
+    storage = (await import("../db-storage")).storage;
     const { registerRoutes } = await import("../routes");
     const app = express();
     app.use(express.json());
@@ -47,10 +56,23 @@ suite("PostgreSQL real: mozos eventuales de Restaurant", () => {
     if (!address || typeof address === "string") throw new Error("Sin puerto de prueba");
     baseUrl = `http://127.0.0.1:${address.port}`;
   });
+  beforeEach(async () => {
+    shiftId = randomUUID(); shifts.push(shiftId);
+    await pool!.query("INSERT INTO cash_shifts(id,area,shift_number,status,opened_by,opened_at) VALUES($1,'restaurant',1,'open','Eventual test',now())", [shiftId]);
+  });
+  afterEach(async () => {
+    await pool!.query("UPDATE cash_shifts SET status='closed' WHERE id=ANY($1::varchar[])", [shifts]);
+  });
 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
-    await pool?.end();
+    if (pool) {
+      await pool.query("DELETE FROM restaurant_orders WHERE id=ANY($1::varchar[])", [orders]);
+      await pool.query("DELETE FROM eventual_waiters WHERE id=ANY($1::varchar[])", [waiters]);
+      await pool.query("DELETE FROM cash_closing_summaries WHERE shift_id=ANY($1::varchar[])", [shifts]);
+      await pool.query("DELETE FROM cash_shifts WHERE id=ANY($1::varchar[])", [shifts]);
+      await pool.end();
+    }
   });
 
   it("se puede crear uno, aparece activo en la lista, y una orden real lo guarda como texto libre", async () => {
@@ -110,6 +132,64 @@ suite("PostgreSQL real: mozos eventuales de Restaurant", () => {
       expect(fullList.body.some((w: any) => w.id === waiterId)).toBe(true);
     } finally {
       if (waiterId) await pool.query("DELETE FROM eventual_waiters WHERE id = $1", [waiterId]);
+    }
+  });
+  it("expires the old roster on real shift close, preserves open orders and allows registering again", async () => {
+    const fullName = `Eventual ${randomUUID()}`;
+    const first = await request("POST", "/api/restaurant/eventual-waiters", { fullName });
+    const order = await storage.createRestaurantOrder({ orderNumber: randomUUID(), orderType: "dine_in", status: "open", covers: 1, waiterName: fullName, total: "0", openedAt: new Date() });
+    orders.push(order.id);
+    const closed = await storage.closeShift(shiftId, "Eventual test", 0);
+    shifts.push(closed.turnoNuevo.id);
+    expect((await request("GET", "/api/restaurant/eventual-waiters")).body.some((w: any) => w.id === first.body.id)).toBe(false);
+    expect((await pool!.query("SELECT waiter_name,status FROM restaurant_orders WHERE id=$1", [order.id])).rows[0]).toEqual({ waiter_name: fullName, status: "open" });
+    expect((await request("GET", "/api/restaurant/eventual-waiters?activeOnly=false")).body.some((w: any) => w.id === first.body.id)).toBe(true);
+    expect((await request("PATCH", `/api/restaurant/eventual-waiters/${first.body.id}`, { isActive: "true" })).status).toBe(409);
+    await expect(storage.createRestaurantOrder({ orderNumber: randomUUID(), orderType: "dine_in", covers: 1, waiterName: fullName, total: "0", openedAt: new Date() })).rejects.toMatchObject({ statusCode: 409 });
+    const second = await request("POST", "/api/restaurant/eventual-waiters", { fullName });
+    expect(second.status).toBe(201); expect(second.body.id).not.toBe(first.body.id); expect(second.body.cashShiftId).toBe(closed.turnoNuevo.id);
+  });
+  it("requires an open restaurant shift, independently of reception and SPA", async () => {
+    await pool!.query("UPDATE cash_shifts SET status='closed' WHERE id=$1", [shiftId]);
+    for (const area of ["reception", "spa"]) {
+      const id = randomUUID(); shifts.push(id);
+      await pool!.query("INSERT INTO cash_shifts(id,area,shift_number,status,opened_at) VALUES($1,$2,1,'open',now())", [id, area]);
+    }
+    const result = await request("POST", "/api/restaurant/eventual-waiters", { fullName: `No shift ${randomUUID()}` });
+    expect(result.status).toBe(409); expect(result.body.error).toContain("Restaurante");
+  });
+  it("deduplicates concurrent registrations within a shift without merging past shifts", async () => {
+    const name = `Concurrent ${randomUUID()}`;
+    const [a, b] = await Promise.all([request("POST", "/api/restaurant/eventual-waiters", { fullName: name }), request("POST", "/api/restaurant/eventual-waiters", { fullName: name.toUpperCase() })]);
+    expect(a.status).toBe(201); expect(b.status).toBe(201); expect(a.body.id).toBe(b.body.id);
+    expect((await request("GET", "/api/restaurant/eventual-waiters")).body.filter((w: any) => w.id === a.body.id)).toHaveLength(1);
+  });
+  it("does not publish unlinked legacy names and preserves permanent waiters with the same name", async () => {
+    const id = randomUUID(), userId = randomUUID(), name = `Legacy ${randomUUID()}`; waiters.push(id);
+    await pool!.query("INSERT INTO eventual_waiters(id,full_name,is_active) VALUES($1,$2,'true')", [id, name]);
+    expect((await request("GET", "/api/restaurant/eventual-waiters")).body.some((w: any) => w.id === id)).toBe(false);
+    await pool!.query("INSERT INTO system_users(id,username,email,full_name,role,es_mozo,created_at) VALUES($1,$2,$3,$4,'restaurant','true',now())", [userId, userId, `${userId}@example.test`, name]);
+    try {
+      const order = await storage.createRestaurantOrder({ orderNumber: randomUUID(), orderType: "dine_in", covers: 1, waiterName: name, total: "0", openedAt: new Date() });
+      orders.push(order.id); expect(order.waiterName).toBe(name);
+    } finally { await pool!.query("DELETE FROM system_users WHERE id=$1", [userId]); }
+  });
+  it("does not close an existing old order or occupy a table when a stale waiter selection is rejected", async () => {
+    const area = randomUUID(), table = randomUUID(), oldOrder = randomUUID(), waiter = randomUUID(), name = `Expired ${randomUUID()}`;
+    waiters.push(waiter);
+    await pool!.query("INSERT INTO eventual_waiters(id,full_name,is_active) VALUES($1,$2,'true')", [waiter, name]);
+    await pool!.query("INSERT INTO restaurant_areas(id,name,area_type) VALUES($1,$2,'indoor')", [area, area]);
+    await pool!.query("INSERT INTO restaurant_tables(id,table_number,area_id,status) VALUES($1,'Test',$2,'occupied')", [table, area]);
+    await pool!.query("INSERT INTO restaurant_orders(id,order_number,order_type,status,covers,waiter_name,total,opened_at,table_id) VALUES($1,$2,'dine_in','open',1,'Original waiter',0,now()-interval '2 days',$3)", [oldOrder, randomUUID(), table]);
+    try {
+      const rejected = await request("POST", "/api/restaurant/orders", { tableId: table, covers: 1, waiterName: name });
+      expect(rejected.status, JSON.stringify(rejected.body)).toBe(409);
+      expect((await pool!.query("SELECT id,status,waiter_name FROM restaurant_orders WHERE table_id=$1", [table])).rows).toEqual([{ id: oldOrder, status: "open", waiter_name: "Original waiter" }]);
+      expect((await pool!.query("SELECT status FROM restaurant_tables WHERE id=$1", [table])).rows[0].status).toBe("occupied");
+    } finally {
+      await pool!.query("DELETE FROM restaurant_orders WHERE table_id=$1", [table]);
+      await pool!.query("DELETE FROM restaurant_tables WHERE id=$1", [table]);
+      await pool!.query("DELETE FROM restaurant_areas WHERE id=$1", [area]);
     }
   });
 });
