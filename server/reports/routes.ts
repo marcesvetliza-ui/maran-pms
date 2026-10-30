@@ -630,13 +630,14 @@ export function registerReportsRoutes(app: Express) {
       prevCostos.forEach(c => { prevMap[c.codigo || c.nombre] = $n(c.total); });
 
       const DEPTOS: { nombre: string; prefixes: string[] }[] = [
-        { nombre: "Restaurant / Cocina",   prefixes: ["4.2.1.08.27","4.2.1.08.28","4.2.1.08.29","4.2.1.08.30","4.2.1.08.31","4.2.1.08.32","4.2.1.08.33","4.2.1.08.34","4.2.1.08.35","4.2.1.08.36","4.2.1.08.37","4.2.1.08.38","4.2.1.08.39"] },
+        { nombre: "Restaurant / Cocina",   prefixes: ["4.2.1.08.27","4.2.1.08.28","4.2.1.08.29","4.2.1.08.30","4.2.1.08.31","4.2.1.08.32","4.2.1.08.33","4.2.1.08.34","4.2.1.08.35","4.2.1.08.36","4.2.1.08.37","4.2.1.08.38"] },
         { nombre: "Housekeeping",          prefixes: ["4.2.1.08.23"] },
         { nombre: "Administración",        prefixes: ["4.2.1.08.06","4.2.1.08.07","4.2.1.08.08","4.2.1.08.09","4.2.1.08.10","4.2.1.08.13","4.2.1.08.14","4.2.1.08.15","4.2.1.08.18"] },
         { nombre: "Mantenimiento",         prefixes: ["4.2.1.08.16","4.2.1.08.22"] },
         { nombre: "Servicios Públicos",    prefixes: ["4.2.1.08.11"] },
         { nombre: "Comercial / Publicidad", prefixes: ["4.2.1.08.05","4.2.1.08.12"] },
         { nombre: "Eventos",               prefixes: ["4.2.1.08.40"] },
+        { nombre: "SPA",                   prefixes: ["4.2.1.08.39"] },
       ];
 
       let totalGeneral = 0;
