@@ -11,14 +11,27 @@ describe("Channex revision contract boundary",()=>{
  it("accepts a cancellation without requiring stale guest or rate details",()=>{
   expect(parseBookingRevision({id:"r2",attributes:{booking_id:"b1",property_id:"p1",inserted_at:"2026-10-30T00:00:00Z",status:"cancelled"}},"p1").status).toBe("cancelled");
  });
- it.each(["wrong-property","unknown-status","missing-day","total-mismatch","ambiguous-multiroom","no-timestamp-zone"])("fails closed on %s",problem=>{
+ it.each(["2026-10-30T21:04:48.787899", "2026-10-30T21:04:48"])("accepts Channex UTC timestamp %s without changing money",stamp=>{
+  const r:any=revision();r.attributes.inserted_at=stamp;
+  r.attributes.rooms[0].booking_room_id="stable-room";delete r.attributes.rooms[0].id;
+  const parsed=parseBookingRevision(r,"p1");
+  expect(parsed.insertedAt).toBe(`${stamp}Z`);
+  expect(parsed.rooms[0]).toMatchObject({key:"stable-room",totalCents:25000});
+ });
+ it("keeps booking_room_id stable when room order changes",()=>{
+  const r:any=revision();r.attributes.amount="500.00";
+  r.attributes.rooms=[{...r.attributes.rooms[0],id:undefined,booking_room_id:"a"},{...r.attributes.rooms[0],id:undefined,booking_room_id:"b"}];
+  expect(parseBookingRevision(r,"p1").rooms.map(r=>r.key)).toEqual(["a","b"]);
+  r.attributes.rooms.reverse();expect(parseBookingRevision(r,"p1").rooms.map(r=>r.key)).toEqual(["b","a"]);
+ });
+ it.each(["wrong-property","unknown-status","missing-day","total-mismatch","ambiguous-multiroom","invalid-timestamp"])("fails closed on %s",problem=>{
   const r:any=revision();
   if(problem==="wrong-property")r.attributes.property_id="other";
   if(problem==="unknown-status")r.attributes.status="approved";
   if(problem==="missing-day")delete r.attributes.rooms[0].days["2026-11-02"];
   if(problem==="total-mismatch")r.attributes.amount="251";
   if(problem==="ambiguous-multiroom"){delete r.attributes.rooms[0].id;r.attributes.rooms.push({...r.attributes.rooms[0]});r.attributes.amount="500";}
-  if(problem==="no-timestamp-zone")r.attributes.inserted_at="2026-10-29T23:00:00";
+  if(problem==="invalid-timestamp")r.attributes.inserted_at="2026-10-29T25:00:00";
   expect(()=>parseBookingRevision(r,"p1")).toThrow();
  });
  it("redacts nested card, guarantee, notes and credential fields",()=>{

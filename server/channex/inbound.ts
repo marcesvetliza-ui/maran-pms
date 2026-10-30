@@ -36,6 +36,13 @@ export async function persistInboundRevision(target: Pool, connectionId: string,
       const existing = (await c.query("SELECT payload_hash FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2 FOR UPDATE", [connectionId, payload.id])).rows[0];
       if (existing.payload_hash !== hash) {
         await c.query("UPDATE channex_inbound_revisions SET status='review',review_code='REVISION_ID_COLLISION' WHERE connection_id=$1 AND revision_id=$2", [connectionId, payload.id]);
+      } else if (booking) {
+        // Re-fetching an identical unacknowledged revision after a parser fix
+        // can recover it. Keep the immutable payload/hash and all other review
+        // decisions; normal application still checks scope, mapping and money.
+        await c.query(`UPDATE channex_inbound_revisions SET status='pending',review_code=NULL,booking_id=$3,inserted_at=$4
+          WHERE connection_id=$1 AND revision_id=$2 AND status='review' AND review_code='INVALID_REVISION' AND acked_at IS NULL`,
+          [connectionId, payload.id, booking.bookingId, booking.insertedAt]);
       }
     }
     await c.query("COMMIT");

@@ -56,6 +56,20 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   await Promise.all([service.applyInboundRevision(f.id,r.id),service.applyInboundRevision(f.id,r.id)]);await apply(f,r);
   expect(await linked(f)).toHaveLength(1);expect((await pool.query("SELECT revision_id FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows).toHaveLength(1);
  });
+ it("recovers the identical unacknowledged revision rejected by the old timestamp parser",async()=>{
+  const f=await fixture(),r:any=revision(f.id,"booking-utc-recovery","utc-recovery","new","2026-10-30T21:04:48.787899");
+  r.attributes.rooms[0].booking_room_id="channex-room";delete r.attributes.rooms[0].id;
+  await service.persistInboundRevision(pool,f.id,r);
+  const before=(await pool.query("SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
+  // State left by the previous release: durable payload, no trusted head, no ACK.
+  await pool.query("UPDATE channex_inbound_revisions SET status='review',review_code='INVALID_REVISION',booking_id=NULL,inserted_at=NULL WHERE connection_id=$1",[f.id]);
+  await service.persistInboundRevision(pool,f.id,r);
+  const recovered=(await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
+  expect(recovered).toMatchObject({status:"pending",review_code:null,booking_id:"booking-utc-recovery",payload:before.payload,payload_hash:before.payload_hash});
+  await service.applyInboundRevision(f.id,r.id);await apply(f,r);
+  expect(await linked(f)).toHaveLength(1);
+  expect((await pool.query("SELECT remote_room_id FROM channex_inbound_rooms WHERE connection_id=$1",[f.id])).rows[0].remote_room_id).toBe("channex-room");
+ });
  it("modifies nightly prices and ignores an older revision",async()=>{
   const f=await fixture();await apply(f,revision(f.id,"booking-mod","mod-original"));
   const change=revision(f.id,"booking-mod","mod-new","modified","2026-10-30T01:00:00Z");change.attributes.rooms[0].days["2026-11-11"]="200.00";change.attributes.amount="300";
