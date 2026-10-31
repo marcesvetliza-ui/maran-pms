@@ -61,6 +61,17 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     await pool.query(`UPDATE rate_plans SET base_rate=241 WHERE id='bar'`);
     expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(0);
   });
+  it('shows newest numeric event IDs first after crossing 99 to 100', async () => {
+    await pool.query(`INSERT INTO channex_ari_outbox(id,connection_id,kind,date_from,date_to,reason,task_ids)
+      VALUES(99,'connection','restrictions',$1,$1,'calendar','["old-task"]'),
+            (100,'connection','restrictions',$1,$1,'calendar','["new-task"]'),
+            (101,'connection','restrictions',$1,$1,'calendar','["latest-task"]')`, [day]);
+    const response = await fetch(`${origin}/api/channex/connections/connection/ari`);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.events.map((e: any) => e.id)).toEqual(['101', '100', '99']);
+    expect(data.events[0].task_ids).toEqual(['latest-task']);
+  });
   it('configures scope through the PMS endpoint and queues exactly two full-sync jobs', async () => {
     const r = await fetch(`${origin}/api/channex/connections/connection/ari`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ floor: 2, currency: 'USD', enabled: true }) });
     expect(r.status).toBe(200);

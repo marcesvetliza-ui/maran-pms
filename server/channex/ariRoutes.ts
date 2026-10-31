@@ -20,7 +20,7 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
         const previewFloor = req.query.floor === undefined ? settings.floor : z.coerce.number().int().min(-5).max(100).parse(req.query.floor);
         const rooms = await inventoryPreview(c, req.params.id, previewFloor);
         const summary = (await c.query(`SELECT status,count(*)::int AS count FROM channex_ari_outbox WHERE connection_id=$1 GROUP BY status`, [req.params.id])).rows;
-        const events = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,reason,status,attempts,task_ids,last_error,created_at FROM channex_ari_outbox WHERE connection_id=$1 ORDER BY id DESC LIMIT 30`, [req.params.id])).rows;
+        const events = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,reason,status,attempts,task_ids,last_error,created_at FROM channex_ari_outbox o WHERE connection_id=$1 ORDER BY o.id DESC LIMIT 30`, [req.params.id])).rows;
         res.json({ settings, rooms, summary, events, dispatchEnabled: process.env.CHANNEX_ARI_STAGING_ENABLED === 'true' });
       } finally { c.release(); }
     } catch (error) { res.status(error instanceof z.ZodError ? 400 : 503).json({ error: 'No se pudo consultar el alcance y la cola de Channex' }); }
