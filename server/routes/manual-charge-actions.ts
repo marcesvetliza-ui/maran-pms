@@ -6,6 +6,7 @@ import { pool } from "../db";
 import { requireAuth, requireRole } from "../auth";
 
 const MANUAL_CHARGE_ROLES = ["admin", "manager", "reception"] as const;
+const MANUAL_CHARGE_EDIT_ROLES = [...MANUAL_CHARGE_ROLES, "jefe_recepcion"] as const;
 const MOTIVE_LIMIT = 500;
 const DESCRIPTION_LIMIT = 500;
 const MONEY_LIMIT_CENTS = 9_999_999_999n;
@@ -554,7 +555,7 @@ export function registerManualChargeActionRoutes(app: Express) {
   app.get(
     "/api/reservations/:reservationId/manual-charge-actions",
     requireAuth,
-    requireRole([...MANUAL_CHARGE_ROLES]),
+    requireRole([...MANUAL_CHARGE_EDIT_ROLES]),
     async (req, res) => {
       try {
         const result = await withReservationInvoiceLock(req.params.reservationId, async (client) => {
@@ -578,7 +579,7 @@ export function registerManualChargeActionRoutes(app: Express) {
   app.patch(
     "/api/reservations/:reservationId/manual-charges/:chargeId",
     requireAuth,
-    requireRole([...MANUAL_CHARGE_ROLES]),
+    requireRole([...MANUAL_CHARGE_EDIT_ROLES]),
     async (req, res) => {
       try {
         const result = await mutateManualCharge(
