@@ -967,7 +967,12 @@ export function registerReservationsRoutes(app: Express) {
             (req as any).user?.username,
           );
         }
-        if (earlyCharge > 0) {
+        const recordedSupplements = earlyCharge > 0 || lateCharge > 0
+          ? (await db.execute(sql`SELECT DISTINCT source_type FROM folio_movements
+              WHERE source_type IN ('early_checkin','late_checkout')
+                AND source_id IN (SELECT id FROM charges WHERE reservation_id=${req.params.id})`)).rows.map((r: any) => r.source_type)
+          : [];
+        if (earlyCharge > 0 && !recordedSupplements.includes("early_checkin")) {
           await storage.addFolioCharge(
             "reservation",
             req.params.id,
@@ -978,7 +983,7 @@ export function registerReservationsRoutes(app: Express) {
             (req as any).user?.username,
           );
         }
-        if (lateCharge > 0) {
+        if (lateCharge > 0 && !recordedSupplements.includes("late_checkout")) {
           await storage.addFolioCharge(
             "reservation",
             req.params.id,

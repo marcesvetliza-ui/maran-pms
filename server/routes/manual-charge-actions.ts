@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { invoiceSourceConflict } from "../billing/chargeFiscalHistory";
 import type { Express } from "express";
 import type { PoolClient } from "pg";
@@ -149,7 +150,7 @@ async function inspectManualSource(
   client: PoolClient,
   reservationId: string,
   charge: ChargeRow,
-): Promise<{ eligible: boolean; reason?: string; movementId?: string; movementSnapshot?: Record<string, unknown> }> {
+): Promise<{ eligible: boolean; reason?: string; movementId?: string; movementSnapshot?: Record<string, unknown>; supplement?: "early_checkin" | "late_checkout"; legacySupplement?: boolean }> {
   if (!MANUAL_CHARGE_CATEGORIES.has(charge.category) || charge.is_recurring || charge.unit_amount != null) {
     return { eligible: false, reason: "El origen del cargo no corresponde a un extra manual editable." };
   }
@@ -162,19 +163,42 @@ async function inspectManualSource(
             fm.source_type, fm.source_id, f.entity_type, f.entity_id
        FROM folio_movements fm
        JOIN folios f ON f.id = fm.folio_id
-      WHERE fm.source_type = 'charge' AND fm.source_id = $1 AND fm.type = 'charge'
+      WHERE fm.source_type IN ('charge','early_checkin','late_checkout') AND fm.source_id = $1 AND fm.type = 'charge'
       FOR UPDATE OF fm`,
     [charge.id],
   );
-  if (movementResult.rows.length !== 1) {
+  let supplement: "early_checkin" | "late_checkout" | undefined;
+  let legacySupplement = false;
+  let movement = movementResult.rows[0];
+  if (movementResult.rows.length === 0 && /^(Early Check-in|Late Check-out)(?: \d{2}:\d{2})?$/.test(charge.description)) {
+    // Old automatic supplements were saved before their folio source was linked.
+    // Accept only a unique row matching the actual reservation's enabled amount/time.
+    const r = (await client.query(`SELECT early_check_in,early_check_in_time,early_check_in_charge::text,
+      late_check_out,late_check_out_time,late_check_out_charge::text FROM reservations WHERE id=$1`, [reservationId])).rows[0];
+    const early = charge.description.startsWith('Early');
+    const enabled = early ? r?.early_check_in : r?.late_check_out;
+    const amount = early ? r?.early_check_in_charge : r?.late_check_out_charge;
+    const label = `${early ? 'Early Check-in' : 'Late Check-out'} ${early ? r?.early_check_in_time || '' : r?.late_check_out_time || ''}`.trim();
+    const duplicates = (await client.query(`SELECT id FROM charges WHERE reservation_id=$1 AND description=$2 AND amount::numeric=$3::numeric AND status='active'`, [reservationId, label, charge.amount])).rows;
+    if (enabled && cents(amount) === cents(charge.amount) && label === charge.description && duplicates.length === 1) {
+      supplement = early ? 'early_checkin' : 'late_checkout';
+      const old = await client.query(`SELECT fm.*,f.entity_type,f.entity_id FROM folio_movements fm JOIN folios f ON f.id=fm.folio_id
+        WHERE f.entity_type='reservation' AND f.entity_id=$1 AND fm.type='charge' AND fm.source_type='room' AND fm.source_id=$1
+        AND fm.amount::numeric=$2::numeric AND fm.description IN ($3,$4) FOR UPDATE OF fm`, [reservationId,charge.amount,label,label+' hs']);
+      if (old.rows.length > 1) return { eligible:false,reason:'El recargo tiene movimientos duplicados; requiere revisión.' };
+      movement = old.rows[0] || { id:undefined,entity_type:'reservation',entity_id:reservationId,amount:charge.amount,description:charge.description,source_type:supplement,source_id:charge.id };
+      legacySupplement = true;
+    }
+  }
+  if (movementResult.rows.length > 1 || !movement) {
     return { eligible: false, reason: "No se pudo comprobar un origen manual único en el folio." };
   }
-  const movement = movementResult.rows[0];
+  if (['early_checkin','late_checkout'].includes(movement.source_type)) supplement = movement.source_type;
   if (
     movement.entity_type !== "reservation" ||
     movement.entity_id !== reservationId ||
     movement.amount !== charge.amount ||
-    movement.description !== charge.description
+    (movement.description !== charge.description && !(legacySupplement && movement.description === charge.description + " hs"))
   ) {
     return { eligible: false, reason: "El cargo y su movimiento de folio no coinciden; requiere revisión." };
   }
@@ -191,7 +215,7 @@ async function inspectManualSource(
 
   const linkedMovementHistory = await client.query(
     `SELECT 1 FROM folio_movements
-      WHERE (source_id = $1 AND NOT (source_type = 'charge' AND id = $2))
+      WHERE (source_id = $1 AND NOT (source_type IN ('charge','early_checkin','late_checkout') AND id = $2))
          OR voided_movement_id = $3
       LIMIT 1`,
     [charge.id, movement.id, movement.id],
@@ -209,6 +233,7 @@ async function inspectManualSource(
   return {
     eligible: true,
     movementId: movement.id,
+    supplement, legacySupplement,
     movementSnapshot: {
       id: movement.id,
       folioId: movement.folio_id,
@@ -348,7 +373,7 @@ async function mutateManualCharge(
       }
 
       const proof = await inspectManualSource(client, reservationId, charge);
-      if (!proof.movementId) {
+      if (!proof.movementId && !proof.legacySupplement) {
         throw actionError(409, proof.reason ?? "No se pudo comprobar el origen manual del cargo.", "source_conflict");
       }
       if (!proof.eligible) {
@@ -359,6 +384,17 @@ async function mutateManualCharge(
         charge: publicCharge(charge),
         folioMovement: proof.movementSnapshot,
       };
+      if (proof.legacySupplement) {
+        if (proof.movementId) {
+          await client.query("UPDATE folio_movements SET source_type=$1,source_id=$2 WHERE id=$3", [proof.supplement,chargeId,proof.movementId]);
+        } else {
+          let folio = (await client.query("SELECT id FROM folios WHERE entity_type='reservation' AND entity_id=$1 FOR UPDATE",[reservationId])).rows[0];
+          if (!folio) folio = (await client.query("INSERT INTO folios(id,entity_type,entity_id) VALUES($1,'reservation',$2) RETURNING id",[randomUUID(),reservationId])).rows[0];
+          proof.movementId = randomUUID();
+          await client.query(`INSERT INTO folio_movements(id,folio_id,type,amount,description,source_type,source_id,registered_by)
+            VALUES($1,$2,'charge',$3,$4,$5,$6,$7)`,[proof.movementId,folio.id,charge.amount,charge.description,proof.supplement,chargeId,actor.name]);
+        }
+      }
       let result: ChargeRow;
       let afterMovement: unknown;
       if (operation === "edit") {
@@ -378,7 +414,7 @@ async function mutateManualCharge(
         const movementUpdate = await client.query(
           `UPDATE folio_movements
               SET description = $1, amount = $2
-            WHERE id = $3 AND type = 'charge' AND source_type = 'charge' AND source_id = $4
+            WHERE id = $3 AND type = 'charge' AND source_type IN ('charge','early_checkin','late_checkout') AND source_id = $4
           RETURNING folio_id`,
           [nextDescription, money(nextAmount!), proof.movementId, chargeId],
         );
@@ -388,6 +424,10 @@ async function mutateManualCharge(
         await recalculateFolio(client, movementUpdate.rows[0].folio_id);
         const updatedMovement = await client.query("SELECT * FROM folio_movements WHERE id = $1", [proof.movementId]);
         afterMovement = updatedMovement.rows[0];
+        if (proof.supplement) {
+          const column = proof.supplement === 'early_checkin' ? 'early_check_in_charge' : 'late_check_out_charge';
+          await client.query(`UPDATE reservations SET ${column}=$1 WHERE id=$2`,[money(nextAmount!),reservationId]);
+        }
         result = updateCharge.rows[0] as ChargeRow;
       } else {
         const updateCharge = await client.query(
@@ -405,7 +445,7 @@ async function mutateManualCharge(
         }
         const folio = await client.query(
           `SELECT folio_id FROM folio_movements
-            WHERE id = $1 AND type = 'charge' AND source_type = 'charge' AND source_id = $2`,
+            WHERE id = $1 AND type = 'charge' AND source_type IN ('charge','early_checkin','late_checkout') AND source_id = $2`,
           [proof.movementId, chargeId],
         );
         if (folio.rows.length !== 1) {
@@ -572,7 +612,7 @@ export function registerManualChargeActionRoutes(app: Express) {
 
 export async function manualChargeHasSourceLedger(chargeId: string): Promise<boolean> {
   const result = await pool.query(
-    "SELECT 1 FROM folio_movements WHERE source_type = 'charge' AND source_id = $1 LIMIT 1",
+    "SELECT 1 FROM folio_movements WHERE source_type IN ('charge','early_checkin','late_checkout') AND source_id = $1 LIMIT 1",
     [chargeId],
   );
   return Number(result.rowCount) > 0;
