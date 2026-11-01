@@ -3976,7 +3976,7 @@ export default function GroupDetailPage() {
             );
             const isMaster = groupPaymentDestino === "master";
             const priorBalance = isMaster ? (masterFolio?.masterBalance ?? 0) : (folio?.totals.balance ?? 0);
-            const isRI = groupPaymentCondicionIva === "Responsable Inscripto" || groupPaymentCondicionIva === "Exento";
+            const isRI = groupPaymentCondicionIva === "Responsable Inscripto";
             const condicionSupportsFA = isRI;
             const receiptTypeLabels: Record<string, string> = {
               factura_a: "Factura A",
@@ -4059,14 +4059,14 @@ export default function GroupDetailPage() {
               : [];
 
             // Comprobante types are strictly split by Condición IVA: Responsable
-            // Inscripto/Exento may only receive Factura A/MiPyme A (never Ticket/B),
+            // Inscripto may only receive Factura A/MiPyme A (never Ticket/B),
             // while every other condición may only receive Ticket/Factura B (never
             // A/MiPyme A). Factura T and Voucher Habitaciones sit outside this split
             // (foreign-guest and no-comprobante rules respectively). Call this any
             // time the receptor's condición changes so the current selection — and
             // the dropdown's visible options — stay consistent with the new value.
             const applyStrictComprobanteForCondicion = (condicion: string) => {
-              const supportsFA = condicion === "Responsable Inscripto" || condicion === "Exento";
+              const supportsFA = condicion === "Responsable Inscripto";
               setGroupPaymentReceiptType(prev => {
                 if (prev === "sin_comprobante" || prev === "factura_t") return prev;
                 const prevIsFAFamily = prev === "factura_a" || prev === "factura_mipyme_a";
@@ -4354,7 +4354,7 @@ export default function GroupDetailPage() {
                         </p>
                       )}
                       {!condicionSupportsFA && (
-                        <p className="text-xs text-muted-foreground">Factura A / MiPyme A solo disponibles para Responsable Inscripto o Exento.</p>
+                        <p className="text-xs text-muted-foreground">Factura A / MiPyme A solo disponibles para Responsable Inscripto.</p>
                       )}
                     </div>
                   )}

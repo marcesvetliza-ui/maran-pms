@@ -1,3 +1,4 @@
+import { discardRejectedExemptInvoice } from "./rejectedExemptInvoice";
 import { registerGroupFiscalCashRecoveryRoutes } from "./groupFiscalCashRecovery";
 import { recoverGroupCreditNote } from "./groupCreditRecovery";
 import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
@@ -1321,20 +1322,15 @@ export function registerBillingRoutes(app: Express) {
         !["arg", "ar", "200"].includes(String(folioContext.nationalityCode || "").trim().toLowerCase()) &&
         !["argentina", "argentino", "argentina/a", "argentine"].includes(String(folioContext.nationality || "").trim().toLowerCase());
 
-      // Condición IVA → tipo de comprobante is a strict, mutually exclusive
-      // split: Responsable Inscripto/Exento only ever get Factura A/MiPyme A,
-      // everyone else (Monotributista, Consumidor Final, etc.) only gets
-      // Factura B — matching the same rule enforced client-side in
-      // group-detail.tsx's applyStrictComprobanteForCondicion. Kept as one
-      // shared rule (not scoped to groupId) since this endpoint is the single
-      // point of invoice emission for reservations, groups, spa and events.
+      // IVA Exento recipients use B without changing the service's VAT.
+      // Other recipient classifications retain their existing validation.
       if (tipoComprobante === "FA" || tipoComprobante === "FM") {
-        if (!["responsable_inscripto", "exento"].includes(vatCondition) || cuitDigits.length !== 11) {
-          return res.status(400).json({ error: "Factura A requiere CUIT válido y condición Responsable Inscripto o Exento" });
+        if (!(vatCondition === "responsable_inscripto") || cuitDigits.length !== 11) {
+          return res.status(400).json({ error: "Factura A requiere CUIT válido y condición Responsable Inscripto" });
         }
       }
-      if ((tipoComprobante === "FB" || tipoComprobante === "FMB") && ["responsable_inscripto", "exento"].includes(vatCondition)) {
-        return res.status(400).json({ error: "Factura B no corresponde a receptores Responsable Inscripto o Exento" });
+      if ((tipoComprobante === "FB" || tipoComprobante === "FMB") && (vatCondition === "responsable_inscripto")) {
+        return res.status(400).json({ error: "Factura B no corresponde a receptores Responsable Inscripto" });
       }
       if (tipoComprobante === "FT" && !groupId && (!isForeignGuest || !folioContext?.hasAccommodation)) {
         return res.status(400).json({ error: "Factura T solo puede emitirse a un huésped extranjero por alojamiento" });
@@ -2421,6 +2417,26 @@ export function registerBillingRoutes(app: Express) {
       if (Number(status) >= 400) return res.status(status).json({ error: e.message });
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // User-triggered correction: consults ARCA, never authorizes or records money.
+  app.post("/api/billing/reservations/:reservationId/operations/:operationId/correct-exempt-rejection", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
+    const { reservationId, operationId } = req.params;
+    if (!/^[0-9a-f-]{20,}$/i.test(operationId)) return res.status(400).json({ error: "Operación inválida" });
+    try {
+      const config = await getBillingConfig();
+      const environment = config.arcaAmbiente || "ficticio";
+      const issuer = String(config.arcaCuit || config.cuit || "").replace(/\D/g, "");
+      const user = req.user as any;
+      const result = await discardRejectedExemptInvoice(pool, reservationId, operationId,
+        { id: user?.id, name: user?.fullName || user?.username, ip: req.ip }, { environment, issuer }, async invoice => {
+          const { getTokenAuth } = await import("./wsaaClient");
+          const { feCompConsultar } = await import("./wsfevClient");
+          const { token, sign } = await getTokenAuth(config.arcaCert!, config.arcaKey!, environment as "produccion" | "homologacion");
+          return feCompConsultar({ tipo: invoice.tipo_comprobante, puntoVenta: Number(invoice.punto_venta), numero: Number(invoice.numero), cuitEmisor: issuer, token, sign }, environment as "produccion" | "homologacion");
+        });
+      res.json(result);
+    } catch (error: any) { res.status(error.statusCode || 502).json({ error: error.message || "No se pudo verificar el rechazo. Conservamos la operación." }); }
   });
 
   // Read-only proof for a definitively rejected submission. The browser must

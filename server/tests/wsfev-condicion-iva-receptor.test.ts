@@ -79,6 +79,17 @@ describe("WSFEv1 FECAESolicitar — CondicionIVAReceptorId", () => {
     expect(request.body as string).toContain("<ar:CondicionIVAReceptorId>5</ar:CondicionIVAReceptorId>");
   });
 
+  it("sends B/CUIT/exempt 4 while retaining 21 percent accommodation VAT", async () => {
+    mockArcaSuccess();
+    await feCAESolicitar({ ...baseRequest, tipo: "FB", clienteCuit: "30545515926", clienteCondicionIva: "Exento", montoTotal: 121, montoNeto: 100, montoNeto21: 100, montoIva21: 21, montoNoGravado: 0 }, "homologacion");
+    const body = String((global.fetch as any).mock.calls[0][1].body);
+    expect(body).toContain("<ar:CbteTipo>6</ar:CbteTipo>");
+    expect(body).toContain("<ar:CondicionIVAReceptorId>4</ar:CondicionIVAReceptorId>");
+    expect(body).toContain("<ar:DocTipo>80</ar:DocTipo>");
+    expect(body).toContain("<ar:DocNro>30545515926</ar:DocNro>");
+    expect(body).toContain("<ar:ImpIVA>21.00</ar:ImpIVA>");
+  });
+
   it("mapea Responsable Inscripto a 1 en una Factura A", async () => {
     mockArcaSuccess();
     await feCAESolicitar({ ...baseRequest, tipo: "FA", clienteCondicionIva: "Responsable Inscripto" }, "homologacion");
