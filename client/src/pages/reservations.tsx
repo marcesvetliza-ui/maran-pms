@@ -5567,7 +5567,7 @@ export function ReservationDetailDialog({
   );
 }
 
-function CancelReservationDialog({
+export function CancelReservationDialog({
   reservation,
   open,
   onOpenChange,
@@ -5604,6 +5604,9 @@ function CancelReservationDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cancelled-reservations"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations/cancellations/in-shift"] });
+      queryClient.invalidateQueries({ predicate: query => query.queryKey[0] === "/api/planning" });
       toast({
         title: "Reserva anulada",
         description: "La reserva ha sido anulada y registrada en el log de cancelaciones.",
@@ -5646,7 +5649,7 @@ function CancelReservationDialog({
           </DialogTitle>
           <DialogDescription>
             <strong>Anular</strong> cambia el estado a "Cancelada" y registra el motivo en el historial. 
-            La reserva NO se elimina del sistema.
+            La reserva NO se elimina del sistema. La anulación se informa en caja; no anula automáticamente cobros ni comprobantes.
           </DialogDescription>
         </DialogHeader>
 
@@ -5705,7 +5708,7 @@ function CancelReservationDialog({
           <Button
             variant="destructive"
             onClick={handleCancel}
-            disabled={cancelMutation.isPending}
+            disabled={cancelMutation.isPending || !reason.trim()}
             data-testid="button-confirm-cancel"
           >
             {cancelMutation.isPending ? "Anulando..." : "Confirmar Anulación"}

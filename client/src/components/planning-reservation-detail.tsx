@@ -1,4 +1,4 @@
-import { ReservationDetailDialog } from "@/pages/reservations";
+import { CancelReservationDialog, ReservationDetailDialog } from "@/pages/reservations";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { LogIn, LogOut, AlertCircle, Undo2 } from "lucide-react";
@@ -35,6 +35,7 @@ export function ReservationDetailModal({
 }) {
   const { toast } = useToast();
   const { user } = useAuth();
+  const [cancelReservation, setCancelReservation] = useState<ReservationWithDetails | null>(null);
   const [retroDialogOpen, setRetroDialogOpen] = useState(false);
   const [retroMotivo, setRetroMotivo] = useState("");
   const [dirtyRoomDialogOpen, setDirtyRoomDialogOpen] = useState(false);
@@ -165,39 +166,7 @@ export function ReservationDetailModal({
     },
   });
 
-  const cancelReservationMutation = useMutation({
-    mutationFn: async () =>
-      apiRequest("POST", `/api/reservations/${reservationId}/cancel`, {
-        reason: "Anulado desde Planning",
-        cancelledBy: user?.username || "Recepción",
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "/api/planning",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      queryClient.invalidateQueries({
-        queryKey: ["/api/cancelled-reservations"],
-        exact: false,
-      });
-      toast({ title: "Reserva anulada" });
-      onOpenChange(false);
-    },
-    onError: (error: any) => {
-      let description = "No se pudo anular la reserva.";
-      try {
-        const body = JSON.parse(error.message.replace(/^\d+:\s*/, ""));
-        if (body.error) description = body.error;
-      } catch {}
-      toast({ title: "Error", description, variant: "destructive" });
-    },
-  });
-
-  if (!reservationId) return null;
+  if (!reservationId && !cancelReservation) return null;
 
   const todayLocal = getLocalToday();
   const isCheckInDateValid = reservation
@@ -235,10 +204,11 @@ export function ReservationDetailModal({
     reservation?.status === "confirmed" ||
     reservation?.status === "web_checkin" ||
     reservation?.status === "pending" ||
-    reservation?.status === "tentative";
+    reservation?.status === "tentative" ||
+    reservation?.status === "checked_in";
   return (
     <>
-      {open && reservation ? (
+      {open && reservation && !cancelReservation ? (
         <ReservationDetailDialog
           open={open}
           reservation={reservation}
@@ -253,10 +223,7 @@ export function ReservationDetailModal({
                 }
               : undefined
           }
-          onCancel={() => {
-            if (window.confirm("¿Está seguro que desea cancelar esta reserva?"))
-              cancelReservationMutation.mutate();
-          }}
+          onCancel={() => setCancelReservation(reservation)}
           operationalActions={
             <>
               {reservation.isGroup && reservation.groupId && (
@@ -355,7 +322,7 @@ export function ReservationDetailModal({
           }
         />
       ) : (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open && !cancelReservation} onOpenChange={onOpenChange}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Detalle de reserva</DialogTitle>
@@ -368,6 +335,14 @@ export function ReservationDetailModal({
           </DialogContent>
         </Dialog>
       )}
+
+      {cancelReservation && <CancelReservationDialog
+        reservation={cancelReservation}
+        open
+        currentUserName={user?.fullName || user?.username}
+        onOpenChange={value => { if (!value) setCancelReservation(null); }}
+        onSuccess={() => { setCancelReservation(null); onOpenChange(false); }}
+      />}
 
       {/* Retroactive check-in dialog */}
       <Dialog

@@ -1,3 +1,4 @@
+import { ReservationCancellationHistory } from "@/components/reservation-cancellation-history";
 import { canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
 import { formatDisplayDate } from "@shared/date-display";
 import { informationalSummary } from "@/lib/cash-informational-summary";
@@ -1008,6 +1009,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
       </Card>
 
       {area === "spa" && <SpaCancellationHistory today />}
+      {["reception", "recepcion"].includes(area) && <ReservationCancellationHistory today />}
       {currentShift && (
         <>
           <Card>
@@ -2049,6 +2051,7 @@ function HistorialTab() {
             <DialogTitle>Detalle del Turno</DialogTitle>
           </DialogHeader>
           {shiftDetail?.shift.area === "spa" && detailShiftId && <SpaCancellationHistory shiftId={detailShiftId} />}
+          {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <ReservationCancellationHistory shiftId={detailShiftId} />}
           {detailLoading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => (
