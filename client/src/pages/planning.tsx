@@ -1301,12 +1301,15 @@ export default function PlanningPage() {
                                           <Sunrise className="h-3 w-3 text-orange-400" />
                                         </div>
                                       ) : status === "late_blocked" ? (
-                                        <div
-                                          className={`h-8 rounded border flex items-center justify-center ${getStatusColor("late_blocked")}`}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleCellClick(room, day, status, reservationId)}
+                                          aria-label={`Nueva reserva en habitación ${room.roomNumber} el ${day}; salida con late check-out`}
+                                          className={`h-8 w-full rounded border flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-primary/50 focus-visible:ring-2 focus-visible:ring-primary ${getStatusColor("late_blocked")}`}
                                           data-testid={`cell-${room.id}-${day}`}
                                         >
                                           <Sunset className="h-3 w-3 text-purple-400" />
-                                        </div>
+                                        </button>
                                       ) : ghostBlock ? (
                                         <div
                                           className="h-8 rounded border-2 border-dashed flex items-center justify-between cursor-pointer transition-all hover:brightness-110 group/ghost relative px-1"
@@ -1421,7 +1424,7 @@ export default function PlanningPage() {
                                               </div>
                                             )}
                                             <div className="border-t pt-1 mt-1 text-primary">
-                                              Clic para ver detalle
+                                              {status === "late_blocked" ? "Clic para crear una reserva; hay late check-out" : "Clic para ver detalle"}
                                             </div>
                                           </>
                                         ) : ghostBlock ? (
