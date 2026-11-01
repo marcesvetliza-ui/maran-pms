@@ -3169,9 +3169,9 @@ export function ReservationDetailDialog({
   const activeConsumptionCharges = consumptionCharges.filter((c) => (c as any).status !== "anulado");
   const totalConsumptions = activeConsumptionCharges.reduce((sum, c) => sum + parseFloat(c.amount), 0);
   const totalPayments = safePayments.filter((p) => (p as any).status !== "anulado").reduce((sum, p) => sum + parseFloat(p.amount), 0);
-  const earlyCharge = parseFloat(reservation.earlyCheckInCharge || "0");
-  const lateCharge = parseFloat(reservation.lateCheckOutCharge || "0");
-  const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0") + earlyCharge + lateCharge;
+  // Early/late supplements are persisted in charges by the reservation routes.
+  // Count those active rows once below, never add the reservation metadata again.
+  const subtotalRoom = parseFloat(reservation.totalRoomAmount || "0");
   const totalNdAmount = folioNdMovements.reduce((sum: number, m: any) => sum + parseFloat(m.amount || "0"), 0);
   const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
@@ -3793,30 +3793,6 @@ export function ReservationDetailDialog({
               </div>
             )}
 
-            {(earlyCharge > 0 || lateCharge > 0) && <div className="border rounded-lg">
-              <div className="p-3 border-b bg-muted/50">
-                <h4 className="font-semibold">Ingreso y salida fuera de horario</h4>
-              </div>
-              <div className="p-3">
-                {earlyCharge > 0 && (
-                  <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
-                    <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                    <span>${fmtMoney(earlyCharge)}</span>
-                  </div>
-                )}
-                {lateCharge > 0 && (
-                  <div className="flex justify-between text-sm mb-2 text-amber-600 dark:text-amber-400">
-                    <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                    <span>${fmtMoney(lateCharge)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-semibold pt-2 border-t">
-                  <span>Subtotal Alojamiento</span>
-                  <span data-testid="text-subtotal-room">${fmtMoney(subtotalRoom)}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">* Precio incluye IVA (21%). El desglose se realiza al facturar.</p>
-              </div>
-            </div>}
 
             <div className="wf-panel wf-consumptions">
               <div className="wf-panel-heading compact">
@@ -4621,18 +4597,6 @@ export function ReservationDetailDialog({
                   <span>Subtotal Alojamiento</span>
                   <span>${fmtMoney(reservation.totalRoomAmount || "0")}</span>
                 </div>
-                {earlyCharge > 0 && (
-                  <div className="flex justify-between text-sm mb-1 text-amber-600 dark:text-amber-400">
-                    <span>+ Early Check-in{reservation.earlyCheckInTime ? ` (${reservation.earlyCheckInTime} hs)` : ""}</span>
-                    <span>${fmtMoney(earlyCharge)}</span>
-                  </div>
-                )}
-                {lateCharge > 0 && (
-                  <div className="flex justify-between text-sm mb-1 text-amber-600 dark:text-amber-400">
-                    <span>+ Late Check-out{reservation.lateCheckOutTime ? ` (${reservation.lateCheckOutTime} hs)` : ""}</span>
-                    <span>${fmtMoney(lateCharge)}</span>
-                  </div>
-                )}
                 <div className="flex justify-between text-sm mb-1">
                   <span>+ Consumos</span>
                   <span>${fmtMoney(totalConsumptions)}</span>
