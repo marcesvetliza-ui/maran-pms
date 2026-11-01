@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { addDays, daysBetween, compressValues, retryDelay } from '../channex/ari';
+import { addDays, daysBetween, compressValues, retryDelay, ARI_CALL_INTERVAL_MS } from '../channex/ari';
 import { dispatchChannexAri } from '../channex/ariWorker';
 describe('Channex ARI boundaries', () => {
   it('uses inclusive civil days across leap dates and bounds every batch at 500 days', () => {
@@ -16,7 +16,13 @@ describe('Channex ARI boundaries', () => {
   it('honors Retry-After seconds and dates and backs off across failures', () => {
     expect(retryDelay(0, '120', 0, () => 0)).toBe(120000);
     expect(retryDelay(0, 'Thu, 01 Jan 1970 00:02:00 GMT', 0, () => 0)).toBe(120000);
-    expect(retryDelay(3, null, 0, () => 0)).toBe(40000);
+    expect(retryDelay(3, null, 0, () => 0)).toBe(480000);
+  });
+  it('stays within the per-endpoint quota even for a burst of one request kind', () => {
+    const requests = Array.from({ length: 30 }, (_, i) => i * ARI_CALL_INTERVAL_MS);
+    for (const start of requests) expect(requests.filter(t => t >= start && t < start + 60000).length).toBeLessThanOrEqual(10);
+    expect(retryDelay(0, null, 0, () => 0)).toBe(60000);
+    expect(retryDelay(1, '5', 0, () => 0)).toBe(120000);
   });
   it('never reads the database or sends externally when disabled', async () => {
     const pool = { connect: vi.fn() }, send = vi.fn();

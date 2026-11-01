@@ -120,6 +120,14 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     const send = vi.fn(async () => { entered(); await gate; return ['task']; }); const first = dispatchChannexAri(pool, send, true); await enteredPromise;
     try { expect((await dispatchChannexAri(pool, send, true)).state).toBe('busy'); } finally { release(); await first; } expect(send).toHaveBeenCalledTimes(1);
   });
+  it.each([503, 400, 'network'])('pauses other queued ARI for at least one minute after %s', async status => {
+    await enable(); await pool.query(`UPDATE rate_plans SET base_rate=333 WHERE id='bar'`);
+    const send = vi.fn(async () => { if (status === 'network') throw new TypeError('network unavailable'); throw new AriTransportError(Number(status)); });
+    expect((await dispatchChannexAri(pool, send, true)).state).toBe(status === 400 ? 'blocked' : 'retry');
+    expect((await pool.query("SELECT next_call_at > now()+interval '55 seconds' AS paused FROM channex_ari_dispatch WHERE id=1")).rows[0].paused).toBe(true);
+    expect((await dispatchChannexAri(pool, send, true)).state).toBe('cooldown');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
   it('blocks production, missing mappings and currency mismatches without sending', async () => {
     await enable(); await pool.query(`UPDATE rate_plans SET currency='ARS' WHERE id='bar'`); const send = vi.fn();
     expect((await dispatchChannexAri(pool, send, true)).state).toBe('blocked'); expect(send).not.toHaveBeenCalled();

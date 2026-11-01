@@ -80,7 +80,8 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
       const delay = retryDelay(Math.max(...events.map(e => e.attempts)), error instanceof AriTransportError ? error.retryAfter : null);
       const safeMessage = error instanceof AriTransportError || error instanceof AriConfigurationError ? error.message : transient ? 'No se pudo conectar con Channex; se reintentará' : 'Revisá el alcance, el mapeo, la moneda y la vigencia de las tarifas antes de reintentar';
       await c.query(`UPDATE channex_ari_outbox SET status=$2,attempts=attempts+1,run_after=now()+($3*interval '1 millisecond'),last_error=$4 WHERE id=ANY($1::bigint[])`, [ids, transient ? 'pending' : 'blocked', delay, safeMessage]);
-      if (error instanceof AriTransportError && error.status === 429) await c.query(`UPDATE channex_ari_dispatch SET next_call_at=GREATEST(next_call_at,now()+($1*interval '1 millisecond')) WHERE id=1`, [delay]);
+      // Pause all ARI dispatch after provider/network errors, including other queued events.
+      if (transient || error instanceof AriTransportError) await c.query(`UPDATE channex_ari_dispatch SET next_call_at=GREATEST(next_call_at,now()+($1*interval '1 millisecond')) WHERE id=1`, [delay]);
       return { state: transient ? 'retry' : 'blocked' };
     }
   } finally { try { if (locked) await c.query('SELECT pg_advisory_unlock(1296126535,903)'); } finally { c.release(); } }

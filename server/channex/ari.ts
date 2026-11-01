@@ -5,7 +5,7 @@ export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date
 export type AriValue = { property_id: string; date_from: string; date_to: string;[key: string]: string | number | boolean };
 export class AriConfigurationError extends Error { }
 export const STAGING_URL = 'https://staging.channex.io/api/v1';
-export const ARI_CALL_INTERVAL_MS = 3100; // Global persisted spacing: at most 20 calls in any minute.
+export const ARI_CALL_INTERVAL_MS = 6100; // Conservative global spacing: <=10 ARI calls/minute, hence <=10 per endpoint/property.
 export function addDays(day: string, days: number) {
   const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10);
 }
@@ -18,7 +18,7 @@ export function daysBetween(from: string, to: string) {
 export function retryDelay(attempt: number, retryAfter: string | null, now = Date.now(), random = Math.random) {
   const seconds = retryAfter === null ? NaN : Number(retryAfter);
   const requested = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter || '') - now;
-  return Math.max(3100, Number.isFinite(requested) ? Math.max(0, requested) : 0, Math.min(3600000, 5000 * 2 ** Math.min(attempt, 10)) * (1 + random() * .2));
+  return Math.max(60000, Number.isFinite(requested) ? Math.max(0, requested) : 0, Math.min(3600000, 60000 * 2 ** Math.min(attempt, 10)) * (1 + random() * .2));
 }
 export function compressValues(values: AriValue[]): AriValue[] {
   const result: AriValue[] = [];
