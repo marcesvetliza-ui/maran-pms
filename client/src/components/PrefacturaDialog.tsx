@@ -1,8 +1,9 @@
+import { CompanySelector } from "@/components/entity-selector";
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
@@ -11,7 +12,7 @@ import {
   buildAppliedPaymentMethodDetails,
   buildInvoicePaymentMethods,
 } from "@/lib/invoice-payment-methods";
-import type { ReservationWithDetails, PaymentMethod } from "@shared/schema";
+import type { ReservationWithDetails, PaymentMethod, Company, InsertCompany } from "@shared/schema";
 import {
   getAvailableReservationAdvancePayments,
   isReservationCreditNoteAdjustment,
@@ -518,6 +519,9 @@ export function PrefacturaDialog({
 
   // Step 1: who to bill
   const [billingTarget, setBillingTarget] = useState<"guest" | "company" | "agency">("guest");
+  const billingRecipientTouched = useRef(false);
+  const companyCreationPending = useRef(false);
+  const [showCreateCompany, setShowCreateCompany] = useState(false);
   const [billingEntityId, setBillingEntityId] = useState("");
   const [razonSocial, setRazonSocial] = useState("");
   const [cuit, setCuit] = useState("");
@@ -667,6 +671,8 @@ export function PrefacturaDialog({
     if (open) {
       setHasPendingSubmission(!!submission.current!.pending(reservationId));
       setStep(1);
+      billingRecipientTouched.current = false;
+      setShowCreateCompany(false);
       setDoCheckout(true);
       setEmittedInvoice(null);
       setCheckoutDone(false);
@@ -767,7 +773,7 @@ export function PrefacturaDialog({
   // initial guess, never locked: handleBillingTargetChange lets reception
   // switch to the guest (or back) at any time.
   useEffect(() => {
-    if (!reservation || !open) return;
+    if (!reservation || !open || billingRecipientTouched.current) return;
     // The reservation's own company/agency link takes priority (it's what
     // reception explicitly chose for this stay), but falls back to whatever
     // the guest's own profile has on file — otherwise a guest with a company
@@ -899,6 +905,7 @@ export function PrefacturaDialog({
   }
 
   function handleBillingTargetChange(target: "guest" | "company" | "agency") {
+    billingRecipientTouched.current = true;
     setSubmitError(null);
     setBillingTarget(target);
     setBillingEntityId("");
@@ -912,12 +919,37 @@ export function PrefacturaDialog({
   }
 
   function handleEntitySelect(id: string, entityType: "company" | "agency") {
+    billingRecipientTouched.current = true;
     setSubmitError(null);
     setBillingEntityId(id);
     const list = entityType === "company" ? companies : agencies;
     const entity = list.find((e: any) => String(e.id) === id);
     if (entity) applyEntity(entity, entityType);
   }
+
+  const createBillingCompany = useMutation({
+    mutationFn: async (company: InsertCompany): Promise<Company> => {
+      const response = await apiRequest('POST', '/api/companies', company);
+      const created = await response.json();
+      if (!created?.id) throw new Error('La empresa no devolvió una identificación válida. Actualizá el listado antes de reintentar.');
+      return created;
+    },
+    onSuccess: (company) => {
+      billingRecipientTouched.current = true;
+      queryClient.setQueryData<any[]>(['/api/companies'], current => [...(Array.isArray(current) ? current.filter(c => String(c.id) !== String(company.id)) : []), company]);
+      setBillingTarget('company'); setBillingEntityId(String(company.id)); applyEntity(company, 'company');
+      setSubmitError(null); setShowCreateCompany(false);
+      void queryClient.invalidateQueries({ queryKey: ['/api/companies'] });
+      void queryClient.invalidateQueries({ queryKey: ['/api/companies/search'] });
+      toast({ title: 'Empresa creada y seleccionada' });
+    },
+    onError: (error: Error) => {
+      let message = error.message;
+      try { const body = JSON.parse(message.slice(message.indexOf('{'))); message = typeof body.error === 'string' ? body.error : body.error?.message || message; } catch {}
+      toast({ title: 'No se pudo crear la empresa', description: message, variant: 'destructive' });
+    },
+    onSettled: () => { companyCreationPending.current = false; },
+  });
 
   const addChargePresets = [
     ...chargeTypesData.map(ct => ({ id: ct.id, label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowPriceEdit: ct.allowPriceEdit ?? false })),
@@ -1831,6 +1863,7 @@ export function PrefacturaDialog({
                         <SelectContent>{companies.filter((company: any) => company.id).map((company: any) => <SelectItem key={company.id} value={String(company.id)}>{company.razonSocial || company.nombreFantasia}</SelectItem>)}</SelectContent>
                       </Select>
                     )}
+                    {!billingTargetLocked && <Button type="button" variant="ghost" size="sm" className="h-7 px-1 text-xs" data-testid="button-new-billing-company" disabled={isSubmitting || hasPendingSubmission || createBillingCompany.isPending} onClick={() => setShowCreateCompany(true)}><Plus className="h-3 w-3 mr-1" />Nueva empresa</Button>}
                   </div>
                 )}
                 {billingTarget === "agency" && (
@@ -2559,6 +2592,21 @@ export function PrefacturaDialog({
           )}
         </div>
       </DialogContent>
+
+      <Dialog open={showCreateCompany} onOpenChange={value => { if (!companyCreationPending.current) setShowCreateCompany(value); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Nueva empresa para facturar</DialogTitle><DialogDescription>Guardá la empresa y quedará seleccionada en esta prefactura, sin perder los cargos ni el cobro preparados.</DialogDescription></DialogHeader>
+          <fieldset disabled={createBillingCompany.isPending} className={createBillingCompany.isPending ? 'pointer-events-none opacity-60' : ''}>
+            <CompanySelector initialMode="create" resetOnCreate={false} onSelect={company => { billingRecipientTouched.current = true; setBillingTarget('company'); setBillingEntityId(String(company.id)); applyEntity(company,'company'); setShowCreateCompany(false); }} onCreateNew={company => {
+              if (companyCreationPending.current) return;
+              companyCreationPending.current = true;
+              createBillingCompany.mutate(company);
+            }} />
+          </fieldset>
+          {createBillingCompany.isPending && <p role="status" className="text-sm">Guardando empresa…</p>}
+          <DialogFooter><Button type="button" variant="outline" disabled={createBillingCompany.isPending} onClick={() => setShowCreateCompany(false)}>Cancelar alta de empresa</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Transfer charge sub-dialog (single charge) */}
       <TransferChargeDialog

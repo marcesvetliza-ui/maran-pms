@@ -593,6 +593,8 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
 }
 
 interface CompanySelectorProps {
+  initialMode?: "search" | "create";
+  resetOnCreate?: boolean;
   onSelect: (company: Company) => void;
   onCreateNew: (company: InsertCompany) => void;
   selectedCompany?: Company | null;
@@ -600,9 +602,9 @@ interface CompanySelectorProps {
   cardClassName?: string;
 }
 
-export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClear, cardClassName }: CompanySelectorProps) {
+export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClear, cardClassName, initialMode = "search", resetOnCreate = true }: CompanySelectorProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [mode, setMode] = useState<"search" | "create">("search");
+  const [mode, setMode] = useState<"search" | "create">(initialMode);
   const [debouncedQuery, setDebouncedQuery] = useState("");
 
   const [newCompany, setNewCompany] = useState({
@@ -674,6 +676,7 @@ export function CompanySelector({ onSelect, onCreateNew, selectedCompany, onClea
       montoBaseFce: newCompany.montoBaseFce || null,
       isActive: "true",
     });
+    if (!resetOnCreate) return;
     setNewCompany({
       razonSocial: "",
       nombreFantasia: "",
