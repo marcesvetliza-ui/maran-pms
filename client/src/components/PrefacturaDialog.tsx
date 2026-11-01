@@ -1,3 +1,4 @@
+import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
@@ -2107,6 +2108,7 @@ export function PrefacturaDialog({
                         return (
                           <ChargeRow
                             key={charge.id}
+                            editAction={!isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
                             id={String(charge.id)}
                             amount={parseFloat(charge.amount)}
                             description={itemDescriptions[String(charge.id)] || charge.description}
@@ -3327,8 +3329,9 @@ function NotaDebitoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category,
+  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction,
 }: {
+  editAction?: React.ReactNode;
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
   editing: boolean; editingValue: string;
@@ -3442,7 +3445,7 @@ function ChargeRow({
              )}
             {isTransfer ? renderTransferDescription() : <span className="text-sm">{cleanDescription}</span>}
             {date && <span className="text-xs text-muted-foreground">{formatDateAR(date)}</span>}
-            {!isTransfer && (
+            {!editAction && !isTransfer && (
               <Button
                 size="icon" variant="ghost"
                 className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
@@ -3463,7 +3466,8 @@ function ChargeRow({
       <TableCell className="text-right text-sm font-medium">
         {isTransfer ? "—" : `$${fmtMoney(pending)}`}
       </TableCell>
-      <TableCell className="w-10 text-right">
+      <TableCell className="w-20 whitespace-nowrap text-right">
+        {editAction}
         {!isTransfer && onTransfer ? (
           <Button
             size="icon" variant="ghost"

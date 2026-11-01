@@ -117,7 +117,7 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     testPool = new pg.Pool({ connectionString: testDatabaseUrl, max: 6 });
     await testPool.query(`
       DROP TABLE IF EXISTS audit_logs, sales_invoices, folio_movements, charges, folios, reservations CASCADE;
-      CREATE TABLE reservations (id varchar PRIMARY KEY, status text NOT NULL);
+      CREATE TABLE reservations (id varchar PRIMARY KEY, status text NOT NULL, early_check_in boolean, early_check_in_time text, early_check_in_charge numeric(10,2), late_check_out boolean, late_check_out_time text, late_check_out_charge numeric(10,2));
       CREATE TABLE folios (
         id varchar PRIMARY KEY,
         entity_type text NOT NULL,
@@ -377,6 +377,34 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     expect(unknownActions.body.charges[0].reason).toContain("no conserva el detalle");
   });
 
+  it.each(['early_checkin','late_checkout'] as const)('edits an automatic %s without duplicating its existing room movement, including another rename', async (kind) => {
+    const f = await createFixture({ amount:'42.50' });
+    const early = kind === 'early_checkin', label = early ? 'Early Check-in 08:00' : 'Late Check-out 18:00';
+    const prefix = early ? 'early_check_in' : 'late_check_out';
+    await testPool.query(`UPDATE reservations SET ${prefix}=true,${prefix}_time=$1,${prefix}_charge='42.50' WHERE id=$2`,[early?'08:00':'18:00',f.reservationId]);
+    await testPool.query('UPDATE charges SET description=$1 WHERE id=$2',[label,f.chargeId]);
+    await testPool.query("UPDATE folio_movements SET source_type='room',source_id=$1,description=$2 WHERE id=$3",[f.reservationId,label+' hs',f.movementId]);
+    expect((await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`)).body.charges[0].eligible).toBe(true);
+    const first=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{description:'Horario acordado',amount:'50.25',motivo:'Corrección',expectedDescription:label,expectedAmount:'42.50'});
+    expect(first.status,JSON.stringify(first.body)).toBe(200);
+    const second=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{description:'Horario final',amount:'60.00',motivo:'Nuevo acuerdo',expectedDescription:'Horario acordado',expectedAmount:'50.25'});
+    expect(second.status,JSON.stringify(second.body)).toBe(200);
+    const ledger=(await testPool.query('SELECT amount::text,description,source_type,source_id FROM folio_movements WHERE folio_id=$1',[f.folioId])).rows;
+    expect(ledger).toEqual([{amount:'60.00',description:'Horario final',source_type:kind,source_id:f.chargeId}]);
+    expect((await testPool.query(`SELECT ${prefix}_charge::text AS amount FROM reservations WHERE id=$1`,[f.reservationId])).rows[0].amount).toBe('60.00');
+  });
+  it('links an unposted automatic late charge only on edit and retains one financial movement', async () => {
+    const f=await createFixture({amount:'42.50'});
+    await testPool.query("UPDATE reservations SET late_check_out=true,late_check_out_time=NULL,late_check_out_charge='42.50' WHERE id=$1",[f.reservationId]);
+    await testPool.query("UPDATE charges SET description='Late Check-out' WHERE id=$1",[f.chargeId]);
+    await testPool.query('DELETE FROM folio_movements WHERE id=$1',[f.movementId]);
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`);
+    expect(actions.body.charges[0].eligible).toBe(true);
+    expect((await testPool.query('SELECT count(*)::int AS n FROM folio_movements WHERE folio_id=$1',[f.folioId])).rows[0].n).toBe(0);
+    const edited=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{description:'Salida especial',amount:'45.00',motivo:'Corrección',expectedDescription:'Late Check-out',expectedAmount:'42.50'});
+    expect(edited.status,JSON.stringify(edited.body)).toBe(200);
+    expect((await testPool.query('SELECT amount::text,source_type FROM folio_movements WHERE folio_id=$1',[f.folioId])).rows).toEqual([{amount:'45.00',source_type:'late_checkout'}]);
+  });
   it("returns 404 across reservations, 403 for closed/no-show/closed folios, and prevents legacy hard deletion", async () => {
     const owner = await createFixture();
     const other = await createFixture();

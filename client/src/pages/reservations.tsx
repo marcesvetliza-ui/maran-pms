@@ -1,3 +1,4 @@
+import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { ReservationNightlyPricing, ReservationFolioSummary, type ReservationNightlyPricingHandle } from "@/components/reservation-nightly-pricing";
 import { ReservationFolioHeader } from "@/components/reservation-folio-header";
@@ -3986,6 +3987,7 @@ export function ReservationDetailDialog({
                       <span className={`font-medium tabular-nums ${isAnulado ? "line-through text-muted-foreground" : ""}`} data-testid={`text-charge-amount-${charge.id}`}>
                         ${fmtMoney(charge.amount)}
                       </span>
+                      {!isLocked && !isAnulado && <ReservationChargeEdit reservationId={reservation.id} chargeId={String(charge.id)} />}
                       {restaurantOrderNum && (
                         <Button
                           size="sm"
