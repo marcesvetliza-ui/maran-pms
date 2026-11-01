@@ -118,15 +118,18 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     await testPool.query(`
       DROP TABLE IF EXISTS audit_logs, sales_invoices, folio_movements, charges, folios, reservations CASCADE;
       CREATE TABLE reservations (id varchar PRIMARY KEY, status text NOT NULL, early_check_in boolean, early_check_in_time text, early_check_in_charge numeric(10,2), late_check_out boolean, late_check_out_time text, late_check_out_charge numeric(10,2));
+      CREATE SEQUENCE IF NOT EXISTS folio_seq_reservation;
       CREATE TABLE folios (
         id varchar PRIMARY KEY,
+        codigo text NOT NULL UNIQUE DEFAULT gen_random_uuid()::text,
         entity_type text NOT NULL,
         entity_id varchar NOT NULL,
         status text NOT NULL DEFAULT 'open',
         closed_at timestamp,
         total_charges numeric(12,2) DEFAULT 0,
         total_payments numeric(12,2) DEFAULT 0,
-        balance numeric(12,2) DEFAULT 0
+        balance numeric(12,2) DEFAULT 0,
+        UNIQUE(entity_type,entity_id)
       );
       CREATE TABLE charges (
         id varchar PRIMARY KEY,
@@ -393,17 +396,20 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     expect(ledger).toEqual([{amount:'60.00',description:'Horario final',source_type:kind,source_id:f.chargeId}]);
     expect((await testPool.query(`SELECT ${prefix}_charge::text AS amount FROM reservations WHERE id=$1`,[f.reservationId])).rows[0].amount).toBe('60.00');
   });
-  it('links an unposted automatic late charge only on edit and retains one financial movement', async () => {
+  it.each([false,true])('links an unposted automatic late charge on edit (missing folio: %s)', async (missingFolio) => {
     const f=await createFixture({amount:'42.50'});
     await testPool.query("UPDATE reservations SET late_check_out=true,late_check_out_time=NULL,late_check_out_charge='42.50' WHERE id=$1",[f.reservationId]);
     await testPool.query("UPDATE charges SET description='Late Check-out' WHERE id=$1",[f.chargeId]);
     await testPool.query('DELETE FROM folio_movements WHERE id=$1',[f.movementId]);
+    if (missingFolio) await testPool.query('DELETE FROM folios WHERE id=$1',[f.folioId]);
     const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`);
     expect(actions.body.charges[0].eligible).toBe(true);
     expect((await testPool.query('SELECT count(*)::int AS n FROM folio_movements WHERE folio_id=$1',[f.folioId])).rows[0].n).toBe(0);
     const edited=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{description:'Salida especial',amount:'45.00',motivo:'Corrección',expectedDescription:'Late Check-out',expectedAmount:'42.50'});
     expect(edited.status,JSON.stringify(edited.body)).toBe(200);
-    expect((await testPool.query('SELECT amount::text,source_type FROM folio_movements WHERE folio_id=$1',[f.folioId])).rows).toEqual([{amount:'45.00',source_type:'late_checkout'}]);
+    const folio=(await testPool.query("SELECT id,codigo FROM folios WHERE entity_type='reservation' AND entity_id=$1",[f.reservationId])).rows[0];
+    if (missingFolio) expect(folio.codigo).toMatch(/^RS-\d+$/);
+    expect((await testPool.query('SELECT amount::text,source_type FROM folio_movements WHERE folio_id=$1',[folio.id])).rows).toEqual([{amount:'45.00',source_type:'late_checkout'}]);
   });
   it("returns 404 across reservations, 403 for closed/no-show/closed folios, and prevents legacy hard deletion", async () => {
     const owner = await createFixture();

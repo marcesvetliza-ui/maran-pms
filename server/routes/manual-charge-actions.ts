@@ -389,7 +389,13 @@ async function mutateManualCharge(
           await client.query("UPDATE folio_movements SET source_type=$1,source_id=$2 WHERE id=$3", [proof.supplement,chargeId,proof.movementId]);
         } else {
           let folio = (await client.query("SELECT id FROM folios WHERE entity_type='reservation' AND entity_id=$1 FOR UPDATE",[reservationId])).rows[0];
-          if (!folio) folio = (await client.query("INSERT INTO folios(id,entity_type,entity_id) VALUES($1,'reservation',$2) RETURNING id",[randomUUID(),reservationId])).rows[0];
+          if (!folio) {
+            const sequence = (await client.query("SELECT nextval('folio_seq_reservation') AS seq")).rows[0].seq;
+            const codigo = `RS-${String(sequence).padStart(6,'0')}`;
+            folio = (await client.query("INSERT INTO folios(id,codigo,entity_type,entity_id) VALUES($1,$2,'reservation',$3) ON CONFLICT(entity_type,entity_id) DO NOTHING RETURNING id",[randomUUID(),codigo,reservationId])).rows[0]
+              || (await client.query("SELECT id FROM folios WHERE entity_type='reservation' AND entity_id=$1 FOR UPDATE",[reservationId])).rows[0];
+            if (!folio) throw actionError(409,'No se pudo recuperar el folio de la reserva.');
+          }
           proof.movementId = randomUUID();
           await client.query(`INSERT INTO folio_movements(id,folio_id,type,amount,description,source_type,source_id,registered_by)
             VALUES($1,$2,'charge',$3,$4,$5,$6,$7)`,[proof.movementId,folio.id,charge.amount,charge.description,proof.supplement,chargeId,actor.name]);
