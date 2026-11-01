@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Receipt, ArrowLeft, Plus, Trash2 } from "lucide-react";
-import { EmitirFacturaDialog, NotaCreditoDialog, CASH_AREA_TO_PV_AREA, CONDICION_IVA_OPTIONS, isRiOrExento, NON_FISCAL_TIPOS_SET } from "@/pages/billing";
+import { EmitirFacturaDialog, NotaCreditoDialog, CASH_AREA_TO_PV_AREA, CONDICION_IVA_OPTIONS, isFacturaARecipient, NON_FISCAL_TIPOS_SET } from "@/pages/billing";
 import { InvoiceDialog, PurchaseInventoryPicker, type PurchaseInventoryOption, type Supplier, type AccountingAccount } from "@/pages/purchase-invoices";
 import { InternalMovementForm, TransferStockForm } from "@/pages/inventory";
 import { PrefacturaDialog, isArgentineNationality } from "@/components/PrefacturaDialog";
@@ -705,7 +705,7 @@ function RegistrarComprobanteVenta({ area, tipo, onClose }: { area: AreaId | "";
 
   const totalCents = rows.reduce((sum, row) => sum + Math.round((Number(row.importe) || 0) * 100), 0);
   const validRows = rows.length > 0 && rows.every(row => row.descripcion.trim() && /^\d+(?:\.\d{1,2})?$/.test(row.importe) && Number(row.importe) > 0);
-  const condicionValida = (tipo !== "FA" && tipo !== "FM") || isRiOrExento(condicionIva);
+  const condicionValida = (tipo !== "FA" && tipo !== "FM") || isFacturaARecipient(condicionIva);
   const valid = !!puntoVentaNumero && !!numero.trim() && !!fecha && !!razonSocial.trim() && !!condicionIva &&
     (sinDiscriminarIva ? razonSocial.trim().length > 0 : true) && condicionValida && validRows && totalCents > 0;
 
@@ -765,7 +765,7 @@ function RegistrarComprobanteVenta({ area, tipo, onClose }: { area: AreaId | "";
             <SelectTrigger data-testid="select-condicion-iva-registro"><SelectValue /></SelectTrigger>
             <SelectContent>{CONDICION_IVA_OPTIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
           </Select>
-          {!condicionValida && <p className="text-sm text-destructive mt-1">Factura A/MiPyme A requiere condición Responsable Inscripto o Exento.</p>}
+          {!condicionValida && <p className="text-sm text-destructive mt-1">Factura A/MiPyme A requiere condición Responsable Inscripto.</p>}
         </div>
       </div>
       <div className="space-y-3">

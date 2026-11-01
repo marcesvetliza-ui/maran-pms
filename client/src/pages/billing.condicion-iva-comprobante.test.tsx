@@ -104,42 +104,12 @@ describe("EmitirFacturaDialog — split Condición IVA / comprobante", () => {
     ));
   });
 
-  it("never lets a manual Factura B selection reach the server paired with an Exento receptor", async () => {
+  it("emits Factura B for Exento without changing the receptor to Consumidor Final", async () => {
     const user = userEvent.setup();
-    renderDialog({ condicionIva: "Exento", cuit: "20123456789" });
-
-    // Mount-time logic already selects FA for Exento. Selecting FB must pull
-    // condicionIva along into an eligible value rather than allowing
-    // "Factura B" + "Exento" to reach the server together.
-    await user.click(screen.getByTestId("select-tipo-factura"));
-    await user.click(screen.getByRole("option", { name: "Factura B" }));
-
-    await waitFor(() => expect(screen.getByTestId("select-condicion-iva")).toHaveTextContent("Consumidor Final"));
-
+    renderDialog({ condicionIva: "Exento", cuit: "30545515926" });
+    await waitFor(() => expect(screen.getByTestId("select-tipo-factura")).toHaveTextContent("Factura B"));
+    expect(screen.getByTestId("select-condicion-iva")).toHaveTextContent("Exento");
     await user.click(screen.getByTestId("btn-emitir-confirmar"));
-
-    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith(
-      "POST",
-      "/api/billing/invoices",
-      expect.objectContaining({
-        tipoComprobante: "FB",
-        cliente: expect.objectContaining({ condicionIva: "Consumidor Final" }),
-      }),
-    ));
-  });
-
-  it("allows Factura A for an Exento receptor with a valid CUIT", async () => {
-    const user = userEvent.setup();
-    renderDialog({ condicionIva: "Exento", cuit: "20123456789" });
-
-    expect(screen.getByTestId("select-tipo-factura")).toHaveTextContent("Factura A");
-
-    await user.click(screen.getByTestId("btn-emitir-confirmar"));
-
-    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith(
-      "POST",
-      "/api/billing/invoices",
-      expect.objectContaining({ tipoComprobante: "FA" }),
-    ));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("POST", "/api/billing/invoices", expect.objectContaining({tipoComprobante: "FB", cliente: expect.objectContaining({condicionIva: "Exento", cuit: "30545515926"})})));
   });
 });

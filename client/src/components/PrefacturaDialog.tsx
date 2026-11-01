@@ -419,7 +419,7 @@ function buildInvoiceItems(selectedItems: SelectedFolioItem[], tipo: string) {
 // ─── Auto-suggest tipo from condicionIva / cuit ───────────────────────────────
 
 export function suggestTipo(cuit: string, condicionIva: string): string {
-  if (condicionIva === "Responsable Inscripto" || condicionIva === "Exento") {
+  if (condicionIva === "Responsable Inscripto") {
     // The receiver's fiscal condition determines the document; the UI then
     // clearly asks for the CUIT that is mandatory for A.
     return "FA";
@@ -951,6 +951,47 @@ export function PrefacturaDialog({
     onSettled: () => { companyCreationPending.current = false; },
   });
 
+  const correctExemptRejection = useMutation({
+    mutationFn: async () => {
+      if (!submission.current!.acquire()) throw new Error("Hay otra operación en curso");
+      try {
+        const attempt = submission.current!.pending(reservationId);
+        const operationId = attempt?.invoiceRequest?.creditOperationId;
+        if (!operationId || attempt?.invoice) throw new Error("No hay un intento fiscal corregible");
+        if (folioLoading || !folioInitializedRef.current) throw new Error("Esperá a que termine de cargar el folio antes de corregir.");
+        if (!attempt.payments.length || attempt.payments.some(p => !["efectivo", "tarjeta_credito", "tarjeta_debito", "transferencia", "mercadopago"].includes(p.method))) throw new Error("Este intento requiere revisar sus formas de pago antes de corregirlo.");
+        return await (await apiRequest("POST", `/api/billing/reservations/${reservationId}/operations/${operationId}/correct-exempt-rejection`, {})).json();
+      } finally { submission.current!.release(); }
+    },
+    onSuccess: async result => {
+      if (result?.discarded !== true) return;
+      const original = submission.current!.pending(reservationId);
+      if (!original?.invoiceRequest) return;
+      const request = original.invoiceRequest;
+      const recipient = request.cliente || {};
+      submission.current!.complete(reservationId);
+      setRazonSocial(recipient.razonSocial || ""); setCuit(recipient.cuit || ""); setDni(recipient.dni || ""); setDomicilio(recipient.domicilio || "");
+      if (result.correctedCompanyId) { setBillingTarget("company"); setBillingEntityId(String(result.correctedCompanyId)); }
+      if (request.puntoVentaOverride) setPuntoVenta(String(request.puntoVentaOverride));
+      setInvoiceObservations(request.observaciones || ""); setDoCheckout(original.checkoutRequested); setSaleCondition("contado");
+      if (Array.isArray(request.sourceChargeIds)) setSelectedIds(new Set(request.sourceChargeIds.map(String)));
+      setPaymentRows(original.payments.map(p => ({ id: newRowId(), amount: String(p.amount), method: p.method as PaymentMethod, reference: p.reference || "", retencionEnabled: false, retencionTipo: "iibb", retencionMonto: "" })));
+      const next = newSettlementOperationId();
+      window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
+      setCreditOperationId(next); setHasPendingSubmission(false); setSubmitError(null);
+      billingRecipientTouched.current = true;
+      setCondicionIva("Exento"); setTipo("FB");
+      await queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId] });
+      toast({ title: "Rechazo verificado: revisar Factura B", description: "ARCA no autorizó el intento A. Se conserva el historial; no se emitió ni cobró. Revisá los datos antes de confirmar." });
+    },
+    onError: (error: Error) => setSubmitError(parseApiError(error)),
+  });
+  const pendingFiscalAttempt = hasPendingSubmission ? submission.current!.pending(reservationId) : null;
+  const canCorrectExemptRejection = !pendingFiscalAttempt?.invoice &&
+    ["FA", "FM"].includes(pendingFiscalAttempt?.invoiceRequest?.tipoComprobante) &&
+    String(pendingFiscalAttempt?.invoiceRequest?.cliente?.condicionIva || "").toLowerCase() === "exento";
+
   const addChargePresets = [
     ...chargeTypesData.map(ct => ({ id: ct.id, label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowPriceEdit: ct.allowPriceEdit ?? false })),
     { id: "manual", label: "Cargo editable", description: "", amount: "", category: "otros", allowPriceEdit: true },
@@ -1207,7 +1248,7 @@ export function PrefacturaDialog({
   const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
     if (opt.value === "cierre_habitacion") return true; // always available as fallback
     if (opt.value === "FT") return canOfferFacturaT;
-    if (["Responsable Inscripto", "Exento"].includes(condicionIva)) return ["FA", "FM"].includes(opt.value);
+    if (condicionIva === "Responsable Inscripto") return ["FA", "FM"].includes(opt.value);
     return ["FB", "FMB"].includes(opt.value);
   });
 
@@ -1271,6 +1312,7 @@ export function PrefacturaDialog({
   }
 
   async function doSubmit() {
+    if (correctExemptRejection.isPending) return;
     if (submission.current!.isBusy()) return;
     const retrying = !!submission.current!.pending(reservationId);
     const isCcPayment = saleCondition === "cuenta_corriente";
@@ -2367,9 +2409,12 @@ export function PrefacturaDialog({
             {hasPendingSubmission && (
               <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
                 <p className="text-sm">Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado.</p>
-                <Button onClick={() => void doSubmit()} disabled={isSubmitting} data-testid="button-retry-prefactura">
+                <Button onClick={() => void doSubmit()} disabled={isSubmitting || correctExemptRejection.isPending} data-testid="button-retry-prefactura">
                   {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
                 </Button>
+                {canCorrectExemptRejection && <Button type="button" variant="outline" className="mt-2 sm:ml-2" disabled={isSubmitting || folioLoading || correctExemptRejection.isPending} onClick={() => correctExemptRejection.mutate()} data-testid="button-correct-exempt-rejection">
+                  {correctExemptRejection.isPending ? "Verificando con ARCA…" : "Verificar rechazo y corregir a Factura B"}
+                </Button>}
               </div>
             )}
             {submitError && (

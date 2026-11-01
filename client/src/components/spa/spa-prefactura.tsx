@@ -74,7 +74,7 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
  const recipient=kind==="company"?{name:selectedCompany?.name??"",document:selectedCompany?.cuit??"",condition:selectedCompany?.vatCondition??"",address:selectedCompany?.address??""}:
   {name:[person?.firstName,person?.lastName].filter(Boolean).join(" "),document:person?.cuit||person?.documentNumber||"",condition:person?.vatCondition??"",address:person?.address??""};
  const condition=recipient.condition.trim().toLowerCase().replace(/[\s-]+/g,"_");
- const inferredTipo=["responsable_inscripto","exento"].includes(condition)?"FA":"FB";
+ const inferredTipo=condition==="responsable_inscripto"?"FA":"FB";
  const effectiveType=receiptType??inferredTipo;
  const tipo=effectiveType==="cierre_spa"?"Voucher SPA — no fiscal":effectiveType==="FA"?"Factura A":"Factura B";
  const typeProblem=effectiveType!=="cierre_spa"&&!ivaLabels[condition]?"Falta una condición IVA válida en la ficha seleccionada. Revisá los datos fiscales antes de emitir.":effectiveType!=="cierre_spa"&&effectiveType!==inferredTipo?"El tipo elegido no corresponde a la condición IVA. Revisá el comprobante o los datos fiscales.":effectiveType==="cierre_spa"&&context.data&&context.data.voucherPoint==null?"Revisá la configuración del punto de venta SPA antes de emitir el voucher.":"";

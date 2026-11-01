@@ -82,16 +82,9 @@ export const CONDICION_IVA_OPTIONS = [
   "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento", "No Categorizado",
 ];
 
-// Condición IVA → tipo de comprobante is a strict, mutually exclusive split:
-// Responsable Inscripto/Exento only ever get Factura A/MiPyme A, everyone
-// else (Monotributista, Consumidor Final, etc.) only gets Factura B —
-// mirrors the same rule enforced server-side in POST /api/billing/invoices
-// and client-side in group-detail.tsx's applyStrictComprobanteForCondicion.
-// Kept in sync here too since this dialog is the single point of invoice
-// emission for reservations, restaurant, spa and events, not just groups.
-export function isRiOrExento(condicionIva: string): boolean {
-  const normalized = String(condicionIva || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  return normalized === "responsable_inscripto" || normalized === "exento";
+// An IVA Exento recipient receives B, retaining their exempt fiscal status.
+export function isFacturaARecipient(condicionIva: string): boolean {
+  return String(condicionIva || "").trim().toLowerCase().replace(/[\s-]+/g, "_") === "responsable_inscripto";
 }
 
 // companies.condicionIva / agencies.condicionIva store the machine IvaCondition
@@ -1033,7 +1026,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       // Auto-select comprobante type based on cuit + condición IVA
       if (initialValues.cuit) {
         const iva = initialValues.condicionIva || "";
-        const preferido = (iva === "Responsable Inscripto" || iva === "Exento") ? "FA" : "FB";
+        const preferido = (iva === "Responsable Inscripto") ? "FA" : "FB";
         setTipo(tipos.includes(preferido) ? preferido : tipos.includes("FA") ? "FA" : tipos[0]);
       } else {
         setTipo(tipos.includes("FB") ? "FB" : tipos[0]);
@@ -1104,12 +1097,12 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     const eType: "guest" | "company" | "agency" = entity._type === "Huésped" ? "guest" : entity._type === "Agencia" ? "agency" : "company";
     setSelectedEntityInfo({ type: eType, id: entity.id });
     setManualConsumerFinal(false);
-    if (isRiOrExento(condVal) || condVal === "Monotributista") {
-      // Responsable Inscripto/Exento may only receive FA/MiPyme A (never FB),
+    if (isFacturaARecipient(condVal) || ["Monotributista", "Exento"].includes(condVal)) {
+      // Responsable Inscripto may only receive FA/MiPyme A (never FB),
       // regardless of whether CUIT is present yet — a missing CUIT surfaces
       // as a validation error on submit instead of silently switching to an
       // invalid comprobante for this condición.
-      const auto = isRiOrExento(condVal)
+      const auto = isFacturaARecipient(condVal)
         ? (tipos.includes("FA") ? "FA" : tipos.includes("FM") ? "FM" : "FA")
         : (tipos.includes("FB") ? "FB" : tipos.includes("FMB") ? "FMB" : "FB");
       const nextTipo = tipos.includes(auto) ? auto : tipos.includes("FB") ? "FB" : tipos[0];
@@ -1147,10 +1140,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     }
     if (!condicionIva.trim()) {
       errs.condicionIva = "Esta ficha no tiene condición IVA cargada — seleccioná la correcta antes de emitir.";
-    } else if ((tipo === "FA" || tipo === "FM") && !isRiOrExento(condicionIva)) {
-      errs.condicionIva = "Factura A/MiPyme A requiere condición Responsable Inscripto o Exento";
-    } else if ((tipo === "FB" || tipo === "FMB") && isRiOrExento(condicionIva)) {
-      errs.condicionIva = "Factura B no corresponde a receptores Responsable Inscripto o Exento";
+    } else if ((tipo === "FA" || tipo === "FM") && !isFacturaARecipient(condicionIva)) {
+      errs.condicionIva = "Factura A/MiPyme A requiere condición Responsable Inscripto";
+    } else if ((tipo === "FB" || tipo === "FMB") && isFacturaARecipient(condicionIva)) {
+      errs.condicionIva = "Factura B no corresponde a receptores Responsable Inscripto";
     }
     items.forEach((it, i) => {
       if (!it.descripcion.trim()) errs[`desc_${i}`] = "Descripción requerida";
@@ -2076,11 +2069,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           <Select value={tipo} onValueChange={v => {
             const prevTipo = tipo; setTipo(v);
             if (v === "FA" || v === "FM") {
-              // Keep an already-compatible condición (Exento shouldn't be
-              // clobbered into Responsable Inscripto); only correct it when
-              // the current value would be an invalid pairing.
-              if (!isRiOrExento(condicionIva)) setCondicionIva("Responsable Inscripto");
-            } else if ((v === "FB" || v === "FMB") && isRiOrExento(condicionIva)) {
+              // Keep a compatible recipient condition for the chosen A document.
+              if (!isFacturaARecipient(condicionIva)) setCondicionIva("Responsable Inscripto");
+            } else if ((v === "FB" || v === "FMB") && isFacturaARecipient(condicionIva)) {
               setCondicionIva("Consumidor Final");
             } else if (v === "FC" || v === "FT") {
               setCondicionIva("Consumidor Final");
@@ -2273,7 +2264,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                   // Auto-correct tipo when the new condición would make the
                   // current one invalid — same strict split as the tipo
                   // selector above, applied in the other direction.
-                  const nowRiExento = isRiOrExento(v);
+                  const nowRiExento = isFacturaARecipient(v);
                   if (!nowRiExento && (tipo === "FA" || tipo === "FM") && (tipos.includes("FB") || tipos.includes("FMB"))) {
                     const next = tipos.includes("FB") ? "FB" : "FMB";
                     const prevTipo = tipo; setTipo(next); recalcForTipo(next, prevTipo);
