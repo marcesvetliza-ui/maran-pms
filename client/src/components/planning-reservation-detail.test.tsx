@@ -4,12 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const { api, detail } = vi.hoisted(() => ({ api: vi.fn(), detail: vi.fn() }));
-vi.mock("@/pages/reservations", () => ({
+vi.mock("@/pages/reservations", async () => ({
+  ...(await vi.importActual("@/pages/reservations")),
   ReservationDetailDialog: (props: any) => {
     detail(props);
     return (
       <section aria-label="Detalle compartido">
         <button onClick={props.onEdit}>Editar datos</button>
+        {props.allowCancel && <button onClick={props.onCancel}>Anular Reserva</button>}
         {props.operationalActions}
       </section>
     );
@@ -125,12 +127,30 @@ describe("Planning uses the shared detail and preserves operational actions", ()
       ),
     );
   });
-  it("opens the checkout circuit and preserves the cancel restriction for an occupied stay", async () => {
+  it("opens the checkout circuit and permits reasoned cancellation for an occupied stay", async () => {
     reservation.status = "checked_in";
     mount();
     await userEvent.click(await screen.findByTestId("button-checkout-quick"));
     expect(screen.getByText("Prefactura de checkout")).toBeInTheDocument();
-    expect(detail.mock.lastCall?.[0].allowCancel).toBe(false);
+    expect(detail.mock.lastCall?.[0].allowCancel).toBe(true);
     expect(api).not.toHaveBeenCalled();
   });
+  it.each(['confirmed','checked_in'])('requires a written reason before cancelling %s from Planning', async status => {
+    reservation.status = status;
+    mount();
+    await userEvent.click(await screen.findByRole('button', { name: 'Anular Reserva' }));
+    const confirm = await screen.findByTestId('button-confirm-cancel');
+    expect(confirm).toBeDisabled();
+    expect(api).not.toHaveBeenCalled();
+    await userEvent.type(screen.getByTestId('input-cancel-reason'), 'Registro duplicado por recepción');
+    await userEvent.click(confirm);
+    await waitFor(() => expect(api).toHaveBeenCalledWith('POST', '/api/reservations/r/cancel', expect.objectContaining({ reason: 'Registro duplicado por recepción' })));
+  });
+  it.each(['cancelled','checked_out'])('does not offer cancellation for %s', async status => {
+    reservation.status = status; mount();
+    await screen.findByRole('button', { name: 'Editar datos' });
+    expect(detail.mock.lastCall?.[0].allowCancel).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Anular Reserva' })).not.toBeInTheDocument();
+  });
+
 });

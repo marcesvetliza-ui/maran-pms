@@ -1772,6 +1772,24 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  // Informational history: uses the cancellation time, not the stay dates.
+  app.get("/api/reservations/cancellations/in-shift", requireAuth, requirePermission("sidebar:/cash-register"), async (req, res) => {
+    try {
+      const today = req.query.today === "true";
+      const shiftId = typeof req.query.shiftId === "string" ? req.query.shiftId : "";
+      if (!today && !shiftId) return res.status(400).json({ error: "Indicá una caja o la consulta de hoy" });
+      const result = today
+        ? await db.execute(sql`SELECT l.* FROM cancelled_reservation_logs l
+            WHERE (l.cancellation_date AT TIME ZONE 'UTC' AT TIME ZONE 'America/Argentina/Buenos_Aires')::date=${getArgentinaToday()}::date
+            ORDER BY l.cancellation_date DESC,l.id`)
+        : await db.execute(sql`SELECT l.* FROM cancelled_reservation_logs l JOIN cash_shifts s ON s.id=${shiftId}
+            WHERE s.area IN ('reception','recepcion') AND l.cancellation_date>=s.opened_at
+            AND l.cancellation_date<COALESCE(s.closed_at,now())
+            ORDER BY l.cancellation_date DESC,l.id`);
+      res.json(result.rows);
+    } catch { res.status(500).json({ error: "No se pudo consultar las reservas anuladas" }); }
+  });
+
   // Cancel reservation endpoint
   app.post("/api/reservations/:id/cancel", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     if (typeof req.body.reason !== "string" || !req.body.reason.trim()) return res.status(400).json({error:"El motivo de anulación es obligatorio"});
