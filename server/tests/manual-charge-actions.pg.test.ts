@@ -227,6 +227,22 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
       .toMatchObject({ eligible: false, reason: expect.stringContaining("origen manual único") });
   });
 
+  it("allows Jefe de Recepción to inspect and edit charges without extending void permissions", async () => {
+    const fixture = await createFixture();
+    const role = { "x-test-role": "jefe_recepcion" };
+    const path = `/api/reservations/${fixture.reservationId}/manual-charges/${fixture.chargeId}`;
+    const actions = await request("GET", `/api/reservations/${fixture.reservationId}/manual-charge-actions`, undefined, role);
+    expect(actions.status).toBe(200);
+    expect(actions.body.charges[0]).toMatchObject({ id: fixture.chargeId, eligible: true });
+    const changed = await request("PATCH", path, { ...bodyFor(), description: "Cochera acordada", amount: "250.00" }, role);
+    expect(changed.status).toBe(200);
+    expect(changed.body).toMatchObject({ description: "Cochera acordada", amount: "250.00" });
+    const movement = await testPool.query("SELECT amount::text FROM folio_movements WHERE id=$1", [fixture.movementId]);
+    expect(movement.rows[0].amount).toBe("250.00");
+    expect((await request("POST", path + "/anular", bodyFor(), role)).status).toBe(403);
+    expect((await request("PATCH", path, bodyFor(), { "x-test-role": "restaurant" })).status).toBe(403);
+  });
+
   it("edits charge and folio atomically, validates exact input fields, and detects stale snapshots", async () => {
     const fixture = await createFixture();
     const result = await request("PATCH", `/api/reservations/${fixture.reservationId}/manual-charges/${fixture.chargeId}`, {
