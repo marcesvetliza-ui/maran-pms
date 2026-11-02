@@ -1,3 +1,4 @@
+import {simulatedFiscalAudit} from "./helpers/simulatedFiscalAudit";
 import {it,expect} from "vitest";
 import wrong from "./fixtures/assistant-nc-pending-wrong-workflow.json";
 import {sourceRange} from "./helpers/assistantSourceEvidence";
@@ -10,7 +11,7 @@ import type {SupportTicket,SupportDiagnosis} from "../../shared/programming-supp
 const version="a".repeat(40);
 const ticket={version,module:"grupos",title:"No puedo hacer una nota de crédito",actual:"Intenté hacer una nota de crédito desde un grupo y apareció un error. Después fui a Facturación y quedó pendiente de conciliar.",expected:"Poder anular la factura y saber cómo continuar.",messages:[]} as SupportTicket;
 const source=()=>new CodeSource(process.cwd(),version);
-const reply=(content:unknown)=>({usage:{total_tokens:500,prompt_tokens:300},choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(content)}}]});
+const reply=(content:unknown,request?:any)=>({usage:{total_tokens:500,prompt_tokens:300},choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(simulatedFiscalAudit(content,request))}}]});
 const corrected=():SupportDiagnosis=>({summary:"Hay un circuito para revisar y recuperar la NC existente desde Facturación. El estado pendiente no identifica por sí solo la causa del fallo.",cause:"No se conoce el error exacto de esta operación; los guards de eliminación de pagos no permiten inferirlo.",certainty:"sustentado_en_codigo",proposal:"Consultar en Facturación el detalle de la NC pendiente y su error. Revisar la opción Reintentar y conciliar sobre esa misma NC; no crear otra mientras se verifica el estado. Si persiste el error, copiar el mensaje exacto para distinguir rechazo fiscal de conciliación local.",questions:[],dataRepair:"",proposedTests:[],limitations:["Inspección estática, sin registros del incidente ni pruebas ejecutadas."],evidence:[{...sourceRange("server/billing/routes.ts",'app.post("/api/billing/credit-notes/:id/reconcile"',0,56),explanation:"Handler de recuperación que deriva a la operación del grupo o reserva."},{...sourceRange("client/src/pages/billing.tsx","Reintentar y conciliar",8,2),explanation:"Botón sobre la NC pendiente."},{...sourceRange("server/billing/groupCreditRecovery.ts",'if (nc.estado === "autorizacion_pendiente")',2,30),explanation:"Recuperación con el identificador de la NC existente."}]});
 
 it.each(["grupos","facturacion"])("orients the actual pending-NC report to recovery and its screen (%s)",async module=>{
@@ -40,7 +41,7 @@ it("requires the corrected workflow citations and still passes the full correcti
    expect(payload.evidence.decisionBrief.checks.map((c:any)=>c.id)).toContain("recovery_route");
    expect(req.messages[0].content).toContain("NC pendiente informada");
    expect(payload.evidence.citedCode.map((r:any)=>r.path)).toContain("client/src/pages/billing.tsx");
-   return reply({approved:true,issues:[]});
+   return reply({approved:true,issues:[]},req);
   }
   writes++;
   if(writes===1)return reply(wrong);

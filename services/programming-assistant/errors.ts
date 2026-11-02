@@ -108,7 +108,7 @@ export function investigationMetrics(error: unknown) {
 /** Fixed reason labels only: never log the reviewer text or source payload. */
 export function auditFailureReason(error: unknown) {
   const reason = (error as {auditReason?:unknown} | null)?.auditReason;
-  return typeof reason === "string" && ["semantic_rejected", "output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch", "invalid_reference"].includes(reason) ? reason : undefined;
+  return typeof reason === "string" && ["semantic_rejected", "output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch", "invalid_reference", "incomplete_checks", "invalid_check_reference", "inconsistent_checks"].includes(reason) ? reason : undefined;
 }
 
 export function auditSchemaFailureDetails(error: unknown) {

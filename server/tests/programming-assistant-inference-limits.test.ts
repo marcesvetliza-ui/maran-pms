@@ -1,3 +1,4 @@
+import {simulatedFiscalAudit} from "./helpers/simulatedFiscalAudit";
 import {it,expect} from "vitest";
 import historicalWrong from "./fixtures/assistant-nc-speculative-persistence.json";
 import {inferenceLimitIssues} from "../../services/programming-assistant/inference-limits";
@@ -17,7 +18,7 @@ const ticket={version,module:"grupos",title:"Error 10049 en NC pendiente de grup
 const source=()=>new CodeSource(process.cwd(),version);
 const base=(patch:Partial<SupportDiagnosis>={}):SupportDiagnosis=>({summary:"Esta revisión construye las fechas en el XML.",cause:"No se determinó la causa histórica.",proposal:"Contrastar el envío y revisión del intento histórico con el código actual.",certainty:"hipotesis",proposedTests:[],questions:[],dataRepair:"",limitations:["No se consultaron registros operativos."],evidence:[],...patch});
 const corrected=():SupportDiagnosis=>base({evidence:[...wrong.evidence,{...sourceRange("server/billing/groupCreditRecovery.ts","return db.transaction(async (tx) => {",0,61),explanation:"Aplicación local posterior a comprobar estado emitida y CAE; no demuestra el resultado histórico."}]});
-const reply=(content:unknown)=>({usage:{total_tokens:500,prompt_tokens:300},choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(content)}}]});
+const reply=(content:unknown,request?:any)=>({usage:{total_tokens:500,prompt_tokens:300},choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(simulatedFiscalAudit(content,request))}}]});
 
 it.each(["hipotesis","sustentado_en_codigo","falta_informacion"] as const)("rejects the received causal leap even with certainty %s",certainty=>{
  const errors=inferenceLimitIssues({...wrong,certainty} as SupportDiagnosis);
@@ -49,7 +50,7 @@ it("blocks the complete received report before a permissive mocked auditor can a
  const s=source();for(const ref of wrong.evidence)await s.read(ref.path,ref.start,ref.end);
  expect(wrong.evidence.every(ref=>s.validates(ref))).toBe(true);
  let writers=0,audits=0;
- const client={chat:{completions:{create:async(req:any)=>{if(req.response_format.json_schema.name==="maran_diagnosis_audit"){audits++;return reply({approved:true,issues:[]});}writers++;return reply(wrong);}}}};
+ const client={chat:{completions:{create:async(req:any)=>{if(req.response_format.json_schema.name==="maran_diagnosis_audit"){audits++;return reply({approved:true,issues:[]},req);}writers++;return reply(wrong);}}}};
  await expect(diagnose(ticket,s,{apiKey:"unused",model:"mock"},client as any)).rejects.toMatchObject({code:"evidence_inconsistent"});
  expect(writers).toBe(3);expect(audits).toBe(0);
 });
@@ -62,7 +63,7 @@ it("allows an honest undetermined cause through independent review without inven
    expect(req.messages[0].content).toContain("no exigir inventar una causa alternativa");
    expect(payload.evidence.decisionBrief.checks.map((c:any)=>c.id)).toContain("local_application");
    expect(payload.diagnosis.statements.find((s:any)=>s.field==="cause").text).toBe(corrected().cause);
-   return reply({approved:true,issues:[]});
+   return reply({approved:true,issues:[]},req);
   }
   writers++;if(writers===1)return reply(wrong);
   expect(JSON.stringify(req.messages)).toContain("UNINSPECTED_MECHANISM_REPAIR");
@@ -106,7 +107,7 @@ it('blocks the fresh report before an auditor can rubber-stamp the unobserved in
  const s=source();for(const ref of received.evidence)await s.read(ref.path,ref.start,ref.end);
  let audits=0,writes=0;
  const client={chat:{completions:{create:async(req:any)=>{
-  if(req.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return reply({approved:true,issues:[]});}
+  if(req.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return reply({approved:true,issues:[]},req);}
   writes++;return reply(received);
  }}}};
  await expect(diagnose(ticket,s,{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({code:'evidence_inconsistent'});
@@ -119,7 +120,7 @@ it('requires a corrected conclusion and independent audit after the new report i
  const client={chat:{completions:{create:async(req:any)=>{
   if(req.response_format.json_schema.name==='maran_diagnosis_audit'){
    audits++;expect(req.messages[0].content).toContain('no identifica cuál de las entradas era incorrecta');
-   return reply({approved:true,issues:[]});
+   return reply({approved:true,issues:[]},req);
   }
   writes++;
   if(writes===1)return reply(received);

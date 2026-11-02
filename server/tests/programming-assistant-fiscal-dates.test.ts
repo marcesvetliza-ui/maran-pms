@@ -1,3 +1,4 @@
+import {simulatedFiscalAudit} from "./helpers/simulatedFiscalAudit";
 import {it,expect} from "vitest";
 import wrong from "./fixtures/assistant-nc-date-unsupported-report.json";
 import {sourceRange} from "./helpers/assistantSourceEvidence";
@@ -11,7 +12,7 @@ const version="a".repeat(40);
 const ticket={version,module:"grupos",title:"Error al conciliar una NC pendiente de grupo",actual:"Al intentar conciliar aparece 10049: Los campos FchServDesde, FchServHasta y FchVtoPago contienen errores o no fueron ingresados. Son obligatorios cuando Concepto es 2 o 3.",expected:"Investigar cómo se completan las fechas durante la recuperación; no emitir otro comprobante.",messages:[]} as SupportTicket;
 const coverage=[...creditNoteRecoveryChecklist,fiscalDatesRecoveryRequirement];
 const source=()=>new CodeSource(process.cwd(),version);
-const reply=(content:unknown)=>({usage:{total_tokens:500,prompt_tokens:300},choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(content)}}]});
+const reply=(content:unknown,request?:any)=>({usage:{total_tokens:500,prompt_tokens:300},choices:[{finish_reason:"stop",message:{role:"assistant",content:JSON.stringify(simulatedFiscalAudit(content,request))}}]});
 const corrected=():SupportDiagnosis=>({summary:"El código de esta revisión sí construye e incorpora las tres fechas al XML para Concepto 2, incluidas NC. No alcanza para demostrar la causa del rechazo histórico.",cause:"La ausencia de campos en el wrapper no demuestra que falten en el envío: authorize usa emitirFactura y feCAESolicitar llama a buildServiceDates. La causa del incidente no está confirmada.",certainty:"sustentado_en_codigo",proposal:"Contrastar la revisión y el envío del intento histórico con el constructor actual antes de proponer cambios. Conservar la identidad de la NC pendiente. La lectura del código y de tests simulados no prueba autorización fiscal real ni resolución del incidente.",proposedTests:[],questions:[],dataRepair:"",limitations:["Sin acceso al envío histórico ni al resultado fiscal real; no se ejecutaron pruebas."],evidence:[
  {...sourceRange("server/billing/routes.ts",'app.post("/api/billing/credit-notes/:id/reconcile"',0,56),explanation:"Recuperación de la NC existente."},
  {...sourceRange("client/src/pages/billing.tsx","Reintentar y conciliar",8,2),explanation:"Acción de Facturación."},
@@ -50,7 +51,7 @@ it("audits a corrected explanation against the full fiscal chain rather than app
    const code=[...payload.evidence.decisionBrief.readings,...payload.evidence.citedCode].map((r:any)=>r.content).join("\n");
    expect(code).toContain("serviceDates +");expect(code).toContain("function buildServiceDates");
    expect(payload.capabilities.operationalDatabaseAccess).toBe(false);
-   return reply({approved:true,issues:[]});
+   return reply({approved:true,issues:[]},req);
   }
   writes++;if(writes===1)return reply(wrong);
   expect(JSON.stringify(req.messages)).toContain("FISCAL_PAYLOAD_CHAIN_NOT_SUPPORTED");
@@ -63,7 +64,7 @@ it("cannot bypass an independent rejection by appending the correct citations to
  const s=source();await orientInvestigation(ticket,s);const r={...wrong,evidence:corrected().evidence};let audits=0;
  const client={chat:{completions:{create:async(req:any)=>{
   if(req.response_format.json_schema.name==="maran_diagnosis_audit"){
-   audits++;return reply({approved:false,issues:[{statementId:"cause_1_1",problem:"Afirma que no se completan fechas pero el constructor y el XML leídos sí las incorporan.",correction:"Separar el código actual de la causa histórica no verificada; no afirmar ausencia."}]});
+   audits++;return reply({approved:false,issues:[{statementId:"cause_1_1",problem:"Afirma que no se completan fechas pero el constructor y el XML leídos sí las incorporan.",correction:"Separar el código actual de la causa histórica no verificada; no afirmar ausencia."}]},req);
   }
   return reply(r);
  }}}};

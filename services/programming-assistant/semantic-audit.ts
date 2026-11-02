@@ -9,8 +9,14 @@ import {AUDIT_OUTPUT,requestCost} from './lifecycle';
 
 const fields=['summary','cause','proposal','certainty','limitations','proposedTests','questions','dataRepair','evidence'] as const;
 type AuditField=typeof fields[number];
-const verdictSchema=z.object({approved:z.boolean(),issues:z.array(z.object({statementId:z.string().min(1),problem:z.string().min(1).max(600),correction:z.string().min(1).max(600)}).strict()).max(4)}).strict();
-function auditOutputSchema(statementIds:string[]){return {type:'object',additionalProperties:false,properties:{approved:{type:'boolean'},issues:{type:'array',maxItems:4,items:{type:'object',additionalProperties:false,properties:{statementId:{type:'string',enum:statementIds},problem:{type:'string',minLength:1,maxLength:600},correction:{type:'string',minLength:1,maxLength:600}},required:['statementId','problem','correction']}}},required:['approved','issues']};}
+const reviewTopics=['causal_inference','repair_and_action','test_preconditions'] as const;
+const checkSchema=z.object({topic:z.enum(reviewTopics),statementId:z.string().min(1),supported:z.boolean(),reason:z.string().min(1).max(300),counterexample:z.string().min(1).max(240),evidenceIndex:z.number().int().nonnegative().nullable(),codeQuote:z.string().max(240)}).strict();
+const verdictSchema=z.object({approved:z.boolean(),issues:z.array(z.object({statementId:z.string().min(1),problem:z.string().min(1).max(600),correction:z.string().min(1).max(600)}).strict()).max(4),checks:z.array(checkSchema).length(3).optional()}).strict();
+function auditOutputSchema(statementIds:string[],requireChecks:boolean){
+ const issue={type:'object',additionalProperties:false,properties:{statementId:{type:'string',enum:statementIds},problem:{type:'string',minLength:1,maxLength:600},correction:{type:'string',minLength:1,maxLength:600}},required:['statementId','problem','correction']};
+ const check={type:'object',additionalProperties:false,properties:{topic:{type:'string',enum:reviewTopics},statementId:{type:'string',enum:statementIds},supported:{type:'boolean'},reason:{type:'string',minLength:1,maxLength:300},counterexample:{type:'string',minLength:1,maxLength:240},evidenceIndex:{type:['integer','null'],minimum:0},codeQuote:{type:'string',maxLength:240}},required:['topic','statementId','supported','reason','counterexample','evidenceIndex','codeQuote']};
+ return {type:'object',additionalProperties:false,properties:{approved:{type:'boolean'},issues:{type:'array',maxItems:4,items:issue},...(requireChecks?{checks:{type:'array',minItems:3,maxItems:3,items:check}}:{})},required:['approved','issues',...(requireChecks?['checks']:[])]};
+}
 
 /** Assign server-owned references without asking the reviewer to copy text.
  * Preserve every character, including array boundaries and citation ownership.
@@ -55,15 +61,23 @@ const recoveryAuditInstruction="En este caso hay una NC pendiente informada. Ver
 
 const fiscalDatesAuditInstruction="Compará cada causa, reparación y supuesto de las pruebas propuestas con las lecturas, incluidas date_builder, date_serialization, fiscal_call y local_application. Calcular campos en el XML actual no demuestra qué se envió antes ni descarta un fallo histórico. El error del proveedor describe una validación rechazada; por sí solo no identifica cuál de las entradas era incorrecta. Si no se conoce la fecha del intento, rechazar que “esto queda evidenciado” por un catch o que una asignación incorrecta esté sustentada en código sin señalar una expresión defectuosa. Una hipótesis condicional debe decir qué observación la confirmaría o refutaría y no convertirse en una reparación obligatoria. No exigir ni proponer más logs o validaciones sin identificar qué evidencia concreta falta y comprobar los controles existentes. Tampoco demuestra que la base deba guardar esos campos: seguir entradas, lecturas y escrituras antes de proponer persistencia. Rechazar el salto de una causa no probada a otra por descarte, incluso con certeza hipotesis. Si el propio informe admite no inspeccionar el mecanismo, no puede recomendar repararlo. Aceptar una conclusión acotada: esta revisión arma los campos, la causa histórica no se determinó; no exigir inventar una causa alternativa. No confundir autorización fiscal con aplicación local ni pedir lógica investigable al usuario.";
 
+const proofReviewInstruction=`Antes del veredicto, completá checks: una revisión causal_inference, una repair_and_action y una test_preconditions. Son comprobaciones independientes del resumen del autor. Identificá un statementId real del campo revisado y justificá supported contra el código. evidenceIndex es el índice cero de evidence.proofReferences, que remite a una lectura de citedCode, decisionBrief.readings (collection decisionBriefReadings) u operationalTestsConsulted. codeQuote debe ser un fragmento literal contiguo de su content, sin marcadores de deduplicación. Las lecturas compartidas no deben confundirse con ausencia de evidencia. Si no hay lectura pertinente, evidenceIndex=null, codeQuote="" y supported=false: explicar la limitación, nunca inventar respaldo. Una causa histórica no determinada puede ser una conclusión válida si el código leído respalda ese alcance; no exige obtener registros operativos para explicar el código.
+En counterexample, intentá refutar la implicación: ¿puede darse la condición observada sin la conclusión afirmada? Para causa, verificá si un estado pendiente o un rechazo identifica realmente una entrada específica o si admite otros caminos. Para reparación/acción, verificá si presupone un defecto demostrado o una operación autorizada. Para pruebas, verificá si la preparación propuesta basta para producir el resultado esperado, o si confunde una condición necesaria con una suficiente. No presentar un escenario contrafáctico como hecho del incidente. Si no hay reparación o prueba propuesta, usá proposal/cause para explicar su ausencia, sin inventar una observación.
+Si cualquier check no respalda el informe, supported=false, approved=false y al menos una issue debe citar ese mismo statementId. Una cita textual por sí sola no prueba la inferencia. Si todos los checks son supported=true, eso aún no obliga a aprobar: revisar las restantes afirmaciones. No aprobar por compartir vocabulario con el código. No exigir una causa alternativa si el informe declara honestamente que no se determinó.`;
+
 export async function prepareAudit(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,coverage:readonly string[] = []) {
   const {citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief}=await buildCoverageReview(report,source,coverage);
   const diagnosis=auditReport(report);
+  const requireChecks=isCreditNoteRecoveryCoverage(coverage);
+  const collections={citedCode,decisionBriefReadings:decisionBrief?.readings || [],operationalTestsConsulted};
+  const reviewReadings=Object.entries(collections).flatMap(([collection,readings])=>readings.map((reading,index)=>({collection,index,...reading})));
+  const proofReferences=reviewReadings.map(({collection,index,path,start,end})=>({collection,index,path,start,end}));
   const statementById=new Map(diagnosisStatements(report).statements.map(item=>[item.id,item]));
-  const payload=JSON.stringify({case:investigationCase(ticket),diagnosis,evidence:{citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief},capabilities:{codeInspectionOnly:true,testsExecuted:false,operationalDatabaseAccess:false}});
- return {diagnosis,statementById,payload,request:{messages:[{role:'system' as const,content:auditInstruction+(isCreditNoteRecoveryCoverage(coverage)?'\n'+recoveryAuditInstruction:'')+(isFiscalDatesRecoveryCoverage(coverage)?'\n'+fiscalDatesAuditInstruction:'')},{role:'user' as const,content:payload}],max_completion_tokens:AUDIT_OUTPUT,response_format:{type:'json_schema' as const,json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema([...statementById.keys()])}}}};
+  const payload=JSON.stringify({case:investigationCase(ticket),diagnosis,evidence:{citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief,...(requireChecks?{proofReferences}:{})},capabilities:{codeInspectionOnly:true,testsExecuted:false,operationalDatabaseAccess:false}});
+ return {diagnosis,statementById,payload,requireChecks,reviewReadings,request:{messages:[{role:'system' as const,content:auditInstruction+(isCreditNoteRecoveryCoverage(coverage)?'\n'+recoveryAuditInstruction:'')+(isFiscalDatesRecoveryCoverage(coverage)?'\n'+fiscalDatesAuditInstruction:'')+(requireChecks?'\n'+proofReviewInstruction:'')},{role:'user' as const,content:payload}],max_completion_tokens:AUDIT_OUTPUT,response_format:{type:'json_schema' as const,json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema([...statementById.keys()],requireChecks)}}}};
 }
 export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,client:OpenAI,options:{model:string;signal:AbortSignal;remainingTokens:number;coverageChecklist?:readonly string[];prepared?:Awaited<ReturnType<typeof prepareAudit>>;estimate?:typeof requestCost;observe?:(request:unknown,promptTokens:unknown)=>void}) {
- const {statementById,request}=options.prepared || await prepareAudit(ticket,report,source,options.coverageChecklist);
+ const {statementById,request,requireChecks,reviewReadings}=options.prepared || await prepareAudit(ticket,report,source,options.coverageChecklist);
   const estimate=(options.estimate || requestCost)({...request,model:options.model},AUDIT_OUTPUT);
  // No request is made if its reserved cost cannot fit.
  if(estimate>options.remainingTokens)throw Object.assign(new Error('No queda presupuesto para verificar la coherencia del diagnóstico.'),{code:'audit_budget'});
@@ -82,12 +96,32 @@ export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosi
   if(!validation.success){
    // Paths/codes only: neither the rejected JSON nor its values enter logs.
    auditSchemaIssues=validation.error.issues.slice(0,4).map(issue=>({
-    path:issue.path.map(part=>typeof part==='number'?'item':(['issues','approved','statementId','problem','correction'].includes(String(part))?String(part):'unknown')).join('.'),
+    path:issue.path.map(part=>typeof part==='number'?'item':(['issues','approved','statementId','problem','correction','checks','topic','supported','reason','counterexample','evidenceIndex','codeQuote'].includes(String(part))?String(part):'unknown')).join('.'),
     code:issue.code,
    }));
    throw new Error('Formato de auditoría inválido');
   }
   const verdict=validation.data;
+  if(requireChecks){
+   auditReason='incomplete_checks';
+   if(!verdict.checks || new Set(verdict.checks.map(check=>check.topic)).size!==reviewTopics.length)throw new Error('Falta una revisión independiente');
+   const allowedFields={causal_inference:['summary','cause','evidence'],repair_and_action:['proposal','dataRepair','cause'],test_preconditions:['proposedTests','proposal','cause']};
+   for(const check of verdict.checks){
+    auditReason='invalid_check_reference';
+    const statement=statementById.get(check.statementId);
+    if(!statement || !allowedFields[check.topic].includes(statement.field))throw new Error('La revisión no corresponde al campo indicado');
+    if(check.evidenceIndex===null){
+     if(check.supported || check.codeQuote!=='')throw new Error('No se puede respaldar una conclusión sin lectura citada');
+    }else {
+     const reading=reviewReadings[check.evidenceIndex];
+     if(!reading || !check.codeQuote.trim() || !reading.content.includes(check.codeQuote))throw new Error('La lectura no contiene la cita del auditor');
+     const original=await source.read(reading.path,reading.start,reading.end);
+     if(!original.content.includes(check.codeQuote))throw new Error('Un marcador de contexto no es código fuente');
+    }
+    auditReason='inconsistent_checks';
+    if(!check.supported && (verdict.approved || !verdict.issues.some(issue=>issue.statementId===check.statementId)))throw new Error('El veredicto ignora una comprobación rechazada');
+   }
+  }
   auditReason='inconsistent_verdict';
   if(verdict.approved!== (verdict.issues.length===0))throw new Error('Veredicto contradictorio');
   auditReason='invalid_reference';

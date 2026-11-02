@@ -1,0 +1,68 @@
+{
+  "summary": "El problema de que la nota de crédito quede pendiente de conciliar y muestre el error fiscal 10049 (campos de fecha faltantes o inválidos) está relacionado con el armado y autorización de la NC para Concepto 2 en la integración con ARCA.",
+  "cause": "La función que construye las fechas requeridas para el XML del comprobante de Concepto 2 (buildServiceDates) usa la fecha de emisión para asignar FchServDesde, FchServHasta (un día después) y FchVtoPago (60 días después). El error 10049 ocurre cuando estos campos no están completos o correctos en el XML que se envía al proveedor fiscal. El código en wsfevClient.ts muestra que esas fechas se añaden al XML para Concepto 2 correctamente, con validaciones estrictas del formato y fechas válidas. El código también distingue la autorización (feCAESolicitar) de la conciliación local, que solo ocurre cuando el estado y la CAE ya existen. La conciliación local en groupCreditRecovery.ts actualiza el estado a conciliada sólo si la NC tiene estado 'emitida', tiene un CAE válido y la conciliación está pendiente. Si la NC queda en estado pendiente sin CAE o sin fecha autorización, la conciliación no avanza y la función en el endpoint devuelve error. En la pantalla Facturación se ofrece un botón para reintentar la conciliación, que llama al endpoint que ejecuta recoverGroupCreditNote. El error reportado corresponde a que la NC está sin autorización fiscal completa, por lo tanto falta el CAE y las fechas fiscales obligatorias en el XML. Esto puede ser por un mal guardado inicial de esa NC, que no tiene los datos de fecha necesarios o no se autorizó correctamente en ARCA.",
+  "proposal": "1. Verificar que al crear la NC de grupo se construyen y asignan correctamente las fechas FchServDesde, FchServHasta y FchVtoPago usando el mismo esquema del buildServiceDates y que estas se persistirán para la autorización fiscal.\n2. Confirmar que la autorización vía feCAESolicitar se realiza correctamente y que el XML enviado contiene esas fechas y el resto de campos requeridos para Concepto 2.\n3. En caso de NC pendiente sin CAE y error 10049 en conciliación, usar el botón de reintentar conciliación para que se intente autorizar la NC o recuperarla si ya está emitida aunque la pantalla no la muestre como tal. Si el problema persiste, investigar si el guardado inicial de la NC estaba incompleto o corrupto.\nNo se debe emitir otro comprobante mientras se corrige la autorización ni hacer conciliación manual hasta que la NC tenga CAE válido y fechas fiscales correctas.",
+  "certainty": "sustentado_en_codigo",
+  "proposedTests": [
+    "Probar la creación de una NC de grupo y revisar en la base de datos las fechas de prestación y de vencimiento guardadas antes de la autorización fiscal.",
+    "Simular la autorización con feCAESolicitar y verificar el cuerpo XML enviado al proveedor ARCA para confirmar que incluye las fechas obligatorias con formato AAAAMMDD.",
+    "Generar una NC y que quede en estado pendiente sin CAE, intentar conciliar y verificar que se reproduzca el error 10049 con el mensaje específico de fechas.",
+    "Usar el botón de reintentar conciliación en la pantalla Facturación y validar que el proceso intente nuevamente la autorización o recuperación y que si pasa, actualice el estado a conciliada.",
+    "Leer logs y bases para validar que si el CAE y fechas fiscales están incompletos, la NC no pasa a estado conciliada y se mantiene pendiente.",
+    "Verificar que la función recoverGroupCreditNote no modifica ni emite otra NC en caso de error, sólo reintenta autorizar o recupera el estado del comprobante existente."
+  ],
+  "questions": [],
+  "dataRepair": "",
+  "limitations": [
+    "El análisis se basa en la revisión estática del código y no incluye ejecución de pruebas ni valores de casos concretos del incidente.",
+    "No se tiene acceso a los datos exactos guardados de la nota de crédito que provocó el error ni a la configuración del usuario o ambiente fiscales.",
+    "No se evaluaron otras posibles causas fiscales externas a la aplicación que pudieran influir en el rechazo del proveedor.",
+    "La evidencia de interfaz citada corresponde a: Facturación. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+    "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+    "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+  ],
+  "evidence": [
+    {
+      "path": "server/billing/wsfevClient.ts",
+      "start": 127,
+      "end": 145,
+      "explanation": "La función buildServiceDates construye y valida las fechas FchServDesde, FchServHasta y FchVtoPago para enviar al proveedor, basadas en la fecha de emisión, y en formato AAAAMMDD."
+    },
+    {
+      "path": "server/billing/wsfevClient.ts",
+      "start": 195,
+      "end": 233,
+      "explanation": "El XML enviado a ARCA para Concepto 2 incluye las fechas fiscales generadas y validadas; la construcción del SOAP con estos campos se ve en feCAESolicitar."
+    },
+    {
+      "path": "server/billing/invoiceService.ts",
+      "start": 578,
+      "end": 629,
+      "explanation": "El servicio de facturación intenta recuperar la NC autorizada o solicitar nueva autorización con las fechas y datos necesarios. Maneja estados pendientes y CAE para autorizar o recuperar NC."
+    },
+    {
+      "path": "server/billing/groupCreditRecovery.ts",
+      "start": 112,
+      "end": 235,
+      "explanation": "La función recoverGroupCreditNote verifica estado, autorización y realiza conciliación local solo si la NC tiene CAE válido y fechas; si está pendiente sin CAE lanza error o mantiene pendiente."
+    },
+    {
+      "path": "server/billing/routes.ts",
+      "start": 859,
+      "end": 917,
+      "explanation": "El endpoint para conciliación de NC de grupo llama a recoverGroupCreditNote y valida estado, pendiente o conciliada, retornando error si no está autorizada o no válida."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 286,
+      "end": 314,
+      "explanation": "La pantalla Facturación usa una mutación para llamar al endpoint de conciliación y muestra mensajes de éxito o error, incluyendo el error fiscal recibido para informar al usuario."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 445,
+      "end": 466,
+      "explanation": "Se muestra el botón para reintentar conciliación, con indicador y mensaje para el usuario, basado en el estado actual de la NC."
+    }
+  ]
+}
