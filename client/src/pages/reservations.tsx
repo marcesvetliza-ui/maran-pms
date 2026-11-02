@@ -2517,7 +2517,9 @@ export function ReservationDetailDialog({
   const [bulkIncludeAccommodation, setBulkIncludeAccommodation] = useState(false);
   const [bulkSelectedPaymentIds, setBulkSelectedPaymentIds] = useState<Set<string>>(new Set());
   const [bulkTransferNote, setBulkTransferNote] = useState("");
-  const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
+  const [anularTarget, setAnularTarget] = useState<{
+    type: "cargo" | "pago"; id: string; expectedDescription?: string; expectedAmount?: string;
+  } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [anularEmitirNC, setAnularEmitirNC] = useState(false);
   const [anularSinNCPending, setAnularSinNCPending] = useState(false);
@@ -2845,16 +2847,35 @@ export function ReservationDetailDialog({
   });
 
   const anularChargeMutation = useMutation({
-    mutationFn: async ({ id, motivo }: { id: string; motivo: string }) => {
-      return apiRequest("PATCH", `/api/charges/${id}/anular`, { motivoAnulacion: motivo });
+    mutationFn: async ({ id, motivo, expectedDescription, expectedAmount }: {
+      id: string; motivo: string; expectedDescription?: string; expectedAmount?: string;
+    }) => {
+      const response = await apiRequest("PATCH", `/api/charges/${id}/anular`, {
+        motivoAnulacion: motivo, expectedDescription, expectedAmount,
+      });
+      return response.json();
     },
-    onSuccess: () => {
-      refetchCharges();
+    onSuccess: async (result: { roomOnly?: boolean }) => {
       queryClient.invalidateQueries({ queryKey: ["spa-account-folio"] });
       queryClient.invalidateQueries({ queryKey: ["spa-prefactura-account"] });
       setAnularTarget(null);
       setMotivoAnulacion("");
-      toast({ title: "Cargo anulado", description: "El cargo ha sido anulado del folio." });
+      toast({
+        title: "Cargo anulado",
+        description: result.roomOnly
+          ? "Anulado solo en la habitación. El consumo de Restaurante permanece sin cambios."
+          : "El cargo ha sido anulado del folio.",
+      });
+      try {
+        await Promise.all([
+          refetchCharges(),
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/folios", "reservation", reservation.id] }),
+        ]);
+      } catch {
+        toast({ title: "El cargo ya se anuló", description: "Falta actualizar el folio. Actualizá la pantalla antes de continuar." });
+      }
     },
     onError: (error: any) => {
       toast({ title: "Error", description: parseApiError(error) || "No se pudo anular el cargo", variant: "destructive" });
@@ -4028,12 +4049,16 @@ export function ReservationDetailDialog({
                           <ArrowRightLeft className="h-3 w-3 mr-1" />Transferir
                         </Button>
                         )}
-                        {!invoicedChargeIds.has(String(charge.id)) && (
+                        {canAnularCargo && !invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="sm"
                           variant="outline"
                           className="h-7 px-2 text-xs"
-                          onClick={() => { setAnularTarget({ type: "cargo", id: charge.id }); setMotivoAnulacion(""); }}
+                          onClick={() => {
+                            setAnularTarget({ type: "cargo", id: charge.id,
+                              expectedDescription: charge.description, expectedAmount: String(charge.amount) });
+                            setMotivoAnulacion("");
+                          }}
                           title="Anular cargo"
                           data-testid={`button-anular-charge-${charge.id}`}
                         >
@@ -5360,6 +5385,8 @@ export function ReservationDetailDialog({
 
       {/* Anular Cargo / Pago Dialog */}
       {(() => {
+        const anularCharge = anularTarget?.type === "cargo"
+          ? charges?.find((c: any) => c.id === anularTarget.id) : null;
         const anularPayment = anularTarget?.type === "pago"
           ? payments?.find((p: any) => p.id === anularTarget.id)
           : null;
@@ -5378,7 +5405,9 @@ export function ReservationDetailDialog({
                 Anular {anularTarget?.type === "cargo" ? "Cargo" : "Pago"}
               </DialogTitle>
               <DialogDescription>
-                Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales.
+                {anularCharge?.category === "restaurant"
+                  ? "Se anula solo el cargo en la habitación: dejará de sumar al saldo y seguirá visible como ANULADO. El pedido y los consumos de Restaurante no se modifican. No se cambian stock, pagos ni Caja."
+                  : "Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales."}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
@@ -5428,7 +5457,11 @@ export function ReservationDetailDialog({
                 onClick={() => {
                   if (!anularTarget) return;
                   if (anularTarget.type === "cargo") {
-                    anularChargeMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
+                    anularChargeMutation.mutate({
+                      id: anularTarget.id, motivo: motivoAnulacion,
+                      expectedDescription: anularTarget.expectedDescription,
+                      expectedAmount: anularTarget.expectedAmount,
+                    });
                   } else {
                     // If payment has an invoice but NC is not checked, require explicit second confirmation
                     if (anularInvoiceRef && !anularEmitirNC) {

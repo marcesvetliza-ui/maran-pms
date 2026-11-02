@@ -274,6 +274,7 @@ async function writeAudit(
     action: "update" | "delete";
     reservationId: string;
     chargeId: string;
+    entityType?: "reservation_manual_extra" | "reservation_room_charge";
     description: string;
     before: unknown;
     after: unknown;
@@ -283,7 +284,7 @@ async function writeAudit(
   await client.query(
     `INSERT INTO audit_logs
        (user_id, user_name, action, module, entity_type, entity_id, description, details, ip_address, timestamp)
-     VALUES ($1, $2, $3, 'charges', 'reservation_manual_extra', $4, $5, $6, $7, NOW())`,
+     VALUES ($1, $2, $3, 'charges', $8, $4, $5, $6, $7, NOW())`,
     [
       input.actorId,
       input.actorName,
@@ -298,6 +299,7 @@ async function writeAudit(
         after: input.after,
       }),
       input.ipAddress,
+      input.entityType ?? "reservation_manual_extra",
     ],
   );
 }
@@ -629,3 +631,11 @@ export async function manualChargeHasSourceLedger(chargeId: string): Promise<boo
   );
   return Number(result.rowCount) > 0;
 }
+
+/** Shared transaction/fiscal primitives; this does not broaden manual eligibility. */
+export const roomChargeActionSupport = {
+  actionError, parseReason, parseExpected, cents, money, publicCharge,
+  validateVoidBody: (body: unknown): void => { assertAllowedBody(body, "void"); },
+  withReservationInvoiceLock, getReservation, reservationIsClosed, getCharge,
+  invoiceSourceConflict, recalculateFolio, writeAudit,
+};

@@ -20,6 +20,7 @@ import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth, requireRole, requirePermission } from "../auth";
 import { canEditAccommodation } from "../accommodationPermissions";
 import { changesAccommodation } from "@shared/accommodationPermission";
+import { anularRestaurantRoomCharge } from "./restaurant-room-charge-void";
 import { RESERVATION_CHARGE_VOID_ROLES } from "@shared/reservationChargePermissions";
 import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
 import { audit } from "../audit";
@@ -1960,6 +1961,23 @@ export function registerReservationsRoutes(app: Express) {
       const existing = await storage.getCharge(req.params.id);
       if (!existing) return res.status(404).json({ error: "Cargo no encontrado" });
       if (String(existing.id).startsWith("checkout-discount:")) return res.status(409).json({ error: "El descuento está vinculado a una prefactura emitida y no puede anularse como un cargo." });
+      if (existing.reservationId && existing.category === "restaurant") {
+        const updated = await anularRestaurantRoomCharge(
+          existing.reservationId,
+          existing.id,
+          {
+            motivo: motivoAnulacion,
+            expectedDescription: req.body.expectedDescription ?? existing.description,
+            expectedAmount: req.body.expectedAmount ?? existing.amount,
+          },
+          {
+            id: String(req.user?.id ?? ""),
+            name: String(req.user?.username ?? req.user?.fullName ?? ""),
+            ipAddress: String(req.ip ?? req.socket?.remoteAddress ?? ""),
+          },
+        );
+        return res.json(updated);
+      }
       if (existing.status === "anulado") return res.status(400).json({ error: "El cargo ya está anulado" });
       if (existing.reservationId) {
         const reservation = await storage.getReservation(existing.reservationId);
