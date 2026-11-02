@@ -626,6 +626,7 @@ describe("PrefacturaDialog — checkout-failure mid-flow", () => {
     const onClose = vi.fn();
     const onCheckoutComplete = vi.fn();
     renderDialog({
+      mode:"billing",
       onClose,
       onCheckoutComplete,
       reservation: {

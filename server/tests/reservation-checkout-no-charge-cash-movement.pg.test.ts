@@ -161,11 +161,11 @@ async function cleanupFixture(fixture: Fixture) {
   await testPool.query(`DELETE FROM room_types WHERE id = $1`, [fixture.roomTypeId]);
 }
 
-async function postCheckout(reservationId: string) {
+async function postCheckout(reservationId: string, body: Record<string,unknown> = {}) {
   const response = await fetch(`${baseUrl}/api/reservations/${reservationId}/check-out`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(body),
   });
   return { status: response.status, body: await response.json() as any };
 }
@@ -196,6 +196,17 @@ runIfDatabaseIsConfigured("PostgreSQL real: check-out sin cargos registra una sa
     await testPool?.end();
     const { pool } = await import("../db");
     await pool.end();
+  });
+
+  it("impide que el cierre saldado fuerce una deuda histórica o registre CC", async () => {
+    const fixture=await createFixture(1000);
+    try {
+      await testPool!.query("UPDATE reservations SET check_out_date=CURRENT_DATE-3 WHERE id=$1",[fixture.reservationId]);
+      const result=await postCheckout(fixture.reservationId,{requireSettled:true,forceCheckout:true});
+      expect(result.status).toBe(409);expect(result.body.balance).toBe(1000);
+      expect((await testPool!.query("SELECT status FROM reservations WHERE id=$1",[fixture.reservationId])).rows[0].status).toBe("checked_in");
+      expect(await readNoChargeMovements(fixture.reservationId)).toHaveLength(0);
+    }finally{await cleanupFixture(fixture);}
   });
 
   it("registra un movimiento informativo de $0 al hacer check-out de una reserva con tarifa $0 y sin cargos", async () => {
@@ -245,7 +256,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: check-out sin cargos registra una sa
          VALUES ($1, $2, 1000, 'efectivo', CURRENT_DATE, 'active')`,
         [`pg-nocharge-pay-${fixture.reservationId}`, fixture.reservationId],
       );
-      const result = await postCheckout(fixture.reservationId);
+      const result = await postCheckout(fixture.reservationId, {requireSettled:true});
       expect(result.status).toBe(200);
 
       const movements = await readNoChargeMovements(fixture.reservationId);

@@ -1,3 +1,4 @@
+import { withReservationFinancialLock } from "../nightlyPricingGuard";
 import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
 import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
@@ -1546,6 +1547,7 @@ export function registerReservationsRoutes(app: Express) {
 
   // Check-out endpoint
   app.post("/api/reservations/:id/check-out", requireAuth, async (req, res) => {
+    const run = async () => {
     const reservationLockClient = await pool.connect();
     try {
       await reservationLockClient.query("SELECT pg_advisory_lock(hashtext($1))", [`reservation-finance:${req.params.id}`]);
@@ -1588,6 +1590,12 @@ export function registerReservationsRoutes(app: Express) {
         ? savedRoomTotal
         : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
       const balance = roomTotal + chargesTotal - paymentsTotal;
+
+      // A zero-balance UI action must never fall back to forced/historical
+      // departure and create a CC debt if the balance changed meanwhile.
+      if (req.body?.requireSettled === true && balance > 0.01) {
+        return res.status(409).json({error:"El saldo cambió. Actualizá el folio y liquidá el importe pendiente antes de dar check-out.",balance});
+      }
 
       if (balance > 0.01 && !(isGroupLinked && groupDeparture) && (isGroupLinked || !forceCheckout)) {
         return res.status(400).json({
@@ -1771,6 +1779,14 @@ export function registerReservationsRoutes(app: Express) {
     } finally {
       await reservationLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [`reservation-finance:${req.params.id}`]).catch(() => undefined);
       reservationLockClient.release();
+    }
+    };
+    try {
+      return req.body?.requireSettled === true
+        ? await withReservationFinancialLock(req.params.id, run)
+        : await run();
+    } catch {
+      return res.status(500).json({error:"No se pudo verificar el saldo para cerrar la estadía. Actualizá el folio e intentá nuevamente."});
     }
   });
 
