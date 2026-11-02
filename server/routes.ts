@@ -1,3 +1,4 @@
+import { assertPurchaseInvoiceNotDuplicate } from "./purchase-invoice-duplicates";
 import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit } from "@shared/purchase-invoice-edit";
 import { requireCashView, cashShiftAccess } from "./cash-user-access";
 import { canViewCash, canOperateCash } from "@shared/cash-user-access";
@@ -3118,34 +3119,6 @@ export async function registerRoutes(
         });
       }
 
-      // ── Prevenir comprobantes duplicados ──────────────────────────────────
-      if (body.numeroComprobante) {
-        const supplierClause = body.supplierId
-          ? sql`supplier_id = ${parseInt(body.supplierId)}`
-          : sql`(proveedor_cuit IS NOT NULL AND proveedor_cuit = ${body.proveedorCuit || ""})`;
-        const pvClause = body.puntoVenta
-          ? sql`punto_venta = ${parseInt(body.puntoVenta)}`
-          : sql`punto_venta IS NULL`;
-        const dupCheck = await db.execute(sql`
-          SELECT id, numero_comprobante_ext, numero_comprobante
-          FROM purchase_invoices
-          WHERE tipo_comprobante = ${body.tipoComprobante}
-            AND numero_comprobante = ${body.numeroComprobante}
-            AND (${supplierClause})
-            AND (${pvClause})
-          LIMIT 1
-        `);
-        if (dupCheck.rows.length > 0) {
-          const dup = dupCheck.rows[0] as any;
-          const ref = dup.numero_comprobante_ext || dup.numero_comprobante;
-          return res.status(409).json({
-            error: `El comprobante ${ref} ya fue registrado anteriormente (ID #${dup.id}). No se permiten duplicados.`,
-            existingId: dup.id,
-          });
-        }
-      }
-      // ─────────────────────────────────────────────────────────────────────
-
       // Calcular montoTotal
       const n = (k: string) => parseFloat(body[k] || "0") || 0;
       const montoTotal = calculatePurchaseInvoiceTotal(body);
@@ -3197,6 +3170,7 @@ export async function registerRoutes(
 
       // Insertar comprobante
       const rawInvoice = await db.transaction(async (tx) => {
+      await assertPurchaseInvoiceNotDuplicate(tx, body);
       const result = await tx.execute(sql`
         INSERT INTO purchase_invoices (
           tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
@@ -3323,7 +3297,7 @@ export async function registerRoutes(
       });
       res.status(201).json(rawInvoice);
     } catch (e: any) {
-      res.status(e?.statusCode || 500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message, ...(e?.code === "PURCHASE_INVOICE_DUPLICATE" ? { existingId: e.existingId } : {}) });
     }
   });
 
