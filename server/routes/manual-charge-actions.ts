@@ -4,6 +4,7 @@ import type { Express } from "express";
 import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, requireRole } from "../auth";
+import { RESERVATION_CHARGE_VOID_ROLES } from "@shared/reservationChargePermissions";
 
 const MANUAL_CHARGE_ROLES = ["admin", "manager", "reception"] as const;
 const MANUAL_CHARGE_EDIT_ROLES = [...MANUAL_CHARGE_ROLES, "jefe_recepcion"] as const;
@@ -555,7 +556,7 @@ export function registerManualChargeActionRoutes(app: Express) {
   app.get(
     "/api/reservations/:reservationId/manual-charge-actions",
     requireAuth,
-    requireRole([...MANUAL_CHARGE_EDIT_ROLES]),
+    requireRole([...RESERVATION_CHARGE_VOID_ROLES]),
     async (req, res) => {
       try {
         const result = await withReservationInvoiceLock(req.params.reservationId, async (client) => {
@@ -569,7 +570,11 @@ export function registerManualChargeActionRoutes(app: Express) {
             throw error;
           }
         });
-        res.json(result);
+        const canEdit = MANUAL_CHARGE_EDIT_ROLES.some(role => role === req.user?.role);
+        res.json({
+          ...result,
+          charges: result.charges.map(charge => ({ ...charge, canEdit: charge.eligible && canEdit })),
+        });
       } catch (error) {
         sendActionError(res, error);
       }
@@ -599,7 +604,7 @@ export function registerManualChargeActionRoutes(app: Express) {
   app.post(
     "/api/reservations/:reservationId/manual-charges/:chargeId/anular",
     requireAuth,
-    requireRole([...MANUAL_CHARGE_ROLES]),
+    requireRole([...RESERVATION_CHARGE_VOID_ROLES]),
     async (req, res) => {
       try {
         const result = await mutateManualCharge(

@@ -2,6 +2,7 @@ import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { ReservationNightlyPricing, ReservationFolioSummary, type ReservationNightlyPricingHandle } from "@/components/reservation-nightly-pricing";
 import { ReservationFolioHeader } from "@/components/reservation-folio-header";
+import { canVoidReservationCharge } from "@shared/reservationChargePermissions";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -2378,6 +2379,7 @@ export function ReservationDetailDialog({
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
   const canAnularPago = !currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole);
+  const canAnularCargo = canVoidReservationCharge(currentUserRole);
 
   // Bug K: Fetch emitted invoices for this reservation so we can lock charges that were
   // already invoiced (prevent cancel/transfer of billed items).
@@ -4014,7 +4016,7 @@ export function ReservationDetailDialog({
                           <PlusCircle className="h-3 w-3 text-green-600" />
                         </Button>
                         {/* Bug K: invoiced charges cannot be transferred or cancelled — must go through NC */}
-                        {!invoicedChargeIds.has(String(charge.id)) && (
+                        {canAnularCargo && !invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="sm"
                           variant="outline"

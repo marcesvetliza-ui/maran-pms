@@ -20,6 +20,7 @@ import { getBillingConfig } from "../billing/billingConfig";
 import { requireAuth, requireRole, requirePermission } from "../auth";
 import { canEditAccommodation } from "../accommodationPermissions";
 import { changesAccommodation } from "@shared/accommodationPermission";
+import { RESERVATION_CHARGE_VOID_ROLES } from "@shared/reservationChargePermissions";
 import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
@@ -1950,7 +1951,7 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/charges/:id/anular", requireAuth, requireRole(["admin", "manager", "reception"]), async (req, res) => {
+  app.patch("/api/charges/:id/anular", requireAuth, requireRole([...RESERVATION_CHARGE_VOID_ROLES]), async (req, res) => {
     try {
       const { motivoAnulacion, anuladoPor } = req.body;
       if (typeof motivoAnulacion !== "string" || !motivoAnulacion.trim()) {
