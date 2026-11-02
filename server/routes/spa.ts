@@ -1,3 +1,4 @@
+import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { spaPlanningMoveSchema, spaMoveEndTime } from "@shared/spaPlanningMove";
 import type { Express } from "express";
 import { voidSpaPayment } from "../spaCancellation";
@@ -1763,6 +1764,9 @@ export function registerSpaRoutes(app: Express) {
 
       const accountData = await storage.getSpaAccount(req.params.id);
       if (!accountData) return res.status(404).json({ error: "Account not found" });
+
+      const collectionError = nonFiscalCollectionError(receiptType, accountData.payments.filter((p:any)=>p.status !== "anulado").map((p:any)=>p.method));
+      if (collectionError) return res.status(400).json({error:collectionError});
 
       const totalAmount = accountData.items.reduce((sum: number, item: any) => sum + parseFloat(item.subtotal), 0);
       const totalPaid = accountData.payments.filter((p: any) => p.status !== "anulado").reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);

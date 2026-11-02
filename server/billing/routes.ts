@@ -1,3 +1,4 @@
+import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { discardRejectedExemptInvoice, findRejectedExemptAttempt } from "./rejectedExemptInvoice";
 import { registerGroupFiscalCashRecoveryRoutes } from "./groupFiscalCashRecovery";
 import { recoverGroupCreditNote } from "./groupCreditRecovery";
@@ -1073,6 +1074,8 @@ export function registerBillingRoutes(app: Express) {
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      const collectionError = nonFiscalCollectionError(tipoComprobante, Array.isArray(cashFormaPagoDetalle) && cashFormaPagoDetalle.length ? cashFormaPagoDetalle.filter((row:any)=>Number(row?.amount)>0).map((row:any)=>row.method) : [cashFormaPago]);
+      if (collectionError) return res.status(400).json({error:collectionError});
       if (isEventCashArea(cashArea)) {
         return res.status(400).json({ error: "La caja de Eventos está desactivada. Los cobros se registran en Administración o Recepción." });
       }

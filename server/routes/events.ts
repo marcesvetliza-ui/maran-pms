@@ -1,3 +1,4 @@
+import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { formatDisplayDate } from "../../shared/date-display";
 import type { Express } from "express";
 import { storage } from "../db-storage";
@@ -539,6 +540,9 @@ export function registerEventsRoutes(app: Express) {
       const event = await storage.getEvent(req.params.eventId);
       if (!event) return res.status(404).json({ error: "Event not found" });
 
+      const collectionError = nonFiscalCollectionError(receiptType, (event.payments || []).filter((p:any)=>p.status !== "anulado").map((p:any)=>p.method));
+      if (collectionError) return res.status(400).json({error:collectionError});
+
       const chargesList = event.charges || [];
       const paymentsList = event.payments || [];
       const totalCharges = chargesList.reduce((sum: number, c: any) => sum + parseFloat(c.totalAmount), 0);
@@ -789,6 +793,9 @@ export function registerEventsRoutes(app: Express) {
 
       const table = await storage.getEventTable(req.params.tableId);
       if (!table) return res.status(404).json({ error: "Event table not found" });
+
+      const collectionError = nonFiscalCollectionError(receiptType, table.payments.filter((p:any)=>p.status !== "anulado").map((p:any)=>p.method));
+      if (collectionError) return res.status(400).json({error:collectionError});
 
       const totalCharges = table.charges.reduce((sum: number, c: any) => sum + parseFloat(c.total), 0);
       const totalPayments = table.payments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);

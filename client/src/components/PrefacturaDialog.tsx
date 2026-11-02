@@ -1,3 +1,4 @@
+import { nonFiscalCollectionError, isCashMethod } from "@shared/cash-document-classification";
 import { CompanySelector } from "@/components/entity-selector";
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
@@ -1340,6 +1341,8 @@ export function PrefacturaDialog({
           appliedPaymentDetails,
         )
       : buildInvoicePaymentMethods(currentCollectionRows, appliedPaymentDetails);
+    const collectionError = nonFiscalCollectionError(tipo, invoicePaymentMethods.cashFormaPagoDetalle?.map(row=>row.method) || [invoicePaymentMethods.cashFormaPago]);
+    if (collectionError) { setSubmitError(collectionError); return; }
     const usesCcEntity = isCcPayment || invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
     const invoiceSettlesCcPayment = invoicePaymentMethods.cashFormaPago === "cuenta_corriente";
 
@@ -2321,7 +2324,7 @@ export function PrefacturaDialog({
                         <Select value={row.method} onValueChange={v => updateRow(row.id, "method", v)}>
                           <SelectTrigger className="h-8 text-sm" data-testid={`select-payment-method-${idx}`}><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {Object.entries(PAYMENT_METHOD_LABELS).map(([v, l]) => (
+                            {Object.entries(PAYMENT_METHOD_LABELS).filter(([v])=>isFiscalTipo || isCashMethod(v)).map(([v, l]) => (
                               <SelectItem key={v} value={v} disabled={paymentRows.some(other => other.id !== row.id && other.method === v)}>
                                 {l}
                               </SelectItem>

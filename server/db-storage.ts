@@ -1,4 +1,6 @@
 import { withLodgingInventoryMutationLock } from "./inventoryMutationLock";
+import { nonFiscalCollectionError } from "@shared/cash-document-classification";
+
 import {breakfastEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
@@ -1761,6 +1763,8 @@ export class DatabaseStorage implements IStorage {
       advanceInvoiceRef?: string;
     };
   }): Promise<Payment & { paymentRequestReplayed?: boolean }> {
+    const collectionError = nonFiscalCollectionError(input.receiptType, [input.payment.method]);
+    if (collectionError) throw Object.assign(new Error(collectionError), {statusCode:400});
     const methodMap: Record<string, string> = {
       efectivo: "cash",
       cash: "cash",
