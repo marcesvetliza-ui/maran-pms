@@ -766,10 +766,14 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
       return data || null;
     },
     refetchOnMount: "always",
+    staleTime: 0,
   });
 
   const { data: movements = [], isLoading: movementsLoading } = useQuery<CashMovement[]>({
     queryKey: ["/api/cash/movements", `?shiftId=${currentShift?.id}`],
+    refetchOnMount: "always",
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       if (!currentShift?.id) return [];
       const res = await fetch(`/api/cash/movements?shiftId=${currentShift.id}`, { credentials: "include" });
@@ -1901,6 +1905,8 @@ function HistorialTab() {
 
   const { data: shiftDetail, isLoading: detailLoading, isError: detailError } = useQuery<ShiftDetail>({
     queryKey: ["/api/cash/shifts", detailShiftId],
+    refetchOnMount: "always",
+    staleTime: 0,
     queryFn: async () => {
       const res = await fetch(`/api/cash/shifts/${detailShiftId}`, { credentials: "include" });
       if (!res.ok) throw new Error("Error loading detail");
@@ -2325,6 +2331,9 @@ function ResumenDiaTab() {
   const [fecha, setFecha] = useState(today);
   const { data, isLoading, isError } = useQuery<{ fecha: string; movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }>({
     queryKey: ["/api/reports/caja-unificada", fecha],
+    refetchOnMount: "always",
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const res = await fetch(`/api/reports/caja-unificada?fecha=${fecha}`, { credentials: "include" });
       if (!res.ok) throw new Error("No se pudo cargar el resumen de caja");
