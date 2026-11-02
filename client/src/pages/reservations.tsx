@@ -128,51 +128,8 @@ import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiE
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
 import { GroupRoomObservations } from "@/components/group-room-observations";
-
-const roomNumberCollator = new Intl.Collator("es-AR", {
-  numeric: true,
-  sensitivity: "base",
-});
-
-/** Orden operativo de la tabla: habitaciones numeradas primero y sin asignar al final. */
-export function compareReservationsByRoom(
-  a: ReservationWithDetails,
-  b: ReservationWithDetails,
-): number {
-  const roomA = a.room?.roomNumber?.trim() || null;
-  const roomB = b.room?.roomNumber?.trim() || null;
-
-  if (!roomA && !roomB) return a.checkInDate.localeCompare(b.checkInDate);
-  if (!roomA) return 1;
-  if (!roomB) return -1;
-
-  const roomComparison = roomNumberCollator.compare(roomA, roomB);
-  return roomComparison !== 0
-    ? roomComparison
-    : a.checkInDate.localeCompare(b.checkInDate);
-}
-
-export type ReservationSortMode = "room" | "checkin" | "guest" | "created";
-
-export function compareReservationsForList(
-  mode: ReservationSortMode,
-  a: ReservationWithDetails,
-  b: ReservationWithDetails,
-): number {
-  if (mode === "checkin") {
-    return a.checkInDate.localeCompare(b.checkInDate) || compareReservationsByRoom(a, b);
-  }
-  if (mode === "guest") {
-    const guestA = `${a.guest?.lastName || ""} ${a.guest?.firstName || ""}`.trim();
-    const guestB = `${b.guest?.lastName || ""} ${b.guest?.firstName || ""}`.trim();
-    return roomNumberCollator.compare(guestA, guestB) || compareReservationsByRoom(a, b);
-  }
-  if (mode === "created") {
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      || compareReservationsByRoom(a, b);
-  }
-  return compareReservationsByRoom(a, b);
-}
+import { compareReservationsForList, resolveReservationSortMode, type ReservationSortMode } from "@/lib/reservation-list-order";
+export { compareReservationsByRoom, compareReservationsForList, type ReservationSortMode } from "@/lib/reservation-list-order";
 import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -5780,6 +5737,7 @@ export default function ReservationsPage() {
 
   const todayStr = getLocalToday();
   const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created" | "anuladas">("today");
+  const effectiveSortMode = resolveReservationSortMode(dateMode, sortMode);
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState("");
   const [createdFrom, setCreatedFrom] = useState(todayStr);
@@ -6065,7 +6023,7 @@ export default function ReservationsPage() {
 
       return matchesSearch && matchesStatus;
     })
-    ?.sort((a, b) => compareReservationsForList(sortMode, a, b));
+    ?.sort((a, b) => compareReservationsForList(effectiveSortMode, a, b));
 
   const isResLocked = (r: ReservationWithDetails) => {
     return r.status === "checked_out" || r.status === "cancelled";
@@ -6419,7 +6377,8 @@ export default function ReservationsPage() {
                   <SelectItem value="cancelled">Canceladas</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={sortMode} onValueChange={(value) => setSortMode(value as ReservationSortMode)}>
+              <Select value={effectiveSortMode} disabled={dateMode === "created"}
+                onValueChange={(value) => setSortMode(value as ReservationSortMode)}>
                 <SelectTrigger className="w-[210px]" data-testid="select-sort-reservations">
                   <SelectValue placeholder="Ordenar por" />
                 </SelectTrigger>
