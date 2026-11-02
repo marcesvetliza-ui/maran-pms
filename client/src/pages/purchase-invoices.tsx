@@ -1209,7 +1209,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false)} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
+                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false && item.isActive !== "false" && item.itemKind !== "plato")} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}
@@ -1919,7 +1919,7 @@ export function InvoiceDialog({
                       </div>
 
                       {/* Article selector / name */}
-                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false)} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
+                      <PurchaseInventoryPicker items={existingInvItems.filter((item:any)=>item.purchaseEnabled !== false && item.isActive !== "false" && item.itemKind !== "plato")} selectedId={row.existingItemId} open={!!existingItemOpen[i]} onOpenChange={(v) => setExistingItemOpen(p => ({ ...p, [i]: v }))} onSelect={(id) => { selectExistingInvItem(i, id); setExistingItemOpen(p => ({ ...p, [i]: false })); }} index={i} excludeIds={invItems.filter((_, j) => j !== i).map(r => r.existingItemId).filter(Boolean)} />
                       {row.existingItemId && <p className="text-xs text-muted-foreground">SKU: {(existingInvItems.find((it: any) => String(it.id) === row.existingItemId) as any)?.sku || "Sin código"}</p>}
 
                       {/* Quantity, unit, cost */}

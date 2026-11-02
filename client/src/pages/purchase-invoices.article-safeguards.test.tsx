@@ -30,6 +30,10 @@ const SUPPLIERS = [
 const ACCOUNTS: any[] = [];
 const CATEGORIES: any[] = [];
 const EXISTING_ITEMS = [
+  { id: "raw-beef", name: "Bife materia prima", isActive: "true", itemKind: "materia_prima", purchaseEnabled: true, currentStock: "0", unit: "kg" },
+  { id: "dish-beef", name: "Bife plato interno", isActive: "true", itemKind: "plato", purchaseEnabled: true },
+  { id: "inactive-beef", name: "Bife inactivo", isActive: "false", itemKind: "materia_prima", purchaseEnabled: true },
+  { id: "blocked-beef", name: "Bife no comprar", isActive: "true", itemKind: "materia_prima", purchaseEnabled: false },
   { id: "item-1", name: "Aceite de Oliva", currentStock: "5", unit: "unidad", ivaRate: "10.5" },
   { id: "item-2", name: "Vino Reserva", currentStock: "3", unit: "unidad", ivaRate: "21" },
   { id: "item-3", name: "Artículo Sin IVA Cargado", currentStock: "0", unit: "unidad" },
@@ -75,6 +79,20 @@ describe("InvoiceDialog — no permite repetir un artículo en el mismo comproba
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("ofrece artículos activos comprables incluso sin stock, y oculta platos, inactivos y no comprar", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await addItemRow(user);
+    await user.click(await screen.findByTestId("select-existing-item-0"));
+    expect(await screen.findByText("Bife materia prima")).toBeInTheDocument();
+    expect(screen.queryByText("Bife plato interno")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bife inactivo")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bife no comprar")).not.toBeInTheDocument();
+    expect(screen.getByText("Aceite de Oliva")).toBeInTheDocument();
+    await user.click(screen.getByText("Bife materia prima"));
+    expect(screen.getByText("Seleccionado:")).toBeInTheDocument();
   });
 
   it("excluye del segundo picker el artículo ya elegido en el primer renglón", async () => {
