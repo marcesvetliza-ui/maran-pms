@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { discardRejectedExemptInvoice } from '../billing/rejectedExemptInvoice';
+import { discardRejectedExemptInvoice, findRejectedExemptAttempt } from '../billing/rejectedExemptInvoice';
 const url = process.env.REJECTED_EXEMPT_TEST_DATABASE_URL;
 if (url && new URL(url).pathname !== '/reservation_cancel_test') throw Error('Only disposable reservation_cancel_test allowed');
 const suite = url ? describe : describe.skip;
@@ -36,6 +36,27 @@ suite('Rejected A/Exento correction with read-only ARCA lookup', () => {
     expect(audit).toHaveLength(1);
     expect(JSON.parse(audit[0].details)).toMatchObject({ arcaNotAuthorized: true, before: { id: f.invoice.id }, companyBefore: { condicion_iva: 'consumidor_final' } });
     expect((await pool!.query('SELECT id FROM payments WHERE reservation_id=$1', [f.reservationId])).rows).toHaveLength(0);
+  }));
+
+  it('discovers only the reservation server intent and restores its immutable card amount with an audited replay', async () => fixture(async f => {
+    const intent={operationId:f.operationId,status:'pending',payments:[],ordinaryAdvances:[],sourceChargeIds:['accommodation'],settlement:{status:'pending',destination:'none',method:'tarjeta_credito',amount:531600}};
+    await pool!.query('UPDATE sales_invoices SET credit_reapplication_intent=$2 WHERE id=$1',[f.invoice.id,JSON.stringify(intent)]);
+    expect(await findRejectedExemptAttempt(pool!, randomUUID())).toEqual({attempt:null});
+    expect(await findRejectedExemptAttempt(pool!, f.reservationId)).toEqual({attempt:{operationId:f.operationId,recoverable:true}});
+    const lookup=vi.fn(async()=>null);
+    const run=()=>discardRejectedExemptInvoice(pool!,f.reservationId,f.operationId,{name:'Recepción'},{environment:'produccion',issuer:'30111111118'},lookup,true);
+    const result=await run();
+    expect(result.review).toMatchObject({cliente:{cuit:f.invoice.cliente_cuit,condicionIva:'Exento'},payments:[{amount:'531600',method:'tarjeta_credito'}]});
+    expect(await run()).toEqual(result);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(await findRejectedExemptAttempt(pool!,f.reservationId)).toEqual({attempt:null});
+  }));
+  it('keeps an incomplete server-only intent for reconciliation without any ARCA call or deletion',async()=>fixture(async f=>{
+    expect(await findRejectedExemptAttempt(pool!,f.reservationId)).toEqual({attempt:{operationId:f.operationId,recoverable:false}});
+    const lookup=vi.fn(async()=>null);
+    await expect(discardRejectedExemptInvoice(pool!,f.reservationId,f.operationId,{},{environment:'produccion',issuer:'30111111118'},lookup,true)).rejects.toThrow('conciliación');
+    expect(lookup).not.toHaveBeenCalled();
+    expect((await pool!.query('SELECT id FROM sales_invoices WHERE id=$1',[f.invoice.id])).rows).toHaveLength(1);
   }));
   it('rolls back the company and draft if its audit cannot be saved', async () => fixture(async f => {
     const fn='exempt_audit_'+randomUUID().replaceAll('-','');

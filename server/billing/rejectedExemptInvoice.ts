@@ -2,11 +2,40 @@ import type { Pool } from 'pg';
 
 const conflict = (message: string) => Object.assign(new Error(message), { statusCode: 409 });
 
+// Recover the immutable server intent, never today's editable/default payment fields.
+export function rejectedExemptReview(invoice: any) {
+  const intent = invoice?.credit_reapplication_intent;
+  const settlement = intent?.settlement;
+  if (!Array.isArray(intent?.payments) || intent.payments.length || intent.ordinaryAdvances?.length || intent.checkoutDiscount ||
+      !["efectivo", "tarjeta_credito", "tarjeta_debito", "transferencia", "mercadopago"].includes(settlement?.method) ||
+      !Number.isFinite(Number(settlement?.amount)) || Number(settlement.amount) <= 0 ||
+      Math.abs(Number(settlement.amount) - Number(invoice.monto_total)) > 0.005 ||
+      !Array.isArray(intent.sourceChargeIds) || !intent.sourceChargeIds.length) return null;
+  return {
+    cliente: { razonSocial: invoice.cliente_razon_social, cuit: invoice.cliente_cuit, dni: invoice.cliente_dni,
+      domicilio: invoice.cliente_domicilio, condicionIva: 'Exento' },
+    puntoVentaOverride: invoice.punto_venta, observaciones: invoice.observaciones || '', sourceChargeIds: intent.sourceChargeIds,
+    payments: [{ amount: String(settlement.amount), method: settlement.method, reference: '' }],
+  };
+}
+
+export async function findRejectedExemptAttempt(pool: Pool, reservationId: string) {
+  const invoices = (await pool.query(`SELECT * FROM sales_invoices WHERE reserva_id=$1 AND estado='autorizacion_pendiente' ORDER BY id DESC`, [reservationId])).rows;
+  const invoice = invoices.find(i => ['FA','FM'].includes(i.tipo_comprobante) &&
+    String(i.cliente_condicion_iva).trim().toLowerCase() === 'exento' && /\b10243\b/.test(i.reconciliation_error || ''));
+  if (!invoice) return { attempt: null };
+  const intent = invoice.credit_reapplication_intent;
+  const recoverable = invoices.length === 1 && !invoice.cae && !invoice.modo_ficticio &&
+    intent?.status === 'pending' && intent.settlement?.status === 'pending' && ['cash','none'].includes(intent.settlement?.destination) &&
+    /^[0-9a-f-]{20,}$/i.test(intent.operationId || '') && !!rejectedExemptReview(invoice);
+  return { attempt: { operationId: intent?.operationId, recoverable } };
+}
+
 // Only the old, specifically rejected A/Exento combination is correctable here.
 // The caller provides a read-only ARCA lookup; this function never authorizes a voucher.
 export async function discardRejectedExemptInvoice(pool: Pool, reservationId: string, operationId: string,
   actor: { id?: string; name?: string; ip?: string }, identity: { environment: string; issuer: string },
-  lookup: (invoice: any) => Promise<unknown>) {
+  lookup: (invoice: any) => Promise<unknown>, requireServerReview = false) {
   const c = await pool.connect();
   let reservationLocked = false, seriesKey = '';
   try {
@@ -21,7 +50,7 @@ export async function discardRejectedExemptInvoice(pool: Pool, reservationId: st
         try {
           const proof = typeof row.details === 'string' ? JSON.parse(row.details) : row.details;
           if (proof?.operationId === operationId && proof?.before?.reserva_id === reservationId && proof?.arcaNotAuthorized === true)
-            return { discarded: true, correctedCompanyId: proof.companyBefore?.id || null };
+            return { discarded: true, correctedCompanyId: proof.companyBefore?.id || null, review: rejectedExemptReview(proof.before), operationId };
         } catch {}
       }
       throw conflict('No se encontró el intento pendiente. Actualizá el folio.');
@@ -38,6 +67,11 @@ export async function discardRejectedExemptInvoice(pool: Pool, reservationId: st
         invoice.payment_id || invoice.group_id || invoice.spa_account_id || invoice.restaurant_order_id || intent.status !== 'pending' || intent.settlement?.status !== 'pending' || !['cash','none'].includes(intent.settlement?.destination)) {
       throw conflict('Este intento no puede descartarse automáticamente; requiere conciliación fiscal.');
     }
+    if (requireServerReview) {
+      const pending = await c.query("SELECT id FROM sales_invoices WHERE reserva_id=$1 AND estado='autorizacion_pendiente'", [reservationId]);
+      if (pending.rows.length !== 1 || !rejectedExemptReview(invoice))
+        throw conflict('El intento requiere conciliación antes de corregir sus formas de pago.');
+    }
     const linked = await c.query(`SELECT 1 FROM payments WHERE reservation_id=$1 AND status<>'anulado'
       UNION ALL SELECT 1 FROM sales_invoices WHERE nota_credito_id=$2::integer
       UNION ALL SELECT 1 FROM cash_movements WHERE source_type='comprobante' AND source_id=$2::text
@@ -53,7 +87,7 @@ export async function discardRejectedExemptInvoice(pool: Pool, reservationId: st
        JSON.stringify({ before: invoice, companyBefore: companies[0] || null, companyVatAfter: companies.length ? 'exento' : null, arcaNotAuthorized: true, operationId }), actor.ip || null]);
     await c.query(`DELETE FROM sales_invoices WHERE id=$1`, [invoice.id]);
     await c.query('COMMIT');
-    return { discarded: true, correctedCompanyId: companies[0]?.id || null };
+    return { discarded: true, correctedCompanyId: companies[0]?.id || null, review: rejectedExemptReview(invoice), operationId };
   } catch (error) { await c.query('ROLLBACK').catch(() => {}); throw error; }
   finally {
     if (seriesKey) await c.query('SELECT pg_advisory_unlock(hashtextextended($1,0))', [seriesKey]).catch(() => {});

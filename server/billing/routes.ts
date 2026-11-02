@@ -1,4 +1,4 @@
-import { discardRejectedExemptInvoice } from "./rejectedExemptInvoice";
+import { discardRejectedExemptInvoice, findRejectedExemptAttempt } from "./rejectedExemptInvoice";
 import { registerGroupFiscalCashRecoveryRoutes } from "./groupFiscalCashRecovery";
 import { recoverGroupCreditNote } from "./groupCreditRecovery";
 import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
@@ -2470,6 +2470,12 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
+  // Read-only discovery also works after changing browser/session. Never retries ARCA authorization.
+  app.get("/api/billing/reservations/:reservationId/rejected-exempt-attempt", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
+    try { res.json(await findRejectedExemptAttempt(pool, req.params.reservationId)); }
+    catch { res.status(500).json({ error: "No se pudo consultar el intento fiscal pendiente." }); }
+  });
+
   // User-triggered correction: consults ARCA, never authorizes or records money.
   app.post("/api/billing/reservations/:reservationId/operations/:operationId/correct-exempt-rejection", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     const { reservationId, operationId } = req.params;
@@ -2485,7 +2491,7 @@ export function registerBillingRoutes(app: Express) {
           const { feCompConsultar } = await import("./wsfevClient");
           const { token, sign } = await getTokenAuth(config.arcaCert!, config.arcaKey!, environment as "produccion" | "homologacion");
           return feCompConsultar({ tipo: invoice.tipo_comprobante, puntoVenta: Number(invoice.punto_venta), numero: Number(invoice.numero), cuitEmisor: issuer, token, sign }, environment as "produccion" | "homologacion");
-        });
+        }, req.body?.serverRecovery === true);
       res.json(result);
     } catch (error: any) { res.status(error.statusCode || 502).json({ error: error.message || "No se pudo verificar el rechazo. Conservamos la operación." }); }
   });
