@@ -1,0 +1,65 @@
+{
+  "summary": "El código revisado muestra claramente que las fechas obligatorias FchServDesde, FchServHasta y FchVtoPago para Notas de Crédito con Concepto 2 se construyen y validan correctamente usando la fecha de emisión. Estas fechas se incluyen en el XML antes de enviarse a la AFIP. La recuperación y conciliación de una NC de grupo están implementadas para actualizar el estado de conciliación local y no emitir otra NC, pero el error 10049 indica que esos campos XML contienen errores o no se completaron correctamente. Esto apunta a que la fecha de emisión usada para generar las fechas fiscales no coincide o está mal formateada en algún punto del flujo de autorización o recuperación.",
+  "cause": "La construcción y validación de las fechas FchServDesde, FchServHasta y FchVtoPago se hace en buildServiceDates con un estricto formato AAAAMMDD, y se envía correctamente en el XML con Concepto 2. Sin embargo, el error 10049 indica que al enviar la NC para conciliación fiscal, esos campos faltan o tienen formato incorrecto, lo que puede deberse a que la fecha de emisión que se utiliza para componer estas fechas no es la correcta o no se asigna adecuadamente durante la recuperación o en algún paso previo a la autorización de la NC en ARCA. Esto queda evidenciado porque el código recupera y vuelve a autorizar la NC pendiente, pero el error se devuelve desde ARCA y queda reflejado en reconciliation_error.",
+  "proposal": "Revisar el proceso de recuperación y autorización de la NC para asegurar que la fecha de emisión utilizada para construir las fechas fiscales esté correctamente asignada y en formato AAAAMMDD antes de llamar a feCAESolicitar. Añadir validaciones adicionales y logs para verificar el valor exacto de la fecha en ese momento. Corregir la asignación si hay diferencias entre la fecha almacenada y la usada en la solicitud XML. Sin necesidad de emitir un nuevo comprobante, corregir esta etapa para que la conciliación fiscal no produzca error de campos faltantes o mal formateados.",
+  "certainty": "sustentado_en_codigo",
+  "proposedTests": [
+    "Crear pruebas que simulen la recuperación de una NC de grupo y su envío a feCAESolicitar verificando que las fechas FchServDesde, FchServHasta y FchVtoPago están presentes y en el formato correcto en el XML enviado.",
+    "Validar con pruebas funcionales que al tratar de conciliar el NC pendiente no se produce error 10049, es decir, que las fechas obligatorias están correctamente asignadas en la solicitud fiscal.",
+    "Probar casos límite con fechas de emisión al final o principio del mes/año para garantizar la correcta construcción y envío de fechas coincidentes y validadas."
+  ],
+  "questions": [],
+  "dataRepair": "",
+  "limitations": [
+    "El diagnóstico se basa en el análisis estático del código y los mensajes de error generados por ARCA, sin acceso directo a la base de datos ni logs runtime para ver la fecha exacta con que se construyeron las fechas.",
+    "No se dispone de la información precisa de qué fecha se envió en la solicitud que produjo el error 10049, lo que sería útil para verificar si hay formateo o asignación errónea.",
+    "La validación en producción dependerá de la consistencia con la cual la fecha de emisión está almacenada y pasada en toda la cadena, desde la base hasta la llamada XML.",
+    "La evidencia de interfaz citada corresponde a: Facturación. No demuestra el comportamiento de otras pantallas ni una prueba completa de interfaz.",
+    "Inspección de código: no se ejecutaron pruebas ni se consultó la base operativa.",
+    "Propuesta pendiente de revisión humana. No se aplicó ningún cambio."
+  ],
+  "evidence": [
+    {
+      "path": "server/billing/wsfevClient.ts",
+      "start": 127,
+      "end": 145,
+      "explanation": "buildServiceDates construye las fechas FchServDesde (igual a la fecha de emisión), FchServHasta (día siguiente) y FchVtoPago (60 días después) en formato AAAAMMDD con validación estricta y lanza error si la fecha es inválida."
+    },
+    {
+      "path": "server/billing/wsfevClient.ts",
+      "start": 195,
+      "end": 233,
+      "explanation": "En la función feCAESolicitar se incluye el bloque serviceDates con estas fechas obligatorias para Concepto 2 en el XML enviado a ARCA, garantizando que están presentes en la solicitud de autorización."
+    },
+    {
+      "path": "server/billing/invoiceService.ts",
+      "start": 578,
+      "end": 629,
+      "explanation": "En invoiceService, la fecha usada para autorización se obtiene de la fecha de emisión persistida y se pasa a feCAESolicitar. Hay un try-catch para capturar errores durante esta llamada, lo que coincide con la captura del error 10049 reportado."
+    },
+    {
+      "path": "server/billing/groupCreditRecovery.ts",
+      "start": 112,
+      "end": 235,
+      "explanation": "La función recoverGroupCreditNote maneja la recuperación de la NC pendiente de grupo, llama a emitirFactura para autorizar la NC si el estado es autorizacion_pendiente y solo antes de la conciliación local actualiza el status a conciliada o fallida, sin emitir una NC nueva."
+    },
+    {
+      "path": "server/billing/routes.ts",
+      "start": 859,
+      "end": 917,
+      "explanation": "El endpoint POST /api/billing/credit-notes/:id/reconcile llama a recoverGroupCreditNote si la NC pertenece a un grupo, lo que confirma que el flujo recupera la NC existente y no genera otra distinta."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 445,
+      "end": 466,
+      "explanation": "En la pantalla Facturación se muestra el botón para reintentar y conciliar y el mensaje de error que se refleja de reconciliation_error, que incluye el error 10049 con el mensaje sobre fechas faltantes o mal formateadas."
+    },
+    {
+      "path": "client/src/pages/billing.tsx",
+      "start": 286,
+      "end": 314,
+      "explanation": "La mutación reconcileCreditNoteMutation llama al endpoint de conciliación y refresca la información, además de mostrar mensajes adecuados según tenga o no accountRecovery. El error 10049 persiste indicando problema en campos fechas."
+    }
+  ]
+}

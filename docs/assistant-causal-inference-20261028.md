@@ -13,3 +13,29 @@ La orientación y auditoría fiscal incluyen además la aplicación local poster
 La fixture guarda las afirmaciones del último informe en formato SupportDiagnosis. La regresión lo rechaza pese a citas válidas y a un auditor simulado permisivo; otro caso verifica corrección + auditoría independiente de una conclusión que declara causa no determinada. Hay controles positivos y negativos y un ejemplo de persistencia de stock para no limitar la regla a fechas fiscales.
 
 Validación: 21 archivos / 206 pruebas del asistente correctas; TypeScript y bundle del servicio correctos. Proveedores simulados; no se llamó al modelo ni se consultó la base operativa. No se cambia Facturación ni se ejecutan operaciones fiscales. Falta evaluar una respuesta real tras desplegar ambos servicios desde la misma revisión.
+
+## Seguimiento de la respuesta real e4eac61f — 2026-11-02
+
+La nueva investigación ya usa la revisión actual y recupera correctamente la
+identidad de la NC, pero presenta como sustentada en código una posible fecha
+mal asignada que admite no conocer. Además dice que esto queda evidenciado por
+el rechazo del proveedor y su catch. El catch acredita el transporte/guardado del
+error, no el valor enviado ni el defecto concreto de la entrada.
+
+Se conserva el texto recibido en assistant-nc-unobserved-date.json. Se agregan dos
+controles acotados: contradicción entre entrada del intento explícitamente
+desconocida y causa sólo posible etiquetada sustentado_en_codigo, y atribución de
+esa entrada como evidenciada por el error. Se amplían las instrucciones del autor
+y del auditor: localizar una expresión defectuosa o declarar causa histórica no
+determinada, sin exigir una reparación ni logs genéricos. Una hipótesis
+condicional o un defecto estático localizado siguen siendo admisibles.
+
+Estos controles lingüísticos no garantizan toda la calidad semántica ni prueban
+la causa del incidente. No hay cambios de Facturación, datos operativos, modelo,
+credenciales ni límites. No se reescribe el informe histórico.
+
+Verificación: 21 archivos / 215 pruebas del asistente; TypeScript del servicio y
+bundle correctos. Se prueba rechazo del texto nuevo incluso ante auditor simulado
+permisivo, y corrección completa seguida de auditoría independiente. Sin llamadas
+pagadas al modelo ni acceso a la base operativa. La nueva evaluación real queda
+pendiente después de desplegar PMS y asistente con la misma revisión.

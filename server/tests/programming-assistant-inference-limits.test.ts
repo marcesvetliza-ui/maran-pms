@@ -85,3 +85,48 @@ it("reads the actual local-application phase rather than assigning fiscal requir
 it("does not confuse missing operational database inspection with missing persistence-code inspection",()=>{
  expect(inferenceLimitIssues(base({proposal:"Implementar la corrección de persistencia demostrada en el código.",limitations:["No se verificó la base de datos operativa."]}))).toEqual([]);
 });
+
+it.each(['hipotesis','sustentado_en_codigo','falta_informacion'] as const)('rejects the new received report claiming that the rejection proves an unobserved input, even with %s',async certainty=>{
+ const {default:received}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ expect(inferenceLimitIssues({...received,certainty})).toEqual(expect.arrayContaining([expect.objectContaining({code:'PROVIDER_ERROR_AS_INPUT_PROOF',field:'cause'})]));
+});
+it('does not turn a possible input explanation into a code-backed cause when the input is explicitly unknown',()=>{
+ const report=base({certainty:'sustentado_en_codigo',cause:'El rechazo puede deberse a que el importe no se asigna adecuadamente.',limitations:['No se conoce el valor enviado en el intento.']});
+ expect(inferenceLimitIssues(report)).toEqual(expect.arrayContaining([expect.objectContaining({code:'UNOBSERVED_INPUT_AS_CODE_CAUSE'})]));
+});
+it.each([
+ {cause:'No se determinó la causa histórica. El catch guarda el error; no registra el valor del envío rechazado.',certainty:'sustentado_en_codigo' as const},
+ {cause:'Una posibilidad a verificar es una entrada distinta; si el envío histórico difiere de lo leído se podrá contrastar esa hipótesis. No se determinó la causa.',certainty:'hipotesis' as const},
+ {cause:'El código usa una fecha constante en vez de la fecha recibida: la asignación defectuosa está localizada. No demuestra qué ocurrió en aquel intento.',certainty:'sustentado_en_codigo' as const},
+])('preserves a scoped explanation or explicit conditional hypothesis: $cause',patch=>{
+ expect(inferenceLimitIssues(base({...patch,limitations:['No se dispone de la fecha enviada en la solicitud del intento.']}))).toEqual([]);
+});
+it('blocks the fresh report before an auditor can rubber-stamp the unobserved input attribution',async()=>{
+ const {default:received}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const s=source();for(const ref of received.evidence)await s.read(ref.path,ref.start,ref.end);
+ let audits=0,writes=0;
+ const client={chat:{completions:{create:async(req:any)=>{
+  if(req.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return reply({approved:true,issues:[]});}
+  writes++;return reply(received);
+ }}}};
+ await expect(diagnose(ticket,s,{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({code:'evidence_inconsistent'});
+ expect(writes).toBe(3);expect(audits).toBe(0);
+});
+it('requires a corrected conclusion and independent audit after the new report is rejected',async()=>{
+ const {default:received}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const s=source();for(const ref of [...received.evidence,...corrected().evidence])await s.read(ref.path,ref.start,ref.end);
+ let writes=0,audits=0;
+ const client={chat:{completions:{create:async(req:any)=>{
+  if(req.response_format.json_schema.name==='maran_diagnosis_audit'){
+   audits++;expect(req.messages[0].content).toContain('no identifica cuál de las entradas era incorrecta');
+   return reply({approved:true,issues:[]});
+  }
+  writes++;
+  if(writes===1)return reply(received);
+  expect(JSON.stringify(req.messages)).toContain('PROVIDER_ERROR_AS_INPUT_PROOF');
+  return reply(corrected());
+ }}}};
+ const result=await diagnose(ticket,s,{apiKey:'unused',model:'mock'},client as any);
+ expect(result.report.validationStatus).toBe('complete');expect(result.report.cause).toBe('No se determinó la causa histórica.');
+ expect(writes).toBe(2);expect(audits).toBe(1);
+});
