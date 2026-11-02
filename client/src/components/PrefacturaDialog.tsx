@@ -1,3 +1,5 @@
+import { useAuth } from "@/App";
+import { ReservationChargeVoid } from "@/components/reservation-charge-void";
 import { nonFiscalCollectionError, isCashMethod } from "@shared/cash-document-classification";
 import { CompanySelector } from "@/components/entity-selector";
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
@@ -500,6 +502,7 @@ export function PrefacturaDialog({
   open, onClose, reservationId, reservation, mode, onCheckoutComplete,
 }: PrefacturaDialogProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
 
   // Tracks whether the folio has been initialized for the current open session
   // (false = first load, true = subsequent re-fetches after NC/ND/reversal)
@@ -2195,7 +2198,8 @@ export function PrefacturaDialog({
                         return (
                           <ChargeRow
                             key={charge.id}
-                            editAction={!isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
+                            editAction={!isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onEditDescription={charge.category === "restaurant" ? () => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description) : undefined} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
+                            voidAction={!isSubmitting && !hasPendingSubmission && !isTransfer && charge.status !== "anulado" && !(invoicedAmountsByCharge[String(charge.id)] > 0.005) ? <ReservationChargeVoid reservationId={String(reservationId)} charge={{id:String(charge.id),description:charge.description,amount:String(charge.amount),category:charge.category}} role={user?.role} onSaved={()=>{setItemDescriptions(prev=>{const next={...prev};delete next[String(charge.id)];return next;});}}/> : undefined}
                             id={String(charge.id)}
                             amount={parseFloat(charge.amount)}
                             description={itemDescriptions[String(charge.id)] || charge.description}
@@ -3435,9 +3439,10 @@ function NotaDebitoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction,
+  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction, voidAction,
 }: {
   editAction?: React.ReactNode;
+  voidAction?: React.ReactNode;
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
   editing: boolean; editingValue: string;
@@ -3574,6 +3579,7 @@ function ChargeRow({
       </TableCell>
       <TableCell className="w-20 whitespace-nowrap text-right">
         {editAction}
+        {voidAction}
         {!isTransfer && onTransfer ? (
           <Button
             size="icon" variant="ghost"
