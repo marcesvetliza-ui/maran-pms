@@ -1197,6 +1197,26 @@ export function PrefacturaDialog({
   const alreadyPaidAndInvoiced = !!folio
     && operationalBalance <= 0.01
     && originalBillableItems.every((item) => (remainingAmountsByCharge[item.id] || 0) <= 0.01);
+  // Departure and fiscal issuance are separate operations. Never use the
+  // selected invoice amount or available credit as proof of a paid stay.
+  const checkoutBalance = Number(folio?.financialSummary?.operationalFolioBalance ?? folio?.balance);
+  const canCheckoutWithoutCollection = mode === "checkout" && !!folio && Number.isFinite(checkoutBalance) && checkoutBalance <= 0.01;
+  const checkoutOnly = useMutation({
+    mutationFn: async () => {
+      if (!canCheckoutWithoutCollection) throw new Error("Actualizá el saldo del folio antes de cerrar la estadía.");
+      return (await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {requireSettled:true})).json();
+    },
+    onSuccess: async () => {
+      await Promise.all(["/api/reservations","/api/reservations/check-out","/api/dashboard/departures","/api/rooms","/api/rooms/in-house","/api/dashboard/stats","/api/planning","/api/housekeeping"].map(key=>queryClient.invalidateQueries({queryKey:[key]})));
+      onCheckoutComplete?.();
+      onClose();
+      toast({title:"Check-out realizado",description:"La estadía se cerró sin emitir comprobantes ni registrar nuevos cobros."});
+    },
+    onError: error => {
+      setSubmitError(parseApiError(error));
+      void queryClient.invalidateQueries({queryKey:["/api/reservations",String(reservationId),"folio"]});
+    },
+  });
   // Distinguishes the two situations the banner/copy below needs to tell
   // apart: "there was something to bill and it's already settled" vs.
   // "there was never anything to bill" (e.g. a $0 room rate, no charges).
@@ -1835,7 +1855,7 @@ export function PrefacturaDialog({
       <DialogContent className="w-[calc(100vw-24px)] max-w-[1200px] max-h-[94dvh] flex flex-col overflow-hidden p-0 gap-0 sm:w-[calc(100vw-48px)]">
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
-            {step < 3 && <><FileText className="h-5 w-5" />Prefactura</>}
+            {step < 3 && <><FileText className="h-5 w-5" />{canCheckoutWithoutCollection ? "Confirmar Check-out" : "Prefactura"}</>}
             {step === 3 && <><CircleCheck className="h-5 w-5 text-green-600" />Resultado</>}
             {reservation && (
               <span className="font-normal text-muted-foreground text-sm ml-2">
@@ -1848,8 +1868,25 @@ export function PrefacturaDialog({
 
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 sm:px-7">
+          {step < 3 && canCheckoutWithoutCollection && <div className="space-y-4" data-testid="checkout-settled-confirmation">
+            {reservationData?.notes && <div className="text-sm bg-muted/30 rounded-md p-3" data-testid="prefactura-reservation-notes"><div className="text-muted-foreground mb-1">Notas de la reserva:</div><div style={{whiteSpace:"pre-wrap"}}>{reservationData.notes}</div></div>}
+            <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-950/40 p-4 space-y-2">
+              <p className="font-semibold">El saldo de la estadía está saldado.</p>
+              <p>Podés dar el check-out sin emitir otra factura ni registrar nuevos cobros.</p>
+              {hasNothingToInvoice && <p>Esta reserva no tiene nada para facturar.</p>}
+              <p className="text-sm">Los comprobantes, créditos y conciliaciones pendientes se conservan para su gestión por separado desde Facturación o el folio.</p>
+            </div>
+            <p className="font-semibold">Saldo de cobro: ${fmtMoney(checkoutBalance)}</p>
+            <p data-testid="new-charge-required">Nuevo cobro requerido: $0,00</p>
+            {submitError && <p role="alert" className="text-destructive">{submitError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={checkoutOnly.isPending} onClick={handleClose}>Cancelar</Button>
+              <Button variant="outline" onClick={()=>window.open(`/api/reservations/${reservationId}/folio/pdf`,"_blank")}>Imprimir resumen</Button>
+              <Button onClick={()=>checkoutOnly.mutate()} disabled={checkoutOnly.isPending || isSubmitting || folioLoading} data-testid="button-checkout-without-issuance">{checkoutOnly.isPending ? "Cerrando estadía…" : "Dar check-out"}</Button>
+            </div>
+          </div>}
           {/* ── Prefactura (cargos + cobro en una sola pantalla) ──────────── */}
-          {step < 3 && (
+          {step < 3 && !canCheckoutWithoutCollection && (
           <div className="space-y-4">
             {/* Reservation notes stay visible in both checkout and billing entry points. */}
             {reservationData?.notes && (
@@ -1872,6 +1909,10 @@ export function PrefacturaDialog({
               </div>
             )}
             {/* Already-paid-and-invoiced (or nothing to bill at all): block a new invoice, only allow checkout */}
+            {canCheckoutWithoutCollection && !alreadyPaidAndInvoiced && <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm" data-testid="checkout-paid-without-invoice">
+              <p className="font-semibold">El saldo de la estadía está saldado.</p>
+              <p>Podés dar el check-out sin emitir otra factura ni cobrar nuevamente. Los comprobantes, créditos o conciliaciones pendientes se conservan para su gestión por separado.</p>
+            </div>}
             {alreadyPaidAndInvoiced && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
                 <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
@@ -1961,7 +2002,7 @@ export function PrefacturaDialog({
               {!isFiscalTipo && <p className="mt-2 text-xs text-muted-foreground">Comprobante interno, sin CAE</p>}
             </section>
 
-            {!hasPendingSubmission && !alreadyPaidAndInvoiced && (
+            {!hasPendingSubmission && !alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
               <div className="rounded-lg border p-3 space-y-3">
                 <Button variant="outline" size="sm" onClick={() => setShowDiscount(!showDiscount)} disabled={isSubmitting || tipo === "FT" || !isFiscalTipo}>
                   {showDiscount ? <X className="mr-1 h-4 w-4" /> : <Plus className="mr-1 h-4 w-4" />}
@@ -2288,7 +2329,7 @@ export function PrefacturaDialog({
         )}
 
         {/* ── STEP 2: Cobro ──────────────────────────────────────────────────── */}
-        {step < 3 && (
+        {step < 3 && !canCheckoutWithoutCollection && (
           <div className="space-y-0">
             {/* Zero-balance notice: no new payment required */}
             {totalSelected > 0.01 && selectedBalance <= 0.01 && (
@@ -2483,10 +2524,9 @@ export function PrefacturaDialog({
               <Button variant="outline" size="sm" className="text-orange-700 border-orange-300 hover:bg-orange-50" onClick={() => setShowBulkTransfer(true)} disabled={folioLoading || !folio || totalSelected <= 0.01}>
                 <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
               </Button>
-              {!hasPendingSubmission && alreadyPaidAndInvoiced && (mode === "checkout"
-                ? <Button onClick={doSubmit} disabled={isSubmitting}>{isSubmitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</> : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}</Button>
-                : <Button variant="outline" onClick={handleClose}>Cerrar</Button>)}
-              {!alreadyPaidAndInvoiced && (
+              {canCheckoutWithoutCollection && <Button onClick={()=>checkoutOnly.mutate()} disabled={checkoutOnly.isPending || isSubmitting || folioLoading} data-testid="button-checkout-without-issuance">{checkoutOnly.isPending ? "Cerrando estadía…" : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}</Button>}
+              {!hasPendingSubmission && alreadyPaidAndInvoiced && mode !== "checkout" && <Button variant="outline" onClick={handleClose}>Cerrar</Button>}
+              {!alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
                 <Button
                   onClick={handleSubmit}
                   disabled={hasPendingSubmission || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}

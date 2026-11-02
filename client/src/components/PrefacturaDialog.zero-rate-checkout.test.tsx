@@ -149,6 +149,41 @@ describe("PrefacturaDialog — check-out de reserva sin nada para facturar (tari
     vi.stubGlobal("open", vi.fn());
   });
 
+  it("cierra una estadía cobrada aunque no quede conciliada su facturación, sin emitir ni cobrar otra vez", async () => {
+    const folio={...ZERO_RATE_FOLIO,roomTotal:332000,grandTotal:332000,totalPayments:332000,balance:0,payments:[{id:"pago-previo",amount:"332000",method:"cash",date:"2026-11-02",status:"active"}]};
+    const fetchMock=buildFetchMock(folio);vi.stubGlobal("fetch",fetchMock);
+    const {onClose,onCheckoutComplete}=renderDialog();
+    await userEvent.setup().click(await screen.findByTestId("button-checkout-without-issuance"));
+    await waitFor(()=>expect(onCheckoutComplete).toHaveBeenCalledOnce());expect(onClose).toHaveBeenCalledOnce();
+    const posts=fetchMock.mock.calls.filter(([,options])=>options?.method === "POST");
+    expect(posts).toHaveLength(1);expect(String(posts[0][0])).toContain("/check-out");expect(JSON.parse(String(posts[0][1]?.body))).toEqual({requireSettled:true});
+    expect(screen.queryByTestId("button-registrar-emitir")).not.toBeInTheDocument();
+  });
+
+  it("conserva la operación fiscal pendiente al cerrar una estadía saldada", async () => {
+    const key=`prefactura-pending:${RESERVATION_ID}`;
+    const pending=JSON.stringify({invoiceRequest:{creditOperationId:"pending-original"},invoice:null,payments:[],checkoutRequested:true});
+    sessionStorage.setItem(key,pending);
+    try {
+      const fetchMock=buildFetchMock({...ZERO_RATE_FOLIO,roomTotal:332000,grandTotal:332000,totalPayments:332000,balance:0});vi.stubGlobal("fetch",fetchMock);
+      const {onCheckoutComplete}=renderDialog();await userEvent.setup().click(await screen.findByTestId("button-checkout-without-issuance"));
+      await waitFor(()=>expect(onCheckoutComplete).toHaveBeenCalledOnce());expect(sessionStorage.getItem(key)).toBe(pending);
+      expect(fetchMock.mock.calls.filter(([,options])=>options?.method === "POST")).toHaveLength(1);
+    } finally {sessionStorage.removeItem(key);}
+  });
+
+  it("deja abierta la estadía si el servidor encuentra un saldo cambiado", async () => {
+    const fetchMock=buildFetchMock(ZERO_RATE_FOLIO,409);vi.stubGlobal("fetch",fetchMock);
+    const {onClose,onCheckoutComplete}=renderDialog();await userEvent.setup().click(await screen.findByTestId("button-checkout-without-issuance"));
+    await waitFor(()=>expect(screen.getByTestId("button-checkout-without-issuance")).toBeEnabled());
+    expect(onClose).not.toHaveBeenCalled();expect(onCheckoutComplete).not.toHaveBeenCalled();
+  });
+
+  it("mantiene la facturación disponible en modo billing para una estadía cobrada", async () => {
+    vi.stubGlobal("fetch",buildFetchMock({...ZERO_RATE_FOLIO,roomTotal:332000,grandTotal:332000,totalPayments:332000,balance:0}));
+    renderDialog({mode:"billing"});expect(await screen.findByTestId("button-registrar-emitir")).toBeInTheDocument();expect(screen.queryByTestId("button-checkout-without-issuance")).not.toBeInTheDocument();
+  });
+
   it("muestra el botón 'Dar check-out' en vez de dejar 'Registrar y emitir' deshabilitado sin salida", async () => {
     vi.stubGlobal("fetch", buildFetchMock(ZERO_RATE_FOLIO));
     renderDialog();
