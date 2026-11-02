@@ -213,6 +213,7 @@ export function ReservationFormDialog({
 }) {
   const { toast } = useToast();
   const isEditing = !!reservation;
+  const editRatesRef = useRef<ReservationNightlyPricingHandle>(null);
   const accommodationAccess = useQuery<{ canEdit: boolean }>({
     queryKey: ["/api/reservation-edit-permission"],
     enabled: open && isEditing,
@@ -1026,7 +1027,7 @@ export function ReservationFormDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="operational-form">
-          {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Las tarifas y fechas de esta reserva se mantienen desde el Folio: Editar tarifas / Modificar estadía. Este formulario edita los demás datos.</p>}
+          {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Podés cambiar los importes desde Editar tarifas. Las fechas se modifican desde el Folio: Modificar estadía. Los demás datos se guardan con Guardar Cambios.</p>}
           <div className="operational-body grid items-start gap-6 lg:grid-cols-[1fr_1.1fr]"><section className="min-w-0 space-y-4" aria-label="Huésped y vínculos">
             <GuestSelector
               selectedGuest={selectedGuest}
@@ -1225,6 +1226,7 @@ export function ReservationFormDialog({
             {lodgingReadOnly && <p className="rounded border p-3 text-sm" role="status">Tarifas y noches en sólo lectura. {accommodationAccess.isError ? "No se pudo verificar tu permiso; reintentá antes de modificar." : "Un administrador puede habilitar tu permiso individual en Permisos."}</p>}
             <div className={`rounded-lg border p-3 grid gap-2 ${sectionCardClass(!!formData.ratePlanId, !isEditing)}`}>
               <Label htmlFor="ratePlan">Plan Tarifario</Label>
+              {reservation?.pricingScheme === "nightly_v1" && <Button type="button" variant="outline" size="sm" className="justify-self-start" disabled={lodgingReadOnly || mutation.isPending} onClick={() => editRatesRef.current?.openRates()} data-testid="button-edit-reservation-rates"><Pencil className="h-4 w-4 mr-1" />Editar tarifas</Button>}
               <Select
                 value={formData.ratePlanId || ""}
                 onValueChange={handleRatePlanChange}
@@ -1270,7 +1272,7 @@ export function ReservationFormDialog({
                   </div>
                 </div>
               )}
-              {formData.ratePlanId && formData.ratePlanId !== "__special__" && (() => {
+              {reservation?.pricingScheme === "nightly_v1" ? <p className="text-xs text-muted-foreground">Revisá y confirmá los importes por noche con Editar tarifas. El cambio se guarda al confirmarlo en ese editor.</p> : formData.ratePlanId && formData.ratePlanId !== "__special__" && (() => {
                 const plan = ratePlans?.find(p => p.id === formData.ratePlanId);
                 if (!plan) return null;
                 const paxMap: Record<number, string | null | undefined> = { 1: plan.rate1pax, 2: plan.rate2pax, 3: plan.rate3pax, 4: plan.rate4pax };
@@ -2240,6 +2242,10 @@ export function ReservationFormDialog({
             </Button>
           </DialogFooter>
         </form>
+        {open && reservation?.pricingScheme === "nightly_v1" && <ReservationNightlyPricing editorOnly ref={editRatesRef} reservationId={reservation.id} onApplied={updated => {
+          // Keep unrelated unsaved fields intact. General PATCH still excludes pricing.
+          setFormData(previous => ({ ...previous, baseRatePerNight: updated.baseRatePerNight, finalRatePerNight: updated.finalRatePerNight, totalRoomAmount: updated.totalRoomAmount, discountType: updated.discountType, discountValue: updated.discountValue }));
+        }} />}
       </DialogContent>
     </Dialog>
 

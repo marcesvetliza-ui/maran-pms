@@ -17,10 +17,10 @@ async function jsonGet(path: string) {
   if (!response.ok) throw new Error("No se pudo cargar el alojamiento. Reintentá antes de modificar.");
   return response.json();
 }
-export type ReservationNightlyPricingHandle = { openStay: () => void };
+export type ReservationNightlyPricingHandle = { openStay: () => void; openRates: () => void };
 export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHandle, {
-  reservationId: string; role?: string; onLegacyEdit?: () => void; onApplied?: () => void;
-}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit, onApplied }, ref) {
+  reservationId: string; role?: string; onLegacyEdit?: () => void; onApplied?: (reservation: any) => void; editorOnly?: boolean;
+}>(function ReservationNightlyPricing({ reservationId, role, onLegacyEdit, onApplied, editorOnly = false }, ref) {
   const { toast } = useToast();
   const key = ["/api/reservations", reservationId, "nightly-pricing"];
   const state = useQuery<State>({ queryKey: key, queryFn: () => jsonGet(`/api/reservations/${reservationId}/nightly-pricing`), staleTime: 0, refetchOnMount: "always" });
@@ -59,7 +59,15 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
     setCheckIn(reservation.checkInDate); setCheckOut(reservation.checkOutDate); setAddedRates({});
     invalidatePreview(); void state.refetch();
   };
+  const openRates = () => {
+    if (state.isLoading) { toast({ title: "Cargando tarifas", description: "Esperá un momento y volvé a intentar." }); return; }
+    if (!reservation || state.isError) { toast({ title: "No se pudieron cargar las tarifas", description: "Volvé a abrir la reserva antes de editar.", variant: "destructive" }); return; }
+    if (!canWrite) { toast({ title: "Alojamiento en sólo lectura", description: "Un administrador debe habilitar tu permiso individual para editar tarifas y noches.", variant: "destructive" }); return; }
+    if (blocked) { toast({ title: "No se pueden modificar las tarifas", description: blocked, variant: "destructive" }); return; }
+    if (nightly) start("rates"); else onLegacyEdit?.();
+  };
   useImperativeHandle(ref, () => ({
+    openRates,
     openStay: () => {
       if (!reservation) return;
       if (!canWrite) { toast({ title: "Alojamiento en sólo lectura", description: "Un administrador debe habilitar tu permiso individual para editar tarifas y noches.", variant: "destructive" }); return; }
@@ -91,18 +99,18 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       void queryClient.invalidateQueries({ queryKey: ["/api/reservation-changelog", reservationId] });
       void queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId, "changelog"] });
       setMode(null); setSelected([]);
-      onApplied?.();
+      onApplied?.(data);
       toast({ title: "Alojamiento actualizado", description: "El detalle y el total se guardaron con motivo e historial. No se modificaron los cobros." });
     },
     onError: (e: Error) => { setError(e.message); setPreview(null); void state.refetch(); },
   });
-  if (state.isLoading) return <section className="rounded-lg border p-4" role="status">Cargando alojamiento…</section>;
-  if (state.isError || !reservation) return <section className="rounded-lg border p-4 text-destructive"><p>No se pudo cargar el alojamiento.</p><Button variant="outline" onClick={() => void state.refetch()}>Reintentar</Button></section>;
+  if (state.isLoading) return editorOnly ? null : <section className="rounded-lg border p-4" role="status">Cargando alojamiento…</section>;
+  if (state.isError || !reservation) return editorOnly ? null : <section className="rounded-lg border p-4 text-destructive"><p>No se pudo cargar el alojamiento.</p><Button variant="outline" onClick={() => void state.refetch()}>Reintentar</Button></section>;
   const totalBefore = nightly ? nightlyTotal(nights) : Math.round(Number(reservation.totalRoomAmount || 0) * 100);
   const editorBefore = editorSnapshot?.nightlyPricing ? nightlyTotal(editorSnapshot.nightlyPricing) : totalBefore;
   const totalAfter = localAfter.length ? nightlyTotal(localAfter) : editorBefore;
   return <>
-    <section className="wf-panel wf-lodging" data-testid="nightly-pricing-panel">
+    {!editorOnly && <section className="wf-panel wf-lodging" data-testid="nightly-pricing-panel">
       <header className="wf-panel-heading">
         <div><p className="wf-section-kicker">ALOJAMIENTO</p><h3>{nightly ? "Tarifas por noche" : "Importe de la estadía"}</h3></div>
         {nightly ? <Button size="sm" variant="outline" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil size={14}/>{selected.length ? `Editar ${selected.length} noches` : "Editar tarifas"}</Button>
@@ -116,7 +124,7 @@ export const ReservationNightlyPricing = forwardRef<ReservationNightlyPricingHan
       {!nightly && <footer className="border-t p-3 flex justify-between font-semibold"><span>Subtotal alojamiento <small className="font-normal text-muted-foreground">· IVA incluido</small></span><span>{money(totalBefore)}</span></footer>}
       {nightly && selected.length > 0 && <div className="wf-selection-bar"><span>{selected.length} {selected.length === 1 ? "noche seleccionada" : "noches seleccionadas"}</span><div className="wf-selection-actions"><Button variant="outline" size="sm" disabled={!canWrite || !!blocked} onClick={() => start("rates")}><Pencil size={14}/>Editar {selected.length} {selected.length === 1 ? "noche" : "noches"}</Button><Button variant="ghost" size="sm" disabled={!canWrite || !!blocked} onClick={() => { start("rates"); setDiscountMode("percent"); }}><Minus size={14}/>Aplicar descuento</Button></div></div>}
       <p className="wf-footnote">Las tarifas incluyen IVA. El desglose fiscal se realiza al facturar.</p>
-    </section>
+    </section>}
     <Dialog open={!!mode} onOpenChange={open => { if (!save.isPending && !open) setMode(null); }}>
       <DialogContent className="wf-production wf-tariff-modal max-w-[850px] max-h-[92dvh] flex flex-col overflow-hidden" onInteractOutside={e => { if (save.isPending) e.preventDefault(); }}>
         <DialogHeader><DialogTitle>{mode === "stay" ? "Modificar estadía" : `Editar ${selected.length} ${selected.length === 1 ? "noche" : "noches"}`}</DialogTitle><DialogDescription>Revisá las noches afectadas y su impacto. No se modifica nada hasta confirmar. Los cobros permanecen intactos.</DialogDescription></DialogHeader>
