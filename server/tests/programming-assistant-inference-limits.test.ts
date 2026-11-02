@@ -5,7 +5,7 @@ import {inferenceLimitIssues} from "../../services/programming-assistant/inferen
 import {CodeSource} from "../../services/programming-assistant/source";
 import {diagnose} from "../../services/programming-assistant/diagnose";
 import {orientInvestigation} from "../../services/programming-assistant/navigation";
-import {sourceRange} from "./helpers/assistantSourceEvidence";
+import {sourceRange,bindFiscalRecoveryEvidence} from "./helpers/assistantSourceEvidence";
 import type {SupportTicket,SupportDiagnosis} from "../../shared/programming-support";
 // Keep the received report verbatim; bind only its citations to the same live
 // instructions so unrelated source edits cannot hide the causal-limit check.
@@ -88,7 +88,8 @@ it("does not confuse missing operational database inspection with missing persis
 });
 
 it.each(['hipotesis','sustentado_en_codigo','falta_informacion'] as const)('rejects the new received report claiming that the rejection proves an unobserved input, even with %s',async certainty=>{
- const {default:received}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const {default:historicalReceived}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const received=bindFiscalRecoveryEvidence(historicalReceived);
  expect(inferenceLimitIssues({...received,certainty})).toEqual(expect.arrayContaining([expect.objectContaining({code:'PROVIDER_ERROR_AS_INPUT_PROOF',field:'cause'})]));
 });
 it('does not turn a possible input explanation into a code-backed cause when the input is explicitly unknown',()=>{
@@ -103,7 +104,8 @@ it.each([
  expect(inferenceLimitIssues(base({...patch,limitations:['No se dispone de la fecha enviada en la solicitud del intento.']}))).toEqual([]);
 });
 it('blocks the fresh report before an auditor can rubber-stamp the unobserved input attribution',async()=>{
- const {default:received}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const {default:historicalReceived}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const received=bindFiscalRecoveryEvidence(historicalReceived);
  const s=source();for(const ref of received.evidence)await s.read(ref.path,ref.start,ref.end);
  let audits=0,writes=0;
  const client={chat:{completions:{create:async(req:any)=>{
@@ -114,7 +116,8 @@ it('blocks the fresh report before an auditor can rubber-stamp the unobserved in
  expect(writes).toBe(3);expect(audits).toBe(0);
 });
 it('requires a corrected conclusion and independent audit after the new report is rejected',async()=>{
- const {default:received}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const {default:historicalReceived}=await import('./fixtures/assistant-nc-unobserved-date.json');
+ const received=bindFiscalRecoveryEvidence(historicalReceived);
  const s=source();for(const ref of [...received.evidence,...corrected().evidence])await s.read(ref.path,ref.start,ref.end);
  let writes=0,audits=0;
  const client={chat:{completions:{create:async(req:any)=>{

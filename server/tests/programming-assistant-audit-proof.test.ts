@@ -1,5 +1,7 @@
 import {expect,it} from 'vitest';
-import received from './fixtures/assistant-nc-cae-as-missing-dates.json';
+import historicalReceived from './fixtures/assistant-nc-cae-as-missing-dates.json';
+import { bindFiscalRecoveryEvidence } from './helpers/assistantSourceEvidence';
+const received = bindFiscalRecoveryEvidence(historicalReceived);
 import {CodeSource} from '../../services/programming-assistant/source';
 import {auditDiagnosis,prepareAudit} from '../../services/programming-assistant/semantic-audit';
 import {diagnose} from '../../services/programming-assistant/diagnose';
