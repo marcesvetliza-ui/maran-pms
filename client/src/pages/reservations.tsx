@@ -2,6 +2,7 @@ import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { ReservationNightlyPricing, ReservationFolioSummary, type ReservationNightlyPricingHandle } from "@/components/reservation-nightly-pricing";
 import { ReservationFolioHeader } from "@/components/reservation-folio-header";
+import { canVoidReservationCharge } from "@shared/reservationChargePermissions";
 import { useState, useEffect, useRef } from "react";
 import { createReservationPaymentSubmission } from "@/lib/reservation-payment-submit";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -127,51 +128,8 @@ import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiE
 import { GuestSelector, CompanySelector, AgencySelector, NationalityCombobox } from "@/components/entity-selector";
 import type { ReservationWithDetails, ReservationWaitlist, Guest, Company, Agency, RoomWithType, RoomType, RatePlan, InsertReservation, InsertGuest, InsertCompany, InsertAgency, ReservationStatus, DiscountType, ReservationSource, Charge, Payment, PaymentMethod, BedType, PackageWithDetails, GiftVoucher } from "@shared/schema";
 import { GroupRoomObservations } from "@/components/group-room-observations";
-
-const roomNumberCollator = new Intl.Collator("es-AR", {
-  numeric: true,
-  sensitivity: "base",
-});
-
-/** Orden operativo de la tabla: habitaciones numeradas primero y sin asignar al final. */
-export function compareReservationsByRoom(
-  a: ReservationWithDetails,
-  b: ReservationWithDetails,
-): number {
-  const roomA = a.room?.roomNumber?.trim() || null;
-  const roomB = b.room?.roomNumber?.trim() || null;
-
-  if (!roomA && !roomB) return a.checkInDate.localeCompare(b.checkInDate);
-  if (!roomA) return 1;
-  if (!roomB) return -1;
-
-  const roomComparison = roomNumberCollator.compare(roomA, roomB);
-  return roomComparison !== 0
-    ? roomComparison
-    : a.checkInDate.localeCompare(b.checkInDate);
-}
-
-export type ReservationSortMode = "room" | "checkin" | "guest" | "created";
-
-export function compareReservationsForList(
-  mode: ReservationSortMode,
-  a: ReservationWithDetails,
-  b: ReservationWithDetails,
-): number {
-  if (mode === "checkin") {
-    return a.checkInDate.localeCompare(b.checkInDate) || compareReservationsByRoom(a, b);
-  }
-  if (mode === "guest") {
-    const guestA = `${a.guest?.lastName || ""} ${a.guest?.firstName || ""}`.trim();
-    const guestB = `${b.guest?.lastName || ""} ${b.guest?.firstName || ""}`.trim();
-    return roomNumberCollator.compare(guestA, guestB) || compareReservationsByRoom(a, b);
-  }
-  if (mode === "created") {
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      || compareReservationsByRoom(a, b);
-  }
-  return compareReservationsByRoom(a, b);
-}
+import { compareReservationsForList, resolveReservationSortMode, type ReservationSortMode } from "@/lib/reservation-list-order";
+export { compareReservationsByRoom, compareReservationsForList, type ReservationSortMode } from "@/lib/reservation-list-order";
 import { GiftVoucherSelect } from "@/components/gift-voucher-select";
 
 /** Strip machine-readable transfer/reversal tags from a charge description before display. */
@@ -2384,6 +2342,7 @@ export function ReservationDetailDialog({
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
   const canAnularPago = !currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole);
+  const canAnularCargo = canVoidReservationCharge(currentUserRole);
 
   // Bug K: Fetch emitted invoices for this reservation so we can lock charges that were
   // already invoiced (prevent cancel/transfer of billed items).
@@ -2521,7 +2480,9 @@ export function ReservationDetailDialog({
   const [bulkIncludeAccommodation, setBulkIncludeAccommodation] = useState(false);
   const [bulkSelectedPaymentIds, setBulkSelectedPaymentIds] = useState<Set<string>>(new Set());
   const [bulkTransferNote, setBulkTransferNote] = useState("");
-  const [anularTarget, setAnularTarget] = useState<{ type: "cargo" | "pago"; id: string } | null>(null);
+  const [anularTarget, setAnularTarget] = useState<{
+    type: "cargo" | "pago"; id: string; expectedDescription?: string; expectedAmount?: string;
+  } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
   const [anularEmitirNC, setAnularEmitirNC] = useState(false);
   const [anularSinNCPending, setAnularSinNCPending] = useState(false);
@@ -2849,16 +2810,39 @@ export function ReservationDetailDialog({
   });
 
   const anularChargeMutation = useMutation({
-    mutationFn: async ({ id, motivo }: { id: string; motivo: string }) => {
-      return apiRequest("PATCH", `/api/charges/${id}/anular`, { motivoAnulacion: motivo });
+    mutationFn: async ({ id, motivo, expectedDescription, expectedAmount }: {
+      id: string; motivo: string; expectedDescription?: string; expectedAmount?: string;
+    }) => {
+      const response = await apiRequest("PATCH", `/api/charges/${id}/anular`, {
+        motivoAnulacion: motivo, expectedDescription, expectedAmount,
+      });
+      return response.json();
     },
-    onSuccess: () => {
-      refetchCharges();
+    onSuccess: async (result: { roomOnly?: boolean }) => {
       queryClient.invalidateQueries({ queryKey: ["spa-account-folio"] });
       queryClient.invalidateQueries({ queryKey: ["spa-prefactura-account"] });
       setAnularTarget(null);
       setMotivoAnulacion("");
-      toast({ title: "Cargo anulado", description: "El cargo ha sido anulado del folio." });
+      toast({
+        title: "Cargo anulado",
+        description: result.roomOnly
+          ? "Anulado solo en la habitación. El consumo de Restaurante permanece sin cambios."
+          : "El cargo ha sido anulado del folio.",
+      });
+      try {
+        await Promise.all([
+          refetchCharges(),
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/folios", "reservation", reservation.id] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/rooms/in-house"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/rooms/arriving-today"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/planning"] }),
+        ]);
+      } catch {
+        toast({ title: "El cargo ya se anuló", description: "Falta actualizar el folio. Actualizá la pantalla antes de continuar." });
+      }
     },
     onError: (error: any) => {
       toast({ title: "Error", description: parseApiError(error) || "No se pudo anular el cargo", variant: "destructive" });
@@ -4020,7 +4004,7 @@ export function ReservationDetailDialog({
                           <PlusCircle className="h-3 w-3 text-green-600" />
                         </Button>
                         {/* Bug K: invoiced charges cannot be transferred or cancelled — must go through NC */}
-                        {!invoicedChargeIds.has(String(charge.id)) && (
+                        {canAnularCargo && !invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="sm"
                           variant="outline"
@@ -4032,12 +4016,16 @@ export function ReservationDetailDialog({
                           <ArrowRightLeft className="h-3 w-3 mr-1" />Transferir
                         </Button>
                         )}
-                        {!invoicedChargeIds.has(String(charge.id)) && (
+                        {canVoidReservationCharge(currentUserRole, charge.category) && !invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="sm"
                           variant="outline"
                           className="h-7 px-2 text-xs"
-                          onClick={() => { setAnularTarget({ type: "cargo", id: charge.id }); setMotivoAnulacion(""); }}
+                          onClick={() => {
+                            setAnularTarget({ type: "cargo", id: charge.id,
+                              expectedDescription: charge.description, expectedAmount: String(charge.amount) });
+                            setMotivoAnulacion("");
+                          }}
                           title="Anular cargo"
                           data-testid={`button-anular-charge-${charge.id}`}
                         >
@@ -5364,6 +5352,8 @@ export function ReservationDetailDialog({
 
       {/* Anular Cargo / Pago Dialog */}
       {(() => {
+        const anularCharge = anularTarget?.type === "cargo"
+          ? charges?.find((c: any) => c.id === anularTarget.id) : null;
         const anularPayment = anularTarget?.type === "pago"
           ? payments?.find((p: any) => p.id === anularTarget.id)
           : null;
@@ -5382,7 +5372,9 @@ export function ReservationDetailDialog({
                 Anular {anularTarget?.type === "cargo" ? "Cargo" : "Pago"}
               </DialogTitle>
               <DialogDescription>
-                Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales.
+                {anularCharge?.category === "restaurant"
+                  ? "Se anula solo el cargo en la habitación: dejará de sumar al saldo y seguirá visible como ANULADO. El pedido y los consumos de Restaurante no se modifican. No se cambian stock, pagos ni Caja."
+                  : "Esta acción anula el registro. Seguirá visible en el folio con estado ANULADO y no afectará los totales."}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 py-2">
@@ -5432,7 +5424,11 @@ export function ReservationDetailDialog({
                 onClick={() => {
                   if (!anularTarget) return;
                   if (anularTarget.type === "cargo") {
-                    anularChargeMutation.mutate({ id: anularTarget.id, motivo: motivoAnulacion });
+                    anularChargeMutation.mutate({
+                      id: anularTarget.id, motivo: motivoAnulacion,
+                      expectedDescription: anularTarget.expectedDescription,
+                      expectedAmount: anularTarget.expectedAmount,
+                    });
                   } else {
                     // If payment has an invoice but NC is not checked, require explicit second confirmation
                     if (anularInvoiceRef && !anularEmitirNC) {
@@ -5751,6 +5747,7 @@ export default function ReservationsPage() {
 
   const todayStr = getLocalToday();
   const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created" | "anuladas">("today");
+  const effectiveSortMode = resolveReservationSortMode(dateMode, sortMode);
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState("");
   const [createdFrom, setCreatedFrom] = useState(todayStr);
@@ -6036,7 +6033,7 @@ export default function ReservationsPage() {
 
       return matchesSearch && matchesStatus;
     })
-    ?.sort((a, b) => compareReservationsForList(sortMode, a, b));
+    ?.sort((a, b) => compareReservationsForList(effectiveSortMode, a, b));
 
   const isResLocked = (r: ReservationWithDetails) => {
     return r.status === "checked_out" || r.status === "cancelled";
@@ -6390,7 +6387,8 @@ export default function ReservationsPage() {
                   <SelectItem value="cancelled">Canceladas</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={sortMode} onValueChange={(value) => setSortMode(value as ReservationSortMode)}>
+              <Select value={effectiveSortMode} disabled={dateMode === "created"}
+                onValueChange={(value) => setSortMode(value as ReservationSortMode)}>
                 <SelectTrigger className="w-[210px]" data-testid="select-sort-reservations">
                   <SelectValue placeholder="Ordenar por" />
                 </SelectTrigger>
