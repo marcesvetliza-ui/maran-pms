@@ -36,6 +36,8 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails } from "@shared/schema";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 
+type CheckoutReservation = ReservationWithDetails & { folioBalance?: number | null };
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 function daysSince(dateStr: string, today: string) {
   return Math.floor(
@@ -158,8 +160,8 @@ export default function CheckOutPage() {
   const [pendingNoShowId, setPendingNoShowId] = useState<string | null>(null);
 
   // ── queries ──
-  const { data: reservations, isLoading } = useQuery<ReservationWithDetails[]>({
-    queryKey: ["/api/dashboard/departures"],
+  const { data: reservations, isLoading } = useQuery<CheckoutReservation[]>({
+    queryKey: ["/api/dashboard/departures"], refetchOnMount: "always",
   });
 
   const { data: noShows = [], isLoading: loadingNoShows, refetch: refetchNoShows } = useQuery<any[]>({
@@ -442,9 +444,9 @@ export default function CheckOutPage() {
                       <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
                         <div className="flex items-center gap-2">
                           <CreditCard className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">Total habitación</span>
+                          <span className="text-sm">{(reservation as any).groupId || (reservation as any).isGroup ? "Saldo personal" : "Saldo cuenta"}</span>
                         </div>
-                        <span className="text-lg font-bold">${fmtMoney(reservation.totalRoomAmount || "0")}</span>
+                        <span className="text-lg font-bold" data-testid={`checkout-balance-${reservation.id}`}>{reservation.folioBalance != null && Number.isFinite(reservation.folioBalance) ? `$${fmtMoney(reservation.folioBalance)}` : "Consultar folio"}</span>
                       </div>
                       {reservation.notes && (
                         <div className="text-xs bg-muted/30 rounded-md p-2" data-testid={`checkout-notes-${reservation.id}`}>
@@ -686,7 +688,7 @@ export default function CheckOutPage() {
       {selectedReservation && (
         <PrefacturaDialog
           open={prefacturaOpen}
-          onClose={() => { setPrefacturaOpen(false); setSelectedReservation(null); }}
+          onClose={() => { setPrefacturaOpen(false); setSelectedReservation(null); void queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] }); }}
           reservationId={selectedReservation.id}
           reservation={selectedReservation}
           mode="checkout"

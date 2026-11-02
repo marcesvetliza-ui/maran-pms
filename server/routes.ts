@@ -48,6 +48,7 @@ import { registerChannexRoutes } from "./routes/channex";
 import { registerPlanningRoutes } from "./routes/planning";
 import { registerPackagesRoutes } from "./routes/packages";
 import { registerManualLibraryRoutes } from "./routes/manual-library";
+import { registerDepartureRoutes } from "./routes/departures";
 import { registerRoomsRoutes } from "./routes/rooms";
 import { registerRevenueRoutes } from "./routes/revenue";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
@@ -717,15 +718,7 @@ export async function registerRoutes(
     },
   );
 
-  // Today's departures (check-outs scheduled for today)
-  app.get("/api/dashboard/departures", async (req, res) => {
-    try {
-      const departures = await storage.getReservationsForCheckOut();
-      res.json(departures);
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching departures" });
-    }
-  });
+  registerDepartureRoutes(app);
 
 
   // ============== ADMINISTRATION ==============
