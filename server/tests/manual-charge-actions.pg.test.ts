@@ -112,11 +112,173 @@ const bodyFor = (charge: { description?: string; amount?: string } = {}) => ({
 });
 
 runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)", () => {
+  async function restaurantFixture(legacy = false) {
+    const fixture = await createFixture({ category: "restaurant" });
+    const orderId = randomUUID();
+    const restaurantFolioId = randomUUID();
+    await testPool.query("INSERT INTO restaurant_orders VALUES ($1, 'PRUEBA', 'closed', 300.50, 'true')", [orderId]);
+    await testPool.query("INSERT INTO order_items VALUES ($1, $2, 2, 'served')", [randomUUID(), orderId]);
+    await testPool.query("INSERT INTO inventory_items VALUES ($1, 12)", [randomUUID()]);
+    await testPool.query("INSERT INTO payments VALUES ($1, $2, 40)", [randomUUID(), fixture.reservationId]);
+    await testPool.query("INSERT INTO cash_movements VALUES ($1, 40)", [randomUUID()]);
+    await testPool.query(
+      `INSERT INTO folios (id, entity_type, entity_id, status, total_charges, total_payments, balance)
+       VALUES ($1, 'restaurant_order', $2, 'open', 300.50, 300.50, 0)`,
+      [restaurantFolioId, orderId],
+    );
+    await testPool.query(
+      `INSERT INTO folio_movements (folio_id, type, amount, description, source_type, source_id)
+       VALUES ($1, 'charge', 300.50, 'Pedido PRUEBA', 'restaurant_order', $2),
+              ($1, 'payment', 300.50, 'Imputación a habitación', 'restaurant_payment', $2)`,
+      [restaurantFolioId, orderId],
+    );
+    if (legacy) {
+      await testPool.query("DELETE FROM folio_movements WHERE id = $1", [fixture.movementId]);
+      await testPool.query("UPDATE folios SET total_charges = 0, balance = 0 WHERE id = $1", [fixture.folioId]);
+    }
+    return fixture;
+  }
+
+  async function restaurantSnapshot() {
+    const queries = [
+      "SELECT * FROM restaurant_orders ORDER BY id",
+      "SELECT * FROM order_items ORDER BY id",
+      "SELECT * FROM inventory_items ORDER BY id",
+      "SELECT * FROM payments ORDER BY id",
+      "SELECT * FROM cash_movements ORDER BY id",
+      "SELECT * FROM folios WHERE entity_type = 'restaurant_order' ORDER BY id",
+      `SELECT fm.* FROM folio_movements fm JOIN folios f ON f.id = fm.folio_id
+        WHERE f.entity_type = 'restaurant_order' ORDER BY fm.id`,
+    ];
+    return Promise.all(queries.map(async sql => (await testPool.query(sql)).rows));
+  }
+
+  async function voidRestaurant(fixture: Fixture, role = "reception", overrides: Record<string, unknown> = {}) {
+    return request("PATCH", `/api/charges/${fixture.chargeId}/anular`, {
+      motivoAnulacion: "Cargo que no corresponde a esta habitación",
+      expectedDescription: "Cochera", expectedAmount: "300.50", ...overrides,
+    }, { "x-test-role": role });
+  }
+
+  it.each(["reception", "jefe_recepcion", "admin", "manager"])(
+    "%s annuls only the room imputation and preserves Restaurant, stock, payments and cash", async role => {
+      const fixture = await restaurantFixture();
+      const untouched = await restaurantSnapshot();
+      const result = await voidRestaurant(fixture, role, { anuladoPor: "forged-actor" });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ status: "anulado", roomOnly: true, amount: "300.50", anuladoPor: "manual-extra-tester" });
+      expect(await restaurantSnapshot()).toEqual(untouched);
+      const folio = await testPool.query("SELECT total_charges::text, balance::text FROM folios WHERE id = $1", [fixture.folioId]);
+      expect(folio.rows[0]).toEqual({ total_charges: "0.00", balance: "0.00" });
+      const reversal = await testPool.query(
+        "SELECT amount::text, voided_movement_id FROM folio_movements WHERE source_type = 'restaurant_room_charge_void' AND source_id = $1",
+        [fixture.chargeId],
+      );
+      expect(reversal.rows).toEqual([{ amount: "-300.50", voided_movement_id: fixture.movementId }]);
+      const logs = await testPool.query("SELECT user_name, details FROM audit_logs WHERE entity_id = $1", [fixture.chargeId]);
+      expect(logs.rows).toHaveLength(1);
+      expect(logs.rows[0].user_name).toBe("manual-extra-tester");
+      expect(JSON.parse(logs.rows[0].details).after).toMatchObject({ scope: "room_only", restaurantConsumptionPreserved: true });
+    },
+  );
+
+  it("supports old Restaurant charges with no mirrored room ledger without inventing a movement", async () => {
+    const fixture = await restaurantFixture(true);
+    const untouched = await restaurantSnapshot();
+    expect((await voidRestaurant(fixture, "jefe_recepcion")).status).toBe(200);
+    expect(await restaurantSnapshot()).toEqual(untouched);
+    expect((await testPool.query("SELECT * FROM folio_movements WHERE source_id = $1", [fixture.chargeId])).rows).toEqual([]);
+  });
+
+  it("deduplicates simultaneous annulments and later retries, retaining the first audit and reason", async () => {
+    const fixture = await restaurantFixture();
+    const results = await Promise.all([voidRestaurant(fixture), voidRestaurant(fixture, "jefe_recepcion")]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect((await voidRestaurant(fixture)).body.alreadyAnulado).toBe(true);
+    expect((await testPool.query("SELECT count(*) FROM audit_logs WHERE entity_id = $1", [fixture.chargeId])).rows[0].count).toBe("1");
+    expect((await testPool.query("SELECT count(*) FROM folio_movements WHERE source_type = 'restaurant_room_charge_void' AND source_id = $1", [fixture.chargeId])).rows[0].count).toBe("1");
+  });
+
+  it.each(["restaurant", "housekeeping", "maintenance", "responsable_area"])(
+    "denies %s before any financial mutation", async role => {
+      const fixture = await restaurantFixture();
+      expect((await voidRestaurant(fixture, role)).status).toBe(403);
+      expect((await testPool.query("SELECT status FROM charges WHERE id = $1", [fixture.chargeId])).rows[0].status).toBe("active");
+    },
+  );
+
+  it.each(["borrador", "emitida", "error", "anulada"])(
+    "blocks Restaurant room annulment with %s fiscal history", async state => {
+      const fixture = await restaurantFixture();
+      await testPool.query(
+        "INSERT INTO sales_invoices (reserva_id, estado, source_charge_ids) VALUES ($1, $2, $3::jsonb)",
+        [fixture.reservationId, state, JSON.stringify([fixture.chargeId])],
+      );
+      const result = await voidRestaurant(fixture);
+      expect(result.status).toBe(409);
+      expect((await testPool.query("SELECT status FROM charges WHERE id = $1", [fixture.chargeId])).rows[0].status).toBe("active");
+    },
+  );
+
+  it("requires a reason and rejects stale confirmation snapshots", async () => {
+    const fixture = await restaurantFixture();
+    expect((await voidRestaurant(fixture, "reception", { motivoAnulacion: "  " })).status).toBe(400);
+    expect((await voidRestaurant(fixture, "reception", { expectedAmount: "999.00" })).status).toBe(409);
+    expect((await voidRestaurant(fixture, "reception", { expectedDescription: "Otra descripción" })).status).toBe(409);
+    expect((await testPool.query("SELECT status FROM charges WHERE id = $1", [fixture.chargeId])).rows[0].status).toBe("active");
+  });
+
+  it("blocks closed rooms, closed folios and group funding scope", async () => {
+    const closed = await restaurantFixture();
+    await testPool.query("UPDATE reservations SET status = 'checked_out' WHERE id = $1", [closed.reservationId]);
+    expect((await voidRestaurant(closed)).status).toBe(403);
+    const folioClosed = await restaurantFixture();
+    await testPool.query("UPDATE folios SET status = 'closed' WHERE id = $1", [folioClosed.folioId]);
+    expect((await voidRestaurant(folioClosed)).status).toBe(403);
+    const group = await restaurantFixture();
+    await testPool.query("INSERT INTO group_reservation_links VALUES ($1, $2)", [randomUUID(), group.reservationId]);
+    expect((await voidRestaurant(group)).status).toBe(409);
+  });
+
+  it("does not guess unlinked or transferred financial movements", async () => {
+    const unlinked = await restaurantFixture(true);
+    await testPool.query(
+      "INSERT INTO folio_movements (folio_id, type, amount, description, source_type) VALUES ($1, 'charge', 300.50, 'Cochera', 'unknown')",
+      [unlinked.folioId],
+    );
+    expect((await voidRestaurant(unlinked)).status).toBe(409);
+    const transferred = await restaurantFixture();
+    await testPool.query(
+      "INSERT INTO charges (id, reservation_id, description, amount, date) VALUES ($1, $2, $3, 100, CURRENT_DATE)",
+      [randomUUID(), randomUUID(), `[xfer:${transferred.chargeId}] Traslado`],
+    );
+    expect((await voidRestaurant(transferred)).status).toBe(409);
+  });
+
+  it("rolls back the charge, reversal and room balance when audit persistence fails", async () => {
+    const fixture = await restaurantFixture();
+    const untouched = await restaurantSnapshot();
+    await testPool.query(`CREATE FUNCTION reject_room_void_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'forced audit failure'; END; $$;
+      CREATE TRIGGER reject_room_void_audit BEFORE INSERT ON audit_logs
+      FOR EACH ROW WHEN (NEW.entity_id = '${fixture.chargeId}') EXECUTE FUNCTION reject_room_void_audit();`);
+    try {
+      expect((await voidRestaurant(fixture)).status).toBe(500);
+      expect((await testPool.query("SELECT status FROM charges WHERE id = $1", [fixture.chargeId])).rows[0].status).toBe("active");
+      expect((await testPool.query("SELECT balance::text FROM folios WHERE id = $1", [fixture.folioId])).rows[0].balance).toBe("300.50");
+      expect((await testPool.query("SELECT count(*) FROM folio_movements WHERE source_id = $1", [fixture.chargeId])).rows[0].count).toBe("1");
+      expect(await restaurantSnapshot()).toEqual(untouched);
+    } finally {
+      await testPool.query("DROP TRIGGER reject_room_void_audit ON audit_logs; DROP FUNCTION reject_room_void_audit()");
+    }
+  });
+
   beforeAll(async () => {
     process.env.DATABASE_URL = testDatabaseUrl!;
     testPool = new pg.Pool({ connectionString: testDatabaseUrl, max: 6 });
     await testPool.query(`
-      DROP TABLE IF EXISTS audit_logs, sales_invoices, folio_movements, charges, folios, reservations CASCADE;
+      DROP TABLE IF EXISTS audit_logs, sales_invoices, folio_movements, charges, folios, reservations,
+        group_reservation_links, restaurant_orders, order_items, inventory_items, payments, cash_movements CASCADE;
       CREATE TABLE reservations (id varchar PRIMARY KEY, status text NOT NULL, early_check_in boolean, early_check_in_time text, early_check_in_charge numeric(10,2), late_check_out boolean, late_check_out_time text, late_check_out_charge numeric(10,2));
       CREATE SEQUENCE IF NOT EXISTS folio_seq_reservation;
       CREATE TABLE folios (
@@ -188,6 +350,12 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
         ip_address text,
         timestamp timestamp NOT NULL
       );
+      CREATE TABLE group_reservation_links (id varchar PRIMARY KEY, reservation_id varchar NOT NULL);
+      CREATE TABLE restaurant_orders (id varchar PRIMARY KEY, order_number text, status text, total numeric, charged_to_room text);
+      CREATE TABLE order_items (id varchar PRIMARY KEY, order_id varchar, quantity integer, status text);
+      CREATE TABLE inventory_items (id varchar PRIMARY KEY, stock numeric);
+      CREATE TABLE payments (id varchar PRIMARY KEY, reservation_id varchar, amount numeric);
+      CREATE TABLE cash_movements (id varchar PRIMARY KEY, amount numeric);
     `);
     await startApp();
   });
@@ -240,6 +408,8 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     const movement = await testPool.query("SELECT amount::text FROM folio_movements WHERE id=$1", [fixture.movementId]);
     expect(movement.rows[0].amount).toBe("250.00");
     expect((await request("POST", path + "/anular", bodyFor(), role)).status).toBe(403);
+    expect((await request("PATCH", `/api/charges/${fixture.chargeId}/anular`, { motivoAnulacion: "Corrección de prueba" }, role)).status).toBe(403);
+    expect((await testPool.query("SELECT status FROM charges WHERE id=$1", [fixture.chargeId])).rows[0].status).toBe("active");
     expect((await request("PATCH", path, bodyFor(), { "x-test-role": "restaurant" })).status).toBe(403);
   });
 

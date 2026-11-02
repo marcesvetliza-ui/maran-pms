@@ -4,6 +4,7 @@ import type { Express } from "express";
 import type { PoolClient } from "pg";
 import { pool } from "../db";
 import { requireAuth, requireRole } from "../auth";
+import { RESERVATION_CHARGE_VOID_ROLES } from "@shared/reservationChargePermissions";
 
 const MANUAL_CHARGE_ROLES = ["admin", "manager", "reception"] as const;
 const MANUAL_CHARGE_EDIT_ROLES = [...MANUAL_CHARGE_ROLES, "jefe_recepcion"] as const;
@@ -273,6 +274,7 @@ async function writeAudit(
     action: "update" | "delete";
     reservationId: string;
     chargeId: string;
+    entityType?: "reservation_manual_extra" | "reservation_room_charge";
     description: string;
     before: unknown;
     after: unknown;
@@ -282,7 +284,7 @@ async function writeAudit(
   await client.query(
     `INSERT INTO audit_logs
        (user_id, user_name, action, module, entity_type, entity_id, description, details, ip_address, timestamp)
-     VALUES ($1, $2, $3, 'charges', 'reservation_manual_extra', $4, $5, $6, $7, NOW())`,
+     VALUES ($1, $2, $3, 'charges', $8, $4, $5, $6, $7, NOW())`,
     [
       input.actorId,
       input.actorName,
@@ -297,6 +299,7 @@ async function writeAudit(
         after: input.after,
       }),
       input.ipAddress,
+      input.entityType ?? "reservation_manual_extra",
     ],
   );
 }
@@ -569,7 +572,11 @@ export function registerManualChargeActionRoutes(app: Express) {
             throw error;
           }
         });
-        res.json(result);
+        const canEdit = MANUAL_CHARGE_EDIT_ROLES.some(role => role === req.user?.role);
+        res.json({
+          ...result,
+          charges: result.charges.map(charge => ({ ...charge, canEdit: charge.eligible && canEdit })),
+        });
       } catch (error) {
         sendActionError(res, error);
       }
@@ -599,7 +606,7 @@ export function registerManualChargeActionRoutes(app: Express) {
   app.post(
     "/api/reservations/:reservationId/manual-charges/:chargeId/anular",
     requireAuth,
-    requireRole([...MANUAL_CHARGE_ROLES]),
+    requireRole([...RESERVATION_CHARGE_VOID_ROLES]),
     async (req, res) => {
       try {
         const result = await mutateManualCharge(
@@ -624,3 +631,11 @@ export async function manualChargeHasSourceLedger(chargeId: string): Promise<boo
   );
   return Number(result.rowCount) > 0;
 }
+
+/** Shared transaction/fiscal primitives; this does not broaden manual eligibility. */
+export const roomChargeActionSupport = {
+  actionError, parseReason, parseExpected, cents, money, publicCharge,
+  validateVoidBody: (body: unknown): void => { assertAllowedBody(body, "void"); },
+  withReservationInvoiceLock, getReservation, reservationIsClosed, getCharge,
+  invoiceSourceConflict, recalculateFolio, writeAudit,
+};
