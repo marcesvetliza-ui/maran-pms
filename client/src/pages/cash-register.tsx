@@ -1,3 +1,4 @@
+import { CASH_DOCUMENT_LABELS, cashDocumentSummary, type CashDocumentEvidence } from "@shared/cash-document-classification";
 import { ReservationCancellationHistory } from "@/components/reservation-cancellation-history";
 import { canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
 import { formatDisplayDate } from "@shared/date-display";
@@ -97,7 +98,7 @@ type CashShift = {
   turnoTipo?: string | null;
 };
 
-type CashMovement = {
+type CashMovement = CashDocumentEvidence & {
   id: number;
   shiftId: number;
   area: string;
@@ -216,6 +217,8 @@ const AREA_LABEL_MAP: Record<string, string> = {
   reception: "Recepción",
   recepcion: "Recepción",
   restaurant: "Restaurante",
+  administracion: "Administración",
+  grupos: "Grupos",
   spa: "SPA",
   events: "Eventos",
 };
@@ -325,6 +328,7 @@ const CASH_RECEIPT_CODES: Record<string, string> = {
 };
 
 function cashReceiptTypes(movement: CashMovement): Array<{ code: string; label: string }> {
+  if (movement.documentClass) return [{code:CASH_DOCUMENT_LABELS[movement.documentClass], label:movement.documentReference || "Sin comprobante vinculado"}];
   if (movement.sourceType === "restaurant_order" && movement.restaurantInvoices?.length) {
     return [...new Map(movement.restaurantInvoices.map((invoice) => [
       invoice.type,
@@ -383,6 +387,17 @@ function buildSummaryFromMovements(movements: CashMovement[]) {
   return summary;
 }
 
+export function CashDocumentBreakdown({ movements }: {movements: CashMovement[]}) {
+  const rows = cashDocumentSummary(movements);
+  return <div className="space-y-2 mb-4" data-testid="cash-document-breakdown">
+    <h3 className="font-semibold">Efectivo por comprobante</h3>
+    <Table><TableHeader><TableRow><TableHead>Origen del cobro</TableHead><TableHead className="text-right">Efectivo ingresado</TableHead></TableRow></TableHeader>
+    <TableBody>{rows.map(row=><TableRow key={row.key}><TableCell>{row.label}</TableCell><TableCell className="text-right" data-testid={`cash-document-total-${row.key}`}>{formatCurrency(row.total)}</TableCell></TableRow>)}
+    <TableRow className="font-semibold"><TableCell>Total ingresos en efectivo</TableCell><TableCell className="text-right">{formatCurrency(rows.reduce((sum,row)=>sum+row.total,0))}</TableCell></TableRow></TableBody></Table>
+    <p className="text-xs text-muted-foreground">Clasificación según los comprobantes vinculados actualmente. Los egresos y el efectivo neto se muestran en el resumen de caja. Emitir un comprobante sobre un cobro existente no agrega dinero.</p>
+  </div>;
+}
+
 function SummaryTable({ movements }: { movements: CashMovement[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const summary = buildSummaryFromMovements(movements.filter(m=>m.movementType !== "informational"));
@@ -393,7 +408,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
     ...Object.entries(informative).map(([method,data])=>({method,data,informational:true}))];
 
   return (
-    <Table>
+    <><CashDocumentBreakdown movements={movements} /><Table>
       <TableHeader>
         <TableRow>
           <TableHead>Método</TableHead>
@@ -435,6 +450,7 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
                         <span className="text-muted-foreground w-11 shrink-0 tabular-nums">{formatTime(m.createdAt)}</span>
                         <span className="flex-1 truncate font-medium">
                           {cleanCashMovementLabel(m.sourceLabel || m.description) || "—"}
+                          <span className="block text-muted-foreground">{m.documentClass ? CASH_DOCUMENT_LABELS[m.documentClass] : "Sin clasificar"} · {m.documentReference || "Sin comprobante vinculado"}</span>
                           {m.registeredBy ? <span className="ml-2 text-muted-foreground font-normal">({m.registeredBy})</span> : null}
                         </span>
                         <span className={`shrink-0 font-semibold tabular-nums ${m.movementType === "expense" ? "text-red-600" : m.movementType === "informational" ? "text-muted-foreground" : ""}`}>
@@ -455,11 +471,11 @@ function SummaryTable({ movements }: { movements: CashMovement[] }) {
         </TableRow>
 
       </TableBody>
-    </Table>
+    </Table></>
   );
 }
 
-function printClosingSummary(
+export function printClosingSummary(
   shift: CashShift,
   movements: CashMovement[],
   efectivoSistema: number | null,
@@ -488,6 +504,7 @@ function printClosingSummary(
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character] || character);
   const documentReference = (movement: CashMovement): string => {
+    if (movement.documentReference) return movement.documentReference;
     if (movement.sourceType === "restaurant_order") {
       if (movement.restaurantInvoices?.length) {
         return movement.restaurantInvoices.map(formatRestaurantInvoice).join(" · ");
@@ -511,6 +528,7 @@ function printClosingSummary(
     byMethod[key].push(m);
   }
 
+  const documentBreakdown = `<h2>Efectivo por comprobante</h2><table style="width:100%">${cashDocumentSummary(movements).map(row=>`<tr><td>${row.label}</td><td style="text-align:right">${formatCurrency(row.total)}</td></tr>`).join("")}</table><p style="font-size:11px">Desglose de ingresos en efectivo; los egresos se descuentan en el total neto.</p>`;
   const methodBoxes = Object.entries(byMethod).map(([method, movs]) => {
     const label = PAYMENT_METHOD_MAP[method] || method;
     const total = movs.filter(m => m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
@@ -526,7 +544,7 @@ function printClosingSummary(
       return `<tr style="${esInformational ? "opacity:0.65;font-style:italic;" : ""}">
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${formatTime(m.createdAt)}</td>
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${escapeHtml(m.description || m.sourceLabel || "-")}</td>
-        ${closingSnapshot ? `<td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:10px">${escapeHtml(documentReference(m))}</td>` : ""}
+        ${`<td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:10px">${escapeHtml(documentReference(m))} · ${escapeHtml(m.documentClass ? CASH_DOCUMENT_LABELS[m.documentClass] : "Sin clasificar")}</td>`}
         <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">
           ${closingSnapshot
             ? escapeHtml(cashReceiptTypes(m).map(({ code }) => code).join(" / ") || "—")
@@ -560,7 +578,7 @@ function printClosingSummary(
             <tr style="background:#f9f9f9">
               <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Hora</th>
               <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Descripción</th>
-              ${closingSnapshot ? `<th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Comprobante</th>` : ""}
+              <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Comprobante / origen</th>
               <th style="padding:4px 8px;font-size:10px;text-align:center;color:#888;font-weight:600;text-transform:uppercase">${closingSnapshot ? "Tipo de comprobante" : "Tipo"}</th>
               <th style="padding:4px 8px;font-size:10px;text-align:right;color:#888;font-weight:600;text-transform:uppercase">Monto</th>
             </tr>
@@ -647,6 +665,7 @@ ${informational.length ? `<div style="margin:12px 0;padding:10px;background:#f8f
   ${informational.map(m => `<div style="font-size:11px;margin-top:3px">${PAYMENT_METHOD_MAP[normalizePaymentMethod(m.paymentMethod)] || m.paymentMethod}: ${m.sourceLabel || m.description || "-"}${m.registeredBy ? ` (${m.registeredBy})` : ""} — ${formatCurrency(Number(m.amount))}</div>`).join("")}
 </div>` : ""}
 
+${documentBreakdown}
 ${methodBoxes}
 
 ${anulSection}
@@ -2261,9 +2280,12 @@ const MODULO_LABEL: Record<string, string> = {
   spa: "SPA",
   eventos: "Eventos",
   restaurant: "Restaurante",
+  administracion: "Administración",
+  grupos: "Grupos",
 };
 
-function printResumenDia(fecha: string, data: { movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }) {
+export function printResumenDia(fecha: string, data: { movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }) {
+  const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"})[character] || character);
   const { movimientos, totalPorMetodo, porModulo, totalGeneral } = data;
   const [y, m, d] = fecha.split("-");
   const fechaFmt = `${d}/${m}/${y}`;
@@ -2277,17 +2299,19 @@ th{background:#f5f5f5}.total{font-weight:bold;background:#eee}h1{font-size:18px}
 <p style="color:#666;font-size:13px;margin:0 0 12px">Consolidado de todas las áreas — Maran Suites &amp; Towers</p>
 <h2>Por Área</h2>
 <table><thead><tr><th>Área</th><th>Total</th></tr></thead><tbody>
-${Object.entries(porModulo).map(([m, v]) => `<tr><td>${MODULO_LABEL[m] || m}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
+${Object.entries(porModulo).map(([m, v]) => `<tr><td>${escapeHtml(MODULO_LABEL[m] || m)}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
 <tr class="total"><td>TOTAL GENERAL</td><td>${formatCurrency(totalGeneral)}</td></tr>
 </tbody></table>
+<h2>Efectivo por comprobante</h2>
+<table><tbody>${cashDocumentSummary(movimientos).map(row=>`<tr><td>${row.label}</td><td>${formatCurrency(row.total)}</td></tr>`).join("")}</tbody></table>
 <h2>Por Método de Pago</h2>
 <table><thead><tr><th>Método</th><th>Total</th></tr></thead><tbody>
-${Object.entries(totalPorMetodo).map(([m, v]) => `<tr><td>${PAYMENT_METHOD_MAP[m] || m}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
+${Object.entries(totalPorMetodo).map(([m, v]) => `<tr><td>${escapeHtml(PAYMENT_METHOD_MAP[m] || m)}</td><td>${formatCurrency(v as number)}</td></tr>`).join("")}
 <tr class="total"><td>TOTAL</td><td>${formatCurrency(totalGeneral)}</td></tr>
 </tbody></table>
 <h2>Detalle de Movimientos (${movimientos.length})</h2>
 <table><thead><tr><th>Área</th><th>Descripción</th><th>Referencia</th><th>Método</th><th>Monto</th></tr></thead><tbody>
-${movimientos.map(m => `<tr><td>${MODULO_LABEL[m.modulo] || m.modulo}</td><td>${m.descripcion || "-"}</td><td>${m.referencia || "-"}</td><td>${PAYMENT_METHOD_MAP[m.metodo] || m.metodo}</td><td>${formatCurrency(m.monto)}</td></tr>`).join("")}
+${movimientos.map(m => `<tr><td>${escapeHtml(MODULO_LABEL[m.modulo] || m.modulo)}</td><td>${escapeHtml(m.descripcion || "-")}</td><td>${escapeHtml(m.referencia || "-")} · ${m.documentClass ? CASH_DOCUMENT_LABELS[m.documentClass as keyof typeof CASH_DOCUMENT_LABELS] : "Sin clasificar"}</td><td>${escapeHtml(PAYMENT_METHOD_MAP[m.metodo] || m.metodo)}</td><td>${formatCurrency(m.monto)}</td></tr>`).join("")}
 </tbody></table>
 <div class="footer">Generado el ${formatHotelDateTime(new Date())} | Maran Suites & Towers</div>
 <script>window.onload=function(){window.print();}<\/script>
@@ -2299,15 +2323,16 @@ ${movimientos.map(m => `<tr><td>${MODULO_LABEL[m.modulo] || m.modulo}</td><td>${
 function ResumenDiaTab() {
   const today = getArgentinaToday();
   const [fecha, setFecha] = useState(today);
-  const { data, isLoading } = useQuery<{ fecha: string; movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }>({
+  const { data, isLoading, isError } = useQuery<{ fecha: string; movimientos: any[]; totalPorMetodo: Record<string, number>; porModulo: Record<string, number>; totalGeneral: number }>({
     queryKey: ["/api/reports/caja-unificada", fecha],
     queryFn: async () => {
       const res = await fetch(`/api/reports/caja-unificada?fecha=${fecha}`, { credentials: "include" });
+      if (!res.ok) throw new Error("No se pudo cargar el resumen de caja");
       return res.json();
     },
   });
 
-  const modulos = ["reserva", "spa", "eventos", "restaurant"];
+  const modulos = [...new Set(["reserva", "spa", "eventos", "restaurant", ...Object.keys(data?.porModulo || {})])];
 
   const fechaDisplay = fecha ? `${fecha.split("-")[2]}/${fecha.split("-")[1]}/${fecha.split("-")[0]}` : fecha;
 
@@ -2332,6 +2357,7 @@ function ResumenDiaTab() {
         </div>
       </div>
 
+      {isError && <p role="alert" className="text-destructive">No se pudo cargar el resumen de caja. Volvé a intentar.</p>}
       {isLoading ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}
@@ -2358,6 +2384,7 @@ function ResumenDiaTab() {
             })}
           </div>
 
+          <Card><CardContent className="pt-4"><CashDocumentBreakdown movements={data.movimientos} /></CardContent></Card>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -2412,7 +2439,7 @@ function ResumenDiaTab() {
                           <Badge variant="secondary">{MODULO_LABEL[m.modulo] || m.modulo}</Badge>
                         </TableCell>
                         <TableCell className="max-w-[200px] truncate">{m.descripcion || "-"}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs">{m.referencia || "-"}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">{m.referencia || "-"}<span className="block">{m.documentClass ? CASH_DOCUMENT_LABELS[m.documentClass as keyof typeof CASH_DOCUMENT_LABELS] : "Sin clasificar"}</span></TableCell>
                         <TableCell>{PAYMENT_METHOD_MAP[m.metodo] || m.metodo}</TableCell>
                         <TableCell className="text-right font-medium">{formatCurrency(m.monto)}</TableCell>
                       </TableRow>

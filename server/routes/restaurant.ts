@@ -1,3 +1,4 @@
+import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
@@ -460,6 +461,9 @@ export function registerRestaurantRoutes(app: Express) {
 
       const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId, itemDescriptions } = req.body;
 
+
+      const collectionError = nonFiscalCollectionError(receiptType, Array.isArray(paymentSplits) && paymentSplits.length ? paymentSplits.map((row:any)=>row.method) : [chargeToRoom ? "room_charge" : (paymentMethod || "cash")]);
+      if (collectionError) return res.status(400).json({error:collectionError});
       // CUIT is mandatory when actually emitting Factura A / Factura C
       if (emitInvoice && ["factura_a", "factura_c"].includes(receiptType || "") && !(customerCuit || "").trim()) {
         return res.status(400).json({ error: "CUIT es requerido para emitir Factura A o Factura C" });
@@ -1100,6 +1104,9 @@ export function registerRestaurantRoutes(app: Express) {
   app.patch("/api/restaurant/orders/:id/split/:splitId", restaurantPaymentTransaction(async (req, res) => {
     try {
       const { method, receiptType, roomReservationId, amount, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
+      const collectionError = nonFiscalCollectionError(receiptType, [method]);
+      if (collectionError) return res.status(400).json({error:collectionError});
+
 
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Order not found" });
@@ -1292,6 +1299,9 @@ export function registerRestaurantRoutes(app: Express) {
         itemDescriptions,
       } = req.body;
 
+
+      const collectionError = nonFiscalCollectionError(receiptType, [method]);
+      if (collectionError) return res.status(400).json({error:collectionError});
       if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
         return res.status(400).json({ error: "Seleccioná al menos un ítem" });
       }
@@ -1759,6 +1769,9 @@ export function registerRestaurantRoutes(app: Express) {
   app.post("/api/restaurant/table-reservations/:id/advances", requireAuth, async (req, res) => {
     try {
       const { amount, paymentMethod, notes, receiptType, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
+      const collectionError = nonFiscalCollectionError(receiptType, [paymentMethod]);
+      if (collectionError) return res.status(400).json({error:collectionError});
+
       // Generate voucher number ADV-YYYY-NNNN
       const year = new Date().getFullYear();
       const allAdvances = await storage.getReservationAdvances(req.params.id);

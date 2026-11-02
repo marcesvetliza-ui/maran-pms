@@ -1,3 +1,4 @@
+import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { FiscalNumberLookupError, readLastAuthorizedNumber } from "./lastAuthorizedNumber";
 import { db, pool } from "../db";
 import { eq, sql } from "drizzle-orm";
@@ -343,6 +344,8 @@ async function freeStaleRejectedDraft(
 }
 
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
+  const collectionError = nonFiscalCollectionError(data.tipoComprobante, data.cashFormaPagoDetalle?.length ? data.cashFormaPagoDetalle.filter(row=>Number(row.amount)>0).map(row=>row.method) : [data.cashFormaPago]);
+  if (collectionError) throw Object.assign(new Error(collectionError), {statusCode:400});
   const config=await getBillingConfig();
   if(isNonFiscalTipo(data.tipoComprobante)) return emitirFacturaUnlocked(data,config);
   const environment=(config as any).arcaAmbiente??"ficticio";

@@ -1,3 +1,6 @@
+import { activeSalesRecord } from "./salesArchive";
+import { getCashDayReport } from "./cash-day-report";
+import { enrichCashDocumentEvidence } from "./cash-document-evidence";
 import { assertPurchaseInvoiceNotDuplicate } from "./purchase-invoice-duplicates";
 import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit } from "@shared/purchase-invoice-edit";
 import { requireCashView, cashShiftAccess } from "./cash-user-access";
@@ -1766,87 +1769,9 @@ export async function registerRoutes(
   app.get("/api/reports/caja-unificada", requireAuth, async (req, res) => {
     try {
       const fecha = (req.query.fecha as string) || getArgentinaToday();
-      const todos: any[] = [];
-
-      // Room-level payments created as an allocation of a group payment
-      // (p.group_payment_id set — see recordGroupPayment) are excluded here:
-      // the "grupos" block below counts the *entire* group_payments.amount
-      // once per movement, which already covers every cent of that group
-      // payment regardless of whether it was allocated to a room or to the
-      // Folio Maestro/group-charges balance. Counting both would double the
-      // cash figure for every group payment distributed to rooms.
-      const resPayments = await db.execute(sql`
-        SELECT p.id, 'reserva' as modulo, p.method as metodo, p.amount as monto,
-               p.date as fecha_pago, g.first_name || ' ' || g.last_name as descripcion,
-               r.reservation_code as referencia
-        FROM payments p
-        LEFT JOIN reservations r ON p.reservation_id = r.id
-        LEFT JOIN guests g ON r.guest_id = g.id
-        WHERE p.date = ${fecha} AND (p.status IS NULL OR p.status = 'active')
-          AND p.group_payment_id IS NULL
-      `);
-      todos.push(...(resPayments.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
-
-      const spaRows = await db.execute(sql`
-        SELECT sp.id, 'spa' as modulo, sp.method as metodo, sp.amount as monto,
-               sp.created_at::date as fecha_pago,
-               'SPA - Cuenta ' || sp.account_id as descripcion,
-               sp.account_id as referencia
-        FROM spa_payments sp
-        WHERE sp.created_at::date = ${fecha} AND (sp.status IS NULL OR sp.status = 'active')
-      `);
-      todos.push(...(spaRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
-
-      const evtRows = await db.execute(sql`
-        SELECT ep.id, 'eventos' as modulo, ep.method as metodo, ep.amount as monto,
-               ep.paid_at::date as fecha_pago,
-               'Evento - ' || e.name as descripcion,
-               e.name as referencia
-        FROM event_payments ep
-        LEFT JOIN events e ON ep.event_id = e.id
-        WHERE ep.paid_at::date = ${fecha} AND (ep.status IS NULL OR ep.status = 'active')
-      `);
-      todos.push(...(evtRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
-
-      // Group payments (Pago Grupal / Pagar Folio Maestro) can bundle several
-      // payment methods in one row via payment_method_detail — expand each
-      // method into its own movement, same granularity as the other modules.
-      // Cuenta Corriente rows settle through account_movements, not cash, so
-      // they're excluded here just like the group_payment cash-movement writer.
-      const grupoRows = await db.execute(sql`
-        SELECT gp.id || '-' || COALESCE(pmd->>'method', gp.method) as id, 'grupos' as modulo,
-               COALESCE(pmd->>'method', gp.method) as metodo,
-               COALESCE((pmd->>'amount')::numeric, gp.amount::numeric) as monto,
-               gp.date as fecha_pago,
-               'Grupo - ' || COALESCE(g.name, gp.group_id) as descripcion,
-               g.name as referencia,
-               gp.retention_detail as retencion
-        FROM group_payments gp
-        LEFT JOIN groups g ON g.id = gp.group_id
-        LEFT JOIN LATERAL jsonb_array_elements(gp.payment_method_detail) AS pmd ON true
-        WHERE gp.date = ${fecha}
-          AND COALESCE(pmd->>'method', gp.method) IS DISTINCT FROM 'cuenta_corriente'
-      `);
-      todos.push(...(grupoRows.rows as any[]).map(r => ({ ...r, monto: parseFloat(r.monto) })));
-
-      const porMetodo: Record<string, number> = {};
-      const porModulo: Record<string, number> = {};
-      for (const p of todos) {
-        const m = (p as any).metodo || "otros";
-        porMetodo[m] = (porMetodo[m] || 0) + parseFloat((p as any).monto || "0");
-        const mod = (p as any).modulo || "otros";
-        porModulo[mod] = (porModulo[mod] || 0) + parseFloat((p as any).monto || "0");
-      }
-
-      res.json({
-        fecha,
-        movimientos: todos,
-        totalPorMetodo: porMetodo,
-        porModulo,
-        totalGeneral: todos.reduce((s, p) => s + parseFloat((p as any).monto || "0"), 0),
-      });
+      res.json(await getCashDayReport(fecha, undefined, activeSalesRecord("cash_movement", sql`cm.id`)));
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e.statusCode || 500).json({ error: e.message });
     }
   });
 
@@ -2040,7 +1965,7 @@ export async function registerRoutes(
     try {
       const detail = await storage.getShiftDetail(req.params.id);
       const grouped = await enrichGroupCashMovements(detail.movements, req.params.id);
-      res.json({ ...detail, movements: await enrichRestaurantCashMovements(grouped) });
+      res.json({ ...detail, movements: await enrichCashDocumentEvidence(await enrichRestaurantCashMovements(grouped)) });
     } catch (error: any) {
       res.status(404).json({ error: error.message || "Shift not found" });
     }
@@ -2052,7 +1977,7 @@ export async function registerRoutes(
       if (!shiftId) return res.status(400).json({ error: "shiftId is required" });
       const movements = await storage.getCashMovements(shiftId);
       const grouped = await enrichGroupCashMovements(movements, shiftId);
-      res.json(await enrichRestaurantCashMovements(grouped));
+      res.json(await enrichCashDocumentEvidence(await enrichRestaurantCashMovements(grouped)));
     } catch (error) {
       res.status(500).json({ error: "Error fetching movements" });
     }
