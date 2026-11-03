@@ -3028,6 +3028,7 @@ export const billingConfig = pgTable("billing_config", {
 });
 
 export const salesInvoices = pgTable("sales_invoices", {
+  fiscalIdentity: jsonb("fiscal_identity").$type<{ environment: string; issuer: string; pointOfSale: number; type: string; operationId?: string }>(),
   id: serial("id").primaryKey(),
   tipoComprobante: text("tipo_comprobante").notNull(),
   puntoVenta: integer("punto_venta").notNull(),

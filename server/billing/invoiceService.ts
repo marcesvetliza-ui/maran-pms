@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { assertBillingPoint, BillingPreflightError, fiscalRecipientError } from "./preflight";
+import { beginBillingOperation, billingOperationStage, billingOperationNumber, operationForInvoice, payloadHash, type BillingOperation, type FiscalIdentity } from "./operationJournal";
+import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { FiscalNumberLookupError, readLastAuthorizedNumber } from "./lastAuthorizedNumber";
 import { db, pool } from "../db";
@@ -52,6 +56,8 @@ export function isNonFiscalTipo(tipo: string): tipo is NonFiscalTipo {
 }
 
 export interface NewInvoiceData {
+  operationId?: string;
+  requestSnapshot?: Record<string, any>;
   tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "FMB" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NCMB" | "NDA" | "NDB" | "NDT" | "NDM" | "NDMB" | "NDC" | NonFiscalTipo;
   cliente: {
     razonSocial: string;
@@ -264,6 +270,7 @@ async function getNextInvoiceNumberFromAfip(
   cuit: string,
   wsfeUrl: string,
   database: BillingDatabase,
+  operationId?: string,
 ): Promise<number> {
   const cbteTipo = TIPOS_CBT_WSFE[tipo] ?? 6;
   const cuitLimpio = cuit.replace(/-/g, "");
@@ -294,53 +301,20 @@ async function getNextInvoiceNumberFromAfip(
     throw new FiscalNumberLookupError(timedOut ? 504 : 502, timedOut ? "tiempo de espera agotado" : "conexión no disponible");
   }
   const proximo = ultimoAfip + 1;
+  if (operationId) await billingOperationNumber(database, operationId, proximo);
 
-  // Sincronizar contador local con AFIP
+  const occupied = await database.execute(sql`SELECT id,estado,modo_ficticio FROM sales_invoices WHERE tipo_comprobante=${tipo} AND punto_venta=${puntoVenta} AND numero=${proximo} LIMIT 1`);
+  if (occupied.rows[0]?.id) throw Object.assign(new Error(`La numeración ${tipo} PV ${puntoVenta}, número ${proximo}, está ocupada por otro registro. No se solicitó autorización. Administración debe revisar esa serie; no vuelvas a emitir ni adelantes el contador.`), {
+    statusCode: 409, code: "BILLING_NUMBER_CONFLICT", authorizationRequested: false,
+    conflictInvoiceId: occupied.rows[0].id, pointOfSale: puntoVenta, documentType: tipo, number: proximo,
+  });
+  // The counter is observational in ARCA mode and is never advanced past a conflict.
   await database.execute(sql`
-    INSERT INTO invoice_counters (tipo_comprobante, punto_venta, ultimo_numero)
-    VALUES (${tipo}, ${puntoVenta}, ${proximo})
-    ON CONFLICT (tipo_comprobante, punto_venta)
-    DO UPDATE SET ultimo_numero = ${proximo}
+    INSERT INTO invoice_counters(tipo_comprobante,punto_venta,ultimo_numero) VALUES(${tipo},${puntoVenta},${proximo})
+    ON CONFLICT(tipo_comprobante,punto_venta) DO UPDATE SET ultimo_numero=${proximo}
   `);
 
   return proximo;
-}
-
-/**
- * Frees a (tipo_comprobante, punto_venta, numero) slot occupied by a stale
- * "autorizacion_pendiente" draft, but only after ARCA itself confirms — via
- * FECompConsultar — that it never authorized that number. Returns false
- * (without deleting anything) whenever that can't be established safely:
- * no row there, the row isn't a pending draft, or ARCA reports it as
- * authorized after all. Never call this for a row this same request didn't
- * just fail to insert past.
- */
-async function freeStaleRejectedDraft(
-  tipo: string,
-  puntoVenta: number,
-  numero: number,
-  token: string,
-  sign: string,
-  cuitEmisor: string,
-  wsfeUrl: string,
-  ambiente: "homologacion" | "produccion",
-  database: BillingDatabase,
-): Promise<boolean> {
-  const existing = await database.execute(sql`
-    SELECT id FROM sales_invoices
-    WHERE tipo_comprobante = ${tipo} AND punto_venta = ${puntoVenta} AND numero = ${numero}
-      AND estado = 'autorizacion_pendiente'
-    LIMIT 1
-  `);
-  const row = existing.rows[0] as any;
-  if (!row) return false;
-
-  const { feCompConsultar } = await import("./wsfevClient");
-  const authorized = await feCompConsultar({ tipo, puntoVenta, numero, cuitEmisor, token, sign }, ambiente);
-  if (authorized) return false; // ARCA sí la autorizó — no es un borrador huérfano, no se toca.
-
-  await database.delete(salesInvoices).where(eq(salesInvoices.id, Number(row.id)));
-  return true;
 }
 
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
@@ -349,11 +323,15 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const config=await getBillingConfig();
   if(isNonFiscalTipo(data.tipoComprobante)) return emitirFacturaUnlocked(data,config);
   const environment=(config as any).arcaAmbiente??"ficticio";
+  if (!["ficticio", "homologacion", "produccion"].includes(environment)) throw new BillingPreflightError("El ambiente de facturación configurado no es válido. No se emitió ningún comprobante.");
   // Funding never uses ficticio. Preserve the existing synthetic emitter and
   // its independent counters without taking an operational series lock.
   if(environment==="ficticio") return emitirFacturaUnlocked(data,config);
   const issuer=String((config as any).arcaCuit??config.cuit).replace(/\D/g,"");
   const pv=data.puntoVentaOverride??(environment==="homologacion"?(config.puntoVentaHomolog??99):config.puntoVenta);
+  assertFinancialSchemaReady();
+  data = { ...data, operationId: data.operationId || String(data.creditReapplicationIntent?.operationId || randomUUID()) };
+  const identity: FiscalIdentity = { environment, issuer, pointOfSale: Number(pv), type: data.tipoComprobante };
   const c=await pool.connect();
   let locked=false;
   try {
@@ -370,7 +348,29 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
         [environment,issuer,data.tipoComprobante,String(pv)]);
       if(pending.rowCount) throw Object.assign(new Error("La serie fiscal tiene una operación de financiación pendiente. Recuperá esa misma operación."),{statusCode:409});
     }
-    return await emitirFacturaUnlocked(data,config,drizzle(c,{schema}));
+    const database = drizzle(c,{schema});
+    let operation: BillingOperation | undefined;
+    if (data.recoveryInvoiceId) {
+      operation = await operationForInvoice(database, data.recoveryInvoiceId);
+      if (operation?.stage === "rejected" || operation?.stage === "corrected") throw Object.assign(new Error("ARCA rechazó este intento. Verificá el rechazo y corregí los datos antes de preparar una nueva emisión."), {statusCode:409,code:"BILLING_CORRECTION_REQUIRED"});
+      if (operation && payloadHash(operation.fiscal_identity) !== payloadHash(identity)) throw Object.assign(new Error("El ambiente, emisor o punto de venta cambió desde la emisión original. Conservamos el intento sin reenviarlo."), { statusCode: 409, code: "BILLING_IDENTITY_CHANGED" });
+    } else {
+      operation = await beginBillingOperation(database, data, identity);
+      if (operation.invoice_id) data = { ...data, recoveryInvoiceId: operation.invoice_id };
+    }
+    try {
+      if (!data.recoveryInvoiceId) {
+        await assertBillingPoint(config, data.puntoVentaOverride, database);
+        const recipientError = fiscalRecipientError(data.tipoComprobante, data.cliente);
+        if (recipientError) throw new BillingPreflightError(recipientError);
+      }
+      return await emitirFacturaUnlocked(data,config,database,operation,identity);
+    } catch (error: any) {
+      if (operation && ["BILLING_PREFLIGHT_REJECTED", "BILLING_NUMBER_CONFLICT"].includes(error?.code) && !operation.invoice_id) {
+        await billingOperationStage(database, operation.operation_id, "blocked", undefined, error.code);
+      }
+      throw error;
+    }
   } finally {
     // Explicit unlock also on throw. Do not return a session lock to the pool.
     try {
@@ -381,7 +381,7 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   }
 }
 
-async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<ReturnType<typeof getBillingConfig>>, database: BillingDatabase = db): Promise<typeof salesInvoices.$inferSelect> {
+async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<ReturnType<typeof getBillingConfig>>, database: BillingDatabase = db, operation?: BillingOperation, fiscalIdentity?: FiscalIdentity): Promise<typeof salesInvoices.$inferSelect> {
   const db = database;
   if (isUnsupportedSaleType(data.tipoComprobante)) {
     throw Object.assign(
@@ -395,7 +395,7 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
   // All operational owners are captured in the local draft before ARCA.  The
   // later link is deliberately idempotent, but must never be the only place
   // where ownership is recorded.
-  const recoverableBeforeAuthorization = recoverableFiscalAdjustment
+  const recoverableBeforeAuthorization = ambiente === "homologacion" || ambiente === "produccion" || recoverableFiscalAdjustment
     || Boolean(data.paymentId)
     || Boolean(data.groupId)
     || Boolean(data.groupPaymentId)
@@ -426,6 +426,7 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
   const insertPendingInvoice = async () => {
     const values: typeof salesInvoices.$inferInsert = {
       tipoComprobante: data.tipoComprobante,
+      fiscalIdentity: fiscalIdentity ? { ...fiscalIdentity, operationId: operation?.operation_id } : undefined,
       puntoVenta,
       numero,
       fechaEmision: getArgentinaToday(),
@@ -480,6 +481,10 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
       return inserted;
     });
     pendingInvoice = draft;
+    if (operation) {
+      await billingOperationStage(db, operation.operation_id, "numbered", draft.id);
+      operation.invoice_id = draft.id;
+    }
     return draft;
   };
 
@@ -487,14 +492,19 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
     const existing = await db.execute(sql`
       SELECT * FROM sales_invoices
       WHERE id = ${data.recoveryInvoiceId}
-        AND estado = 'autorizacion_pendiente'
-        AND reconciliation_status = 'pendiente'
+        AND estado IN ('autorizacion_pendiente','emitida')
       LIMIT 1
     `);
     if (!existing.rows.length) {
       throw new Error("La NC pendiente ya no está disponible para reintentar su autorización");
     }
     const draft = existing.rows[0] as any;
+    if (draft.estado === "emitida") {
+      if (operation) await billingOperationStage(db, operation.operation_id, "authorized", Number(draft.id));
+      return Object.fromEntries(Object.entries(draft).map(([key,value]) => [key.replace(/_([a-z])/g,(_match,c)=>c.toUpperCase()),value])) as any;
+    }
+    const storedIdentity = draft.fiscal_identity;
+    if (storedIdentity && fiscalIdentity && ["environment","issuer","pointOfSale","type"].some(key => storedIdentity[key] !== (fiscalIdentity as any)[key])) throw Object.assign(new Error("La identidad fiscal del borrador no coincide con la configuración actual."), {statusCode:409,code:"BILLING_IDENTITY_CHANGED"});
     numero = Number(draft.numero);
     if (Number(draft.punto_venta) !== puntoVenta) {
       throw new Error("La NC pendiente tiene un punto de venta distinto al de la factura original");
@@ -532,39 +542,13 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
     // Número sincronizado con AFIP (evita desfasaje por uso previo de modo ficticio)
     if (!pendingInvoice) {
       numero = await getNextInvoiceNumberFromAfip(
-        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl,db
+        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl,db,operation?.operation_id
       );
     }
 
-    // The draft must exist before the outbound ARCA call. If the process stops
-    // after ARCA authorizes it, the original invoice, its exact charge mapping
-    // and a resolvable pending NC are already stored locally.
-    //
-    // getNextInvoiceNumberFromAfip always asks AFIP for its own last-authorized
-    // number, so a prior attempt that never got a CAE (ARCA rejected it, or the
-    // request never reached ARCA at all) hands back that exact same "next"
-    // number again. If that same prior attempt got far enough to insert its own
-    // pending draft, this insert collides with it (sales_invoices' unique
-    // (tipo_comprobante, punto_venta, numero) constraint) — the retry can never
-    // proceed, even with corrected data, until that stale draft is cleared.
-    // One bounded retry: on that exact collision, confirm with ARCA itself
-    // (feCompConsultar) that the blocking draft was indeed never authorized,
-    // then free it and insert again. A row ARCA confirms as authorized is left
-    // untouched — this never discards a real comprobante.
-    if (recoverableBeforeAuthorization && !pendingInvoice) {
-      try {
-        await insertPendingInvoice();
-      } catch (err: any) {
-        if (err?.code !== "23505" || !(await freeStaleRejectedDraft(
-          data.tipoComprobante, puntoVenta, numero, token, sign, cuitAuth, wsfeUrl,
-          ambiente as "homologacion" | "produccion",
-          db,
-        ))) {
-          throw err;
-        }
-        await insertPendingInvoice();
-      }
-    }
+    // Persist every fiscal draft before authorization, including direct sales.
+    // A different operation's draft is never deleted to free its number.
+    if (recoverableBeforeAuthorization && !pendingInvoice) await insertPendingInvoice();
 
     // The fiscal dates must use the same Argentina calendar day stored on the invoice.
     const fecha = String(pendingInvoice?.fechaEmision || (pendingInvoice as any)?.fecha_emision || getArgentinaToday()).replace(/-/g, "");
@@ -587,15 +571,23 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
           }]
         : undefined;
 
+      if (operation) await billingOperationStage(db, operation.operation_id, "submitting", pendingInvoice?.id);
       // A pending draft may have been authorized just before a network/process
       // failure. Query ARCA by its already persisted number first; only an
       // explicit "not found" allows a new authorization request.
       const recovered = data.recoveryInvoiceId
         ? await feCompConsultar(
             { tipo: data.tipoComprobante, puntoVenta, numero, cuitEmisor: cuitAuth, token, sign },
-            ambiente as "homologacion" | "produccion"
+            ambiente as "homologacion" | "produccion",
+            { total: montos.montoTotal, fecha, docTipo: resolveFiscalRecipientDocument(data.cliente).tipo, docNro: resolveFiscalRecipientDocument(data.cliente).numero },
           )
         : null;
+      if (data.recoveryInvoiceId && !recovered && !(pendingInvoice as any)?.fiscalIdentity && !(pendingInvoice as any)?.fiscal_identity) throw Object.assign(new Error("El intento antiguo no tiene ambiente fiscal registrado. ARCA no confirmó una autorización en este ambiente. Requiere revisión antes de reenviarlo."), {statusCode:409,code:"BILLING_LEGACY_IDENTITY_REVIEW"});
+      if (data.recoveryInvoiceId && !recovered) {
+        await assertBillingPoint(config, data.puntoVentaOverride, db);
+        const recipientError = fiscalRecipientError(data.tipoComprobante, data.cliente);
+        if (recipientError) throw new BillingPreflightError(recipientError);
+      }
       const resultado = recovered ?? await feCAESolicitar(
           {
             tipo: data.tipoComprobante,
@@ -617,6 +609,7 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
       cae = resultado.cae;
       caeFechaVto = resultado.caeFechaVto;
     } catch (error: any) {
+      if (operation) await billingOperationStage(db, operation.operation_id, error?.code === "ARCA_AUTHORIZATION_REJECTED" ? "rejected" : "uncertain", pendingInvoice?.id, error?.code || "ARCA_RESULT_UNCERTAIN");
       if (pendingInvoice) {
         await db.execute(sql`
           UPDATE sales_invoices
@@ -650,6 +643,7 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
       reconciliationError: null,
       reconciliationUpdatedAt: new Date(),
     }).where(eq(salesInvoices.id, pendingInvoice.id)).returning();
+    if (operation) await billingOperationStage(db, operation.operation_id, "authorized", finalized.id);
     return finalized;
   }
 

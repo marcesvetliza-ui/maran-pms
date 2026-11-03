@@ -1,3 +1,5 @@
+import { getFinancialSchemaStatus } from "./migrate";
+import { BUILD_REVISION } from "./buildRevision";
 import { activeSalesRecord } from "./salesArchive";
 import { getCashDayReport } from "./cash-day-report";
 import { enrichCashDocumentEvidence } from "./cash-document-evidence";
@@ -292,13 +294,17 @@ export async function registerRoutes(
     } catch {
       dbStatus = "error";
     }
-    const status = dbStatus === "ok" ? "ok" : "degraded";
+    const readiness = getFinancialSchemaStatus();
+    const financialReady = readiness?.ready !== false;
+    const status = dbStatus !== "ok" ? "degraded" : financialReady ? "ok" : "starting";
     const environment = process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
-    res.status(dbStatus === "ok" ? 200 : 503).json({
+    res.status(status === "ok" ? 200 : 503).json({
       status,
       database: dbStatus,
       environment,
       version: "1.0.0",
+      revision: BUILD_REVISION,
+      financialReady,
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
     });

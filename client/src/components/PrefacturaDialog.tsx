@@ -1,3 +1,4 @@
+import { billingPointOptions, billingPointError } from "@shared/billing-point-of-sale";
 import { useAuth } from "@/App";
 import { ReservationChargeVoid } from "@/components/reservation-charge-void";
 import { nonFiscalCollectionError, isCashMethod } from "@shared/cash-document-classification";
@@ -631,8 +632,52 @@ export function PrefacturaDialog({
     enabled: open && !!reservationId, staleTime: 0,
   });
   const serverAttempt = serverRejection?.attempt;
-  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"], enabled: open });
-  const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], enabled: open });
+  const localOperationId = hasPendingSubmission ? submission.current!.pending(reservationId)?.invoiceRequest?.creditOperationId : null;
+  const pendingOperationKey = ["/api/billing/reservations", String(reservationId), "pending-operation"];
+  const { data: discoveredOperation, isLoading: discoveringOperation, isError: operationDiscoveryError } = useQuery<any>({
+    queryKey: pendingOperationKey, enabled: open && !!reservationId && !hasPendingSubmission,
+    queryFn: async () => (await apiRequest("GET", `/api/billing/reservations/${reservationId}/pending-operation`)).json(), staleTime: 0,
+  });
+  const operationStatusKey = ["/api/billing/reservations", String(reservationId), localOperationId, "reception-status"];
+  const { data: receptionStatus, refetch: refetchReceptionStatus } = useQuery<any>({
+    queryKey: operationStatusKey, enabled: open && !!localOperationId,
+    queryFn: async () => (await apiRequest("GET", `/api/billing/reservations/${reservationId}/operations/${localOperationId}/reception-status`)).json(), staleTime: 0,
+  });
+  useEffect(() => {
+    const remote = discoveredOperation?.pending;
+    if (!open || !remote?.attempt || !submission.current!.restore(reservationId, remote.attempt)) return;
+    setHasPendingSubmission(true); setCreditOperationId(remote.operationId);
+    if (remote.attempt.invoiceRequest?.tipoComprobante) setTipo(remote.attempt.invoiceRequest.tipoComprobante);
+  }, [open, reservationId, discoveredOperation]);
+  const correctReceptionAttempt = useMutation({
+    mutationFn: async () => {
+      const id = submission.current!.pending(reservationId)?.invoiceRequest?.creditOperationId;
+      if (!id) throw new Error("No hay una operación para corregir.");
+      return (await apiRequest("POST", `/api/billing/reservations/${reservationId}/operations/${id}/correct-reception`, {})).json();
+    },
+    onSuccess: async (result: any) => {
+      if (result.recovered) {
+        setSubmitError(null); await refetchReceptionStatus();
+        toast({ title: "Factura autorizada verificada", description: "No se volvió a emitir. Completá la operación pendiente para terminar su registro." }); return;
+      }
+      if (!result.corrected) return;
+      const request = result.request || {};
+      submission.current!.complete(reservationId);
+      setHasPendingSubmission(false); setSubmitError(null);
+      const next = newSettlementOperationId(); setCreditOperationId(next); window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
+      setTipo(request.tipoComprobante || tipo);
+      setRazonSocial(request.cliente?.razonSocial || ""); setCuit(request.cliente?.cuit || ""); setDni(request.cliente?.dni || "");
+      setCondicionIva(request.cliente?.condicionIva || "Consumidor Final"); setDomicilio(request.cliente?.domicilio || "");
+      if (Array.isArray(request.sourceChargeIds)) setSelectedIds(new Set(request.sourceChargeIds));
+      queryClient.invalidateQueries({ queryKey: pendingOperationKey });
+      queryClient.invalidateQueries({ queryKey: operationStatusKey });
+      await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
+      toast({ title: "Podés corregir los datos", description: "No se emitió ni cobró nada. Revisá el receptor y el comprobante antes de confirmar nuevamente." });
+    },
+    onError: (error: any) => setSubmitError(parseApiError(error)),
+  });
+  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"], queryFn: async () => (await apiRequest("GET", "/api/billing/config")).json(), enabled: open });
+  const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], queryFn: async () => (await apiRequest("GET", "/api/pos-configs")).json(), enabled: open });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"], enabled: open });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
@@ -812,24 +857,20 @@ export function PrefacturaDialog({
   // fallback solo se probaba si pos_configs estaba vacía del todo, así que
   // con filas inactivas o sin match quedaba en blanco para siempre.
   useEffect(() => {
-    if (puntoVenta) return;
-    if (billingConfig?.arcaAmbiente === "homologacion") {
-      if (billingConfig?.puntoVentaHomolog) setPuntoVenta(String(billingConfig.puntoVentaHomolog));
+    if (!open || !billingConfig) return;
+    const pending = submission.current!.pending(reservationId);
+    if (pending) {
+      const originalPoint = pending.invoiceRequest?.puntoVentaOverride;
+      if (originalPoint != null) setPuntoVenta(String(originalPoint));
       return;
     }
-    const activePos = posConfigs.filter((p: any) => p.activo !== false);
-    const sessionPosNumero = Number(localStorage.getItem("maranPosNumero"));
-    const sessionPos = Number.isFinite(sessionPosNumero)
-      ? activePos.find((p: any) => p.numero === sessionPosNumero)
-      : undefined;
-    const configuredPos = activePos.find((p: any) => p.numero === billingConfig?.puntoVenta);
-    const defaultPos = sessionPos || configuredPos || activePos[0];
-    if (defaultPos) {
-      setPuntoVenta(String(defaultPos.numero));
-    } else if (billingConfig?.puntoVenta) {
-      setPuntoVenta(String(billingConfig.puntoVenta));
-    }
-  }, [posConfigs, billingConfig?.puntoVenta, billingConfig?.puntoVentaHomolog, billingConfig?.arcaAmbiente, puntoVenta]);
+    const options = billingPointOptions(billingConfig, posConfigs, !["FA","FB","FC","FT","FM","FMB"].includes(tipo));
+    if (options.some(point => String(point.numero) === puntoVenta)) return;
+    const sessionPoint = Number(localStorage.getItem("maranPosNumero"));
+    const preferred = options.find(point => point.numero === sessionPoint)
+      || options.find(point => point.numero === billingConfig.puntoVenta) || options[0];
+    setPuntoVenta(preferred ? String(preferred.numero) : "");
+  }, [open, reservationId, billingConfig, posConfigs, puntoVenta, hasPendingSubmission, tipo]);
 
   function fillFromReservation(
     res: ReservationWithDetails,
@@ -1249,16 +1290,11 @@ export function PrefacturaDialog({
   // En homologación, los PV operativos (Recepción, Restaurant, etc. — son de
   // producción) ni se muestran: mezclar su numeración con la del PV de
   // pruebas es justo lo que ese PV dedicado existe para evitar.
-  const activePosConfigs = posConfigs.filter((p: any) => p.activo !== false);
-  const posOptions = ambiente === "homologacion"
-    ? (billingConfig?.puntoVentaHomolog
-        ? [{ id: "pv-homologacion", numero: billingConfig.puntoVentaHomolog, nombre: "Homologación (pruebas ARCA)" }]
-        : [])
-    : activePosConfigs.length > 0
-      ? activePosConfigs
-      : billingConfig?.puntoVenta
-        ? [{ id: "default-pv", numero: billingConfig.puntoVenta, nombre: "" }]
-        : [];
+  const posOptions = billingPointOptions(billingConfig, posConfigs, !isFiscalTipo);
+  const pendingAttempt = hasPendingSubmission ? submission.current!.pending(reservationId) : null;
+  const pointError = isFiscalTipo && !pendingAttempt?.invoice && !receptionStatus?.invoice ? billingPointError(billingConfig, posConfigs, pendingAttempt?.invoiceRequest?.puntoVentaOverride ?? puntoVenta) : null;
+  const retainedPoint = pendingAttempt?.invoiceRequest?.puntoVentaOverride;
+
 
   // A linked company/agency is a billing option, never a forced recipient:
   // reception must still be able to issue the stay to the guest. And it's
@@ -1348,6 +1384,9 @@ export function PrefacturaDialog({
     if (correctExemptRejection.isPending || serverAttempt || rejectionLoading || rejectionError) return;
     if (submission.current!.isBusy()) return;
     const retrying = !!submission.current!.pending(reservationId);
+    if (!retrying && (discoveringOperation || operationDiscoveryError)) { setSubmitError("Estamos verificando si hay una operación anterior. Volvé a intentar cuando termine la consulta."); return; }
+    if (correctReceptionAttempt.isPending) return;
+    if (retrying && pointError && !alreadyPaidAndInvoiced) { setSubmitError(pointError); return; }
     const isCcPayment = saleCondition === "cuenta_corriente";
     const appliedPaymentDetails = buildAppliedPaymentMethodDetails(
       applyReleasedCredit ? availableAdvancePayments : [],
@@ -1411,9 +1450,12 @@ export function PrefacturaDialog({
 
       // A browser may disappear after ARCA/local issuance and before checkout.
       // Recover the persisted server saga before consulting the now-empty folio.
-      if (!retrying && saleCondition === "cuenta_corriente" && creditOperationId) {
+      const originalRequest = submission.current!.pending(reservationId)?.invoiceRequest;
+      const recoveryOperationId = originalRequest?.creditOperationId || creditOperationId;
+      const originalCc = originalRequest?.reservationSettlementMethod === "cuenta_corriente" || originalRequest?.cashFormaPago === "cuenta_corriente";
+      if ((!retrying && saleCondition === "cuenta_corriente" || retrying && originalCc && !submission.current!.pending(reservationId)?.invoice) && recoveryOperationId) {
         let recoveryRes = await fetch(
-          `/api/billing/reservations/${reservationId}/operations/${creditOperationId}/recover`,
+          `/api/billing/reservations/${reservationId}/operations/${recoveryOperationId}/recover`,
           { method: "POST", headers: { "Content-Type": "application/json" } },
         );
         if (recoveryRes.status === 404) {
@@ -1511,6 +1553,8 @@ export function PrefacturaDialog({
           throw new Error(body?.error || "No se pudo recuperar la liquidación pendiente");
         }
       }
+
+      if (!retrying && pointError && !alreadyPaidAndInvoiced) { setSubmitError(pointError); return; }
 
       // Guard: if the folio is already fully paid AND has invoices, skip payment+invoice
       // and go straight to checkout. This prevents duplicate invoices.
@@ -1648,6 +1692,11 @@ export function PrefacturaDialog({
       }
       submission.current!.prepare(reservationId, invoiceRequest, paymentPayloads, mode === "checkout" && doCheckout);
       setHasPendingSubmission(true);
+      if (retrying && localOperationId) {
+        const status = await (await apiRequest("GET", `/api/billing/reservations/${reservationId}/operations/${localOperationId}/reception-status`)).json();
+        if (Array.isArray(status.acknowledgedPaymentIds)) submission.current!.acknowledge(reservationId, status.acknowledgedPaymentIds);
+        if (status.attempt?.invoice) submission.current!.acceptInvoice(reservationId, status.attempt.invoice);
+      }
       const completed = await submission.current!.run(reservationId, async (url, body) => {
         const response = await apiRequest("POST", url, body);
         return response.json();
@@ -1700,6 +1749,7 @@ export function PrefacturaDialog({
       }
       submission.current!.complete(reservationId);
       setHasPendingSubmission(false);
+      queryClient.invalidateQueries({ queryKey: pendingOperationKey });
       if (completed.checkoutRequested && !checkoutSucceeded) {
         // Payment and invoice have been saved, but the room must not be treated
         // as closed until staff resolve the failed checkout.
@@ -1787,23 +1837,7 @@ export function PrefacturaDialog({
       onClose();
 
     } catch (err: any) {
-      try {
-        const discarded = await submission.current!.discardRejectedInvoice(reservationId, err, async operationId => {
-          const response = await apiRequest("GET", `/api/billing/reservations/${reservationId}/operations/${operationId}/status`);
-          const status = await response.json();
-          // Unknown/malformed responses are not proof that an operation is safe
-          // to discard. A status lookup never resumes ARCA or writes money.
-          return status.exists !== false;
-        });
-        if (discarded) {
-          setHasPendingSubmission(false);
-          const nextOperationId = newSettlementOperationId();
-          window.sessionStorage.setItem(settlementOperationKey(reservationId), nextOperationId);
-          setCreditOperationId(nextOperationId);
-        }
-      } catch {
-        // Verification failed; preserve the original operation for safe retry.
-      }
+      refetchReceptionStatus();
       setSubmitError(parseApiError(err));
     } finally {
       submission.current!.release();
@@ -1938,6 +1972,7 @@ export function PrefacturaDialog({
               </div>
             )}
 
+            <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={`space-y-4 ${hasPendingSubmission ? "pointer-events-none opacity-70" : ""}`} data-testid="prefactura-editable-fields">
             <section className="rounded-lg border bg-card/50 px-4 py-3" aria-label="Identidad y comprobante">
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identidad y comprobante</h2>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -1987,7 +2022,8 @@ export function PrefacturaDialog({
                 </div>
                 <div>
                   <Label className="mb-1 block text-[11px] text-muted-foreground">Punto de venta</Label>
-                  <Select value={puntoVenta} onValueChange={setPuntoVenta}><SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger><SelectContent>{posOptions.map((pos: any) => <SelectItem key={pos.id} value={String(pos.numero)}>PV {String(pos.numero).padStart(4, "0")} {pos.nombre ? `— ${pos.nombre}` : ""}</SelectItem>)}</SelectContent></Select>
+                  <Select disabled={hasPendingSubmission || !billingConfig} value={puntoVenta} onValueChange={setPuntoVenta}><SelectTrigger className="h-8 text-sm"><SelectValue placeholder="PV..." /></SelectTrigger><SelectContent>{retainedPoint && !posOptions.some(point => Number(point.numero) === Number(retainedPoint)) && <SelectItem disabled value={String(retainedPoint)}>PV {retainedPoint} — {pendingAttempt?.invoice || receptionStatus?.invoice ? "comprobante emitido" : "intento anterior, requiere revisión"}</SelectItem>}{posOptions.map((pos: any) => <SelectItem key={pos.id} value={String(pos.numero)}>PV {String(pos.numero).padStart(4, "0")} {pos.nombre ? `— ${pos.nombre}` : ""}</SelectItem>)}</SelectContent></Select>
+                  {pointError && <p role="status" data-testid="billing-point-error" className="mt-1 text-xs text-amber-700 dark:text-amber-400">{pointError}</p>}
                 </div>
                 <div>
                   <Label className="mb-1 block text-[11px] text-muted-foreground">Condición de venta</Label>
@@ -2324,6 +2360,7 @@ export function PrefacturaDialog({
             )}
               </div>}
             </section>
+            </fieldset>
 
           </div>
         )}
@@ -2331,6 +2368,7 @@ export function PrefacturaDialog({
         {/* ── STEP 2: Cobro ──────────────────────────────────────────────────── */}
         {step < 3 && !canCheckoutWithoutCollection && (
           <div className="space-y-0">
+            <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={hasPendingSubmission ? "pointer-events-none opacity-70" : ""}>
             {/* Zero-balance notice: no new payment required */}
             {totalSelected > 0.01 && selectedBalance <= 0.01 && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
@@ -2452,6 +2490,8 @@ export function PrefacturaDialog({
               />
             </div>
 
+            </fieldset>
+
             {/* Split-balance-changed notice — shown when a reversal/NC changed the
                 folio balance after the user already split into multiple rows */}
             {splitBalanceChanged && paymentRows.length > 1 && selectedBalance > 0.01 && (
@@ -2466,8 +2506,18 @@ export function PrefacturaDialog({
             {(hasPendingSubmission || serverAttempt || rejectionError) && (
               <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
                 <p className="text-sm">{rejectionError ? "No se pudo consultar el intento fiscal. Volvé a abrir la prefactura antes de emitir." : serverAttempt ? "Hay un intento A rechazado por la condición IVA Exento. Verificá el rechazo para recuperar los datos originales y preparar una Factura B sin emitir ni cobrar." : "Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado."}</p>
+                {pendingAttempt?.invoiceRequest && <div className="rounded border bg-background p-3 text-sm space-y-1" data-testid="billing-original-intent">
+                  <p className="font-semibold">Datos del intento que se va a completar</p>
+                  <p>{pendingAttempt.invoiceRequest.cliente?.razonSocial || "Receptor original"} · {pendingAttempt.invoiceRequest.tipoComprobante} · PV {pendingAttempt.invoiceRequest.puntoVentaOverride ?? "original"}</p>
+                  <p>{pendingAttempt.invoiceRequest.reservationSettlementMethod === "cuenta_corriente" || pendingAttempt.invoiceRequest.cashFormaPago === "cuenta_corriente" ? "Cargo a Cuenta Corriente; sin cobro de caja." : pendingAttempt.payments.length ? pendingAttempt.payments.map(payment => `${PAYMENT_METHOD_LABELS[payment.method] || (String(payment.method).startsWith("retencion_") ? "Retención" : payment.method)}: $${fmtMoney(payment.amount)}`).join(" · ") : "Sin cobro nuevo preparado."}</p>
+                  <p className="text-muted-foreground">Para cambiar estos datos, usá la acción de corrección cuando esté habilitada. El reintento conserva el pedido original.</p>
+                </div>}
                 {serverAttempt && !canCorrectExemptRejection && <p className="text-sm">Este intento requiere conciliación antes de continuar.</p>}
-                {hasPendingSubmission && !serverAttempt && <Button onClick={() => void doSubmit()} disabled={isSubmitting || correctExemptRejection.isPending} data-testid="button-retry-prefactura">
+                {hasPendingSubmission && receptionStatus && <p className="my-2 text-sm" data-testid="billing-operation-state">
+                  {receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
+                </p>}
+                {hasPendingSubmission && (receptionStatus?.safeToCorrect || receptionStatus?.canVerifyRejection) && <Button type="button" variant="outline" onClick={() => correctReceptionAttempt.mutate()} disabled={isSubmitting || correctReceptionAttempt.isPending} data-testid="button-correct-reception-attempt">{correctReceptionAttempt.isPending ? "Verificando…" : receptionStatus.canVerifyRejection ? "Verificar rechazo y corregir datos" : "Corregir datos del intento"}</Button>}
+                {hasPendingSubmission && !serverAttempt && <Button onClick={() => void doSubmit()} disabled={isSubmitting || correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!pointError || receptionStatus?.stage === "blocked" || receptionStatus?.canVerifyRejection === true} data-testid="button-retry-prefactura">
                   {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
                 </Button>}
                 {canCorrectExemptRejection && <Button type="button" variant="outline" className="mt-2 sm:ml-2" disabled={isSubmitting || folioLoading || correctExemptRejection.isPending} onClick={() => correctExemptRejection.mutate()} data-testid="button-correct-exempt-rejection">
@@ -2529,7 +2579,7 @@ export function PrefacturaDialog({
               {!alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
                 <Button
                   onClick={handleSubmit}
-                  disabled={hasPendingSubmission || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
+                  disabled={discoveringOperation || operationDiscoveryError || (!!pointError && saleCondition !== "cuenta_corriente" && !alreadyPaidAndInvoiced) || hasPendingSubmission || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
                   data-testid="button-registrar-emitir"
                 >
                   {isSubmitting ? (

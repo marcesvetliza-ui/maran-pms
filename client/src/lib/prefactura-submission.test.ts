@@ -51,15 +51,11 @@ describe("Prefactura persisted payment intent", () => {
     });
     expect(() => submission.prepare("r", { creditOperationId: "operation" }, [])).toThrow("Storage unavailable");
   });
-  it("allows correcting a rejected invoice only after read-only proof of no fiscal claim", async () => {
+  it.each([400,403,409,500])("never discards an intent merely because a request fails (%s)", async status => {
     const submission = createPrefacturaSubmission(sessionStorage);
-    submission.prepare("r", { creditOperationId: crypto.randomUUID() }, []);
-    expect(await submission.discardRejectedInvoice("r", new Error("Response lost"), async () => false)).toBe(false);
-    expect(await submission.discardRejectedInvoice("r", new Error("500: Error"), async () => false)).toBe(false);
-    expect(await submission.discardRejectedInvoice("r", new Error("409: Error"), async () => true)).toBe(false);
-    expect(submission.pending("r")).not.toBeNull();
-    expect(await submission.discardRejectedInvoice("r", new Error("400: Invalid recipient"), async () => false)).toBe(true);
-    expect(submission.pending("r")).toBeNull();
+    const original = submission.prepare("r", { creditOperationId: crypto.randomUUID() }, []);
+    await expect(submission.run("r", async () => { throw new Error(`${status}: Error`); })).rejects.toThrow();
+    expect(submission.pending("r")).toEqual(original);
   });
   it.each([502,504])("retains the exact pending invoice and payment IDs after a numbering failure (%s)",async status=>{
     const submission=createPrefacturaSubmission(sessionStorage);
@@ -68,7 +64,6 @@ describe("Prefactura persisted payment intent", () => {
     await expect(submission.run("reservation",async()=>{calls++;throw new Error(`${status}: No se pudo consultar ARCA`);})).rejects.toThrow("No se pudo consultar ARCA");
     expect(calls).toBe(1);
     const reopened=createPrefacturaSubmission(sessionStorage);
-    expect(await reopened.discardRejectedInvoice("reservation",new Error(`${status}: No se pudo consultar ARCA`),async()=>false)).toBe(false);
     expect(reopened.pending("reservation")).toEqual(original);
   });
 

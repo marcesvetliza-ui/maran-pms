@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 const originalFetch = global.fetch;
 
 const mocks = vi.hoisted(() => ({
+  point: 99,
   getTokenAuth: vi.fn(),
   feCAESolicitar: vi.fn(),
   feCompConsultar: vi.fn(),
@@ -17,7 +18,7 @@ vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(async () => ({
     arcaAmbiente: "homologacion",
     puntoVenta: 1,
-    puntoVentaHomolog: 99,
+    puntoVentaHomolog: mocks.point,
     arcaCuit: "30-12345678-9",
   })),
 }));
@@ -193,6 +194,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito A
 
     const suffix = randomUUID();
     const puntoVenta = 9000 + (parseInt(suffix.slice(0, 6), 16) % 1000);
+    mocks.point = puntoVenta;
     const originalInvoiceId = 700000 + (parseInt(suffix.slice(6, 12), 16) % 100000);
     const firstError = `ARCA no responde — prueba ${suffix}`;
     const retryError = `ARCA sigue sin responder — prueba ${suffix}`;
@@ -262,6 +264,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: recuperación de notas de crédito A
           numero: 7,
         }),
         "homologacion",
+        expect.objectContaining({ total: 100, docTipo: 99, docNro: "0" }),
       );
 
       const afterRetryFailure = await pool.query(
@@ -337,6 +340,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
   it("reintenta con la fecha fiscal persistida, incluso al día siguiente", async () => {
     if(!pool)throw Error("Test DB required");
     const suffix=randomUUID(), pv=8000+(parseInt(suffix.slice(0,6),16)%900);
+    mocks.point = pv;
     const input={tipoComprobante:"NCB" as const,cliente:{razonSocial:"Synthetic",condicionIva:"Consumidor Final"},items:[{descripcion:"Prueba",cantidad:1,precioUnitario:100,alicuotaIva:"no_gravado" as const,subtotalNeto:0,subtotal:100}],reservaId:`date-${suffix}`,facturaOriginalId:777777,sourceChargeIds:["accommodation"],sourceChargeAmounts:{accommodation:100},puntoVentaOverride:pv,recoverableCreditNote:true};
     global.fetch=vi.fn(async(_url,init)=>new Response(lastAuthorizedForRequest(6,init),{status:200})) as any;
     try {
@@ -356,6 +360,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const reservationId = `recovery-reservation-${suffix}`;
     const paymentId = `recovery-payment-${suffix}`;
     const puntoVenta = 8100 + (parseInt(suffix.slice(0, 4), 16) % 800);
+    mocks.point = puntoVenta;
     let invoiceId: number | null = null;
     try {
       await pool.query(`INSERT INTO reservations
@@ -392,6 +397,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const suffix = randomUUID();
     const groupId = `recovery-direct-group-${suffix}`;
     const puntoVenta = 8900 + (parseInt(suffix.slice(0, 4), 16) % 500);
+    mocks.point = puntoVenta;
     let invoiceId: number | null = null;
     try {
       await pool.query(`INSERT INTO groups (id, group_code, name, check_in_date, check_out_date, status, created_at)
@@ -433,6 +439,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const allocationId = `recovery-allocation-${suffix}`;
     const cashId = `recovery-cash-${suffix}`;
     const puntoVenta = 9400 + (parseInt(suffix.slice(0, 4), 16) % 400);
+    mocks.point = puntoVenta;
     let invoiceId: number | null = null;
     try {
       await pool.query(`INSERT INTO groups (id, group_code, name, check_in_date, check_out_date, status, created_at)
@@ -498,6 +505,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const accountId = `recovery-spa-account-${suffix}`;
     const itemId = `recovery-spa-item-${suffix}`;
     const puntoVenta = 9800 + (parseInt(suffix.slice(0, 4), 16) % 150);
+    mocks.point = puntoVenta;
     let invoiceId: number | null = null;
     let createdShiftId: string | null = null;
     const suspendedSpaShifts: Array<{
@@ -580,6 +588,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const accountId = `recovery-duplicate-spa-${suffix}`;
     const itemId = `recovery-duplicate-spa-item-${suffix}`;
     const puntoVenta = 9900 + (parseInt(suffix.slice(0, 4), 16) % 30);
+    mocks.point = puntoVenta;
     const invoiceIds: number[] = [];
     let spaAccountUniqueIndexDropped = false;
     try {
@@ -707,6 +716,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const accountId = `recovery-review-race-${suffix}`;
     const itemId = `recovery-review-race-item-${suffix}`;
     const puntoVenta = 9930 + (parseInt(suffix.slice(0, 4), 16) % 20);
+    mocks.point = puntoVenta;
     let invoiceId: number | null = null;
     const lockClient = await pool.connect();
     try {
@@ -804,6 +814,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const accountId = `recovery-authorization-race-${suffix}`;
     const itemId = `recovery-authorization-race-item-${suffix}`;
     const puntoVenta = 9930 + (parseInt(suffix.slice(0, 4), 16) % 20);
+    mocks.point = puntoVenta;
     let invoiceId: number | null = null;
     try {
       await pool.query(`INSERT INTO spa_accounts (id, appointment_id, guest_name, status, opened_at)
@@ -880,6 +891,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: rutas de recuperación de facturas c
     const groupPaymentId = `recovery-unemitted-payment-${suffix}`;
     const accountId = `recovery-unemitted-spa-${suffix}`;
     const puntoVenta = 9950 + (parseInt(suffix.slice(0, 4), 16) % 40);
+    mocks.point = puntoVenta;
     let groupInvoiceId: number | null = null;
     let paymentInvoiceId: number | null = null;
     let spaInvoiceId: number | null = null;

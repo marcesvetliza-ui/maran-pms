@@ -75,7 +75,7 @@ export function parseConsultationResult(xml: string, req: FECompConsulta, tipo: 
       !/^\d+(?:\.\d{1,2})?$/.test(field(found, "ImpTotal")) ||
       Math.round(Number(field(found, "ImpTotal")) * 100) !== Math.round(expected.total * 100) ||
       field(found, "CbteFch") !== expected.fecha || Number(field(found, "DocTipo")) !== expected.docTipo ||
-      field(found, "DocNro") !== expected.docNro || field(found, "MonId") !== "PES" ||
+      (!/^\d+$/.test(field(found, "DocNro")) || field(found, "DocNro").replace(/^0+(?=\d)/, "") !== expected.docNro.replace(/^0+(?=\d)/, "")) || field(found, "MonId") !== "PES" ||
       Number(field(found, "MonCotiz")) !== 1))
     throw new Error("ARCA: el comprobante consultado no coincide con la identidad fiscal persistida.");
   return authorization(field(found, "CodAutorizacion"), field(found, "FchVto"));
@@ -95,7 +95,23 @@ export function parseAuthorizationResult(xml: string, req: FECAERequest, tipo: n
         const code=one(n,"Code")?.text.trim(),message=one(n,"Msg")?.text.trim();
         return message ? `${code ? code+": " : ""}${message.slice(0,500)}` : "";
       }).filter(Boolean);
-      throw new Error(`ARCA rechazó el comprobante o no confirmó su autorización.${reasons.length ? " " + reasons.join("; ") : ""}`);
+      const message = `ARCA rechazó el comprobante o no confirmó su autorización.${reasons.length ? " " + reasons.join("; ") : ""}`;
+      // These two explicit recipient validation codes are also returned by
+      // WSFE as global Errors without a detail/header. No authorization data
+      // may coexist with this proof.
+      const hasAuthorization = (node: Node): boolean => ["CAE", "CodAutorizacion", "ResultGet"].includes(node.name) || node.children.some(hasAuthorization);
+      if (!header && !detail && errors.length && errors.every(node => node.uri === WSFE && node.name === "Err" && ["10015", "10243"].includes(one(node,"Code")?.text.trim() || "")) && !hasAuthorization(result)) {
+        throw Object.assign(new Error(message), { code: "ARCA_AUTHORIZATION_REJECTED", statusCode: 400 });
+      }
+      // Only a complete, matching R/R response is a confirmed rejection.
+      // Errors without this evidence, malformed XML and timeouts remain uncertain.
+      if (header && detail && one(header,"Resultado")?.text.trim() === "R" && one(detail,"Resultado")?.text.trim() === "R" &&
+          Number(one(header,"PtoVta")?.text) === req.puntoVenta && Number(one(header,"CbteTipo")?.text) === tipo &&
+          Number(one(detail,"CbteDesde")?.text) === req.numero && Number(one(detail,"CbteHasta")?.text) === req.numero &&
+          !one(detail,"CAE")?.text.trim() && reasons.length) {
+        throw Object.assign(new Error(message), { code: "ARCA_AUTHORIZATION_REJECTED", statusCode: 400 });
+      }
+      throw new Error(message);
     }
   if (Number(field(header, "PtoVta")) !== req.puntoVenta || Number(field(header, "CbteTipo")) !== tipo ||
       Number(field(detail, "CbteDesde")) !== req.numero || Number(field(detail, "CbteHasta")) !== req.numero)

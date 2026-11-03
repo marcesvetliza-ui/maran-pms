@@ -1,0 +1,16 @@
+name: Verificar revisión publicada en Xenia
+on:
+  push:
+    branches: [feature/xenia-channex-staging]
+  workflow_dispatch:
+jobs:
+  revision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Verificar código y disponibilidad de Xenia
+        run: node scripts/wait-for-revision.js https://demo.maranpms.com.ar "$GITHUB_SHA"

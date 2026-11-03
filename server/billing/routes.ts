@@ -1,3 +1,5 @@
+import { registerReceptionOperationRoutes } from "./receptionOperations";
+import { beginBillingOperation } from "./operationJournal";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { discardRejectedExemptInvoice, findRejectedExemptAttempt } from "./rejectedExemptInvoice";
 import { registerGroupFiscalCashRecoveryRoutes } from "./groupFiscalCashRecovery";
@@ -14,7 +16,7 @@ import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges, posConfigs, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
 import { activeSalesRecord } from '../salesArchive';
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
-import { buildComprobanteAsociado, calcularMontos, emitirFactura, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
+import { buildComprobanteAsociado, calcularMontos, emitirFactura, isNonFiscalTipo, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
 import { verifySaleCatalog } from "./verifySaleCatalog";
 import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
 import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
@@ -1122,9 +1124,21 @@ export function registerBillingRoutes(app: Express) {
   });
 
   // POST /api/billing/invoices
+  registerReceptionOperationRoutes(app);
+
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      if (req.body.prefacturaRecovery?.version === 2 && !isNonFiscalTipo(String(tipoComprobante)) && reservaId && typeof creditOperationId === "string" && /^[0-9a-f-]{20,}$/i.test(creditOperationId)) {
+        assertFinancialSchemaReady();
+        const config = await getBillingConfig();
+        if (["homologacion", "produccion"].includes(String(config.arcaAmbiente))) {
+          const selected = puntoVentaOverride ?? pvBody ?? (config.arcaAmbiente === "homologacion" ? config.puntoVentaHomolog : config.puntoVenta);
+          await beginBillingOperation(db, { ...req.body, requestSnapshot: req.body, creditReapplicationIntent: { operationId: creditOperationId } }, {
+            environment: String(config.arcaAmbiente), issuer: String(config.arcaCuit || config.cuit).replace(/\D/g, ""), pointOfSale: Number(selected), type: String(tipoComprobante),
+          });
+        }
+      }
       const collectionError = nonFiscalCollectionError(tipoComprobante, Array.isArray(cashFormaPagoDetalle) && cashFormaPagoDetalle.length ? cashFormaPagoDetalle.filter((row:any)=>Number(row?.amount)>0).map((row:any)=>row.method) : [cashFormaPago]);
       if (collectionError) return res.status(400).json({error:collectionError});
       if (isEventCashArea(cashArea)) {
@@ -1931,6 +1945,8 @@ export function registerBillingRoutes(app: Express) {
         const user = (req as any).user;
         const emitted = await emitirFactura({
           tipoComprobante,
+          operationId: typeof req.body.operationId === "string" ? req.body.operationId : creditOperationId,
+          requestSnapshot: req.body,
           cliente: persistedCliente,
           recipientEntity: fallbackRecipientEntity,
           centerSettlementArea: recipientMode === "centro_comprobantes" ? String(cashArea) : undefined,
@@ -1943,7 +1959,7 @@ export function registerBillingRoutes(app: Express) {
           spaAccountId: spaAccountId || undefined,
           folioId,
           operador: user?.fullName || user?.username,
-          puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? parseInt(puntoVentaOverride ?? pvBody) : undefined,
+          puntoVentaOverride: (puntoVentaOverride ?? pvBody) ? Number(puntoVentaOverride ?? pvBody) : undefined,
           cashFormaPago: cashFormaPago || undefined,
           cashFormaPagoDetalle: normalizedCashFormaPagoDetalle?.length
             ? normalizedCashFormaPagoDetalle
@@ -2260,9 +2276,9 @@ export function registerBillingRoutes(app: Express) {
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (e instanceof FolioInvoiceValidationError || Number(status) >= 400) {
-        return res.status(status || 400).json({ error: e.message });
+        return res.status(status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
       }
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: e?.code === "23505" ? "Hay un registro fiscal en conflicto. Conservamos la operación; verificá el intento pendiente antes de volver a emitir." : e.message, ...(e.code === "23505" ? { code: "BILLING_RECORD_CONFLICT" } : {}) });
     }
   });
 
