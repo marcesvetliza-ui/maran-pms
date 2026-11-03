@@ -2,7 +2,7 @@ import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile, readdir, stat, writeFile, mkdir } from "fs/promises";
 import { createWriteStream } from "fs";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import path from "path";
 
 // server deps to bundle to reduce openat(2) syscalls
@@ -52,6 +52,10 @@ async function copyDir(src: string, dest: string) {
 }
 
 async function buildAll() {
+  let revision = process.env.RAILWAY_GIT_COMMIT_SHA || process.env.BUILD_COMMIT_SHA || "";
+  if (!/^[0-9a-f]{40}$/i.test(revision)) {
+    try { revision = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { revision = "unknown"; }
+  }
   await rm("dist", { recursive: true, force: true });
 
   // Write build timestamp so entry bundle gets a new hash on every deploy,
@@ -87,6 +91,7 @@ async function buildServer(outfile: string, mode: "production" | "development") 
     outfile,
     define: {
       "process.env.NODE_ENV": JSON.stringify(mode),
+      "__BUILD_REVISION__": JSON.stringify(revision),
     },
     minify: true,
     // The demo uses only the guarded static frontend; never bundle Vite's

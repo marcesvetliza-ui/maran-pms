@@ -43,7 +43,10 @@ vi.mock("../db", () => {
         },
       })),
     })),
-    execute: vi.fn(async () => {
+    execute: vi.fn(async (query: any) => {
+      const { PgDialect } = await import("drizzle-orm/pg-core");
+      const text = new PgDialect().sqlToQuery(query).sql;
+      if (text.includes("SELECT id,estado,modo_ficticio FROM sales_invoices")) return { rows: [] };
       state.events.push("execute");
       state.executeCount++;
       if (state.savedDraft && state.authorizationError) {
@@ -93,6 +96,10 @@ vi.mock("../db", () => {
  return mocked;
 });
 
+vi.mock("../billing/operationJournal", async original => ({ ...await original<typeof import("../billing/operationJournal")>(),
+  beginBillingOperation: vi.fn(async (_db, data, identity) => ({ operation_id: data.operationId, fiscal_identity: identity, stage: "prepared", invoice_id: null })),
+  operationForInvoice: vi.fn(async () => undefined), billingOperationNumber: vi.fn(async () => {}), billingOperationStage: vi.fn(async () => {}),
+}));
 vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(async () => state.billingConfig),
 }));
@@ -257,6 +264,7 @@ describe("recoverable reservation credit-note emission", () => {
     state.billingConfig = {
       arcaAmbiente: "homologacion",
       puntoVenta: 1,
+      puntoVentaHomolog: 99,
       arcaCuit: "30-12345678-9",
     };
     state.authorizationError = "ARCA no responde";
@@ -333,7 +341,7 @@ describe("recoverable reservation credit-note emission", () => {
       return new Response("<soap:Envelope><soap:Body>Servicio no disponible</soap:Body></soap:Envelope>", {status:failure === "http-error" ? 503 : 200});
     }) as any;
     await expect(emitirFactura({
-      tipoComprobante:"FA",cliente:{razonSocial:"Synthetic recipient",condicionIva:"Consumidor Final"},
+      tipoComprobante:"FB",cliente:{razonSocial:"Synthetic recipient",condicionIva:"Consumidor Final"},
       items:[{descripcion:"Synthetic lodging",cantidad:1,precioUnitario:100,alicuotaIva:"no_gravado",subtotalNeto:0,subtotal:100}],
       reservaId:"synthetic-reservation",paymentId:"synthetic-payment",
     })).rejects.toMatchObject({code:"FISCAL_NUMBER_LOOKUP_FAILED",statusCode:failure === "timeout" ? 504 : 502});

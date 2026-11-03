@@ -13,7 +13,7 @@
  * homologación configurado, sin importar qué PV operativos existan.
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -168,6 +168,7 @@ describe("PrefacturaDialog — Punto de venta en homologación", () => {
   let fetchMock: ReturnType<typeof buildFetchMock>;
 
   beforeEach(() => {
+    sessionStorage.clear(); localStorage.clear();
     fetchMock = buildFetchMock();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -200,5 +201,75 @@ describe("PrefacturaDialog — Punto de venta en homologación", () => {
     );
     const body = JSON.parse(String((invoicePost?.[1] as RequestInit).body));
     expect(body.puntoVentaOverride).toBe(5);
+  });
+
+  it("no conserva el PV de sesión mientras la configuración de homologación llega tarde", async () => {
+    localStorage.setItem("maranPosNumero", "21");
+    let release!: (response: Response) => void;
+    const config = new Promise<Response>(resolve => { release = resolve; });
+    const base = buildFetchMock();
+    fetchMock = vi.fn(async (url, options) => String(url).includes("/api/billing/config") ? config : base(url, options));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup(); renderDialog();
+    const submit = await screen.findByTestId("button-registrar-emitir");
+    expect(submit).toBeDisabled();
+    expect(screen.getByTestId("billing-point-error")).toHaveTextContent("cargando");
+    await act(async () => release(Response.json({ arcaAmbiente: "homologacion", puntoVenta: 1, puntoVentaHomolog: 5 })));
+    await waitFor(() => expect(submit).toBeEnabled()); await user.click(submit);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toBe(true));
+    const post = fetchMock.mock.calls.find(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body)).puntoVentaOverride).toBe(5);
+  });
+
+  it("conserva y explica el punto inválido del intento retenido sin reenviarlo", async () => {
+    const operation = crypto.randomUUID();
+    sessionStorage.setItem(`prefactura-pending:${RESERVATION_ID}`, JSON.stringify({ invoiceRequest: { reservaId: RESERVATION_ID, tipoComprobante: "FB", puntoVentaOverride: 21, creditOperationId: operation }, invoice: null, payments: [], checkoutRequested: true }));
+    renderDialog();
+    await screen.findByTestId("button-retry-prefactura");
+    await waitFor(() => expect(screen.getByTestId("billing-point-error")).toHaveTextContent("homologación"));
+    expect(screen.getByTestId("button-retry-prefactura")).toBeDisabled();
+    expect(JSON.parse(sessionStorage.getItem(`prefactura-pending:${RESERVATION_ID}`)!).invoiceRequest.puntoVentaOverride).toBe(21);
+    expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toBe(false);
+  });
+
+  it("permite corregir explícitamente un intento que el servidor confirma que no salió", async () => {
+    const operation = crypto.randomUUID();
+    const original = { reservaId: RESERVATION_ID, tipoComprobante: "FB", puntoVentaOverride: 21, creditOperationId: operation, cliente: { razonSocial: "Marcelo", condicionIva: "Consumidor Final" } };
+    sessionStorage.setItem(`prefactura-pending:${RESERVATION_ID}`, JSON.stringify({ invoiceRequest: original, invoice: null, payments: [], checkoutRequested: true }));
+    const base = buildFetchMock();
+    fetchMock = vi.fn(async (url, options) => {
+      if (String(url).endsWith("/reception-status")) return Response.json({ stage: "blocked", safeToCorrect: true });
+      if (String(url).endsWith("/correct-reception")) return Response.json({ corrected: true, request: original });
+      return base(url, options);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup(); renderDialog();
+    await user.click(await screen.findByTestId("button-correct-reception-attempt"));
+    await waitFor(() => expect(sessionStorage.getItem(`prefactura-pending:${RESERVATION_ID}`)).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("button-registrar-emitir")).toBeEnabled());
+    expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toBe(false);
+  });
+
+  it("recupera desde otra sesión y registra solo el pago que falta, sin volver a facturar", async () => {
+    const operation = crypto.randomUUID();
+    const first = crypto.randomUUID(), second = crypto.randomUUID();
+    const payments = [first, second].map(paymentRequestId => ({ reservationId: RESERVATION_ID, paymentRequestId, amount: "35000.00", method: "efectivo", date: "2026-11-03", notes: null, reference: null }));
+    const invoice = { id: 701, tipoComprobante: "FB", puntoVenta: 5, numero: 10, cae: "71234567890123", montoTotal: "70000.00" };
+    const original = { reservaId: RESERVATION_ID, creditOperationId: operation, tipoComprobante: "FB", puntoVentaOverride: 5, cliente: { razonSocial: "Marcelo", condicionIva: "Consumidor Final" }, prefacturaRecovery: { version: 2, payments, checkoutRequested: true } };
+    const status = { operationId: operation, stage: "authorized", safeToCorrect: false, invoice, acknowledgedPaymentIds: [first], attempt: { invoiceRequest: original, invoice, payments, checkoutRequested: true, acknowledgedPaymentIds: [first] } };
+    const base = buildFetchMock();
+    fetchMock = vi.fn(async (url, options) => {
+      if (String(url).endsWith("/pending-operation")) return Response.json({ pending: status });
+      if (String(url).endsWith("/reception-status")) return Response.json(status);
+      return base(url, options);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup(); renderDialog();
+    await user.click(await screen.findByTestId("button-retry-prefactura"));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/payments" && options?.method === "POST")).toBe(true));
+    const posted = fetchMock.mock.calls.filter(([url, options]) => String(url) === "/api/payments" && options?.method === "POST");
+    expect(posted).toHaveLength(1);
+    expect(JSON.parse(String(posted[0][1]?.body))).toMatchObject({ paymentRequestId: second, amount: "35000.00", invoiceData: { id: 701 } });
+    expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toBe(false);
   });
 });

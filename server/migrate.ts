@@ -1,3 +1,4 @@
+import { BILLING_OPERATION_SCHEMA_SQL } from "./billing/operationJournal";
 import {ensureCcManualTrackingSchema} from './ccManualTracking';
 import {importStockWorkbook} from './inventoryWorkbookImport';
 import initialStockWorkbook from './assets/initial-stock-20261008.json';
@@ -1216,6 +1217,7 @@ async function withTimeout<T>(label: string, ms: number, fn: () => Promise<T>): 
 export const FINANCIAL_SCHEMA_REQUIREMENTS = {
   columns: {
     sales_invoices: [
+      "fiscal_identity",
       "id",
       "estado",
       "items",
@@ -1282,6 +1284,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "concepts",
     ],
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
+    billing_operations: ["operation_id", "owner_type", "owner_id", "payload_hash", "request_snapshot", "fiscal_identity", "stage", "invoice_id", "error_code"],
     invoice_counters: [],
     purchase_invoices: ["subtipo_retencion", "descuento", "special_details"],
     purchase_invoice_lines: ["id", "invoice_id", "line_number", "item_id", "item_name", "item_sku", "quantity", "unit_price", "vat_rate", "line_total", "warehouse_id"],
@@ -5005,6 +5008,15 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await db.execute(sql.raw(addColumnWithoutRerunNotice("rooms", "bed_config_revision", "integer NOT NULL DEFAULT 0")));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE recipes ADD COLUMN is_active text NOT NULL DEFAULT 'true'`)));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN purchase_enabled boolean NOT NULL DEFAULT true`)));
+  for (const statement of BILLING_OPERATION_SCHEMA_SQL.split(';').map(value => value.trim()).filter(Boolean)) {
+    if (statement.startsWith('CREATE TABLE')) {
+      await db.execute(sql.raw(createTableWithoutRerunNotice('billing_operations', statement.replace('IF NOT EXISTS ', ''))));
+    } else if (statement.startsWith('CREATE INDEX')) {
+      await db.execute(sql.raw(createIndexWithoutRerunNotice('billing_operations_owner_idx', statement.replace('IF NOT EXISTS ', ''))));
+    } else {
+      await db.execute(sql.raw(addColumnWithoutRerunNotice('sales_invoices', 'fiscal_identity', 'jsonb')));
+    }
+  }
   const financialSchema = await verifyFinancialSchema();
   if (!financialSchema.ready) {
     throw Object.assign(new Error(financialSchemaErrorMessage(financialSchema)), {

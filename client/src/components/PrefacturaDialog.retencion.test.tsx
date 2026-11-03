@@ -223,7 +223,7 @@ describe("PrefacturaDialog — retención impositiva en el cobro", () => {
     expect(baseFetch.mock.calls.filter(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toHaveLength(1);
   });
 
-  it.each([false, true])("solo permite corregir un rechazo cuando no existe un comprobante persistido (exists=%s)", async exists => {
+  it.each([false, true])("conserva el intento ante una consulta local sin prueba de rechazo (exists=%s)", async exists => {
     const baseFetch = buildFetchMock();
     fetchMock = vi.fn(async (url, options) => {
       if (String(url) === "/api/billing/invoices" && options?.method === "POST") {
@@ -242,13 +242,8 @@ describe("PrefacturaDialog — retención impositiva en el cobro", () => {
     await user.click(button);
     await screen.findByText(/Datos fiscales rechazados/);
     expect(paymentPosts(fetchMock)).toHaveLength(0);
-    if (exists) {
-      expect(screen.getByTestId("button-retry-prefactura")).toBeEnabled();
-      expect(button).toBeDisabled();
-    } else {
-      expect(screen.queryByTestId("button-retry-prefactura")).not.toBeInTheDocument();
-      expect(button).toBeEnabled();
-      expect(sessionStorage.getItem(`prefactura-pending:${RESERVATION_ID}`)).toBeNull();
-    }
+    expect(screen.getByTestId("button-retry-prefactura")).toBeEnabled();
+    expect(button).toBeDisabled();
+    expect(sessionStorage.getItem(`prefactura-pending:${RESERVATION_ID}`)).not.toBeNull();
   });
 });

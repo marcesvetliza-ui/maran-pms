@@ -14,7 +14,7 @@ jobs:
   smoke-test:
     name: Verificar sistema en staging
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout código
@@ -24,9 +24,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "20"
-
-      - name: Esperar deploy de Railway staging (90s)
-        run: sleep 90
 
       - name: Determinar URL de staging
         id: url
@@ -42,19 +39,10 @@ jobs:
           echo "staging_url=$URL" >> "$GITHUB_OUTPUT"
           echo "Staging URL: $URL"
 
-      - name: Esperar que staging responda
-        run: |
-          URL="${{ steps.url.outputs.staging_url }}"
-          echo "Verificando que $URL responde..."
-          for i in $(seq 1 15); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/health" || echo "000")
-            if [ "$STATUS" = "200" ]; then
-              echo "Staging respondiendo (intento $i)"
-              break
-            fi
-            echo "Intento $i — HTTP $STATUS, reintentando en 10s..."
-            sleep 10
-          done
+      - name: Verificar revisión exacta y disponibilidad
+        env:
+          STAGING_URL: ${{ steps.url.outputs.staging_url }}
+        run: node scripts/wait-for-revision.js "$STAGING_URL" "$GITHUB_SHA"
 
       - name: Verificar entorno staging en health
         run: |
