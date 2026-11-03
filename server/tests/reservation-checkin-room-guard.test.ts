@@ -172,3 +172,14 @@ describe("POST /api/reservations/:id/check-in room guard", () => {
     });
   });
 });
+
+describe("check-in business error reporting",()=>{
+ it("keeps a physical room conflict as 409 with its real reason",async()=>{
+  state.room={...state.room,roomNumber:"202",isVirtual:false};
+  storage.updateReservation.mockRejectedValueOnce(Object.assign(new Error("Conflicto"),{statusCode:409,response:{code:"PHYSICAL_ROOM_OVERLAP",error:"La habitación ya tiene una reserva en esas fechas.",canOverride:false}}));
+  await withServer(async baseUrl=>{
+   const result=await checkIn(baseUrl);expect(result.status).toBe(409);expect(result.body.code).toBe("PHYSICAL_ROOM_OVERLAP");
+   expect(storage.updateRoom).not.toHaveBeenCalled();expect(storage.addFolioCharge).not.toHaveBeenCalled();
+  });
+ });
+});

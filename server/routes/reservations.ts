@@ -879,6 +879,7 @@ export function registerReservationsRoutes(app: Express) {
 
   // Check-in endpoint
   app.post("/api/reservations/:id/check-in", requireAuth, async (req, res) => {
+    let phase = "validation";
     try {
       const reservation = await storage.getReservation(req.params.id);
       if (!reservation) {
@@ -948,7 +949,9 @@ export function registerReservationsRoutes(app: Express) {
         });
       }
 
+      phase = "reservation-status";
       await storage.updateReservation(req.params.id, { status: "checked_in" });
+      phase = "room-status";
       await storage.updateRoom(reservation.roomId, { status: "occupied" });
 
       // Registrar cargo de alojamiento en el folio al hacer check-in
@@ -998,6 +1001,7 @@ export function registerReservationsRoutes(app: Express) {
         }
       } catch (e) { console.error("[Folio] Error registrando cargo alojamiento:", e); }
 
+      phase = "hospitality";
       if (reservation.guestId) {
         const preferences = await storage.getActiveGuestPreferences(reservation.guestId);
         for (const pref of preferences) {
@@ -1049,14 +1053,21 @@ export function registerReservationsRoutes(app: Express) {
         }
       }
 
+      phase = "audit";
       const roomForAudit = await storage.getRoom(reservation.roomId);
       await audit(req, "update", "reservations",
         `Check-in: ${reservation.reservationCode} — Hab. ${roomForAudit?.roomNumber || reservation.roomId}`,
         { entityType: "reservation", entityId: req.params.id }
       );
       res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Error processing check-in" });
+    } catch (error: any) {
+      const businessStatus = Number(error?.statusCode);
+      console.error("[check-in] failed", { reservationId: req.params.id, phase,
+        code: error?.response?.code || error?.code || "CHECK_IN_FAILED" });
+      if (businessStatus >= 400 && businessStatus < 500 && error?.response?.error) {
+        return res.status(businessStatus).json(error.response);
+      }
+      res.status(500).json({ code: "CHECK_IN_FAILED", error: "No se pudo completar el check-in. Revisá el estado de la estadía antes de reintentar." });
     }
   });
 

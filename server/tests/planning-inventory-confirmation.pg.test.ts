@@ -16,7 +16,7 @@ async function fixture(hardGroup=false){
 suite('Planning physical inventory confirmation on disposable PostgreSQL',()=>{
  beforeAll(async()=>{({pool}=await import('../db'));({storage}=await import('../db-storage'));});
  afterAll(async()=>{
-  for(const f of fixtures){await pool.query('DELETE FROM audit_logs WHERE entity_id IN(SELECT id FROM reservations WHERE room_type_id=$1)',[f.type]);await pool.query('DELETE FROM reservation_changelog WHERE reservation_id IN(SELECT id FROM reservations WHERE room_type_id=$1)',[f.type]);await pool.query('DELETE FROM reservations WHERE room_type_id=$1',[f.type]);await pool.query('DELETE FROM group_room_blocks WHERE group_id=$1',[f.group]);await pool.query('DELETE FROM groups WHERE id=$1',[f.group]);await pool.query('DELETE FROM rooms WHERE room_type_id=$1',[f.type]);await pool.query('DELETE FROM guests WHERE id=$1',[f.guest]);await pool.query('DELETE FROM room_types WHERE id=$1',[f.type]);}
+  for(const f of fixtures){await pool.query('DELETE FROM group_reservation_links WHERE group_id=$1',[f.group]);await pool.query('DELETE FROM audit_logs WHERE entity_id IN(SELECT id FROM reservations WHERE room_type_id=$1)',[f.type]);await pool.query('DELETE FROM reservation_changelog WHERE reservation_id IN(SELECT id FROM reservations WHERE room_type_id=$1)',[f.type]);await pool.query('DELETE FROM reservations WHERE room_type_id=$1',[f.type]);await pool.query('DELETE FROM group_room_blocks WHERE group_id=$1',[f.group]);await pool.query('DELETE FROM groups WHERE id=$1',[f.group]);await pool.query('DELETE FROM rooms WHERE room_type_id=$1',[f.type]);await pool.query('DELETE FROM guests WHERE id=$1',[f.guest]);await pool.query('DELETE FROM room_types WHERE id=$1',[f.type]);}
   await pool?.end();
  });
  it('requires acknowledgment then saves once, while a physical overlap stays blocked',async()=>{
@@ -26,6 +26,30 @@ suite('Planning physical inventory confirmation on disposable PostgreSQL',()=>{
   expect(created.roomId).toBe(f.type+'free');
   await expect(storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true,reservationCode:randomUUID()})).rejects.toMatchObject({response:{code:'PHYSICAL_ROOM_OVERLAP',canOverride:false}});
   expect((await pool.query('SELECT id FROM reservations WHERE room_id=$1',[f.type+'free'])).rows).toHaveLength(1);
+ });
+ it('checks in an existing confirmed stay without consuming category capacity again',async()=>{
+  const f=await fixture(true);
+  const id=(await pool.query('SELECT id FROM reservations WHERE room_id=$1',[f.type+'occupied'])).rows[0].id;
+  const checkedIn=await storage.updateReservation(id,{status:'checked_in'});
+  expect(checkedIn?.status).toBe('checked_in');
+  const current=await storage.getReservation(id);
+  expect(current?.roomId).toBe(f.type+'occupied');
+  // A new booking must still respect the unassigned hard group commitment.
+  await expect(storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_SHORTAGE',canOverride:false}});
+ });
+ it('checks in a grouped reservation without counting it outside its own block',async()=>{
+  const f=await fixture(true);
+  const id=(await pool.query('SELECT id FROM reservations WHERE room_id=$1',[f.type+'occupied'])).rows[0].id;
+  const group=fixtures[fixtures.length-1].group;
+  await pool.query('INSERT INTO group_reservation_links(group_id,reservation_id) VALUES($1,$2)',[group,id]);
+  expect((await storage.updateReservation(id,{status:'checked_in'}))?.status).toBe('checked_in');
+ });
+ it('still validates category capacity when reactivating an inactive reservation',async()=>{
+  const f=await fixture(true);
+  const id=(await pool.query('SELECT id FROM reservations WHERE room_id=$1',[f.type+'occupied'])).rows[0].id;
+  await storage.updateReservation(id,{status:'cancelled'});
+  await expect(storage.updateReservation(id,{status:'confirmed'})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_SHORTAGE',canOverride:false}});
+  expect((await storage.getReservation(id))?.status).toBe('cancelled');
  });
  it('never bypasses a hard unassigned group commitment on a later night',async()=>{
   const f=await fixture(true);

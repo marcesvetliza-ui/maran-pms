@@ -1340,8 +1340,14 @@ export class DatabaseStorage implements IStorage {
           });
         }
       }
-      if (inventoryRelevant && finalRoomTypeId && finalCheckIn && finalCheckOut &&
-          !["cancelled", "checked_out", "no_show"].includes(finalStatus)) {
+      // Confirmed/pending/checked-in stays already consume the same inventory.
+      // A status-only check-in must not request that capacity a second time.
+      const inactiveStatuses = ["cancelled", "checked_out", "no_show"];
+      const changesInventoryDemand = finalRoomId !== existing.roomId || finalRoomTypeId !== existing.roomTypeId ||
+        finalCheckIn !== existing.checkInDate || finalCheckOut !== existing.checkOutDate ||
+        inactiveStatuses.includes(existing.status);
+      if (inventoryRelevant && changesInventoryDemand && finalRoomTypeId && finalCheckIn && finalCheckOut &&
+          !inactiveStatuses.includes(finalStatus)) {
         const chosenRoom = finalRoomId ? await this.getRoom(finalRoomId) : null;
         const inventoryConflict = await this.evaluateReservationInventory({
           hasSpecificRoom: !!chosenRoom && chosenRoom.roomTypeId === finalRoomTypeId && isOperationalInventoryRoom(chosenRoom) && !["maintenance", "oos"].includes(chosenRoom.status),
