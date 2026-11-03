@@ -762,7 +762,8 @@ export async function registerRoutes(
   registerDepartureRoutes(app);
 
 
-  // ============== ADMINISTRATION =======
+  // ============== ADMINISTRATION ==============
+
   // Admin Dashboard
   app.get("/api/admin/dashboard", async (req, res) => {
     try {
@@ -1142,7 +1143,8 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== SYSTEM NOTIFICATIONS =============
+  // ==================== SYSTEM NOTIFICATIONS ====================
+
   app.get("/api/notifications", async (req, res) => {
     try {
       const area = req.query.area as string | undefined;
@@ -1217,11 +1219,13 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== CHATBOT WEBHOOK =============  // Extraído a server/mara.ts (registerMaraRoutes, llamado más abajo junto
+  // ==================== CHATBOT WEBHOOK ====================
+  // Extraído a server/mara.ts (registerMaraRoutes, llamado más abajo junto
   // al resto de los registradores de rutas) para poder testearlo aislado
   // sin registrar todo este archivo.
 
-  // ==================== WEB CHECK-IN =============
+  // ==================== WEB CHECK-IN ====================
+
   app.post("/api/web-checkin/generate/:reservationId", async (req, res) => {
     try {
       const reservation = await storage.getReservation(req.params.reservationId);
@@ -1770,7 +1774,8 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== Cash Register Module =============
+  // ==================== Cash Register Module ====================
+
   app.get("/api/cash/configs", requireAuth, async (req, res) => {
     try {
       const configs = await storage.getCashConfigs();
@@ -3586,7 +3591,8 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== TABLERO OPERATIVO =============  app.get("/api/operaciones/resumen", requireAuth, async (req, res) => {
+  // ==================== TABLERO OPERATIVO ====================
+  app.get("/api/operaciones/resumen", requireAuth, async (req, res) => {
     try {
       const today = new Date().toLocaleDateString("en-CA", {
         timeZone: "America/Argentina/Buenos_Aires",
@@ -3785,7 +3791,8 @@ export async function registerRoutes(
     }
   });
 
-  // ==================== SYSTEM INCIDENTS =============  // IMPORTANT: /stats must be registered BEFORE /:id to avoid Express matching "stats" as an ID
+  // ==================== SYSTEM INCIDENTS ====================
+  // IMPORTANT: /stats must be registered BEFORE /:id to avoid Express matching "stats" as an ID
   app.get("/api/incidents/stats", requireAuth, async (req, res) => {
     try {
       const all = await db.select().from(systemIncidents);
@@ -3906,7 +3913,8 @@ export async function registerRoutes(
   registerMaraRoutes(app);
   registerOperationalReportRoutes(app);
 
-  // ==================== NIGHT AUDIT =============  app.post("/api/night-audit/run", requireAuth, requirePermission(NIGHT_AUDIT_RUN_RESOURCE_KEY), async (req, res) => {
+  // ==================== NIGHT AUDIT ====================
+  app.post("/api/night-audit/run", requireAuth, requirePermission(NIGHT_AUDIT_RUN_RESOURCE_KEY), async (req, res) => {
     try {
       const { runNightAudit, nightAuditAlreadyRan, resolveNightAuditDate } = await import("./night-audit");
       const { forceDate, force } = req.body;
