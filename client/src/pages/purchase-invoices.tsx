@@ -45,6 +45,7 @@ import {
   isCardSettlement,
   isReceivedRetention,
   isSupplierPayableDocument,
+  nonFiscalPurchaseStockTotal,
   isValidPurchaseInvoiceTotal,
   mapPurchaseInvoiceAmountFields,
   receivedRetentionAccountCode,
@@ -148,7 +149,7 @@ const TIPOS = [
 
 // Solo para el layout unificado del Centro de Comprobantes — el asistente
 // original (Facturas de Compra) sigue usando TIPOS sin Remito, sin cambios.
-const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }];
+const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }, { value: "REMITO-NF", label: "Comprobante no fiscal" }];
 
 // Sugerencia (no validación dura, confirmado con el usuario): al elegir un
 // proveedor, la letra del comprobante se ajusta según su condición IVA —
@@ -473,7 +474,7 @@ export function InvoiceDialog({
 
   const TIPOS_C = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"];
   // Comprobantes sin desglose de IVA, donde el importe cargado ES el total del comprobante
-  const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION"];
+  const TIPOS_IMPORTE_UNICO = [...TIPOS_C, "RETENCION", "REMITO-NF"];
 
   const applyNetoLines = (updated: NetoLine[]) => {
     setForm(p => {
@@ -675,7 +676,11 @@ export function InvoiceDialog({
   }, [invItems, itemCategories, existingInvItems, form.tipoComprobante, form.cuentaContableId]);
 
   const discountPreview=useMemo(()=>{try{const invoice=applyPurchaseDiscount(form);return {invoice,error:'',total:calculatePurchaseInvoiceTotal(invoice)};}catch(e:any){return {invoice:form,error:e.message,total:0};}},[form]);
-  const total=discountPreview.total;
+  const nonFiscalRows = invItems.filter(row => row.existingItemId);
+  const nonFiscalTotal = nonFiscalRows.length
+    ? nonFiscalPurchaseStockTotal(nonFiscalRows.map(row => ({ quantity: Number(row.quantity), unitCost: Number(row.costPrice) })))
+    : 0;
+  const total = form.tipoComprobante === "REMITO-NF" && !isEditing ? nonFiscalTotal : discountPreview.total;
 
 
   // El desglose "IVA desagregado por alícuota" solo aporta algo cuando hay
@@ -901,6 +906,7 @@ export function InvoiceDialog({
     // (descuentos exclusivos, artículos sin cargo, etc.).
     createMut.mutate({
       ...form,
+      ...(form.tipoComprobante === "REMITO-NF" ? { montoNeto: total.toFixed(2) } : {}),
       supplierId: form.supplierId ? parseInt(form.supplierId) : null,
       cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
       formasPago: form.formaPagoInmediata !== "cuenta_corriente"
@@ -931,14 +937,14 @@ export function InvoiceDialog({
   const isNC = form.tipoComprobante.startsWith("NC");
   const isRetencion = form.tipoComprobante === "RETENCION";
   const isFacturaC = ["FACT-C", "NC-C", "ND-C", "RECIBO-C"].includes(form.tipoComprobante);
-  // Remito: solo existe en el layout unificado — llega mercadería sin datos de
-  // facturación (sin proveedor con CAE, sin IVA/totales), solo se registran
-  // los datos del emisor y los artículos recibidos.
-  const isRemito = form.tipoComprobante === "REMITO";
+  // Ambos remitos ingresan mercadería; el no fiscal también genera deuda,
+  // tomando como precio final el costo ingresado en cada artículo.
+  const isNonFiscal = form.tipoComprobante === "REMITO-NF";
+  const isRemito = form.tipoComprobante === "REMITO" || isNonFiscal;
   const isSupplierPayable = isSupplierPayableDocument(form.tipoComprobante);
   // Factura C y Retención Recibida comparten el mismo paso de Montos simplificado:
   // un único importe que ES el total, sin desglose de IVA.
-  const isImporteUnico = isFacturaC || isRetencion || (form.tipoComprobante === "FACT-B" && !isEditing);
+  const isImporteUnico = isNonFiscal || isFacturaC || isRetencion || (form.tipoComprobante === "FACT-B" && !isEditing);
 
   useEffect(() => {
     if (!isRetencion) return;
@@ -993,9 +999,9 @@ export function InvoiceDialog({
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
                         ...ALL_IVA_FIELDS,
                       }));
-                    } else if (v === "REMITO") {
-                      // Remito: no lleva impuestos ni totales — limpiar cualquier importe
-                      // cargado antes de cambiar de tipo para no enviarlo oculto.
+                    } else if (v === "REMITO" || v === "REMITO-NF") {
+                      // Limpiar los importes anteriores: el remito pendiente no tiene
+                      // total y el no fiscal lo calcula desde los artículos.
                       setForm((p) => ({
                         ...p,
                         tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
@@ -1302,9 +1308,20 @@ export function InvoiceDialog({
           )}
 
           {isRemito && (
+            <div className="space-y-3">
+              <Label>Uso del remito</Label>
+              <Select value={form.tipoComprobante} onValueChange={(value) => setForm(previous => ({ ...previous, tipoComprobante: value, montoNeto: "", formaPagoInmediata: "cuenta_corriente", montoPagadoAhora: "", formasPagoExtra: [] }))}>
+                <SelectTrigger data-testid="select-uso-remito"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="REMITO">Pendiente de factura</SelectItem>
+                  <SelectItem value="REMITO-NF">Comprobante no fiscal</SelectItem>
+                </SelectContent>
+              </Select>
+              {isNonFiscal && <div className="rounded-md border p-4" data-testid="non-fiscal-total"><span>Total Comprobante: </span><strong>${fmt(total)}</strong><p className="text-sm text-muted-foreground">Pendiente de pago en cuenta corriente. Registrá la orden de pago en efectivo al abonarlo.</p></div>}
             <p className="text-xs text-muted-foreground text-center py-2" data-testid="text-remito-sin-impuestos">
-              Remito — no lleva impuestos ni total, solo suma los artículos al inventario.
+              {isNonFiscal ? "Comprobante no fiscal — el total corresponde a los artículos recibidos, sin agregar IVA." : "Remito — no lleva impuestos ni total, solo suma los artículos al inventario."}
             </p>
+            </div>
           )}
 
           {!isRemito && (
@@ -1541,8 +1558,8 @@ export function InvoiceDialog({
                       {/* Un Remito solo se crea desde el Centro de Comprobantes (layout
                           unificado) — esta opción no se ofrece acá, solo se muestra si
                           se está editando uno ya existente para no dejar el select en blanco. */}
-                      {isEditing && form.tipoComprobante === "REMITO" && (
-                        <SelectItem value="REMITO">Remito</SelectItem>
+                      {isEditing && isRemito && (
+                        <SelectItem value={form.tipoComprobante}>{isNonFiscal ? "Comprobante no fiscal" : "Remito"}</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
@@ -2031,7 +2048,7 @@ export function InvoiceDialog({
             data-testid="btn-submit-invoice"
           >
             {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-            {isEditing ? "Guardar cambios" : isRemito ? "Registrar remito" : "Factura completa"}
+            {isEditing ? "Guardar cambios" : isNonFiscal ? "Registrar comprobante no fiscal" : isRemito ? "Registrar remito" : "Factura completa"}
           </Button>
         </DialogFooter>
           ) : (
@@ -3033,7 +3050,7 @@ export default function PurchaseInvoices() {
                       {filteredInvoices.map((inv) => (
                         <TableRow key={inv.id} data-testid={`row-invoice-${inv.id}`} className={inv.estado === "anulado" ? "opacity-50" : ""}>
                           <TableCell>
-                            <Badge variant="secondary" className="font-mono text-xs">{inv.tipoComprobante}</Badge>
+                            <Badge variant="secondary" className="font-mono text-xs">{inv.tipoComprobante === "REMITO-NF" ? "Comprobante no fiscal" : inv.tipoComprobante}</Badge>
                           </TableCell>
                           <TableCell className="font-mono text-sm">{inv.numeroComprobanteExt || inv.numeroComprobante}</TableCell>
                           <TableCell className="max-w-[160px] truncate" title={inv.supplierNombre || inv.proveedorNombre}>
