@@ -6,7 +6,7 @@ import { formatDisplayDate } from "@shared/date-display";
 import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -2827,6 +2827,7 @@ export default function PurchaseInvoices() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
   const [anularId, setAnularId] = useState<number | null>(null);
+  const [anularError, setAnularError] = useState("");
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("todos");
@@ -2876,12 +2877,20 @@ export default function PurchaseInvoices() {
 
   const anularMut = useMutation({
     mutationFn: (id: number) => apiRequest("DELETE", `/api/purchase-invoices/${id}`),
+    onMutate: () => setAnularError(""),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       setAnularId(null);
+      setAnularError("");
+      toast({ title: "Comprobante anulado" });
     },
-    onError: (e: any) => {},
+    onError: (error: unknown) => {
+      const message = parseApiError(error) || "No se pudo anular el comprobante. Volvé a intentar.";
+      setAnularError(message);
+      toast({ title: "No se pudo anular el comprobante", description: message, variant: "destructive" });
+    },
   });
 
   const { toast } = useToast();
@@ -3083,7 +3092,7 @@ export default function PurchaseInvoices() {
                                 </>
                               )}
                               {(inv.estado === "pendiente" || inv.estado === "registrado") && (
-                                <Button variant="ghost" size="icon" onClick={() => setAnularId(inv.id)}
+                                <Button variant="ghost" size="icon" onClick={() => { setAnularError(""); setAnularId(inv.id); }}
                                   title="Anular" data-testid={`btn-anular-invoice-${inv.id}`}>
                                   <Trash2 className="h-4 w-4 text-destructive" />
                                 </Button>
@@ -3170,20 +3179,22 @@ export default function PurchaseInvoices() {
       <PaymentOrderDialog supplier={opSupplier} open={!!opSupplier} onClose={() => setOpSupplier(null)} />
       <InvoiceDetailDialog invoice={detailInvoice} accounts={accounts} onClose={() => setDetailInvoice(null)} />
 
-      <AlertDialog open={!!anularId} onOpenChange={() => setAnularId(null)}>
+      <AlertDialog open={!!anularId} onOpenChange={open => { if (!open && !anularMut.isPending) { setAnularId(null); setAnularError(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Anular comprobante?</AlertDialogTitle>
             <AlertDialogDescription>El comprobante quedará marcado como anulado. Esta acción no se puede revertir.</AlertDialogDescription>
           </AlertDialogHeader>
+          {anularError && <p role="alert" className="text-sm text-destructive" data-testid="purchase-annulment-error">{anularError}</p>}
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={anularMut.isPending}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => anularId && anularMut.mutate(anularId)}
+              disabled={anularMut.isPending}
+              onClick={event => { event.preventDefault(); if (anularId && !anularMut.isPending) anularMut.mutate(anularId); }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               data-testid="btn-confirm-anular"
             >
-              Anular
+              {anularMut.isPending ? "Anulando…" : "Anular"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
