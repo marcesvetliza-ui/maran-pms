@@ -161,3 +161,26 @@ Quedan pendientes la validación real de contrato y mejores prácticas, alta del
 - 32 pruebas servidor aprobadas: contrato, rutas, autenticación, permisos, transporte de revisiones, credenciales y regresión ARI, sin llamadas externas.
 - 39 pruebas PostgreSQL aprobadas: 15 de recepción, 20 del motor nocturno y 4 de la bandeja anterior, con datos ficticios en una base nueva descartable.
 - Instalación de esquema completo, TypeScript y compilación de producción verificados localmente.
+
+## Continuidad de alojamiento al modificar una reserva — 3/11/2026
+
+En staging se observó que una modificación de una reserva de una sola habitación
+regeneró el UUID remoto del alojamiento. El vínculo anterior interpretaba ese
+cambio como una baja y un alta local. La corrección conserva la reserva local si
+la revisión anterior aceptada demuestra una única habitación activa y la nueva
+revisión conserva categoría y plan. Se actualiza el vínculo remoto en la misma
+transacción, sin reescribir los snapshots históricos ni cambiar el código local.
+Una sustitución ambigua entre varias habitaciones exige revisión; no se empareja
+por posición, nombre o importe. Se conservan las guardas de cambios locales,
+historia financiera, disponibilidad, moneda y cotización congelada.
+
+Las altas, modificaciones y cancelaciones nuevas también se registran en
+`reservation_changelog`, visible en Historial, con el identificador de revisión.
+Una revisión repetida no duplica entradas. No se reconstruyen ni fusionan las
+reservas históricas de la prueba VIDEO-004 al publicar.
+
+Validación: 27 pruebas PostgreSQL descartable y 5 de interfaz. Incluyen UUID
+regenerado con conservación de ID/código, cancelación posterior, reenvío,
+conversión USD con cotización original, ambigüedad múltiple y rollback de vínculo
+e historial ante un error. El proveedor se simula; la demostración remota de
+modificación debe repetirse después de publicar.

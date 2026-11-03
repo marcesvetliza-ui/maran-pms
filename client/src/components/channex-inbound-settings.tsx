@@ -19,6 +19,7 @@ const reasons: Record<string, string> = {
   LOCAL_GUEST_CHANGED: "El hotel modificó los datos del huésped", SHARED_GUEST_REQUIRES_REVIEW: "La ficha del huésped se usa en otra reserva",
   LOCAL_RESERVATION_CHANGED: "El hotel modificó esta reserva", LOCAL_FINANCIAL_HISTORY: "La reserva ya tiene movimientos o pertenece a un grupo",
   OCCUPANCY_EXCEEDS_CAPACITY: "La ocupación excede la capacidad", TOTAL_REQUIRES_REVIEW: "El total no coincide con el detalle por noche",
+  ROOM_IDENTITY_REQUIRES_REVIEW: "Channex cambió identificadores de habitaciones sin una correspondencia única; requiere revisión",
   MISSING_ROOM_ID: "Las habitaciones necesitan identificadores estables", CANCELLED_BOOKING_REOPEN: "La reserva ya estaba cancelada",
   CANCELLED_ROOM_REOPEN: "La habitación estaba cancelada", PMS_APPLY_REQUIRES_REVIEW: "El PMS requiere revisión antes de aplicar los cambios",
   LOCAL_STAY_REQUIRES_REVIEW: "Revisá el estado de la estadía antes de modificarla",

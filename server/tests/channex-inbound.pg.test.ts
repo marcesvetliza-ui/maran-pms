@@ -37,7 +37,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
    await pool.query("DELETE FROM channex_inbound_revisions WHERE connection_id=$1",[id]);
    await pool.query("UPDATE channex_ari_settings SET enabled=false WHERE connection_id=$1",[id]);
    await pool.query("DELETE FROM channex_connections WHERE id=$1",[id]);
-   for(const r of rows){await pool.query("DELETE FROM payments WHERE reservation_id=$1",[r.id]);await pool.query("DELETE FROM audit_logs WHERE entity_id=$1",[r.id]);await pool.query("DELETE FROM reservations WHERE id=$1",[r.id]);}
+   for(const r of rows){await pool.query("DELETE FROM payments WHERE reservation_id=$1",[r.id]);await pool.query("DELETE FROM audit_logs WHERE entity_id=$1",[r.id]);await pool.query("DELETE FROM reservation_changelog WHERE reservation_id=$1",[r.id]);await pool.query("DELETE FROM reservations WHERE id=$1",[r.id]);}
   }
   for(const id of guestIds)await pool.query("DELETE FROM guests WHERE id=$1",[id]);
   for(const type of types){await pool.query("DELETE FROM rooms WHERE room_type_id=$1",[type]);await pool.query("DELETE FROM rate_plans WHERE room_type_id=$1",[type]);await pool.query("DELETE FROM room_types WHERE id=$1",[type]);}
@@ -75,6 +75,36 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   const change=revision(f.id,"booking-mod","mod-new","modified","2026-10-30T01:00:00Z");change.attributes.rooms[0].days["2026-11-11"]="200.00";change.attributes.amount="300";
   expect((await apply(f,change)).status).toBe("applied");expect(Number((await linked(f))[0].total_room_amount)).toBe(300);
   expect((await apply(f,revision(f.id,"booking-mod","mod-old","modified","2026-10-30T00:00:00Z"))).status).toBe("stale");expect(Number((await linked(f))[0].total_room_amount)).toBe(300);
+ });
+ it("preserves one local reservation when a modified single room regenerates its UUID",async()=>{
+  const f=await fixture();await apply(f,revision(f.id,"booking-identity","identity-original"));const [original]=await linked(f);
+  const change=revision(f.id,"booking-identity","identity-change","modified","2026-10-30T01:00:00Z");
+  change.attributes.rooms[0].id="regenerated-room";change.attributes.departure_date="2026-11-13";
+  (change.attributes.rooms[0].days as any)["2026-11-12"]="120.00";change.attributes.amount="370";
+  expect((await apply(f,change)).status).toBe("applied");await apply(f,change);
+  const rows=await linked(f);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({id:original.id,reservation_code:original.reservation_code,status:"confirmed",check_out_date:"2026-11-13",total_room_amount:"370.00"});
+  expect((await pool.query("SELECT remote_room_id FROM channex_inbound_rooms WHERE connection_id=$1",[f.id])).rows[0].remote_room_id).toBe("regenerated-room");
+  expect((await pool.query("SELECT remote_room_id FROM channex_inbound_settlements WHERE connection_id=$1 AND revision_id='identity-original'",[f.id])).rows[0].remote_room_id).toBe("remote-0");
+  expect((await pool.query("SELECT * FROM reservation_changelog WHERE reservation_id=$1",[original.id])).rows).toHaveLength(2);
+  expect((await apply(f,revision(f.id,"booking-identity","identity-cancel","cancelled","2026-10-30T02:00:00Z"))).status).toBe("applied");
+  expect((await linked(f))[0]).toMatchObject({id:original.id,status:"cancelled"});
+  expect((await pool.query("SELECT * FROM reservation_changelog WHERE reservation_id=$1",[original.id])).rows).toHaveLength(3);
+ });
+ it("rolls back a remapped identity and history when the modified stay fails validation",async()=>{
+  const f=await fixture();await apply(f,revision(f.id,"booking-remap-rollback","remap-original"));const [original]=await linked(f);
+  const change=revision(f.id,"booking-remap-rollback","remap-invalid","modified","2026-10-30T01:00:00Z");
+  change.attributes.rooms[0].id="invalid-regenerated-room";change.attributes.rooms[0].occupancy.adults=20;
+  expect((await apply(f,change)).review_code).toBe("OCCUPANCY_EXCEEDS_CAPACITY");
+  expect((await linked(f))[0]).toEqual(original);
+  expect((await pool.query("SELECT remote_room_id FROM channex_inbound_rooms WHERE connection_id=$1",[f.id])).rows[0].remote_room_id).toBe("remote-0");
+  expect((await pool.query("SELECT * FROM reservation_changelog WHERE reservation_id=$1",[original.id])).rows).toHaveLength(1);
+ });
+ it("does not guess regenerated identities in a multi-room modification",async()=>{
+  const f=await fixture();await apply(f,revision(f.id,"booking-ambiguous","ambiguous-original","new",undefined,2));const before=await linked(f);
+  const change=revision(f.id,"booking-ambiguous","ambiguous-change","modified","2026-10-30T01:00:00Z",2);
+  change.attributes.rooms.forEach((room,i)=>room.id=`changed-${i}`);
+  expect((await apply(f,change)).review_code).toBe("ROOM_IDENTITY_REQUIRES_REVIEW");
+  expect(await linked(f)).toEqual(before);
  });
  it("cancels all owned rooms once and releases availability without payments",async()=>{
   const f=await fixture();await apply(f,revision(f.id,"booking-cancel","cancel-original","new",undefined,2));
@@ -122,6 +152,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   expect((await pool.query("SELECT total_room_amount FROM reservations WHERE external_reservation_id='booking-fx-future' AND id=ANY($1::varchar[])",[(await linked(f)).map(r=>r.id)])).rows[0].total_room_amount).toBe("500000.00");
   await saveSettlementRate(pool,f.id,{rate:null,reason:"Pausar cotización para futuras reservas"},"Test operator");
   const modified=revision(f.id,"booking-fx","fx-mod","modified","2026-10-30T01:00:00Z");modified.attributes.currency="USD";
+  modified.attributes.rooms[0].id="fx-regenerated-room";
   modified.attributes.amount="270";modified.attributes.rooms[0].days["2026-11-11"]="170.00";
   expect((await apply(f,modified)).status).toBe("applied");
   expect((await pool.query("SELECT total_room_amount FROM reservations WHERE id=$1",[r.id])).rows[0].total_room_amount).toBe("337533.33");
@@ -255,7 +286,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   try {
    expect((await apply(f,revision(f.id,`manual-${f.id}`,"external-duplicate"))).review_code).toBe("UNLINKED_EXTERNAL_RESERVATION");
    expect((await pool.query("SELECT id FROM reservations WHERE external_reservation_id=$1",[`manual-${f.id}`])).rows).toHaveLength(1);
-  } finally {await pool.query("DELETE FROM audit_logs WHERE entity_id=$1",[r.id]);await pool.query("DELETE FROM reservations WHERE id=$1",[r.id]);}
+  } finally {await pool.query("DELETE FROM audit_logs WHERE entity_id=$1",[r.id]);await pool.query("DELETE FROM reservation_changelog WHERE reservation_id=$1",[r.id]);await pool.query("DELETE FROM reservations WHERE id=$1",[r.id]);}
  });
  it("rejects production connections before storing or applying a revision",async()=>{
   const f=await fixture();await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1",[f.id]);await pool.query("UPDATE channex_ari_settings SET enabled=false WHERE connection_id=$1",[f.id]);

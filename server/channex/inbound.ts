@@ -122,10 +122,34 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
         const settlementRate = booking.currency === "USD" ? cursor.settlement_exchange_rate || config.settlement_exchange_rate : "1.000000";
         const settledRooms = booking.status === "cancelled" ? [] : settleBooking(booking, settlementRate);
         if (booking.status !== "cancelled" && cursor.cancelled) return review("CANCELLED_BOOKING_REOPEN");
+        // A single-room revision may regenerate its remote room UUID. Preserve
+        // the local stay only when the previous accepted revision proves a
+        // unique, same-category/plan continuation. Never guess multi-room pairs.
+        const active = [...existing.entries()].filter(([, r]) => r.status !== "cancelled");
+        const incoming = new Set(booking.rooms.map(room => room.key));
+        const removed = active.filter(([key]) => !incoming.has(key));
+        const added = booking.rooms.filter(room => !existing.has(room.key));
+        if (booking.status !== "cancelled" && removed.length && added.length) {
+          const prior = (await db.execute(sql`SELECT payload FROM channex_inbound_revisions
+            WHERE connection_id=${connectionId} AND revision_id=${cursor.last_revision_id}`)).rows[0] as any;
+          const previous = prior ? parseBookingRevision(prior.payload, config.channex_property_id) : null;
+          const before = previous?.rooms[0], after = booking.rooms[0];
+          if (active.length !== 1 || booking.rooms.length !== 1 || previous?.rooms.length !== 1 ||
+              before?.key !== removed[0][0] || before.remoteType !== after.remoteType || before.remotePlan !== after.remotePlan)
+            return review("ROOM_IDENTITY_REQUIRES_REVIEW");
+          const [oldKey, stay] = removed[0];
+          await db.execute(sql`UPDATE channex_inbound_rooms SET remote_room_id=${after.key}
+            WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId} AND remote_room_id=${oldKey}`);
+          existing.delete(oldKey); existing.set(after.key, stay);
+        }
         const wanted = new Set(booking.rooms.map(room => room.key));
         for (const [key, r] of existing) {
           if (booking.status === "cancelled" || !wanted.has(key)) {
-            if (r.status !== "cancelled") await storage.updateReservation(r.id, { status: "cancelled", lastModifiedBy: "Channex" });
+            if (r.status !== "cancelled") {
+              await storage.updateReservation(r.id, { status: "cancelled", lastModifiedBy: "Channex" });
+              await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)
+                VALUES(${r.id},'Channex','channex',${`Cancelación recibida de Channex. Revisión ${revisionId}.`})`);
+            }
             const saved = await storage.getReservation(r.id);
             await db.execute(sql`UPDATE channex_inbound_rooms SET local_hash=${localFingerprint(saved)} WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId} AND remote_room_id=${key}`);
           }
@@ -192,6 +216,8 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
                 nightlyPricing: room.nights, pricingScheme: "nightly_v1", pricingRevision: saved.pricingRevision + 1
               }));
             }
+            await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)
+              VALUES(${saved.id},'Channex','channex',${`${old ? "Modificación" : "Alta"} recibida de Channex. Estadía ${booking.arrival} → ${booking.departure}. Revisión ${revisionId}.`})`);
             await db.execute(sql`INSERT INTO channex_inbound_rooms(connection_id,booking_id,remote_room_id,reservation_id,local_hash)
               VALUES(${connectionId},${booking.bookingId},${room.key},${saved.id},${localFingerprint(saved)})
               ON CONFLICT(connection_id,booking_id,remote_room_id) DO UPDATE SET local_hash=EXCLUDED.local_hash`);
