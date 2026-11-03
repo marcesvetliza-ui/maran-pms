@@ -20,6 +20,8 @@ COPY . .
 
 # Build using the globally-installed tsx
 ARG VITE_SPA_FUNDING_UI
+ARG RAILWAY_GIT_COMMIT_SHA
+ARG BUILD_COMMIT_SHA
 RUN tsx script/build.ts
 
 # ── Stage 2: production ──────────────────────────────────────────────────────
