@@ -2888,7 +2888,7 @@ export async function registerRoutes(
         FROM accounting_entry_lines ael
         JOIN accounting_entries ae ON ae.id = ael.entry_id
         JOIN accounting_accounts aa ON aa.id = ael.account_id
-        WHERE ae.origen_id = ${id} AND ae.origen_tipo = 'purchase_invoice'
+        WHERE ae.id = ${result.rows[0].asiento_id} AND ae.origen_id = ${id} AND ae.origen_tipo = 'purchase_invoice'
       `);
       // Orden(es) de Pago que cancelaron este comprobante
       const ordenesPago = await db.execute(sql`
