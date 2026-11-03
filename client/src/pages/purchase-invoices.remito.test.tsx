@@ -41,7 +41,7 @@ function buildFetchMock(capture?: { body: any }) {
   });
 }
 
-function renderDialog(props: { unifiedLayout?: boolean } = {}) {
+function renderDialog(props: { unifiedLayout?: boolean; editingInvoice?: any; sourceRemito?: any } = {}) {
   return render(
     <QueryClientProvider client={queryClient}>
       <InvoiceDialog
@@ -132,14 +132,14 @@ describe("InvoiceDialog — Remito", () => {
     expect(screen.getByTestId("btn-submit-invoice")).toHaveTextContent("Registrar remito");
   });
 
-  it("permite elegir comprobante no fiscal y volver a pendiente de factura", async () => {
+  it("permite elegir compra no fiscal y volver a pendiente de factura", async () => {
     const user = userEvent.setup();
     renderDialog({ unifiedLayout: true });
     await selectRemito(user);
     await user.click(screen.getByTestId("select-uso-remito"));
-    await user.click(await screen.findByRole("option", { name: "Comprobante no fiscal" }));
+    await user.click(await screen.findByRole("option", { name: "Compra no fiscal" }));
     expect(screen.getByTestId("non-fiscal-total")).toHaveTextContent("Total Comprobante");
-    expect(screen.getByTestId("btn-submit-invoice")).toHaveTextContent("Registrar comprobante no fiscal");
+    expect(screen.getByTestId("btn-submit-invoice")).toHaveTextContent("Registrar compra no fiscal");
     expect(screen.queryByText("Impuestos y totales")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("select-uso-remito"));
     await user.click(await screen.findByRole("option", { name: "Pendiente de factura" }));
@@ -159,7 +159,7 @@ describe("InvoiceDialog — Remito", () => {
     renderDialog({ unifiedLayout: true });
     await selectRemito(user);
     await user.click(screen.getByTestId("select-uso-remito"));
-    await user.click(await screen.findByRole("option", { name: "Comprobante no fiscal" }));
+    await user.click(await screen.findByRole("option", { name: "Compra no fiscal" }));
     await user.click(await screen.findByTestId("select-existing-item-0"));
     await user.click(await screen.findByText("Mercadería NF"));
     await user.clear(screen.getByTestId("input-inv-qty-0"));
@@ -174,6 +174,45 @@ describe("InvoiceDialog — Remito", () => {
     await waitFor(() => expect(capture.body).toBeTruthy());
     expect(capture.body).toMatchObject({ tipoComprobante: "REMITO-NF", montoNeto: "2400.00", condicionPago: "cuenta_corriente", montoIva21: "", formasPago: [] });
     expect(capture.body.stockItems[0]).toMatchObject({ itemId: "item-nf", quantity: "2", unitCost: "1200" });
+  });
+
+  it("edita el uso de un remito existente sin enviar artículos nuevos", async () => {
+    let payload: any;
+    vi.stubGlobal("fetch", vi.fn(async (url: any, options?: RequestInit) => {
+      if (options?.method === "PATCH") { payload = JSON.parse(String(options.body)); return new Response(JSON.stringify({ id: 99 }), { status: 200 }); }
+      if (String(url).endsWith("/api/purchase-invoices/99")) return new Response(JSON.stringify({ articleLines: [{ id: 1, item_name: "Artículo recibido", quantity: "2", unit_price: "1200", line_total: "2400" }], ordenesPago: [] }), { status: 200 });
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true, editingInvoice: { id: 99, tipoComprobante: "REMITO", numeroComprobante: "R99", fechaEmision: "2026-11-03", condicionPago: "contado", supplierId: 1, montoTotal: "0", montoNeto: "0", estado: "pagado" } });
+    await screen.findByText(/Artículo recibido/);
+    await user.click(screen.getByTestId("select-uso-remito"));
+    await user.click(await screen.findByRole("option", { name: "Compra no fiscal" }));
+    expect(screen.getByTestId("non-fiscal-total")).toHaveTextContent("2.400,00");
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+    await waitFor(() => expect(payload?.tipoComprobante).toBe("REMITO-NF"));
+    expect(payload.stockItems).toBeUndefined();
+  });
+
+  it("vincula la factura al remito y no vuelve a enviar stock ni cobros", async () => {
+    let payload: any;
+    vi.stubGlobal("fetch", vi.fn(async (url: any, options?: RequestInit) => {
+      if (options?.method === "POST") { payload = JSON.parse(String(options.body)); return new Response(JSON.stringify({ id: 99 }), { status: 201 }); }
+      if (String(url).endsWith("/api/purchase-invoices/99")) return new Response(JSON.stringify({ articleLines: [{ id: 1, item_name: "Artículo recibido", quantity: "2", unit_price: "1200", line_total: "2400" }], ordenesPago: [{ importe_cancelado: "1000" }] }), { status: 200 });
+      return new Response(JSON.stringify([]), { status: 200 });
+    }));
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true, sourceRemito: { id: 99, tipoComprobante: "REMITO-NF", numeroComprobante: "R99", supplierId: 1, proveedorNombre: "Proveedor Uno SA", montoTotal: "2400", estado: "parcial" } });
+    await screen.findByText(/Artículo recibido/);
+    expect(screen.getByTestId("select-supplier")).toBeDisabled();
+    expect(screen.queryByTestId("btn-add-inv-item")).not.toBeInTheDocument();
+    await user.type(screen.getByTestId("input-numero-comprobante"), "123");
+    await user.type(screen.getByTestId("input-neto-line-0"), "2000");
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+    await waitFor(() => expect(payload?.sourceRemitoId).toBe(99));
+    expect(payload.tipoComprobante).toBe("FACT-A");
+    expect(payload.stockItems).toEqual([]);
+    expect(payload.formasPago).toEqual([]);
   });
 
   it("enviarlo manda tipoComprobante REMITO sin montos, solo emisor y artículos", async () => {

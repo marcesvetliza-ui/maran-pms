@@ -1,3 +1,4 @@
+import { purchaseDocumentLabel } from "@shared/purchase-remito";
 import type { Express } from "express";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -1079,7 +1080,7 @@ export function registerExportRoutes(app: Express) {
         doc.font("Helvetica").fontSize(8.5).fillColor("#000");
         for (const item of items) {
           if (y > 660) { doc.addPage(); y = 60; }
-          doc.text(item.tipo_comprobante, x0 + 8, y);
+          doc.text(purchaseDocumentLabel(item.tipo_comprobante), x0 + 8, y);
           doc.text(item.numero_comprobante_ext || item.numero_comprobante || "", x0 + 150, y);
           doc.text(fDate(item.fecha_emision), x0 + 280, y);
           doc.text(`$ ${fPeso($n(item.monto_total))}`, x0 + 390, y, { width: 120, align: "right" });

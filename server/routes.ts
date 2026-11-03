@@ -45,6 +45,8 @@ import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type S
 import { HELP_MANUAL } from "./help-manual";
 import { generarAsiento } from "./accounting";
 import { enterPurchaseInvoiceStock, parsePurchaseStockRows } from "./purchase-invoice-stock";
+import { updatePurchaseRemito } from "./purchase-remito";
+import { isPurchaseRemito } from "@shared/purchase-remito";
 import { createPaymentOrder } from "./paymentOrder";
 import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
@@ -2850,7 +2852,8 @@ export async function registerRoutes(
 
       // Build flexible query using CASE
       const result = await db.execute(sql`
-        SELECT pi.*, s.razon_social AS supplier_nombre
+        SELECT pi.*, s.razon_social AS supplier_nombre,
+          (SELECT COALESCE(sum(l.line_total),0) FROM purchase_invoice_lines l WHERE l.invoice_id=pi.id) AS remito_subtotal
         FROM purchase_invoices pi
         LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
         WHERE (${periodo ? sql`pi.periodo = ${periodo as string}` : sql`TRUE`})
@@ -3012,6 +3015,13 @@ export async function registerRoutes(
         return res.status(201).json(result.rows[0]);
       }
       const body = normalizeNonFiscalPurchase(applyPurchaseDiscount(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante)));
+      if (body.sourceRemitoId != null) {
+        const sourceId = Number(body.sourceRemitoId);
+        if (!Number.isSafeInteger(sourceId) || sourceId <= 0) return res.status(400).json({ error: "Remito de origen inválido." });
+        if (body.centroCosto && !(await isValidCentroCosto(String(body.centroCosto)))) return res.status(400).json({ error: "Centro de costo inválido." });
+        const converted = await db.transaction(tx => updatePurchaseRemito(tx, sourceId, body, req.user?.id, true));
+        return res.status(201).json(converted);
+      }
       if (body.tipoComprobante === "REMITO-NF") {
         body.montoNeto = nonFiscalPurchaseStockTotal(parsePurchaseStockRows(body.stockItems)).toFixed(2);
       }
@@ -3240,6 +3250,11 @@ export async function registerRoutes(
         FROM purchase_invoices WHERE id = ${id}
       `);
       if (!existing.rows.length) return res.status(404).json({ error: "Comprobante no encontrado" });
+      if (isPurchaseRemito((existing.rows[0] as any).tipo_comprobante)) {
+        if (req.body.centroCosto && !(await isValidCentroCosto(String(req.body.centroCosto)))) return res.status(400).json({ error: "Centro de costo inválido." });
+        const updated = await db.transaction(tx => updatePurchaseRemito(tx, id, req.body, req.user?.id));
+        return res.json(updated);
+      }
       if (!canEditPurchaseInvoice(req.user?.role, (existing.rows[0] as any).estado)) {
         return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
       }

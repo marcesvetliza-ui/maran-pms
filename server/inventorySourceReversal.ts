@@ -7,6 +7,8 @@ const fail=(message:string)=>Object.assign(new Error(message),{statusCode:409});
 export async function reverseInventorySource(type:string,id:string,reason:string,actor:string){
  if(!['purchase_invoice','internal_movement','production_run','spa_account_item','restaurant_order','spa_account'].includes(type)||!id||!reason?.trim())throw fail('Indicá un origen válido y el motivo de la devolución o anulación de stock');
  return withDatabaseTransaction(async()=>{
+  // Serialize purchase reversals with receipt conversion, editing and payment.
+  if(type==='purchase_invoice') await db.execute(sql`SELECT id FROM purchase_invoices WHERE id=${Number(id)} FOR UPDATE`);
   await db.execute(sql`INSERT INTO inventory_source_reversals(source_type,source_id,reason,actor) VALUES(${type},${id},${reason.trim()},${actor}) ON CONFLICT(source_type,source_id) DO NOTHING`);
   const guard=await db.execute(sql`SELECT * FROM inventory_source_reversals WHERE source_type=${type} AND source_id=${id} FOR UPDATE`);
   if(guard.rows[0].completed_at)return {alreadyReversed:true};
