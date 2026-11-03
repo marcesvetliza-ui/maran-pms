@@ -50,25 +50,19 @@ import { withInvoiceAdvisoryLock } from "../billing/invoiceAdvisoryLock";
 import { classifyReservationPaymentMethod } from "../payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { getReservationRateValidationError, normalizeZeroRateNotes } from "@shared/reservationRate";
-import { GROUP_BLOCK_SHORTAGE_CODE, GROUP_BLOCK_WARNING_CODE } from "@shared/group-inventory";
+import { GROUP_BLOCK_WARNING_CODE } from "@shared/group-inventory";
 
 async function assertGroupInventoryForReservation(input: {
   roomTypeId: string; checkInDate: string; checkOutDate: string;
   excludeReservationId?: string; contextGroupId?: string; override?: boolean;
-  // Si el usuario ya eligió una habitación física puntual (y ese cuarto
-  // pasó el chequeo de choque de reservas de más arriba, checkOverbooking),
-  // esa habitación concreta es la fuente de verdad real — el conteo
-  // agregado por categoría solo existe para proteger reservas que TODAVÍA
-  // no tienen una habitación asignada (p.ej. de OTA). Por eso, en ese caso,
-  // un déficit de categoría (GROUP_BLOCK_SHORTAGE) deja de ser un bloqueo
-  // duro y pasa a ser un aviso que se puede confirmar, igual que ya
-  // funciona el "cupo blando" de un grupo tentativo.
+  // A free physical room can confirm aggregate deficits only when no hard
+  // group commitments remain unassigned on any night. Shared policy decides.
   hasSpecificRoom?: boolean;
 }) {
   const conflict = await storage.evaluateReservationInventory(input);
   if (!conflict) return;
-  const isDowngradedShortage = conflict.code === GROUP_BLOCK_SHORTAGE_CODE && !!input.hasSpecificRoom;
-  const isOverridable = conflict.code === GROUP_BLOCK_WARNING_CODE || isDowngradedShortage;
+  const isDowngradedShortage = conflict.code === GROUP_BLOCK_WARNING_CODE && conflict.hardDemand !== undefined;
+  const isOverridable = conflict.code === GROUP_BLOCK_WARNING_CODE;
   if (isOverridable && input.override) return;
   let error: string;
   let warning: typeof conflict & { roomTypeName?: string } = conflict;
@@ -79,7 +73,9 @@ async function assertGroupInventoryForReservation(input: {
   } else if (conflict.code === GROUP_BLOCK_WARNING_CODE) {
     error = "La operación invade el cupo blando de un grupo.";
   } else {
-    error = "La demanda confirmada excede el inventario operativo.";
+    error = conflict.unassignedConfirmedGroupUnits
+      ? `Hay ${conflict.unassignedConfirmedGroupUnits} habitación(es) comprometidas para grupos confirmados pendientes de asignar${conflict.date ? ` el ${formatDisplayDate(conflict.date)}` : ""}. El movimiento excede el inventario operativo.`
+      : "La demanda confirmada excede el inventario operativo.";
   }
   throw Object.assign(new Error(error), {
     statusCode: 409,
@@ -400,10 +396,12 @@ export function registerReservationsRoutes(app: Express) {
           checkOutDate: data.checkOutDate,
           contextGroupId,
           override: overrideTentativeGroupWarning,
-          hasSpecificRoom: !!data.roomId,
+          hasSpecificRoom: isOperationalInventoryRoom(selectedRoom) && selectedRoom.roomTypeId === data.roomTypeId && !["maintenance", "oos"].includes(selectedRoom.status),
         });
       }
 
+      data._inventoryContextGroupId = contextGroupId;
+      data._inventoryOverrideTentativeGroupWarning = overrideTentativeGroupWarning;
       const reservation = await storage.createReservation(data, async (reservation) => {
         if (stayDetailsInput) {
           const details = await saveStayDetails(reservation.id, stayDetailsInput);
@@ -609,6 +607,7 @@ export function registerReservationsRoutes(app: Express) {
       if ((roomChanged || roomTypeChanged || datesChanged || statusChanged) &&
           finalRoomTypeId && finalCheckIn && finalCheckOut &&
           !["cancelled", "checked_out", "no_show"].includes(finalStatus)) {
+        const inventoryRoom = finalRoomId ? await storage.getRoom(finalRoomId) : null;
         await assertGroupInventoryForReservation({
           roomTypeId: finalRoomTypeId,
           checkInDate: finalCheckIn,
@@ -616,10 +615,11 @@ export function registerReservationsRoutes(app: Express) {
           excludeReservationId: req.params.id,
           contextGroupId,
           override: overrideTentativeGroupWarning,
-          hasSpecificRoom: !!finalRoomId,
+          hasSpecificRoom: !!inventoryRoom && isOperationalInventoryRoom(inventoryRoom) && inventoryRoom.roomTypeId === finalRoomTypeId && !["maintenance", "oos"].includes(inventoryRoom.status),
         });
       }
-      if (contextGroupId) req.body._inventoryContextGroupId = contextGroupId;
+      req.body._inventoryContextGroupId = contextGroupId;
+      req.body._inventoryOverrideTentativeGroupWarning = overrideTentativeGroupWarning;
 
       // Bloqueo adicional: no permitir mover una reserva checked_in a una habitación ocupada
       if (existing.status === "checked_in" && roomChanged) {
