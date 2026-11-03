@@ -1,3 +1,4 @@
+import { isPurchaseRemito, purchaseDocumentLabel } from "@shared/purchase-remito";
 import { useAuth } from "@/App";
 import { canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
 import { matchesIssuer } from "@/lib/issuer-search";
@@ -93,6 +94,8 @@ interface Invoice {
   montoExento?: string;
   montoNoGravado?: string;
   subtipoRetencion?: string;
+  remitoSubtotal?: string;
+  specialDetails?: { remitoHistory?: Array<{ action: string; at: string; previous: any; nextType: string }> };
 }
 
 export interface Supplier {
@@ -149,7 +152,7 @@ const TIPOS = [
 
 // Solo para el layout unificado del Centro de Comprobantes — el asistente
 // original (Facturas de Compra) sigue usando TIPOS sin Remito, sin cambios.
-const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }, { value: "REMITO-NF", label: "Comprobante no fiscal" }];
+const TIPOS_UNIFIED = [...TIPOS, { value: "REMITO", label: "Remito" }, { value: "REMITO-NF", label: "Compra no fiscal" }];
 
 // Sugerencia (no validación dura, confirmado con el usuario): al elegir un
 // proveedor, la letra del comprobante se ajusta según su condición IVA —
@@ -246,6 +249,8 @@ function calcPeriodo(fecha: string): string {
 function camelInvoice(r: any): Invoice {
   return {
     id: r.id,
+    remitoSubtotal: r.remito_subtotal,
+    specialDetails: r.special_details,
     tipoComprobante: r.tipo_comprobante,
     supplierNombre: r.supplier_nombre,
     proveedorNombre: r.proveedor_nombre,
@@ -305,6 +310,7 @@ const emptyForm = () => ({
   impuestosInternos: "",
   ley25413: "",
   cuentaContableId: "",
+  centroCosto: "",
   descuentoDescripcion: "",
   descuentoTipo: "importe",
   descuentoPorcentaje: "",
@@ -423,6 +429,7 @@ export function InvoiceDialog({
   embedded,
   unifiedLayout,
   initialTipo,
+  sourceRemito,
 }: {
   open: boolean;
   onClose: () => void;
@@ -432,6 +439,7 @@ export function InvoiceDialog({
   embedded?: boolean;
   /** Tipo elegido en el Centro de Comprobantes antes de abrir este formulario. */
   initialTipo?: string;
+  sourceRemito?: Invoice | null;
   /**
    * Renders the same form as one continuous page (Tipo/Condición → Datos del
    * emisor → Artículos → Impuestos y totales) matching EmitirFacturaDialog's
@@ -450,6 +458,14 @@ export function InvoiceDialog({
       if (["FACT-C", "NC-C", "ND-C", "RECIBO-C", "RETENCION"].includes(initialTipo)) {
         result.alicuotaIva = "0";
       }
+    }
+    if (sourceRemito) {
+      result.supplierId = String(sourceRemito.supplierId);
+      result.proveedorNombre = sourceRemito.proveedorNombre || sourceRemito.supplierNombre || "";
+      result.proveedorCuit = sourceRemito.proveedorCuit || "";
+      result.cuentaContableId = sourceRemito.cuentaContableId ? String(sourceRemito.cuentaContableId) : "";
+      result.centroCosto = sourceRemito.centroCosto || "";
+      result.tipoComprobante = sugerirTipoPorCondicionIva("FACT-A", suppliers.find(row => row.id === sourceRemito.supplierId)?.condicionIva);
     }
     return result;
   };
@@ -551,6 +567,7 @@ export function InvoiceDialog({
         impuestosInternos: editingInvoice.impuestosInternos || "",
         ley25413: editingInvoice.ley25413 || "",
         cuentaContableId: editingInvoice.cuentaContableId ? String(editingInvoice.cuentaContableId) : "",
+        centroCosto: editingInvoice.centroCosto || "",
         observaciones: editingInvoice.observaciones || "",
         subtipoRetencion: editingInvoice.subtipoRetencion || "",
         ...(editingInvoice.descuento?.originales||{}),
@@ -568,7 +585,7 @@ export function InvoiceDialog({
       setAutomaticNetos(true);
       setStep(0);
     }
-  }, [open, editingInvoice, initialTipo]);
+  }, [open, editingInvoice, initialTipo, sourceRemito]);
 
   const { data: itemCategories = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/categories"],
@@ -676,11 +693,17 @@ export function InvoiceDialog({
   }, [invItems, itemCategories, existingInvItems, form.tipoComprobante, form.cuentaContableId]);
 
   const discountPreview=useMemo(()=>{try{const invoice=applyPurchaseDiscount(form);return {invoice,error:'',total:calculatePurchaseInvoiceTotal(invoice)};}catch(e:any){return {invoice:form,error:e.message,total:0};}},[form]);
+  const storedRemitoId = sourceRemito?.id || (isPurchaseRemito(editingInvoice?.tipoComprobante) ? editingInvoice?.id : undefined);
+  const { data: storedRemito, isLoading: loadingRemito, isError: remitoLoadError } = useQuery<any>({
+    queryKey: ["/api/purchase-invoices", storedRemitoId], enabled: open && !!storedRemitoId,
+    queryFn: async () => { const response = await apiRequest("GET", `/api/purchase-invoices/${storedRemitoId}`); return response.json(); },
+  });
+  const storedSubtotal = (storedRemito?.articleLines || []).reduce((sum: number, row: any) => sum + Number(row.line_total), 0);
   const nonFiscalRows = invItems.filter(row => row.existingItemId);
   const nonFiscalTotal = nonFiscalRows.length
     ? nonFiscalPurchaseStockTotal(nonFiscalRows.map(row => ({ quantity: Number(row.quantity), unitCost: Number(row.costPrice) })))
     : 0;
-  const total = form.tipoComprobante === "REMITO-NF" && !isEditing ? nonFiscalTotal : discountPreview.total;
+  const total = form.tipoComprobante === "REMITO-NF" ? (isEditing ? storedSubtotal : nonFiscalTotal) : discountPreview.total;
 
 
   // El desglose "IVA desagregado por alícuota" solo aporta algo cuando hay
@@ -712,7 +735,7 @@ export function InvoiceDialog({
         <SelectTrigger data-testid="select-forma-pago-inmediata"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="cuenta_corriente">Cuenta Corriente</SelectItem>
-          {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+          {FORMAS_PAGO.filter(fp => form.tipoComprobante !== "REMITO-NF" || fp.value === "efectivo").map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
         </SelectContent>
       </Select>
       {form.formaPagoInmediata !== "cuenta_corriente" && (
@@ -740,7 +763,7 @@ export function InvoiceDialog({
                 >
                   <SelectTrigger data-testid={`select-forma-pago-extra-${i}`}><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
+                    {FORMAS_PAGO.filter(fp => form.tipoComprobante !== "REMITO-NF" || fp.value === "efectivo").map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -769,7 +792,7 @@ export function InvoiceDialog({
           <Button
             type="button" variant="ghost" size="sm" className="mt-2 px-0"
             onClick={() => setForm((p) => ({ ...p, formasPagoExtra: [...p.formasPagoExtra, { formaPago: "transferencia", monto: "" }] }))}
-            data-testid="button-add-forma-pago-extra"
+            disabled={form.tipoComprobante === "REMITO-NF"} data-testid="button-add-forma-pago-extra"
           >
             <Plus className="h-3.5 w-3.5 mr-1" /> Agregar otra forma de pago
           </Button>
@@ -825,6 +848,7 @@ export function InvoiceDialog({
       }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       resetDialog();
       const desc = invItems.length > 0
         ? `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
@@ -855,6 +879,7 @@ export function InvoiceDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       resetDialog();
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       toast({ title: "Comprobante actualizado correctamente" });
     },
     onError: (e: any) => toast({ title: "Error al actualizar", description: e.message, variant: "destructive" }),
@@ -906,6 +931,7 @@ export function InvoiceDialog({
     // (descuentos exclusivos, artículos sin cargo, etc.).
     createMut.mutate({
       ...form,
+      ...(sourceRemito ? { sourceRemitoId: sourceRemito.id } : {}),
       ...(form.tipoComprobante === "REMITO-NF" ? { montoNeto: total.toFixed(2) } : {}),
       supplierId: form.supplierId ? parseInt(form.supplierId) : null,
       cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
@@ -962,7 +988,7 @@ export function InvoiceDialog({
       embedded={embedded}
       open={open}
       onOpenChange={(v) => { if (!v) resetDialog(); }}
-      title={isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}
+      title={sourceRemito ? `Cargar factura del remito ${sourceRemito.numeroComprobanteExt || sourceRemito.numeroComprobante}` : isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}
       headerExtra={
         unifiedLayout ? undefined : (
         <div className="flex gap-1 mt-2">
@@ -982,6 +1008,13 @@ export function InvoiceDialog({
       }
     >
         <div className="py-2 space-y-4">
+          {storedRemitoId && <div className="rounded-md border p-3 space-y-1" data-testid="stored-remito-summary">
+            <p>{sourceRemito ? "La factura conserva el ingreso de mercadería y los pagos del remito. No vuelve a ingresar stock ni genera un segundo comprobante de deuda." : "El cambio de uso conserva los artículos y su ingreso original. No modifica cantidades ni costos."}</p>
+            {remitoLoadError ? <p role="alert">No se pudo cargar el remito. Cerrá la ventana y volvé a intentar.</p> : loadingRemito ? <p>Cargando remito…</p> : (storedRemito?.articleLines || []).map((row: any) => <p key={row.id}>{row.item_name}: {row.quantity} × ${fmt(row.unit_price)}</p>)}
+            <p>Valor de los artículos: ${fmt(storedSubtotal)}</p>
+            {sourceRemito && <p>Pagos registrados: ${fmt((storedRemito?.ordenesPago || []).reduce((sum: number, row: any) => sum + Number(row.importe_cancelado), 0))}. El nuevo saldo se calcula al confirmar.</p>}
+          </div>}
+
           {unifiedLayout ? (
           <>
           <div className="grid grid-cols-2 gap-3">
@@ -1005,6 +1038,7 @@ export function InvoiceDialog({
                       setForm((p) => ({
                         ...p,
                         tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
+                        formaPagoInmediata: "cuenta_corriente", montoPagadoAhora: "", formasPagoExtra: [],
                         montoNeto: "",
                         montoExento: "",
                         montoNoGravado: "",
@@ -1036,7 +1070,7 @@ export function InvoiceDialog({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {TIPOS_UNIFIED.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                      {TIPOS_UNIFIED.filter(t => !sourceRemito || t.value.startsWith("FACT-")).map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1105,7 +1139,7 @@ export function InvoiceDialog({
                         onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
                         onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
                         onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
-                        data-testid="select-supplier"
+                        disabled={!!sourceRemito || isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante)} data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
@@ -1195,7 +1229,7 @@ export function InvoiceDialog({
 
           <Separator />
 
-          {!isEditing && (
+          {!isEditing && !sourceRemito && (
             <div className="space-y-2">
               <Label className="text-sm font-semibold">Artículos</Label>
             <div className="space-y-4">
@@ -1314,12 +1348,12 @@ export function InvoiceDialog({
                 <SelectTrigger data-testid="select-uso-remito"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="REMITO">Pendiente de factura</SelectItem>
-                  <SelectItem value="REMITO-NF">Comprobante no fiscal</SelectItem>
+                  <SelectItem value="REMITO-NF">Compra no fiscal</SelectItem>
                 </SelectContent>
               </Select>
-              {isNonFiscal && <div className="rounded-md border p-4" data-testid="non-fiscal-total"><span>Total Comprobante: </span><strong>${fmt(total)}</strong><p className="text-sm text-muted-foreground">Pendiente de pago en cuenta corriente. Registrá la orden de pago en efectivo al abonarlo.</p></div>}
+              {isNonFiscal && <div className="rounded-md border p-4" data-testid="non-fiscal-total"><span>Total Comprobante: </span><strong>${fmt(total)}</strong><p className="text-sm text-muted-foreground">Genera cuenta corriente y se abona mediante una orden de pago en efectivo.</p></div>}
             <p className="text-xs text-muted-foreground text-center py-2" data-testid="text-remito-sin-impuestos">
-              {isNonFiscal ? "Comprobante no fiscal — el total corresponde a los artículos recibidos, sin agregar IVA." : "Remito — no lleva impuestos ni total, solo suma los artículos al inventario."}
+              {isNonFiscal ? "Compra no fiscal — el total corresponde a los artículos recibidos, sin agregar IVA." : "Entrega pendiente de factura — el valor de los artículos es informativo; no genera deuda ni impuestos."}
             </p>
             </div>
           )}
@@ -1501,7 +1535,7 @@ export function InvoiceDialog({
                 </div>
               {/* La forma de pago va al final: es el último dato que
                   normalmente se conoce al cargar un comprobante. */}
-              {isSupplierPayable && !isEditing && !form.tipoComprobante.startsWith("NC") && (
+              {isSupplierPayable && !isEditing && !sourceRemito && !form.tipoComprobante.startsWith("NC") && (
                 <div className="col-span-2">{formaPagoInmediataSection}</div>
               )}
               {/* Total preview */}
@@ -1559,7 +1593,7 @@ export function InvoiceDialog({
                           unificado) — esta opción no se ofrece acá, solo se muestra si
                           se está editando uno ya existente para no dejar el select en blanco. */}
                       {isEditing && isRemito && (
-                        <SelectItem value={form.tipoComprobante}>{isNonFiscal ? "Comprobante no fiscal" : "Remito"}</SelectItem>
+                        <SelectItem value={form.tipoComprobante}>{isNonFiscal ? "Compra no fiscal" : "Remito"}</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
@@ -1604,7 +1638,7 @@ export function InvoiceDialog({
                         onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
                         onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
                         onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
-                        data-testid="select-supplier"
+                        disabled={!!sourceRemito || isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante)} data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
@@ -2028,7 +2062,7 @@ export function InvoiceDialog({
               {/* La forma de pago se pide acá, al final, en vez de en el
                   encabezado: es el último dato que normalmente se conoce al
                   cargar un comprobante. */}
-              {isSupplierPayable && !isEditing && !form.tipoComprobante.startsWith("NC") && (
+              {isSupplierPayable && !isEditing && !sourceRemito && !form.tipoComprobante.startsWith("NC") && (
                 <>
                   <Separator />
                   {formaPagoInmediataSection}
@@ -2044,11 +2078,11 @@ export function InvoiceDialog({
           <Button variant="ghost" onClick={resetDialog}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
+            disabled={!!storedRemitoId && !storedRemito || loadingRemito || createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
             data-testid="btn-submit-invoice"
           >
             {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
-            {isEditing ? "Guardar cambios" : isNonFiscal ? "Registrar comprobante no fiscal" : isRemito ? "Registrar remito" : "Factura completa"}
+            {sourceRemito ? "Vincular factura" : isEditing ? "Guardar cambios" : isNonFiscal ? "Registrar compra no fiscal" : isRemito ? "Registrar remito" : "Factura completa"}
           </Button>
         </DialogFooter>
           ) : (
@@ -2065,7 +2099,7 @@ export function InvoiceDialog({
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
+                disabled={!!storedRemitoId && !storedRemito || loadingRemito || createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
                 data-testid="btn-submit-invoice"
               >
                 {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
@@ -2105,7 +2139,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     isLiquidacionTarjeta ? `${label} sufrida` : label;
 
   const rows: [string, string][] = [
-    ["Tipo", invoice.tipoComprobante],
+    ["Tipo", purchaseDocumentLabel(invoice.tipoComprobante)],
     ["Número", invoice.numeroComprobanteExt || invoice.numeroComprobante],
     ["Proveedor", invoice.supplierNombre || invoice.proveedorNombre || "—"],
     ["CUIT", invoice.proveedorCuit || "—"],
@@ -2143,6 +2177,10 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          {detail?.special_details?.remitoHistory?.length > 0 && <div className="rounded-md border p-3" data-testid="remito-history">
+            <p className="font-semibold">Historial del remito</p>
+            {detail.special_details.remitoHistory.map((entry: any, index: number) => <p key={index}>{purchaseDocumentLabel(entry.previous.tipo_comprobante)} {entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante} → {purchaseDocumentLabel(entry.nextType)} · {entry.action === "factura_recibida" ? "Factura vinculada; stock y pagos conservados" : "Cambio de uso"}</p>)}
+          </div>}
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             {rows.map(([label, val]) => (
               <div key={label}>
@@ -2251,7 +2289,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
 
 // ─── Subcomponent: Payment Order Dialog ──────────────────────────────────────
 
-function PaymentOrderDialog({
+export function PaymentOrderDialog({
   supplier,
   open,
   onClose,
@@ -2263,6 +2301,7 @@ function PaymentOrderDialog({
   const { toast } = useToast();
   const [selectedInvoices, setSelectedInvoices] = useState<number[]>([]);
   const [createdOpId, setCreatedOpId] = useState<number | null>(null);
+  const [partialAmount, setPartialAmount] = useState("");
   const [autoCalcActive, setAutoCalcActive] = useState(true);
   const [alicuotaIibbForm, setAlicuotaIibbForm] = useState("");
   const [form, setForm] = useState({
@@ -2294,10 +2333,16 @@ function PaymentOrderDialog({
     setAutoCalcActive(false);
     setForm((p) => ({ ...p, [k]: v }));
   };
-  const toggleInv = (id: number) =>
-    setSelectedInvoices((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const toggleInv = (id: number) => {
+    const target = facturas.find(row => row.id === id);
+    const nonFiscal = target?.tipoComprobante === "REMITO-NF";
+    setPartialAmount("");
+    setSelectedInvoices(previous => previous.includes(id) ? previous.filter(value => value !== id)
+      : [...previous.filter(value => (facturas.find(row => row.id === value)?.tipoComprobante === "REMITO-NF") === nonFiscal), id]);
+  };
 
   const selectedFacturas = facturas.filter((inv) => selectedInvoices.includes(inv.id));
+  const hasNonFiscal = selectedFacturas.some(row => row.tipoComprobante === "REMITO-NF");
   const isNC = (inv: Invoice) => (inv.tipoComprobante || "").startsWith("NC");
   // NCs restan del total a abonar; solo las facturas positivas forman la base de retenciones.
   // Para una factura "parcial" se usa el saldo pendiente, no el total original.
@@ -2305,6 +2350,12 @@ function PaymentOrderDialog({
     (s, inv) => isNC(inv) ? s - $n(inv.montoTotal) : s + $n(inv.saldoPendiente ?? inv.montoTotal), 0);
   const baseNetosIibb = selectedFacturas.reduce(
     (s, inv) => isNC(inv) ? s : s + $n(inv.montoNeto), 0);
+
+  const settlementTotal = hasNonFiscal && selectedFacturas.length === 1 && partialAmount !== "" ? Number(partialAmount) : totalSelected;
+  useEffect(() => {
+    if (!hasNonFiscal) return;
+    setForm(previous => ({ ...previous, formaPago: "efectivo", efectivo: Number.isFinite(settlementTotal) ? settlementTotal.toFixed(2) : "", depBancario: "", retencionIibb: "", retencionGanancias: "", retencionIva: "", compensacion: "" }));
+  }, [hasNonFiscal, settlementTotal]);
 
   // Al abrir el diálogo (para cualquier proveedor), resetear todo el estado.
   // Sin esto, `selectedInvoices` y `createdOpId` quedaban de la OP anterior
@@ -2315,6 +2366,7 @@ function PaymentOrderDialog({
     if (supplier && open) {
       setAlicuotaIibbForm(String(supplier.alicuotaIibb ?? ""));
       setSelectedInvoices([]);
+      setPartialAmount("");
       setCreatedOpId(null);
       setAutoCalcActive(true);
       setForm({
@@ -2333,7 +2385,7 @@ function PaymentOrderDialog({
 
   // Auto-calculate retenciones from supplier alícuotas whenever selection changes
   useEffect(() => {
-    if (!autoCalcActive || !supplier) return;
+    if (!autoCalcActive || !supplier || hasNonFiscal) return;
     const alicuotaIibb = parseFloat(alicuotaIibbForm) || supplier.alicuotaIibb || 0;
     const calcIibb = baseNetosIibb > 0 ? (baseNetosIibb * (alicuotaIibb / 100)).toFixed(2) : "";
     const calcOther = (alicuota: number) =>
@@ -2344,14 +2396,14 @@ function PaymentOrderDialog({
       retencionGanancias: calcOther(supplier.alicuotaGanancias ?? 0),
       retencionIva: calcOther(supplier.alicuotaIva ?? 0),
     }));
-  }, [totalSelected, baseNetosIibb, supplier, autoCalcActive, alicuotaIibbForm]);
+  }, [totalSelected, baseNetosIibb, supplier, autoCalcActive, alicuotaIibbForm, hasNonFiscal]);
 
   const handleRecalcular = () => {
     setAutoCalcActive(true);
   };
 
   const totalAbonado =
-    totalSelected -
+    settlementTotal -
     $n(form.retencionIibb) -
     $n(form.retencionGanancias) -
     $n(form.retencionIva) -
@@ -2365,6 +2417,7 @@ function PaymentOrderDialog({
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers", supplier?.id, "cuenta-corriente"] });
       setCreatedOpId(data?.id ?? null);
       toast({ title: "Orden de Pago generada", description: `OP ${data?.numero || ""} emitida correctamente.` });
@@ -2387,7 +2440,11 @@ function PaymentOrderDialog({
       toast({ title: "Seleccione al menos una factura", variant: "destructive" });
       return;
     }
+    if (hasNonFiscal && (!Number.isFinite(settlementTotal) || settlementTotal <= 0 || settlementTotal > totalSelected)) {
+      toast({ title: "El pago debe ser mayor a cero y no superar el saldo seleccionado", variant: "destructive" }); return;
+    }
     createMut.mutate({
+      ...(hasNonFiscal && selectedFacturas.length === 1 && partialAmount !== "" ? { montoParcial: settlementTotal } : {}),
       supplierId: Number(supplier?.id),
       fecha: form.fecha,
       facturaIds: selectedInvoices,
@@ -2451,7 +2508,7 @@ function PaymentOrderDialog({
                     />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium flex items-center gap-1.5">
-                        {inv.tipoComprobante} {inv.numeroComprobanteExt || inv.numeroComprobante}
+                        {purchaseDocumentLabel(inv.tipoComprobante)} {inv.numeroComprobanteExt || inv.numeroComprobante}
                         {esNC && <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 px-1.5 py-0.5 rounded font-normal">resta del total</span>}
                         {inv.estado === "parcial" && <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded font-normal">saldo parcial</span>}
                       </div>
@@ -2477,17 +2534,22 @@ function PaymentOrderDialog({
             </div>
             <div>
               <Label>Forma de Pago</Label>
-              <Select value={form.formaPago} onValueChange={(v) => f("formaPago", v)}>
+              <Select disabled={hasNonFiscal} value={form.formaPago} onValueChange={(v) => f("formaPago", v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {FORMAS_PAGO.map((fp) => <SelectItem key={fp.value} value={fp.value}>{fp.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Dep. Bancario</Label><Input type="number" step="0.01" value={form.depBancario} onChange={(e) => f("depBancario", e.target.value)} data-testid="input-dep-bancario" /></div>
-            <div><Label>Efectivo</Label><Input type="number" step="0.01" value={form.efectivo} onChange={(e) => f("efectivo", e.target.value)} data-testid="input-efectivo-op" /></div>
+            <div><Label>Dep. Bancario</Label><Input type="number" step="0.01" disabled={hasNonFiscal} value={form.depBancario} onChange={(e) => f("depBancario", e.target.value)} data-testid="input-dep-bancario" /></div>
+            <div><Label>Efectivo</Label><Input type="number" step="0.01" readOnly={hasNonFiscal} value={form.efectivo} onChange={(e) => f("efectivo", e.target.value)} data-testid="input-efectivo-op" /></div>
           </div>
 
+          {hasNonFiscal && <div className="rounded-md border p-3" data-testid="non-fiscal-payment-notice">
+            <p>Pago de compra no fiscal: únicamente efectivo. Las facturas fiscales se abonan en una orden de pago separada.</p>
+            {selectedFacturas.length === 1 && <div><Label>Importe a pagar ahora (vacío para cancelar todo)</Label><Input type="number" min="0.01" max={totalSelected} step="0.01" value={partialAmount} onChange={event => setPartialAmount(event.target.value)} data-testid="input-op-partial" /></div>}
+          </div>}
+          {!hasNonFiscal && <>
           <Separator />
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-muted-foreground">Retenciones a practicar</p>
@@ -2529,6 +2591,7 @@ function PaymentOrderDialog({
             </div>
           </div>
 
+          </>}
           <div><Label>Observaciones</Label><Textarea value={form.observaciones} onChange={(e) => f("observaciones", e.target.value)} rows={2} /></div>
 
           {/* Resumen */}
@@ -2824,6 +2887,7 @@ export default function PurchaseInvoices() {
     return params.get("tab") || "comprobantes";
   });
   const [newOpen, setNewOpen] = useState(false);
+  const [sourceRemito, setSourceRemito] = useState<Invoice | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
   const [anularId, setAnularId] = useState<number | null>(null);
@@ -2882,6 +2946,7 @@ export default function PurchaseInvoices() {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       setAnularId(null);
       setAnularError("");
       toast({ title: "Comprobante anulado" });
@@ -2900,6 +2965,7 @@ export default function PurchaseInvoices() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       queryClient.invalidateQueries({ queryKey: ["/api/payment-orders"] });
       setClearAllOpen(false);
       toast({ title: "Listo", description: "Todos los comprobantes y OPs fueron eliminados." });
@@ -2915,7 +2981,8 @@ export default function PurchaseInvoices() {
         !search ||
         (inv.supplierNombre || inv.proveedorNombre || "").toLowerCase().includes(search.toLowerCase()) ||
         (inv.proveedorCuit || "").includes(search) ||
-        (inv.numeroComprobanteExt || inv.numeroComprobante).includes(search);
+        (inv.numeroComprobanteExt || inv.numeroComprobante).includes(search) ||
+        (inv.specialDetails?.remitoHistory || []).some(entry => String(entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante || "").toLowerCase().includes(search.toLowerCase()));
       const matchEstado = filterEstado === "todos" || inv.estado === filterEstado;
       const matchPeriodo = !filterPeriodo || inv.periodo === filterPeriodo;
       return matchSearch && matchEstado && matchPeriodo;
@@ -3059,7 +3126,7 @@ export default function PurchaseInvoices() {
                       {filteredInvoices.map((inv) => (
                         <TableRow key={inv.id} data-testid={`row-invoice-${inv.id}`} className={inv.estado === "anulado" ? "opacity-50" : ""}>
                           <TableCell>
-                            <Badge variant="secondary" className="font-mono text-xs">{inv.tipoComprobante === "REMITO-NF" ? "Comprobante no fiscal" : inv.tipoComprobante}</Badge>
+                            <Badge variant="secondary" className="font-mono text-xs">{purchaseDocumentLabel(inv.tipoComprobante)}</Badge>
                           </TableCell>
                           <TableCell className="font-mono text-sm">{inv.numeroComprobanteExt || inv.numeroComprobante}</TableCell>
                           <TableCell className="max-w-[160px] truncate" title={inv.supplierNombre || inv.proveedorNombre}>
@@ -3067,7 +3134,7 @@ export default function PurchaseInvoices() {
                           </TableCell>
                           <TableCell>{formatDisplayDate(inv.fechaEmision)}</TableCell>
                           <TableCell>{inv.periodo || "—"}</TableCell>
-                          <TableCell className="text-right font-semibold">${fmt(inv.montoTotal)}</TableCell>
+                          <TableCell className="text-right font-semibold">${fmt(inv.tipoComprobante === "REMITO" ? inv.remitoSubtotal ?? inv.montoTotal : inv.montoTotal)}</TableCell>
                           <TableCell>{estadoBadge(inv.estado)}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
@@ -3079,7 +3146,7 @@ export default function PurchaseInvoices() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              {canEditPurchaseInvoice(user?.role, inv.estado) && (
+                              {(canEditPurchaseInvoice(user?.role, inv.estado) || isPurchaseRemito(inv.tipoComprobante) && inv.estado !== "anulado") && (
                                 <>
                                   <Button
                                     variant="ghost" size="icon"
@@ -3091,6 +3158,7 @@ export default function PurchaseInvoices() {
                                   </Button>
                                 </>
                               )}
+                              {isPurchaseRemito(inv.tipoComprobante) && inv.estado !== "anulado" && <Button variant="ghost" size="sm" title="Cargar factura del remito" data-testid={`btn-invoice-remito-${inv.id}`} onClick={() => setSourceRemito(inv)}>Cargar factura</Button>}
                               {(inv.estado === "pendiente" || inv.estado === "registrado") && (
                                 <Button variant="ghost" size="icon" onClick={() => { setAnularError(""); setAnularId(inv.id); }}
                                   title="Anular" data-testid={`btn-anular-invoice-${inv.id}`}>
@@ -3175,7 +3243,7 @@ export default function PurchaseInvoices() {
       </div>
 
       {/* Dialogs */}
-      <InvoiceDialog open={newOpen || !!editingInvoice} onClose={() => { setNewOpen(false); setEditingInvoice(null); }} suppliers={suppliers} accounts={accounts} editingInvoice={editingInvoice} />
+      <InvoiceDialog open={newOpen || !!editingInvoice || !!sourceRemito} onClose={() => { setNewOpen(false); setEditingInvoice(null); setSourceRemito(null); }} suppliers={suppliers} accounts={accounts} editingInvoice={editingInvoice} sourceRemito={sourceRemito} unifiedLayout={!!sourceRemito || isPurchaseRemito(editingInvoice?.tipoComprobante)} />
       <PaymentOrderDialog supplier={opSupplier} open={!!opSupplier} onClose={() => setOpSupplier(null)} />
       <InvoiceDetailDialog invoice={detailInvoice} accounts={accounts} onClose={() => setDetailInvoice(null)} />
 

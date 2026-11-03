@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculatePurchaseInvoiceTotal, isSupplierPayableDocument, isValidPurchaseInvoiceTotal, nonFiscalPurchaseStockTotal, normalizeNonFiscalPurchase } from "./purchaseInvoiceTotals";
 import { purchaseInvoiceBalanceAfterEdit } from "./purchase-invoice-edit";
 
-describe("Comprobante no fiscal", () => {
+describe("Compra no fiscal", () => {
   it("suma los subtotales por presentación, redondeados por renglón", () => {
     expect(nonFiscalPurchaseStockTotal([{ quantity: 2, unitCost: 1200 }, { quantity: 3, unitCost: 100.125 }])).toBe(2700.38);
     expect(() => nonFiscalPurchaseStockTotal([])).toThrow("requiere artículos");

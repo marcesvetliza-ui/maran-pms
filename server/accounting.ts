@@ -41,7 +41,7 @@ function parseNum(v: string | null | undefined): number {
 // ─── Concepto ─────────────────────────────────────────────────────────────────
 
 function getConcepto(tipoComprobante: string): string {
-  if (tipoComprobante === "REMITO-NF") return "Compra — comprobante no fiscal";
+  if (tipoComprobante === "REMITO-NF") return "Compra no fiscal";
   if (tipoComprobante === "RETENCION") return "Retención recibida";
   if (tipoComprobante.startsWith("NC")) return "Prov N.Credito A/M";
   if (tipoComprobante === "RESUMEN-BANCO") return "Prov. Resumen Banco";

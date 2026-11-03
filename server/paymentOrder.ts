@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { generarAsientoOP } from "./accounting";
+import { validateNonFiscalPayment } from "@shared/purchase-remito";
 
 type Executor = Pick<typeof db, "execute">;
 
@@ -48,7 +49,7 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
   const idsSQL = sql.raw(idsInt.join(","));
   const facturasRes = await tx.execute(sql`
     SELECT id, monto_total, monto_neto, saldo_pendiente, tipo_comprobante, estado, supplier_id FROM purchase_invoices
-    WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado IN ('pendiente', 'parcial')
+    WHERE id IN (${idsSQL}) AND supplier_id = ${supplierId} AND estado IN ('pendiente', 'parcial') ORDER BY id FOR UPDATE
   `);
   if (facturasRes.rows.length !== idsInt.length) {
     const idsEncontrados = facturasRes.rows.map((r: any) => Number(r.id));
@@ -92,6 +93,7 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
   const retProf = parseFloat(String(input.retencionProfLibs ?? "0")) || 0;
   const comp = parseFloat(String(input.compensacion ?? "0")) || 0;
   const totalAbonado = totalFacturas - retIibb - retGan - retIva - retProf - comp;
+  validateNonFiscalPayment(facturasRes.rows as any, input, totalFacturas);
 
   // Número de OP autoincremental
   const numRes = await tx.execute(sql`
@@ -108,7 +110,7 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
   const opFecha = fecha || getArgentinaToday();
   const opRes = await tx.execute(sql`
     INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones, alicuota_iibb_op)
-    VALUES (${numero}, ${supplierId}, ${opFecha}, ${formaPago || "transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${observaciones || null}, ${alicuotaIibb || null})
+    VALUES (${numero}, ${supplierId}, ${opFecha}, ${formaPago || "transferencia"}, ${dep}, ${ef}, ${ch}, ${totalFacturas}, ${retIibb}, ${retGan}, ${retIva}, ${retProf}, ${comp}, ${totalAbonado}, ${facturasRes.rows.some((row: any) => row.tipo_comprobante === "REMITO-NF") ? ["Pago de compra no fiscal", observaciones].filter(Boolean).join(" — ") : observaciones || null}, ${alicuotaIibb || null})
     RETURNING *
   `);
   const op = opRes.rows[0] as any;

@@ -15,7 +15,7 @@ const identity={supplierId:1,proveedorCuit:'30-12345678-1',tipoComprobante:'FACT
 suite('Purchase invoice identity guard — real PostgreSQL, isolated schema',()=>{
  beforeAll(async()=>{
   await base!.query(`CREATE SCHEMA ${schema}`);
-  await pool!.query(`CREATE TABLE purchase_invoices(id serial PRIMARY KEY,supplier_id integer,proveedor_cuit text,tipo_comprobante text,punto_venta text,numero_comprobante text,numero_comprobante_ext text,estado text DEFAULT 'pendiente')`);
+  await pool!.query(`CREATE TABLE purchase_invoices(id serial PRIMARY KEY,supplier_id integer,proveedor_cuit text,tipo_comprobante text,punto_venta text,numero_comprobante text,numero_comprobante_ext text,estado text DEFAULT 'pendiente',special_details jsonb)`);
   // Markers for downstream work: these are not operational accounting tables.
   await pool!.query('CREATE TABLE effects(invoice_id integer REFERENCES purchase_invoices(id),kind text)');
  });

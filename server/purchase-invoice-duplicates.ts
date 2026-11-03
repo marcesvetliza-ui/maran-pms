@@ -1,6 +1,6 @@
 import {sql,type SQL} from 'drizzle-orm';
 
-type Identity={supplierId:number;proveedorCuit?:string|null;tipoComprobante:string;puntoVenta?:string|number|null;numeroComprobante:string|number};
+type Identity={excludeInvoiceId?:number;supplierId:number;proveedorCuit?:string|null;tipoComprobante:string;puntoVenta?:string|number|null;numeroComprobante:string|number};
 type Transaction={execute:(query:SQL)=>Promise<any>};
 export function canonicalPurchaseNumber(value:unknown,empty='') {
  const text=String(value??'').replace(/\s+/g,'').toUpperCase();
@@ -23,10 +23,17 @@ export async function assertPurchaseInvoiceNotDuplicate(tx:Transaction,input:Ide
  for(const identity of identities.sort())await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`purchase-invoice:${identity}:${document}`},0))`);
  const duplicate=await tx.execute(sql`
   SELECT id,numero_comprobante,numero_comprobante_ext FROM purchase_invoices
-  WHERE upper(btrim(tipo_comprobante))=${type}
-    AND ${canonicalColumn(sql`numero_comprobante`)}=${number}
-    AND ${canonicalColumn(sql`punto_venta`,'0')}=${pv}
-    AND (supplier_id=${input.supplierId} OR (${validCuit} AND regexp_replace(coalesce(proveedor_cuit,''),'[^0-9]','','g')=${cuit}))
+  WHERE id <> ${input.excludeInvoiceId ?? 0} AND (
+    (upper(btrim(tipo_comprobante))=${type}
+      AND ${canonicalColumn(sql`numero_comprobante`)}=${number}
+      AND ${canonicalColumn(sql`punto_venta`,'0')}=${pv})
+    OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(special_details->'remitoHistory')='array' THEN special_details->'remitoHistory' ELSE '[]'::jsonb END) h
+      WHERE upper(btrim(h->'previous'->>'tipo_comprobante'))=${type}
+        AND ${canonicalColumn(sql`h->'previous'->>'numero_comprobante'`)}=${number}
+        AND ${canonicalColumn(sql`h->'previous'->>'punto_venta'`,'0')}=${pv}
+    )
+  ) AND (supplier_id=${input.supplierId} OR (${validCuit} AND regexp_replace(coalesce(proveedor_cuit,''),'[^0-9]','','g')=${cuit}))
   ORDER BY id LIMIT 1
  `);
  const existing=duplicate.rows[0];

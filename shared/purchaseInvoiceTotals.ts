@@ -255,6 +255,6 @@ export function normalizeNonFiscalPurchase<T extends PurchaseInvoiceAmountInput>
 }
 
 export function nonFiscalPurchaseStockTotal(rows: Array<{ quantity: number; unitCost: number }>): number {
-  if (!rows.length) throw Object.assign(new Error("El comprobante no fiscal requiere artículos."), { statusCode: 400 });
+  if (!rows.length) throw Object.assign(new Error("El compra no fiscal requiere artículos."), { statusCode: 400 });
   return roundCurrency(rows.reduce((total, row) => total + roundCurrency(row.quantity * row.unitCost), 0));
 }
