@@ -1158,16 +1158,22 @@ export class DatabaseStorage implements IStorage {
       }
       if (insertData.roomTypeId && insertData.checkInDate && insertData.checkOutDate &&
           !["cancelled", "checked_out", "no_show"].includes(insertData.status)) {
+        const chosenRoom = insertData.roomId ? await this.getRoom(insertData.roomId) : null;
         const inventoryConflict = await this.evaluateReservationInventory({
+          hasSpecificRoom: !!chosenRoom && chosenRoom.roomTypeId === insertData.roomTypeId && isOperationalInventoryRoom(chosenRoom) && !["maintenance", "oos"].includes(chosenRoom.status),
+          override: overrideSoft,
           roomTypeId: insertData.roomTypeId,
           checkInDate: insertData.checkInDate,
           checkOutDate: insertData.checkOutDate,
           contextGroupId,
         });
         if (inventoryConflict && !(inventoryConflict.code === "GROUP_BLOCK_WARNING" && overrideSoft)) {
-          throw Object.assign(new Error("La demanda de habitaciones excede el inventario disponible."), {
+          const message = inventoryConflict.unassignedConfirmedGroupUnits
+            ? `Hay ${inventoryConflict.unassignedConfirmedGroupUnits} habitación(es) comprometidas para grupos confirmados pendientes de asignar el ${inventoryConflict.date}. El movimiento excede el inventario operativo.`
+            : "La demanda de habitaciones excede el inventario disponible.";
+          throw Object.assign(new Error(message), {
             statusCode: 409,
-            response: { error: "La demanda de habitaciones excede el inventario disponible.", code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.code === "GROUP_BLOCK_WARNING" },
+            response: { error: message, code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.code === "GROUP_BLOCK_WARNING" },
           });
         }
       }
@@ -1200,6 +1206,8 @@ export class DatabaseStorage implements IStorage {
     checkOutDate: string;
     excludeReservationId?: string;
     contextGroupId?: string;
+    hasSpecificRoom?: boolean;
+    override?: boolean;
   }): Promise<GroupInventoryConflict | null> {
     const [roomRows, groupRows, blockRows, linkRows, reservationRows] = await Promise.all([
       db.select({ id: rooms.id, roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId)),
@@ -1227,6 +1235,8 @@ export class DatabaseStorage implements IStorage {
       reservations: reservationRows.map(row => ({ ...row, groupId: linkByReservation.get(row.id) ?? null })),
       excludeReservationId: input.excludeReservationId,
       contextGroupId: input.contextGroupId,
+      hasSpecificRoom: input.hasSpecificRoom,
+      override: input.override,
     });
   }
 
@@ -1332,7 +1342,10 @@ export class DatabaseStorage implements IStorage {
       }
       if (inventoryRelevant && finalRoomTypeId && finalCheckIn && finalCheckOut &&
           !["cancelled", "checked_out", "no_show"].includes(finalStatus)) {
+        const chosenRoom = finalRoomId ? await this.getRoom(finalRoomId) : null;
         const inventoryConflict = await this.evaluateReservationInventory({
+          hasSpecificRoom: !!chosenRoom && chosenRoom.roomTypeId === finalRoomTypeId && isOperationalInventoryRoom(chosenRoom) && !["maintenance", "oos"].includes(chosenRoom.status),
+          override: overrideSoft,
           roomTypeId: finalRoomTypeId,
           checkInDate: finalCheckIn,
           checkOutDate: finalCheckOut,
@@ -1340,9 +1353,12 @@ export class DatabaseStorage implements IStorage {
           contextGroupId,
         });
         if (inventoryConflict && !(inventoryConflict.code === "GROUP_BLOCK_WARNING" && overrideSoft)) {
-          throw Object.assign(new Error("La demanda de habitaciones excede el inventario disponible."), {
+          const message = inventoryConflict.unassignedConfirmedGroupUnits
+            ? `Hay ${inventoryConflict.unassignedConfirmedGroupUnits} habitación(es) comprometidas para grupos confirmados pendientes de asignar el ${inventoryConflict.date}. El movimiento excede el inventario operativo.`
+            : "La demanda de habitaciones excede el inventario disponible.";
+          throw Object.assign(new Error(message), {
             statusCode: 409,
-            response: { error: "La demanda de habitaciones excede el inventario disponible.", code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.code === "GROUP_BLOCK_WARNING" },
+            response: { error: message, code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.code === "GROUP_BLOCK_WARNING" },
           });
         }
       }

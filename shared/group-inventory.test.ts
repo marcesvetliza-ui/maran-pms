@@ -98,3 +98,22 @@ describe("group inventory accounting", () => {
     })).toBeNull();
   });
 });
+describe("physical room confirmation policy", () => {
+  const input = { ...base, operationalInventory: 1, groups: [], blocks: [],
+    reservations: [{id:"existing",roomTypeId:"std",checkInDate:"2026-10-10",checkOutDate:"2026-10-12",status:"confirmed"}] };
+  it("requires an explicit confirmation for a free physical room with an aggregate deficit", () => {
+    expect(evaluateGroupInventory({...input,hasSpecificRoom:true})).toMatchObject({code:"GROUP_BLOCK_WARNING",canOverride:true,hardDemand:2,operationalInventory:1,warnings:[]});
+    expect(evaluateGroupInventory({...input,hasSpecificRoom:true,override:true})).toBeNull();
+  });
+  it("does not override a deficit without a concrete free operational room", () => {
+    expect(evaluateGroupInventory({...input,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",canOverride:false});
+  });
+  it("preserves unassigned confirmed group commitments even after acceptance", () => {
+    expect(evaluateGroupInventory({...input,groups:base.groups,blocks:base.blocks,hasSpecificRoom:true,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",canOverride:false});
+  });
+  it("checks later nights before offering confirmation", () => {
+    const groups=[{...base.groups[0],checkInDate:"2026-10-11"}];
+    expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",date:"2026-10-11",canOverride:false});
+    expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",date:"2026-10-11"});
+  });
+});

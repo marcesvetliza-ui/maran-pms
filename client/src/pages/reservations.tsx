@@ -196,7 +196,7 @@ export function ReservationFormDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: (reservation?: ReservationWithDetails) => void;
-  onError?: () => void;
+  onError?: (error: unknown) => void;
   defaultValues?: {
     roomId?: string;
     roomTypeId?: string;
@@ -901,7 +901,7 @@ export function ReservationFormDialog({
         duration: 8000,
       });
       if (!isEditing && onError) {
-        onError();
+        onError(error);
       }
     },
   });

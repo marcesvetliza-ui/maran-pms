@@ -52,7 +52,7 @@ vi.mock("../billing/invoiceService", () => ({
 vi.mock("../billing/invoicePdf", () => ({ generarResumenCuentaPDF: vi.fn() }));
 vi.mock("../billing/billingConfig", () => ({ getBillingConfig: vi.fn() }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
-vi.mock("../email-service", () => ({ sendCheckoutEmail: vi.fn(), sendConfirmationEmail: vi.fn() }));
+vi.mock("../email-service", () => ({ sendCheckoutEmail: vi.fn(async () => undefined), sendConfirmationEmail: vi.fn(async () => undefined) }));
 vi.mock("../utils/assetPath", () => ({ assetPath: (value: string) => value }));
 vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
 
@@ -291,4 +291,22 @@ describe("reservation zero-rate API guard", () => {
       expect(storage.updateReservation).toHaveBeenCalled();
     });
   });
+});
+
+
+describe("inventory confirmation carried to transactional storage",()=>{
+ it("carries the explicit confirmation and group context on create",async()=>{
+  await withServer(async baseUrl=>{
+   const result=await request(baseUrl,"POST",{...baseReservation,overrideTentativeGroupWarning:true,contextGroupId:"group-context"});
+   expect(result.status).toBe(201);
+   expect(storage.createReservation).toHaveBeenCalledWith(expect.objectContaining({_inventoryOverrideTentativeGroupWarning:true,_inventoryContextGroupId:"group-context"}),expect.any(Function));
+  });
+ });
+ it("never downgrades a confirmed group shortage to a confirmable warning",async()=>{
+  storage.evaluateReservationInventory.mockResolvedValueOnce({code:"GROUP_BLOCK_SHORTAGE",canOverride:false,warnings:[],hardDemand:29,operationalInventory:28} as any);
+  await withServer(async baseUrl=>{
+   const result=await request(baseUrl,"POST",{...baseReservation,overrideTentativeGroupWarning:true});
+   expect(result.status).toBe(409);expect(result.body.canOverride).toBe(false);expect(storage.createReservation).not.toHaveBeenCalled();
+  });
+ });
 });

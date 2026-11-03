@@ -1492,14 +1492,14 @@ export default function PlanningPage() {
           queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
           queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
         }}
-        onError={() => {
+        onError={(error) => {
           const params = new URLSearchParams();
           if (newReservationDefaults?.roomId) params.set("roomId", newReservationDefaults.roomId);
           if (newReservationDefaults?.checkInDate) params.set("checkInDate", newReservationDefaults.checkInDate);
           const url = `/reservations${params.toString() ? `?${params.toString()}` : ""}`;
           toast({
             title: "No se pudo crear la reserva desde el planning",
-            description: "Podés intentarlo desde el formulario completo de reservas.",
+            description: parseApiError(error),
             variant: "destructive",
             duration: 12000,
             action: (

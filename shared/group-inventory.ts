@@ -29,6 +29,7 @@ export type GroupInventoryConflict = {
   roomTypeName?: string;
   hardDemand?: number;
   operationalInventory?: number;
+  unassignedConfirmedGroupUnits?: number;
 };
 
 export type InventoryGroup = {
@@ -68,6 +69,9 @@ export type GroupInventoryInput = {
   contextGroupId?: string;
   /** Number of new units being evaluated (0 validates existing commitments). */
   candidateUnits?: number;
+  /** Set only after checking a concrete operational room for overlap. */
+  hasSpecificRoom?: boolean;
+  override?: boolean;
 };
 
 const IGNORED_RESERVATION_STATUSES = new Set(["cancelled", "checked_out", "no_show"]);
@@ -118,6 +122,7 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     overlaps(input.checkIn, input.checkOut, reservation.checkInDate, reservation.checkOutDate),
   );
   const warningRows: GroupInventoryWarning[] = [];
+  let categoryWarning: GroupInventoryConflict | null = null;
   const dateList = nights(input.checkIn, input.checkOut);
 
   for (const date of dateList) {
@@ -143,6 +148,7 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     }).length + (candidateInBlock ? 0 : candidateUnits);
 
     let hardDemand = normalDemand;
+    let unassignedHardCommitment = 0;
     const softRows: Array<{
       group: InventoryGroup;
       quantity: number;
@@ -157,6 +163,7 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       const effectiveLinkedCount = linkedCount + (isCandidateInBlock ? candidateUnits : 0);
       if (HARD_GROUP_STATUSES.has(group.status)) {
         hardDemand += Math.max(quantity, effectiveLinkedCount);
+        unassignedHardCommitment += Math.max(quantity - effectiveLinkedCount, 0);
       } else if (SOFT_GROUP_STATUSES.has(group.status)) {
         hardDemand += effectiveLinkedCount;
         const remaining = Math.max(quantity - effectiveLinkedCount, 0);
@@ -164,15 +171,20 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       }
     }
     if (hardDemand > input.operationalInventory) {
-      return {
-        code: GROUP_BLOCK_SHORTAGE_CODE,
-        canOverride: false,
-        warnings: warningRows,
+      const overridable = input.hasSpecificRoom === true && unassignedHardCommitment === 0;
+      const conflict: GroupInventoryConflict = {
+        code: overridable ? GROUP_BLOCK_WARNING_CODE : GROUP_BLOCK_SHORTAGE_CODE,
+        canOverride: overridable,
+        warnings: [],
         date,
         roomTypeId: input.roomTypeId,
         hardDemand,
         operationalInventory: input.operationalInventory,
+        unassignedConfirmedGroupUnits: unassignedHardCommitment,
       };
+      if (!overridable) return conflict;
+      if (!input.override && !categoryWarning) categoryWarning = conflict;
+      // Keep checking all later nights: acceptance never bypasses hard groups.
     }
     const totalSoftRemaining = softRows.reduce((sum, row) => sum + row.remaining, 0);
     if (hardDemand + totalSoftRemaining > input.operationalInventory) {
@@ -191,7 +203,8 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       }
     }
   }
-  return warningRows.length ? {
+  if (categoryWarning) return categoryWarning;
+  return warningRows.length && !input.override ? {
     code: GROUP_BLOCK_WARNING_CODE,
     canOverride: true,
     warnings: warningRows,
