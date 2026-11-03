@@ -1,3 +1,5 @@
+export const NON_FISCAL_PURCHASE_TYPE = "REMITO-NF";
+
 export const CARD_SETTLEMENT_TYPE = "LIQ-TARJETA";
 export const RECEIVED_RETENTION_TYPE = "RETENCION";
 
@@ -101,7 +103,7 @@ export function isReceivedRetention(tipoComprobante?: string | null): boolean {
 
 /** Los comprobantes del proveedor se cancelan mediante su Orden de Pago. */
 export function isSupplierPayableDocument(tipoComprobante?: string | null): boolean {
-  return /^(FACT|NC|ND|RECIBO)-/.test(tipoComprobante || "");
+  return tipoComprobante === NON_FISCAL_PURCHASE_TYPE || /^(FACT|NC|ND|RECIBO)-/.test(tipoComprobante || "");
 }
 
 export function receivedRetentionAccountCode(subtipo?: string | null): string | null {
@@ -164,7 +166,7 @@ export function calculatePurchaseInvoiceAmountsFromNetLines(
 export function calculatePurchaseInvoiceTotal(input: PurchaseInvoiceAmountInput): number {
   // Una retención recibida es un certificado por un crédito fiscal: el importe
   // ingresado ya es el valor final, igual que en los comprobantes C.
-  if (isReceivedRetention(input.tipoComprobante)) {
+  if (isReceivedRetention(input.tipoComprobante) || input.tipoComprobante === NON_FISCAL_PURCHASE_TYPE) {
     return roundCurrency(amount(input.montoNeto));
   }
 
@@ -237,4 +239,22 @@ export function purchaseInvoiceRetentionSide(tipoComprobante?: string | null): "
 
 export function shouldRegisterPracticedIibbRetention(tipoComprobante?: string | null): boolean {
   return !isCardSettlement(tipoComprobante) && !isReceivedRetention(tipoComprobante);
+}
+
+/** No fiscal: el precio recibido es final, sin crédito fiscal ni impuestos. */
+export function normalizeNonFiscalPurchase<T extends PurchaseInvoiceAmountInput>(input: T): T {
+  if (input.tipoComprobante !== NON_FISCAL_PURCHASE_TYPE) return input;
+  const result = { ...input };
+  for (const key of [
+    "montoIva21", "montoIva105", "montoIva27", "montoIva5", "montoIva25",
+    "montoExento", "montoNoGravado", "impuestosInternos", "ley25413",
+    "percepcionIibb", "percepcionIva", "percepcionGanancias",
+    "retencionIibb", "retencionGanancias", "retencionIva", "retencionSuss", "retencionMunicipal",
+  ] as const) result[key] = "0";
+  return result;
+}
+
+export function nonFiscalPurchaseStockTotal(rows: Array<{ quantity: number; unitCost: number }>): number {
+  if (!rows.length) throw Object.assign(new Error("El comprobante no fiscal requiere artículos."), { statusCode: 400 });
+  return roundCurrency(rows.reduce((total, row) => total + roundCurrency(row.quantity * row.unitCost), 0));
 }

@@ -132,6 +132,50 @@ describe("InvoiceDialog — Remito", () => {
     expect(screen.getByTestId("btn-submit-invoice")).toHaveTextContent("Registrar remito");
   });
 
+  it("permite elegir comprobante no fiscal y volver a pendiente de factura", async () => {
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true });
+    await selectRemito(user);
+    await user.click(screen.getByTestId("select-uso-remito"));
+    await user.click(await screen.findByRole("option", { name: "Comprobante no fiscal" }));
+    expect(screen.getByTestId("non-fiscal-total")).toHaveTextContent("Total Comprobante");
+    expect(screen.getByTestId("btn-submit-invoice")).toHaveTextContent("Registrar comprobante no fiscal");
+    expect(screen.queryByText("Impuestos y totales")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("select-uso-remito"));
+    await user.click(await screen.findByRole("option", { name: "Pendiente de factura" }));
+    expect(screen.queryByTestId("non-fiscal-total")).not.toBeInTheDocument();
+    expect(screen.getByTestId("btn-submit-invoice")).toHaveTextContent("Registrar remito");
+  });
+
+  it("suma cantidad por costo y envía el importe a cuenta corriente sin IVA", async () => {
+    const capture: { body: any } = { body: undefined };
+    const fallback = buildFetchMock(capture);
+    vi.stubGlobal("fetch", vi.fn(async (url: any, options?: RequestInit) => {
+      if (String(url).endsWith("/api/inventory/items")) return new Response(JSON.stringify([{ id: "item-nf", name: "Mercadería NF", unit: "unidad", costPrice: "1200", ivaRate: "21" }]), { status: 200 });
+      if (String(url).endsWith("/api/inventory/warehouses")) return new Response(JSON.stringify([{ id: "wh-nf", name: "Depósito General", is_active: "true" }]), { status: 200 });
+      return fallback(url, options);
+    }));
+    const user = userEvent.setup();
+    renderDialog({ unifiedLayout: true });
+    await selectRemito(user);
+    await user.click(screen.getByTestId("select-uso-remito"));
+    await user.click(await screen.findByRole("option", { name: "Comprobante no fiscal" }));
+    await user.click(await screen.findByTestId("select-existing-item-0"));
+    await user.click(await screen.findByText("Mercadería NF"));
+    await user.clear(screen.getByTestId("input-inv-qty-0"));
+    await user.type(screen.getByTestId("input-inv-qty-0"), "2");
+    await user.clear(screen.getByTestId("input-inv-cost-0"));
+    await user.type(screen.getByTestId("input-inv-cost-0"), "1200");
+    expect(screen.getByTestId("non-fiscal-total")).toHaveTextContent("2.400,00");
+    await user.click(screen.getByTestId("select-supplier"));
+    await user.click(await screen.findByText("Proveedor Uno SA"));
+    await user.type(screen.getByTestId("input-numero-comprobante"), "NF-00001");
+    await user.click(screen.getByTestId("btn-submit-invoice"));
+    await waitFor(() => expect(capture.body).toBeTruthy());
+    expect(capture.body).toMatchObject({ tipoComprobante: "REMITO-NF", montoNeto: "2400.00", condicionPago: "cuenta_corriente", montoIva21: "", formasPago: [] });
+    expect(capture.body.stockItems[0]).toMatchObject({ itemId: "item-nf", quantity: "2", unitCost: "1200" });
+  });
+
   it("enviarlo manda tipoComprobante REMITO sin montos, solo emisor y artículos", async () => {
     const capture: { body: any } = { body: undefined };
     vi.stubGlobal("fetch", buildFetchMock(capture));

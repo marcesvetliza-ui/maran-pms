@@ -93,6 +93,8 @@ import {
   isValidPurchaseInvoiceTotal,
   isReceivedRetention,
   isSupplierPayableDocument,
+  normalizeNonFiscalPurchase,
+  nonFiscalPurchaseStockTotal,
   receivedRetentionAccountCode,
   shouldRegisterPracticedIibbRetention,
   condicionIvaPermiteComprobante,
@@ -3009,7 +3011,10 @@ export async function registerRoutes(
         });
         return res.status(201).json(result.rows[0]);
       }
-      const body = applyPurchaseDiscount(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante));
+      const body = normalizeNonFiscalPurchase(applyPurchaseDiscount(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante)));
+      if (body.tipoComprobante === "REMITO-NF") {
+        body.montoNeto = nonFiscalPurchaseStockTotal(parsePurchaseStockRows(body.stockItems)).toFixed(2);
+      }
       if (isSupplierPayableDocument(body.tipoComprobante) && hasPurchaseRetentions(body)) {
         return res.status(400).json({ error: "Las retenciones al proveedor se registran al pagar, en la Orden de Pago." });
       }
@@ -3240,7 +3245,7 @@ export async function registerRoutes(
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
       if((existing.rows[0] as any).descuento && req.body.descuentoTipo===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar o modificar el descuento de este comprobante.'});
-      const body = applyPurchaseDiscount({...normalizeReceivedRetentionAmounts(req.body, tipoComprobante),tipoComprobante});
+      const body = normalizeNonFiscalPurchase(applyPurchaseDiscount({...normalizeReceivedRetentionAmounts(req.body, tipoComprobante),tipoComprobante}));
       // Las correcciones de comprobantes históricos conservan sus retenciones;
       // uno que nunca las tuvo no puede incorporarlas desde este formulario.
       if (isSupplierPayableDocument(tipoComprobante) &&
