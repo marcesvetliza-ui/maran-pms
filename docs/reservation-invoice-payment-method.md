@@ -40,3 +40,24 @@ read or changed by these tests.
 Reported case: room 1101, FA 0005-00000080 → NC → FA 0005-00000084, 163500 ARS. Its exact operational
 payment linkage / shift state remains unverified: available credentials provide
 Railway deployment/log access, not an authenticated hotel database session.
+
+## Administrative credit/debit rectification after closing
+
+The ordinary editor still refuses closed shifts. An authenticated admin can
+explicitly review and confirm a credit/debit reclassification with a reason and
+proof reference. Preview shows the actual shift number, closing time, amount and
+card totals before/after. It requires a unique original summary and current card
+movements matching that summary or the latest verified revision. Cash and other
+tenders are ineligible. Original closing summary, physical cash count, total
+money received and fiscal documents remain intact.
+
+The additive cash_card_rectifications table retains the original closing and
+cash receipt snapshots, before/after classification, actor, reason and evidence.
+Changing classification and recording the revision are atomic. Receipt/payment
+identities stay fixed; repeated UUIDs cannot apply twice. Shift history presents
+rectifications separately from original closing totals. No ARCA request occurs.
+
+Account recovery is now offered only for explicit CC settlement or an independently
+linked account cargo. No cargo on a verified card/cash receipt returns
+not_applicable and creates no account movement, rather than suggesting a debt
+link is missing. Unknown or actual CC histories still require review.

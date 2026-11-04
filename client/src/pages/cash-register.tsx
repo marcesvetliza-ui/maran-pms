@@ -1,3 +1,4 @@
+import { CashCardRectificationHistory } from '@/components/cash-card-rectification';
 import { CASH_DOCUMENT_LABELS, cashDocumentSummary, type CashDocumentEvidence } from "@shared/cash-document-classification";
 import { ReservationCancellationHistory } from "@/components/reservation-cancellation-history";
 import { canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
@@ -2077,6 +2078,7 @@ function HistorialTab() {
           </DialogHeader>
           {shiftDetail?.shift.area === "spa" && detailShiftId && <SpaCancellationHistory shiftId={detailShiftId} />}
           {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <ReservationCancellationHistory shiftId={detailShiftId} />}
+          {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <CashCardRectificationHistory shiftId={detailShiftId} />}
           {detailLoading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => (

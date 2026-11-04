@@ -1,4 +1,5 @@
 import { registerReceptionOperationRoutes } from "./receptionOperations";
+import { registerCashCardRectificationRoutes } from './cashCardRectificationRoutes';
 import { beginBillingOperation } from "./operationJournal";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { discardRejectedExemptInvoice, findRejectedExemptAttempt } from "./rejectedExemptInvoice";
@@ -7,7 +8,7 @@ import { recoverGroupCreditNote } from "./groupCreditRecovery";
 import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
 import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
-import {creditNoteAccountMovement} from './creditNoteAccountMovement';
+import {creditNoteAccountMovement, originalAccountChargeLinked} from './creditNoteAccountMovement';
 import type { Express } from "express";
 import fs from "fs";
 import path from "path";
@@ -854,6 +855,10 @@ export function registerBillingRoutes(app: Express) {
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
+               orig.cash_forma_pago AS original_cash_forma_pago,
+               orig.cash_forma_pago_detalle AS original_cash_forma_pago_detalle,
+               orig.credit_reapplication_intent AS original_credit_reapplication_intent,
+               ${originalAccountChargeLinked} AS original_account_charge_linked,
                EXISTS (
                  SELECT 1 FROM group_invoices gi
                  WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
@@ -1058,6 +1063,10 @@ export function registerBillingRoutes(app: Express) {
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
+               orig.cash_forma_pago AS original_cash_forma_pago,
+               orig.cash_forma_pago_detalle AS original_cash_forma_pago_detalle,
+               orig.credit_reapplication_intent AS original_credit_reapplication_intent,
+               ${originalAccountChargeLinked} AS original_account_charge_linked,
                EXISTS (
                  SELECT 1 FROM group_invoices gi
                  WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
@@ -1125,6 +1134,7 @@ export function registerBillingRoutes(app: Express) {
 
   // POST /api/billing/invoices
   registerReceptionOperationRoutes(app);
+  registerCashCardRectificationRoutes(app);
 
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {

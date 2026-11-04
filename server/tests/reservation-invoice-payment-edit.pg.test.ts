@@ -43,9 +43,11 @@ async function reapplicationFixture(explicitRelease=false) {
   return {...f,invoice:target,original,note};
 }
 suite('Invoice payment correction against real PostgreSQL',()=>{
-  beforeAll(async()=>{({pool}=await import('../db'));({editReservationInvoiceCashMethod:edit}=await import('../billing/reservationInvoicePaymentEdit'));});
+  beforeAll(async()=>{({pool}=await import('../db'));({editReservationInvoiceCashMethod:edit}=await import('../billing/reservationInvoicePaymentEdit'));await pool.query((await import('../billing/cashCardRectifications')).CASH_CARD_RECTIFICATIONS_SQL);});
   afterAll(async()=>{
     for(const id of ids) {
+      await pool.query('DELETE FROM cash_card_rectifications WHERE payment_id=$1',[id]);
+      await pool.query('DELETE FROM cash_closing_summaries WHERE shift_id=$1',[id]);
       await pool.query('DELETE FROM reservation_changelog WHERE reservation_id=$1::text',[id]);
       await pool.query('DELETE FROM folio_movements WHERE folio_id=$1::text',[id]);
       await pool.query('DELETE FROM folios WHERE id=$1::text',[id]);
@@ -137,5 +139,71 @@ suite('Invoice payment correction against real PostgreSQL',()=>{
     const f=await reapplicationFixture(),before=await state(f);
     await expect(edit(f.invoice,'tarjeta_debito','bad\0operator')).rejects.toBeTruthy();
     expect(await state(f)).toEqual(before);
+  });
+  async function closedFixture(){
+    const f=await reapplicationFixture();
+    await pool.query("UPDATE cash_shifts SET status='closed',closed_at=now() WHERE id=$1",[f.id]);
+    await pool.query(`INSERT INTO cash_closing_summaries(id,shift_id,area,total_cash,total_credit_card,total_debit_card,total_general,closed_by,notes)
+      VALUES($1,$1,'reception',480,163500,0,164000,'Synthetic','Original physical count retained')`,[f.id]);
+    return f;
+  }
+  const action={mode:'preview' as const,actorId:'synthetic-admin',reason:'Se verificó el cupón de débito',evidenceRef:'Control POS sintético'};
+  it('previews and explicitly rectifies closed cards, preserving the original closing/physical count and all fiscal links',async()=>{
+    const f=await closedFixture(),{editLinkedReservationInvoicePayment:linked}=await import('../billing/linkedReservationInvoicePaymentEdit');
+    const before=await state(f),closing=(await pool.query('SELECT * FROM cash_closing_summaries WHERE shift_id=$1',[f.id])).rows;
+    const preview=await linked(f.invoice,'tarjeta_debito','Synthetic',action) as any;
+    expect(preview).toMatchObject({before:{tarjeta_credito:16350000,tarjeta_debito:0},after:{tarjeta_credito:0,tarjeta_debito:16350000},revision:1});
+    expect(await state(f)).toEqual(before);
+    const apply={...action,mode:'apply' as const,operationId:randomUUID(),previewHash:preview.previewHash};
+    await linked(f.invoice,'tarjeta_debito','Synthetic',apply);
+    const after=await state(f);
+    expect(after.payments).toEqual([{...before.payments[0],method:'tarjeta_debito'}]);
+    expect(after.folio).toEqual(before.folio);
+    expect(after.invoiceHistory.filter(i=>i.id!==f.invoice)).toEqual(before.invoiceHistory.filter(i=>i.id!==f.invoice));
+    expect((await pool.query('SELECT * FROM cash_closing_summaries WHERE shift_id=$1',[f.id])).rows).toEqual(closing);
+    const records=(await pool.query('SELECT * FROM cash_card_rectifications WHERE shift_id=$1',[f.id])).rows;
+    expect(records).toHaveLength(1);expect(records[0]).toMatchObject({original_summary:expect.objectContaining({total_cash:'480.00',total_credit_card:'163500.00'}),original_movement:expect.objectContaining({payment_method:'credit_card'}),card_after:preview.after});
+    await linked(f.invoice,'tarjeta_debito','Synthetic',apply);
+    expect(await state(f)).toEqual(after);
+    expect((await pool.query('SELECT * FROM cash_card_rectifications WHERE shift_id=$1',[f.id])).rows).toEqual(records);
+    await expect(linked(f.invoice,'tarjeta_debito','Synthetic',{...apply,reason:'Otro motivo completamente distinto'})).rejects.toMatchObject({statusCode:409});
+  });
+  it('records a second revision against the verified previous revision, without rewriting the original closing',async()=>{
+    const f=await closedFixture(),{editLinkedReservationInvoicePayment:linked}=await import('../billing/linkedReservationInvoicePaymentEdit');
+    for(const method of ['tarjeta_debito','tarjeta_credito']){
+      const p=await linked(f.invoice,method,'Synthetic',action) as any;
+      await linked(f.invoice,method,'Synthetic',{...action,mode:'apply',operationId:randomUUID(),previewHash:p.previewHash});
+    }
+    expect((await pool.query('SELECT revision,card_after FROM cash_card_rectifications WHERE shift_id=$1 ORDER BY revision',[f.id])).rows).toEqual([
+      {revision:1,card_after:{tarjeta_credito:0,tarjeta_debito:16350000}},
+      {revision:2,card_after:{tarjeta_credito:16350000,tarjeta_debito:0}},
+    ]);
+  });
+  it('does not duplicate a historical rectification on concurrent retries',async()=>{
+    const f=await closedFixture(),{editLinkedReservationInvoicePayment:linked}=await import('../billing/linkedReservationInvoicePaymentEdit');
+    const preview=await linked(f.invoice,'tarjeta_debito','Synthetic',action) as any;
+    const request={...action,mode:'apply' as const,operationId:randomUUID(),previewHash:preview.previewHash};
+    await Promise.allSettled([linked(f.invoice,'tarjeta_debito','Synthetic',request),linked(f.invoice,'tarjeta_debito','Synthetic',request)]);
+    await linked(f.invoice,'tarjeta_debito','Synthetic',request);
+    expect((await pool.query('SELECT * FROM cash_card_rectifications WHERE shift_id=$1',[f.id])).rows).toHaveLength(1);
+    expect((await state(f)).cash).toHaveLength(1);
+  });
+  it('does not offer or create an account recovery for a verified card-only invoice',async()=>{
+    const f=await fixture();
+    const {db}=await import('../db'),{sql}=await import('drizzle-orm');
+    const {creditNoteAccountMovement,originalAccountChargeLinked}=await import('../billing/creditNoteAccountMovement');
+    const applies=await db.execute(sql`SELECT ${originalAccountChargeLinked} AS applies FROM sales_invoices orig WHERE orig.id=${f.invoice}`);
+    expect(applies.rows[0]).toMatchObject({applies:false});
+    const invoice=(await state(f)).invoice[0];
+    expect(await db.transaction(tx=>creditNoteAccountMovement(tx,invoice,{id:999999,monto_total:'163500'}))).toEqual({status:'not_applicable',amount:0});
+  });
+  it.each(['cash-target','missing-summary','closing-mismatch','stale-preview'])('refuses unsafe closed correction %s without edits',async(kind)=>{
+    const f=await closedFixture(),{editLinkedReservationInvoicePayment:linked}=await import('../billing/linkedReservationInvoicePaymentEdit');
+    if(kind==='missing-summary')await pool.query('DELETE FROM cash_closing_summaries WHERE shift_id=$1',[f.id]);
+    if(kind==='closing-mismatch')await pool.query('UPDATE cash_closing_summaries SET total_credit_card=10 WHERE shift_id=$1',[f.id]);
+    const before=await state(f);
+    await expect(linked(f.invoice,kind==='cash-target'?'efectivo':'tarjeta_debito','Synthetic',kind==='stale-preview'?{...action,mode:'apply',operationId:randomUUID(),previewHash:'0'.repeat(64)}:action)).rejects.toMatchObject({statusCode:409});
+    expect(await state(f)).toEqual(before);
+    expect((await pool.query('SELECT * FROM cash_card_rectifications WHERE shift_id=$1',[f.id])).rows).toHaveLength(0);
   });
 });

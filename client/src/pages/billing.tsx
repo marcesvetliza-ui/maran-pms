@@ -1,3 +1,5 @@
+import { canReviewCreditNoteAccount } from "@shared/credit-note-account-recovery";
+import { CashCardRectification } from '@/components/cash-card-rectification';
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
@@ -296,8 +298,8 @@ export default function BillingPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
       ]);
       toast({
-        title: data.accountRecovery ? "Cuenta corriente revisada" : "NC conciliada",
-        description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
+        title: data.accountRecovery && data.accountRecovery.status !== "not_applicable" ? "Cuenta corriente revisada" : "NC conciliada",
+        description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "not_applicable" ? "Esta NC corresponde a un cobro de Caja; no tiene un cargo de Cuenta Corriente para compensar." : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
       });
     },
     onError: async (error: any) => {
@@ -571,7 +573,7 @@ export default function BillingPage() {
                                       <Pencil className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
-                                  {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && (
+                                  {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && canReviewCreditNoteAccount(f) && (
                                     <Button variant="ghost" size="sm" title="Revisar y recuperar descuento en cuenta corriente"
                                       disabled={reconcileCreditNoteMutation.isPending}
                                       onClick={() => {if(window.confirm("¿Revisar el descuento de esta NC en cuenta corriente? Solo se registrará si falta; no se emite otro comprobante.")) reconcileCreditNoteMutation.mutate(Number(f.id));}}>
@@ -2834,7 +2836,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
         queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "master-folio"] });
         queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "direct-invoices"] });
       }
-      toast({ title: "Nota de Crédito emitida", description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
+      toast({ title: "Nota de Crédito emitida", description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "not_applicable" ? "Esta NC corresponde a un cobro de Caja; no tiene un cargo de Cuenta Corriente para compensar." : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
       onSuccess?.(data);
       onClose();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
@@ -3076,6 +3078,8 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
   const [domicilio, setDomicilio] = useState("");
   const [registradaMethod, setRegistradaMethod] = useState("efectivo");
   const [reservaMethod, setReservaMethod] = useState("efectivo");
+  const [rectifyClosedCard,setRectifyClosedCard] = useState(false);
+  useEffect(()=>{setRectifyClosedCard(false);},[invoiceId]);
   const [restaurantMethod, setRestaurantMethod] = useState("efectivo");
   const [eventMethod, setEventMethod] = useState("efectivo");
   const [spaMethod, setSpaMethod] = useState("efectivo");
@@ -3117,14 +3121,18 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
       toast({ title: "Comprobante actualizado" });
       onClose();
     },
-    onError: (error: Error) => toast({ title: "No se pudo editar", description: parseApiError(error), variant: "destructive" }),
+    onError: (error: Error) => {
+      const message=parseApiError(error);
+      if(/turno.*cerrado/i.test(message))setRectifyClosedCard(true);
+      toast({ title: "No se pudo editar", description: message, variant: "destructive" });
+    },
   });
 
   if (!invoice) return null;
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Editar comprobante</DialogTitle></DialogHeader>
         <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
           <div className="font-medium">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)}</div>
@@ -3189,10 +3197,17 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
                 <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            {rectifyClosedCard&&['tarjeta_debito','tarjeta_credito'].includes(reservaMethod)&&<CashCardRectification invoiceId={invoiceId} method={reservaMethod} onSaved={()=>{
+              queryClient.invalidateQueries({queryKey:['/api/billing/invoices']});
+              queryClient.invalidateQueries({queryKey:['/api/cash/shifts']});
+              queryClient.invalidateQueries({queryKey:['/api/payments']});
+              queryClient.invalidateQueries({queryKey:['/api/reservations',String(invoice.reserva_id),'folio']});
+              toast({title:'Medio corregido y cierre rectificado',description:'Se conservaron el cierre original, el efectivo contado y el importe del cobro.'});onClose();
+            }}/>}
             <DialogFooter>
               <Button variant="outline" onClick={onClose}>Cancelar</Button>
               <Button
-                disabled={mutation.isPending}
+                disabled={mutation.isPending || rectifyClosedCard}
                 onClick={() => mutation.mutate({ cashFormaPago: reservaMethod })}
                 data-testid="btn-guardar-edicion-fp-reserva"
               >

@@ -1,4 +1,5 @@
 import { BILLING_OPERATION_SCHEMA_SQL } from "./billing/operationJournal";
+import { CASH_CARD_RECTIFICATIONS_SQL } from './billing/cashCardRectifications';
 import {ensureCcManualTrackingSchema} from './ccManualTracking';
 import { SALES_ARCHIVE_SCHEMA_SQL } from './salesArchive';
 import {importStockWorkbook} from './inventoryWorkbookImport';
@@ -4983,6 +4984,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await db.execute(sql.raw(addColumnWithoutRerunNotice("rooms", "bed_config_revision", "integer NOT NULL DEFAULT 0")));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE recipes ADD COLUMN is_active text NOT NULL DEFAULT 'true'`)));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN purchase_enabled boolean NOT NULL DEFAULT true`)));
+  await db.execute(sql.raw(createTableWithoutRerunNotice('cash_card_rectifications',CASH_CARD_RECTIFICATIONS_SQL.replace('IF NOT EXISTS ',''))));
   for (const statement of BILLING_OPERATION_SCHEMA_SQL.split(';').map(value => value.trim()).filter(Boolean)) {
     if (statement.startsWith('CREATE TABLE')) {
       await db.execute(sql.raw(createTableWithoutRerunNotice('billing_operations', statement.replace('IF NOT EXISTS ', ''))));

@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { parseReservationInvoiceRef, reservationPaymentReleasedCents } from "@shared/reservationFolio";
 import { db } from "../db";
 import { normalizeToSpanishPaymentMethod } from "../payment-method";
+import { prepareCardRectification,cardRequestFingerprint,type CardCorrection } from './cashCardRectifications';
 
 const methods = new Set(["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago"]);
 const reject = (message: string, statusCode = 409) => Object.assign(new Error(message), { statusCode });
@@ -43,7 +44,7 @@ function exclusiveReapplication(invoice: any, payment: any, ref: any, invoices: 
  * No new payment, balance change, fiscal emission or historical-shift rewrite.
  * Identity comes only from payment_id / invoice_ref, never amount or guest name.
  */
-export async function editLinkedReservationInvoicePayment(invoiceId: number, method: string, operator: string) {
+export async function editLinkedReservationInvoicePayment(invoiceId: number, method: string, operator: string, correction?:CardCorrection) {
   if (!methods.has(method)) throw reject("Elegí una forma de pago real de Caja.", 400);
   return db.transaction(async tx => {
     const initial = (await tx.execute(sql`SELECT reserva_id FROM sales_invoices WHERE id=${invoiceId}`)).rows[0] as any;
@@ -51,6 +52,13 @@ export async function editLinkedReservationInvoicePayment(invoiceId: number, met
     const reservationId = String(initial.reserva_id);
     const lock = (await tx.execute(sql`SELECT pg_try_advisory_xact_lock(hashtext(${`folio-invoice:${reservationId}`})) AS locked`)).rows[0] as any;
     if (!lock?.locked) throw reject("Hay otra operación sobre el folio. Actualizá y reintentá.");
+    if(correction?.mode==='apply'&&correction.operationId){
+      const applied=(await tx.execute(sql`SELECT fingerprint FROM cash_card_rectifications WHERE operation_id=${correction.operationId}`)).rows[0] as any;
+      if(applied){
+        if(applied.fingerprint!==cardRequestFingerprint(invoiceId,method,correction))throw reject('La operación de rectificación ya fue utilizada con otros datos.');
+        return (await tx.execute(sql`SELECT * FROM sales_invoices WHERE id=${invoiceId}`)).rows[0];
+      }
+    }
     const reservation = (await tx.execute(sql`SELECT id FROM reservations WHERE id=${reservationId} FOR UPDATE`)).rows[0] as any;
     if (!reservation) throw reject("El cobro requiere revisión desde su cuenta de origen.");
     // Same lock order as Reception's receipt correction / cash closing.
@@ -107,8 +115,11 @@ export async function editLinkedReservationInvoicePayment(invoiceId: number, met
         normalizeToSpanishPaymentMethod(movement.payment_method)!==oldMethod) {
       throw reject("El vínculo entre el pago, Caja y folio no es unívoco. No se cambió el cobro.");
     }
-    const shift = (await tx.execute(sql`SELECT status FROM cash_shifts WHERE id=${cash.shift_id} FOR UPDATE`)).rows[0] as any;
-    if (shift?.status!=='open') throw reject("El turno de Caja de este cobro está cerrado. Requiere conciliar el cierre original; no se modifica desde esta acción.", 403);
+    const shift = (await tx.execute(sql`SELECT * FROM cash_shifts WHERE id=${cash.shift_id} FOR UPDATE`)).rows[0] as any;
+    if(correction){
+      const preview=await prepareCardRectification(tx,{invoice,payment,cash,shift,method,invoices,operator},correction);
+      if(correction.mode==='preview')return preview;
+    } else if (shift?.status!=='open') throw reject("El turno de Caja de este cobro está cerrado. Administración puede preparar una rectificación de Crédito a Débito desde este comprobante.", 403);
     if (method!==oldMethod) {
       // Reception enforces ONE cash receipt per payment, including voided
       // history. Correct classification in place; preserve its id, shift,
