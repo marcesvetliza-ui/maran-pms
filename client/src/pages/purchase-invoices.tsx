@@ -1,3 +1,4 @@
+import {matchesPurchaseReport,validatePurchaseReportFilters} from "@shared/purchase-invoice-report";
 import { isPurchaseRemito, purchaseDocumentLabel } from "@shared/purchase-remito";
 import { useAuth } from "@/App";
 import { canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
@@ -2922,6 +2923,10 @@ export default function PurchaseInvoices() {
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("todos");
   const [filterPeriodo, setFilterPeriodo] = useState("");
+  const [reportDesde,setReportDesde]=useState("");
+  const [reportHasta,setReportHasta]=useState("");
+  const [reportSupplier,setReportSupplier]=useState("");
+  const [exporting,setExporting]=useState(false);
 
   const { data: rawInvoices = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/purchase-invoices"],
@@ -3001,19 +3006,18 @@ export default function PurchaseInvoices() {
     },
   });
 
-  const filteredInvoices = useMemo(() => {
-    return invoices.filter((inv) => {
-      const matchSearch =
-        !search ||
-        (inv.supplierNombre || inv.proveedorNombre || "").toLowerCase().includes(search.toLowerCase()) ||
-        (inv.proveedorCuit || "").includes(search) ||
-        (inv.numeroComprobanteExt || inv.numeroComprobante).includes(search) ||
-        (inv.specialDetails?.remitoHistory || []).some(entry => String(entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante || "").toLowerCase().includes(search.toLowerCase()));
-      const matchEstado = filterEstado === "todos" || inv.estado === filterEstado;
-      const matchPeriodo = !filterPeriodo || inv.periodo === filterPeriodo;
-      return matchSearch && matchEstado && matchPeriodo;
-    });
-  }, [invoices, search, filterEstado, filterPeriodo]);
+  const reportFilters={desde:reportDesde,hasta:reportHasta,supplierId:reportSupplier,estado:filterEstado,periodo:filterPeriodo,search};
+  let reportError='';try{validatePurchaseReportFilters(reportFilters);}catch(e:any){reportError=e.message;}
+  const filteredInvoices=invoices.filter(inv=>matchesPurchaseReport(inv,reportFilters));
+  const downloadReport=async(format:'xlsx'|'pdf')=>{
+    if(reportError)return;
+    setExporting(true);
+    try{
+      const params=new URLSearchParams({...reportFilters,format});
+      const response=await apiRequest('GET',`/api/exports/purchase-invoices?${params}`);
+      const blob=await response.blob();const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`comprobantes-compra-${reportDesde||'inicio'}-${reportHasta||'actual'}.${format}`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(e:any){toast({title:'No se pudo descargar el reporte',description:e.message,variant:'destructive'});}finally{setExporting(false);}
+  };
 
   const totalSaldo = ccItems.reduce((s, c) => s + $n(c.totalSaldo), 0);
 
@@ -3126,6 +3130,17 @@ export default function PurchaseInvoices() {
                   />
                 </div>
               </CardHeader>
+              <div className="px-6 pb-4 space-y-2">
+                <div className="flex flex-wrap gap-3 items-end">
+                  <label className="text-sm">Desde (emisión)<Input aria-label="Desde (emisión)" type="date" value={reportDesde} onChange={e=>setReportDesde(e.target.value)}/></label>
+                  <label className="text-sm">Hasta (emisión)<Input aria-label="Hasta (emisión)" type="date" value={reportHasta} onChange={e=>setReportHasta(e.target.value)}/></label>
+                  <label className="text-sm">Proveedor<select aria-label="Proveedor del reporte" className="block h-9 max-w-[300px] rounded-md border bg-background px-3" value={reportSupplier} onChange={e=>setReportSupplier(e.target.value)}><option value="">Todos los proveedores</option>{suppliers.map(s=><option key={s.id} value={s.id}>{s.razonSocial}</option>)}</select></label>
+                  <Button variant="outline" disabled={exporting||isLoading||!!reportError} onClick={()=>downloadReport('xlsx')}>Descargar Excel</Button>
+                  <Button variant="outline" disabled={exporting||isLoading||!!reportError} onClick={()=>downloadReport('pdf')}>Descargar PDF</Button>
+                </div>
+                <p className="text-xs text-muted-foreground">La descarga respeta todos los filtros y contiene los comprobantes cargados en el PMS. {filteredInvoices.length} comprobantes seleccionados.</p>
+                {reportError&&<p role="alert" className="text-sm text-destructive">{reportError}</p>}
+              </div>
               <CardContent className="p-0">
                 {isLoading ? (
                   <div className="text-center py-12 text-muted-foreground">Cargando...</div>

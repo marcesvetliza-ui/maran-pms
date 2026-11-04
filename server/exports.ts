@@ -1,3 +1,4 @@
+import {registerPurchaseReportRoutes} from "./purchase-invoice-report";
 import { purchaseDocumentLabel } from "@shared/purchase-remito";
 import type { Express } from "express";
 import { db } from "./db";
@@ -325,6 +326,7 @@ function alicuotasVentasLine(sale: any): string[] {
 // ─── Route registration ───────────────────────────────────────────────────────
 
 export function registerExportRoutes(app: Express) {
+  registerPurchaseReportRoutes(app);
   // ── SIRCAR ────────────────────────────────────────────────────────────────
 
   app.get("/api/exports/sircar", requireAuth, async (req, res) => {
