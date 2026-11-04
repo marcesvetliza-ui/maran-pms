@@ -44,7 +44,8 @@ suite('Etapa 2: formularios y operaciones reales aisladas',()=>{
  });
  it('impide cambiar cantidades o la unidad base por edición directa',async()=>{
   expect((await request('PATCH',`/api/inventory/items/${item}`,{currentStock:99})).status).toBe(409);
-  expect((await request('PATCH',`/api/inventory/items/${item}`,{unit:'g'})).status).toBe(409);
+  const window=(await import('../inventoryUnitCorrection')).inventoryUnitCorrectionWindow;window.enabled=false;
+  try{expect((await request('PATCH',`/api/inventory/items/${item}`,{unit:'g'})).status).toBe(403);}finally{window.enabled=true;}
   expect(Number((await pool!.query('SELECT current_stock FROM inventory_items WHERE id=$1',[item])).rows[0].current_stock)).toBe(5);
  });
  it('cancelar un cargo SPA pendiente conserva la trazabilidad y anula su efecto en el folio',async()=>{

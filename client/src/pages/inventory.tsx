@@ -2808,6 +2808,7 @@ export function NewItemForm({
 }) {
   const { toast } = useToast();
   const [conversions,setConversions]=useState<InventoryConversionDraft[]>([]);
+  const {data:unitCorrectionMode}=useQuery<{enabled:boolean}>({queryKey:['/api/inventory/unit-correction-mode'],enabled:!!initialItem,staleTime:0});
   const [sku, setSku] = useState(initialItem?.sku || "");
   const [active, setActive] = useState(initialItem?.isActive !== "false");
   const [name, setName] = useState(initialItem?.name || "");
@@ -3049,7 +3050,7 @@ export function NewItemForm({
         </div>
         <div className="space-y-2">
           <Label>Unidad</Label>
-          <Select value={unit} onValueChange={value=>{setUnit(value);setConversions([]);}} disabled={!!initialItem}>
+          <Select value={unit} onValueChange={value=>{setUnit(value);setConversions([]);}} disabled={!!initialItem&&!unitCorrectionMode?.enabled}>
             <SelectTrigger data-testid="select-unit">
               <SelectValue />
             </SelectTrigger>
@@ -3061,7 +3062,7 @@ export function NewItemForm({
               ))}
             </SelectContent>
           </Select>
-          {initialItem && <p className="text-xs text-muted-foreground">La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.</p>}
+          {initialItem && <p className="text-xs text-muted-foreground">{unitCorrectionMode?.enabled?'Corrección temporal de unidades habilitada. Conserva los valores numéricos de stock y del historial; no convierte cantidades.':'La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.'}</p>}
         </div>
         {canCost && <div className="space-y-2">
           <Label>Costo Unitario</Label>
@@ -3128,7 +3129,8 @@ export function NewItemForm({
         </Select>
         <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
       </div>
-      {!initialItem && <InventoryUnitConversions stockUnit={unit} value={conversions} onChange={setConversions}/>}
+      {initialItem&&unit!==initialItem.unit&&<p className="text-sm text-amber-700 dark:text-amber-400">Las equivalencias anteriores no se reutilizan al cambiar la unidad base. Configurá las que correspondan a la nueva unidad; se conserva un registro de las anteriores.</p>}
+      {(!initialItem||unit!==initialItem.unit) && <InventoryUnitConversions stockUnit={unit} value={conversions} onChange={setConversions}/>}
       {!initialItem && missingRequiredFields.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="text-missing-required-fields">
           Falta completar: {missingRequiredFields.join(", ")}.
@@ -3142,7 +3144,7 @@ export function NewItemForm({
           onClick={() => {
             onSubmit({
               name,
-              ...(!initialItem ? {conversions} : {}),
+              ...(!initialItem||unit!==initialItem.unit ? {conversions} : {}),
               ...(initialItem ? {sku:sku.trim() || null,isActive:active ? "true" : "false"} : {}),
               categoryId: categoryId || undefined,
               accountingSupplierIds: supplierIds,

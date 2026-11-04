@@ -1,5 +1,8 @@
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { activeSalesRecord } from "./salesArchive";
+import { inventoryUnitCorrectionWindow } from './inventoryUnitCorrection';
+import { validateInventoryConversions } from './inventoryConversionValidation';
+import { INVENTORY_UNITS } from '@shared/inventoryUnits';
 import {breakfastEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
@@ -5643,8 +5646,8 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem | undefined> {
-    const { accountingSupplierIds, preferredAccountingSupplierId, ...itemValues } = item;
+  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null; conversions?:unknown }, options?:{allowUnitCorrection?:boolean}): Promise<InventoryItem | undefined> {
+    const { accountingSupplierIds, preferredAccountingSupplierId, conversions, ...itemValues } = item;
     if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
       throw new Error("La lista de proveedores contables es inválida");
     }
@@ -5652,15 +5655,24 @@ export class DatabaseStorage implements IStorage {
     if(itemValues.currentStock!==undefined)throw Object.assign(new Error('El stock se modifica mediante movimientos por depósito'),{statusCode:409});
     const [updated] = await db.transaction(async (tx) => {
       const current=await tx.execute(sql`SELECT unit, is_active FROM inventory_items WHERE id=${id} FOR UPDATE`);
+      const unitChanged=itemValues.unit!==undefined && current.rows.length>0 && itemValues.unit!==current.rows[0].unit;
       if (itemValues.isActive === "false" && current.rows[0]?.is_active !== "false") await protectInventoryItemDeactivation(tx, id);
-      if(itemValues.unit!==undefined && current.rows.length && itemValues.unit!==current.rows[0].unit){
+      if(unitChanged){
+        if(!INVENTORY_UNITS.includes(itemValues.unit as any))throw Object.assign(new Error('Unidad de inventario inválida'),{statusCode:400});
         const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM recipes WHERE output_inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM treatment_supplies WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
-        if(references.rows.length)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
+        const correction=inventoryUnitCorrectionWindow.enabled && options?.allowUnitCorrection===true;
+        if(references.rows.length&&!correction)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
+        if(correction){
+          const pending=await tx.execute(sql`SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb LIMIT 1`);
+          if(pending.rows.length)throw Object.assign(new Error('El artículo tiene consumos pendientes: resolvelos antes de corregir la unidad.'),{statusCode:409});
+        }
+        validateInventoryConversions(conversions??[],String(itemValues.unit));
         await tx.execute(sql`DELETE FROM inventory_unit_conversions WHERE item_id=${id}`);
+        for(const line of (conversions??[]) as Array<{fromUnit:string;factor:string}>)await tx.execute(sql`INSERT INTO inventory_unit_conversions(item_id,from_unit,factor) VALUES(${id},${line.fromUnit},${line.factor})`);
       }
       const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
       if (!result) return [];
-      if (itemValues.costPrice !== undefined) {
+      if (itemValues.costPrice !== undefined || unitChanged) {
         await cascadeRecipeCostsFromInventoryItem(tx, id, parseFloat(String(result.costPrice ?? 0)));
       }
       if (accountingSupplierIds !== undefined) {
