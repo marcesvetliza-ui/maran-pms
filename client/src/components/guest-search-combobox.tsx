@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { Search, UserPlus, Loader2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,7 +49,31 @@ export function GuestSearchCombobox({
   const [newPhone, setNewPhone] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const searchFocused = useRef(false);
+  const restoreSearchFocus = useRef(false);
+  const restoreSelectionFocus = useRef(false);
+  const clearButtonRef = useRef<HTMLButtonElement>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (showDropdown && activeIndex >= 0) {
+      document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeIndex, listId, showDropdown]);
+
+  useEffect(() => {
+    if (restoreSearchFocus.current && !selectedGuestId) {
+      restoreSearchFocus.current = false;
+      inputRef.current?.focus();
+    }
+    if (restoreSelectionFocus.current && selectedGuestId) {
+      restoreSelectionFocus.current = false;
+      clearButtonRef.current?.focus();
+    }
+  }, [selectedGuestId]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -62,10 +86,13 @@ export function GuestSearchCombobox({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     clearTimeout(searchTimeout.current);
+    setActiveIndex(-1);
     if (query.length < 2) {
       setResults([]);
       setShowDropdown(false);
+      setIsSearching(false);
       return;
     }
     setIsSearching(true);
@@ -73,15 +100,17 @@ export function GuestSearchCombobox({
       try {
         const res = await fetch(`/api/guests/search?q=${encodeURIComponent(query)}`, { credentials: "include" });
         const data = await res.json();
-        setResults(data || []);
-        setShowDropdown(true);
+        if (!cancelled) {
+          setResults(data || []);
+          setShowDropdown(searchFocused.current);
+        }
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       } finally {
-        setIsSearching(false);
+        if (!cancelled) setIsSearching(false);
       }
     }, 300);
-    return () => clearTimeout(searchTimeout.current);
+    return () => { cancelled = true; clearTimeout(searchTimeout.current); };
   }, [query]);
 
   const createGuestMutation = useMutation({
@@ -113,12 +142,14 @@ export function GuestSearchCombobox({
   });
 
   const handleSelect = (guest: GuestResult) => {
+    restoreSelectionFocus.current = true;
     onGuestSelect(guest);
     setQuery("");
     setShowDropdown(false);
   };
 
   const handleClear = () => {
+    restoreSearchFocus.current = true;
     setQuery("");
     setResults([]);
     setShowDropdown(false);
@@ -142,15 +173,24 @@ export function GuestSearchCombobox({
 
   return (
     <>
-      <div ref={containerRef} className="relative" data-testid={testId}>
-        {label && <Label className="text-sm font-medium mb-1.5 block">{label}</Label>}
+      <div ref={containerRef} className="relative" data-testid={testId}
+        onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            searchFocused.current = false;
+            setShowDropdown(false);
+            setActiveIndex(-1);
+          }
+        }}>
+        {label && <Label htmlFor={`${listId}-input`} className="text-sm font-medium mb-1.5 block">{label}</Label>}
 
         {selectedGuestId && selectedGuestName ? (
           <div className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/40">
             <Check className="h-4 w-4 text-green-600 shrink-0" />
             <span className="text-sm flex-1 font-medium">{selectedGuestName}</span>
             <button
+              ref={clearButtonRef}
               type="button"
+              aria-label="Quitar cliente seleccionado"
               onClick={handleClear}
               className="text-muted-foreground hover:text-foreground"
               data-testid={`${testId}-clear`}
@@ -162,9 +202,43 @@ export function GuestSearchCombobox({
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
             <Input
+              id={`${listId}-input`}
+              ref={inputRef}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showDropdown}
+              aria-controls={showDropdown ? listId : undefined}
+              aria-activedescendant={showDropdown && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => query.length >= 2 && results.length > 0 && setShowDropdown(true)}
+              onChange={(e) => { searchFocused.current = true; setQuery(e.target.value); }}
+              onFocus={() => {
+                searchFocused.current = true;
+                if (query.length >= 2 && results.length > 0) setShowDropdown(true);
+              }}
+              onKeyDown={event => {
+                if (event.ctrlKey || event.altKey || event.metaKey) return;
+                if (event.key === "Tab") {
+                  searchFocused.current = false;
+                  setShowDropdown(false);
+                  setActiveIndex(-1);
+                  // Keep the native browser TAB; never select a highlighted result.
+                } else if (showDropdown && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+                  event.preventDefault();
+                  const count = results.length + 1; // Last option opens the explicit create flow.
+                  setActiveIndex(index => event.key === "ArrowDown"
+                    ? (index + 1) % count : (index <= 0 ? count - 1 : index - 1));
+                } else if (showDropdown && event.key === "Enter") {
+                  event.preventDefault();
+                  if (activeIndex === results.length) handleCreateNew();
+                  else if (activeIndex >= 0) handleSelect(results[activeIndex]);
+                } else if (showDropdown && event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  searchFocused.current = false;
+                  setShowDropdown(false);
+                  setActiveIndex(-1);
+                }
+              }}
               placeholder={placeholder}
               className="pl-8 pr-8"
               data-testid={`${testId}-input`}
@@ -176,15 +250,20 @@ export function GuestSearchCombobox({
         )}
 
         {showDropdown && !selectedGuestId && (
-          <div className="absolute z-50 left-0 right-0 mt-1 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
+          <div id={listId} role="listbox" aria-label="Resultados de clientes" className="absolute z-50 left-0 right-0 mt-1 bg-background border rounded-md shadow-lg max-h-60 overflow-y-auto">
             {results.length === 0 && !isSearching ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados para &quot;{query}&quot;</div>
             ) : (
-              results.map((g) => (
+              results.map((g, index) => (
                 <button
                   key={g.id}
+                  id={`${listId}-${index}`}
+                  role="option"
+                  aria-selected={activeIndex === index}
+                  tabIndex={-1}
                   type="button"
-                  className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex flex-col gap-0.5 border-b last:border-0"
+                  className={`w-full text-left px-3 py-2 hover:bg-muted text-sm flex flex-col gap-0.5 border-b last:border-0 ${activeIndex === index ? "bg-muted" : ""}`}
+                  onMouseDown={event => event.preventDefault()}
                   onClick={() => handleSelect(g)}
                   data-testid={`${testId}-result-${g.id}`}
                 >
@@ -199,6 +278,11 @@ export function GuestSearchCombobox({
             )}
             <button
               type="button"
+              id={`${listId}-${results.length}`}
+              role="option"
+              aria-selected={activeIndex === results.length}
+              tabIndex={-1}
+              onMouseDown={event => event.preventDefault()}
               className="w-full text-left px-3 py-2 text-sm text-primary hover:bg-muted flex items-center gap-2 border-t font-medium"
               onClick={handleCreateNew}
               data-testid={`${testId}-create-new`}
