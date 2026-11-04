@@ -194,6 +194,109 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
       expect.objectContaining({ rate_plan_id: 'remote-bar', date_from: day, date_to: addDays(day, 1), rate: '179.90', min_stay_arrival: 3, min_stay_through: 1, closed_to_arrival: true }),
       expect.objectContaining({ rate_plan_id: 'remote-breakfast', date_from: addDays(day, 2), date_to: addDays(day, 3), rate: '219.25', min_stay_through: 2, stop_sell: true })]);
   });
+  it('sends the complete certification case 8 from the normal calendar API in one call beyond today+499', async () => {
+    await pool.query(`INSERT INTO room_types VALUES('double','Double');
+      INSERT INTO channex_room_type_mappings VALUES('connection','remote-double','double');
+      INSERT INTO rate_plans VALUES('double-bar','double',120,'USD',NULL,NULL);
+      INSERT INTO channex_rate_plan_mappings VALUES('connection','remote-double','remote-double-bar','double-bar')`);
+    await enable();
+    const today=(await pool.query("SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS day")).rows[0].day;
+    // On 04/11/2026 this is exactly 01/12/2027–01/05/2028; keep the test valid as time advances.
+    const from=addDays(today,392), to=addDays(from,152);
+    const changes={changes:[
+      {ratePlanIds:['bar'],dateFrom:from,dateTo:to,values:{rate:'432',closedToArrival:false,closedToDeparture:false,minStayArrival:2}},
+      {ratePlanIds:['double-bar'],dateFrom:from,dateTo:to,values:{rate:'342',minStayArrival:3}},
+    ]};
+    const preview=await calendarRequest('preview',changes);expect(preview.status).toBe(200);
+    expect((await calendarRequest('apply',{...changes,previewToken:preview.body.previewToken})).status).toBe(200);
+    const jobs=(await pool.query("SELECT date_from::text,date_to::text,date_to-date_from AS span,batch_id::text FROM channex_ari_outbox ORDER BY id")).rows;
+    expect(jobs.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(jobs.map(job=>job.batch_id)).size).toBe(1);
+    expect(jobs.every(job=>job.span<500)).toBe(true);
+    const send=vi.fn(async()=>['case-eight-task']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][2]).toEqual([
+      expect.objectContaining({rate_plan_id:'remote-bar',date_from:from,date_to:to,rate:'432.00',min_stay_arrival:2,closed_to_arrival:false,closed_to_departure:false}),
+      expect.objectContaining({rate_plan_id:'remote-double-bar',date_from:from,date_to:to,rate:'342.00',min_stay_arrival:3}),
+    ]);
+    const published=(await pool.query("SELECT target_id,min(day)::text AS first,max(day)::text AS last,count(*)::int AS days FROM channex_ari_published GROUP BY target_id ORDER BY target_id")).rows;
+    expect(published).toEqual([
+      {target_id:'remote-bar',first:from,last:to,days:153},
+      {target_id:'remote-double-bar',first:from,last:to,days:153},
+    ]);
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('idle');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('captures sparse future calendar dates without filling untouched gaps and propagates deletion back to the base rate', async () => {
+    await enable();
+    const first=addDays(day,600),last=addDays(day,900);
+    const request={changes:[{ratePlanIds:['bar'],dateFrom:first,dateTo:first,values:{rate:'200'}},
+      {ratePlanIds:['bar'],dateFrom:last,dateTo:last,values:{rate:'300'}}]};
+    const preview=await calendarRequest('preview',request);expect(preview.status,JSON.stringify(preview.body)).toBe(200);
+    expect((await calendarRequest('apply',{...request,previewToken:preview.body.previewToken})).status).toBe(200);
+    const jobs=(await pool.query('SELECT date_from::text,date_to::text FROM channex_ari_outbox ORDER BY date_from')).rows;
+    expect(jobs).toEqual([{date_from:first,date_to:first},{date_from:last,date_to:last}]);
+    const send=vi.fn(async()=>['sparse-task']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send.mock.calls[0][2]).toHaveLength(2);
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_published')).rows[0].n).toBe(2);
+    await pool.query('DELETE FROM rate_calendar_entries WHERE rate_plan_id=$1 AND stay_date=$2',['bar',last]);
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send.mock.calls[1][2]).toEqual([expect.objectContaining({date_from:last,date_to:last,rate:'100.00'})]);
+  });
+
+  it('rolls future calendar capture back with the edited cells', async () => {
+    await enable(); const c=await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query("INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate) VALUES('bar',$1,432)",[addDays(day,600)]);
+      expect((await c.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(1);
+      await c.query('ROLLBACK');
+    } finally { c.release(); }
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(0);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_entries')).rows[0].n).toBe(0);
+  });
+
+  it('keeps different PMS saves in separate outgoing requests', async () => {
+    await enable();
+    for(const [offset,price] of [[0,'201'],[1,'202']] as const){
+      const request={changes:[{ratePlanIds:['bar'],dateFrom:addDays(day,offset),dateTo:addDays(day,offset),values:{rate:price}}]};
+      const preview=await calendarRequest('preview',request);
+      expect((await calendarRequest('apply',{...request,previewToken:preview.body.previewToken})).status).toBe(200);
+    }
+    const send=vi.fn(async()=>['separate-task']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send.mock.calls[0][2]).toEqual([expect.objectContaining({date_from:day,date_to:day,rate:'201.00'})]);
+    expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE status='pending'")).rows[0].n).toBeGreaterThan(0);
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][2]).toEqual([expect.objectContaining({date_from:addDays(day,1),date_to:addDays(day,1),rate:'202.00'})]);
+  });
+
+  it('waits for every pending row of a batch before retrying the request', async () => {
+    await enable(); await pool.query("UPDATE rate_plans SET base_rate=432 WHERE id='bar'");
+    await pool.query("UPDATE channex_ari_outbox SET run_after=now()+interval '1 minute' WHERE id=(SELECT min(id) FROM channex_ari_outbox)");
+    const send=vi.fn(async()=>['whole-batch']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('idle');expect(send).not.toHaveBeenCalled();
+    await pool.query("UPDATE channex_ari_outbox SET run_after=now()");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');expect(send).toHaveBeenCalledTimes(1);
+    expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE status='pending'")).rows[0].n).toBe(0);
+  });
+
+  it('keeps non-calendar events and full sync bounded to the rolling 500-day horizon', async () => {
+    const today=(await pool.query("SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS day")).rows[0].day;
+    const future=addDays(today,540);
+    const values=await buildAriValues(pool as any,connection,[{...event('restrictions'),date_from:future,date_to:future,reason:'rate_plans:update'}],today);
+    expect(values).toEqual([]);
+    const full=await buildAriValues(pool as any,connection,[{...event('restrictions'),date_from:today,date_to:addDays(today,600),reason:'full_sync'}],today);
+    expect(full[0].date_from).toBe(today);expect(full.at(-1)!.date_to).toBe(addDays(today,499));
+  });
+
   it('rejects an outdated calendar review without overwriting another operator', async () => {
     const request = { changes: [{ ratePlanIds: ['bar'], dateFrom: day, dateTo: day, values: { rate: '170' } }] };
     const first = await calendarRequest('preview', request);

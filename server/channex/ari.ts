@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
-import { calendarEffective } from "@shared/rate-calendar";
+import { calendarEffective, MAX_CALENDAR_CELLS } from "@shared/rate-calendar";
 
-export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number };
+export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number; reason?: string };
 export type AriValue = { property_id: string; date_from: string; date_to: string;[key: string]: string | number | boolean };
 export class AriConfigurationError extends Error { }
 export const STAGING_URL = 'https://staging.channex.io/api/v1';
@@ -25,7 +25,7 @@ export function compressValues(values: AriValue[]): AriValue[] {
   for (const value of values) {
     const prev = result[result.length - 1];
     const identity = ({ date_from, date_to, ...rest }: AriValue) => JSON.stringify(rest);
-    if (prev && addDays(prev.date_to, 1) === value.date_from && identity(prev) === identity(value)) prev.date_to = value.date_to;
+    if (prev && addDays(prev.date_to, 1) === value.date_from && value.date_to <= addDays(prev.date_from, 499) && identity(prev) === identity(value)) prev.date_to = value.date_to;
     else result.push({ ...value });
   }
   return result;
@@ -42,7 +42,20 @@ export async function inventoryPreview(c: Pick<PoolClient, 'query'>, connectionI
 /** Recomputes current absolute values only for affected dates/types, never scans for changes. */
 export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: any, events: AriEvent[], today: string): Promise<AriValue[]> {
   const horizonEnd = addDays(today, 499);
-  const dates = [...new Set(events.flatMap(e => e.date_to < today || e.date_from > horizonEnd ? [] : daysBetween(e.date_from < today ? today : e.date_from, e.date_to > horizonEnd ? horizonEnd : e.date_to)))].sort();
+  // The rolling full sync is 500 days. An explicit calendar edit can start
+  // later; keep its bounded period instead of silently truncating it.
+  const dateSet = new Set<string>();
+  for (const e of events) {
+    const explicitCalendar = e.kind === 'restrictions' && e.reason?.startsWith('rate_calendar:');
+    const from = e.date_from < today ? today : e.date_from;
+    const to = explicitCalendar || e.date_to <= horizonEnd ? e.date_to : horizonEnd;
+    if (to < from) continue;
+    for (const day of daysBetween(from, to)) {
+      dateSet.add(day);
+      if (dateSet.size > MAX_CALENDAR_CELLS + 500) throw new AriConfigurationError('El lote supera el máximo de fechas admitidas; revisá los cambios de calendario antes de reenviar');
+    }
+  }
+  const dates = [...dateSet].sort();
   if (!dates.length) return [];
   const mappings = (await c.query(`SELECT channex_room_type_id,room_type_id FROM channex_room_type_mappings WHERE connection_id=$1`, [connection.id])).rows;
   if (!mappings.length || mappings.some(m => !m.room_type_id) || new Set(mappings.map(m => m.room_type_id)).size !== mappings.length) throw new AriConfigurationError('Completá un mapeo único para cada categoría antes de sincronizar');

@@ -102,13 +102,20 @@ BEGIN
   SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload
    FROM(SELECT rate_plan_id,stay_date FROM calendar_old UNION ALL SELECT rate_plan_id,stay_date FROM calendar_new) changed;
  END IF;
+ -- Capture only the edited civil dates, including explicit future periods.
+ -- Separate gaps and cap each event at 500 days; do not fill untouched years.
  INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,room_type_id,rate_plan_id,reason)
-  SELECT s.connection_id,'restrictions',GREATEST(min(x.day),today),LEAST(max(x.day),today+499),p.room_type_id,x.plan,'rate_calendar:'||lower(TG_OP)
-  FROM jsonb_to_recordset(COALESCE(payload,'[]'::jsonb)) AS x(plan varchar,day date)
-  LEFT JOIN rate_plans p ON p.id=x.plan CROSS JOIN channex_ari_settings s
+  WITH dates AS (
+   SELECT DISTINCT x.plan,x.day FROM jsonb_to_recordset(COALESCE(payload,'[]'::jsonb)) AS x(plan varchar,day date)
+   WHERE x.day>=today
+  ), runs AS (
+   SELECT plan,day,day-(row_number() OVER(PARTITION BY plan ORDER BY day))::integer AS contiguous_run FROM dates
+  )
+  SELECT s.connection_id,'restrictions',min(x.day),max(x.day),p.room_type_id,x.plan,'rate_calendar:'||lower(TG_OP)
+  FROM runs x LEFT JOIN rate_plans p ON p.id=x.plan CROSS JOIN channex_ari_settings s
   JOIN channex_connections c ON c.id=s.connection_id
-  WHERE s.capture_started_at IS NOT NULL AND c.is_active AND x.day BETWEEN today AND today+499
-  GROUP BY s.connection_id,p.room_type_id,x.plan;
+  WHERE s.capture_started_at IS NOT NULL AND c.is_active
+  GROUP BY s.connection_id,p.room_type_id,x.plan,x.contiguous_run,((x.day-today)/500);
  RETURN NULL;
 END $body$;
 `;

@@ -184,3 +184,29 @@ regenerado con conservación de ID/código, cancelación posterior, reenvío,
 conversión USD con cotización original, ambigüedad múltiple y rollback de vínculo
 e historial ante un error. El proveedor se simula; la demostración remota de
 modificación debe repetirse después de publicar.
+
+
+## Ediciones explícitas posteriores al horizonte móvil — 04/11/2026
+
+El Full Sync y su avance diario conservan exactamente 500 días. Las ediciones
+explícitas guardadas en Calendario de venta ya no se recortan a hoy+499: el
+trigger captura sus fechas futuras y el dispatcher conserva su período.
+Se mantienen los límites de revisión/guardado del calendario: 500 días de
+amplitud y 5000 celdas. Los eventos separan huecos y cada intervalo enviado
+se comprime sin superar 500 días.
+
+El worker procesa una operación de base por conexión/tipo en cada llamada:
+conserva completas sus filas y no mezcla guardados independientes. Espera a
+que todas las filas pendientes del mismo lote estén listas para reintento.
+Mantiene los límites de frecuencia, Retry-After, deduplicación, moneda,
+permisos, transporte exclusivamente staging y la restricción de Full Sync
+manual a uno por 24 horas. No amplía la disponibilidad automática más allá
+del horizonte móvil ni habilita canales comerciales.
+
+Las pruebas aisladas cubren los dos planes del caso 8 durante 153 noches
+(01/12/2027–01/05/2028 con fecha base 04/11/2026), en una llamada, conservación
+del último día, supresión de repetidos, fechas separadas sin rellenar huecos,
+borrado que restaura el precio base y rollback junto con el calendario.
+El transporte remoto se simula: todavía corresponde ejecutar el caso real
+desde Xenia, comprobar Channex y conservar el task ID. Publicar el código no
+repite ediciones futuras que el trigger anterior nunca hubiera capturado.

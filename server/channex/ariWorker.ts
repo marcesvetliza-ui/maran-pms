@@ -37,16 +37,20 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
    ) INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,reason)
    SELECT a.connection_id,kind,GREATEST(a.last_horizon_date+500,$1::date),$2::date,'horizon_advance'
    FROM advancing a JOIN updated u USING(connection_id) CROSS JOIN (VALUES('availability'),('restrictions')) k(kind)`, [clock.today, addDays(clock.today, 499)]);
-    const job = (await c.query(`SELECT o.connection_id,o.kind FROM channex_ari_outbox o
+    const job = (await c.query(`SELECT o.connection_id,o.kind,o.batch_id::text FROM channex_ari_outbox o
    JOIN channex_ari_settings s ON s.connection_id=o.connection_id JOIN channex_connections c ON c.id=o.connection_id
    WHERE o.status='pending' AND s.enabled AND c.is_active AND o.run_after<=now() AND c.environment='demo'
+    AND NOT EXISTS(SELECT 1 FROM channex_ari_outbox waiting WHERE waiting.connection_id=o.connection_id
+     AND waiting.kind=o.kind AND waiting.batch_id=o.batch_id AND waiting.status='pending' AND waiting.run_after>now())
    ORDER BY o.run_after,o.id LIMIT 1`)).rows[0];
     if (!job) return { state: 'idle' };
     const connection = (await c.query(`SELECT c.id,c.environment,c.base_url,c.channex_property_id,c.api_key_encrypted,s.floor,s.currency
     FROM channex_connections c JOIN channex_ari_settings s ON s.connection_id=c.id WHERE c.id=$1 AND s.enabled AND c.is_active`, [job.connection_id])).rows[0];
-    const events: AriEvent[] = (await c.query(`WITH batches AS(SELECT batch_id FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now() ORDER BY id LIMIT 1000)
-    SELECT id::text,kind,date_from::text,date_to::text,room_type_id,rate_plan_id,attempts,reason
-    FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now() AND batch_id IN(SELECT batch_id FROM batches) ORDER BY id`, [job.connection_id, job.kind])).rows;
+    // One committed PMS operation per request. Keep every row of that batch
+    // together instead of merging independent cases or splitting a large save.
+    const events: AriEvent[] = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,room_type_id,rate_plan_id,attempts,reason
+    FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now()
+    AND batch_id=$3::bigint ORDER BY id`, [job.connection_id, job.kind, job.batch_id])).rows;
     if (!connection || !events.length) return { state: 'idle' };
     const ids = events.map(e => e.id);
     try {
