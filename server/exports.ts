@@ -1146,7 +1146,7 @@ export function registerExportRoutes(app: Express) {
       const opNumStr = op.numero ? String(parseInt((op.numero as string).split("-")[1] || "0")).padStart(5, "0") : String(op.id);
       const provNameOp = ((op.razon_social as string) || "").replace(/[^a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]/g, "").substring(0, 20);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="OP_${opNumStr}_${provNameOp}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${provNameOp}_OP_${opNumStr}.pdf"`);
       res.send(pdfBuf);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1249,7 +1249,7 @@ export function registerExportRoutes(app: Express) {
       const opNum = op.numero ? String(parseInt(op.numero.split("-")[1] || "0")).padStart(5, "0") : String(opId);
       const provNameCert = (op.razon_social || "").replace(/[^a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]/g, "").substring(0, 20);
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="RETIIBB_${opNum}_${provNameCert}.pdf"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${provNameCert}_RETIIBB_${opNum}.pdf"`);
       res.send(pdfBuf);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
