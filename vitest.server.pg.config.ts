@@ -12,6 +12,9 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Migrations, HTTP and backup fixtures need headroom on shared CI runners.
+    testTimeout: process.env.CI ? 20_000 : 5_000,
+    hookTimeout: process.env.CI ? 60_000 : 10_000,
     // Fixtures share one database, and "current shift" searches are global.
     // Parallel files could route collections into another suite's open shift.
     fileParallelism: false,

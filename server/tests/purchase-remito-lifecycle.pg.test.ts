@@ -46,6 +46,8 @@ suite("Remito: stock, deuda, pagos y factura en una transacción", () => {
   }));
 
   it("vincula una factura conservando el pago parcial, el ingreso y el historial", async () => fixture(async (tx, f) => {
+    // Other suites may already have supplier entries: assert this transaction's delta.
+    const openingLedger = (await tx.execute(sql`SELECT coalesce(sum(l.haber-l.debe),0) AS balance FROM accounting_entry_lines l JOIN accounting_accounts a ON a.id=l.account_id WHERE a.codigo='2.1.1.01'`)).rows[0];
     await updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "REMITO-NF" });
     await createPaymentOrder(tx, { supplierId: f.supplier, facturaIds: [f.invoice], formaPago: "efectivo", efectivo: 1000, montoParcial: 1000 }, () => "2026-11-03");
     await expect(updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "REMITO" })).rejects.toThrow("pagos aplicados");
@@ -57,7 +59,7 @@ suite("Remito: stock, deuda, pagos y factura en una transacción", () => {
     expect((await tx.execute(sql`SELECT id FROM stock_movements WHERE source_type='purchase_invoice' AND source_id=${String(f.invoice)}`)).rows).toHaveLength(1);
     expect((await tx.execute(sql`SELECT id FROM purchase_invoice_lines WHERE invoice_id=${f.invoice}`)).rows).toHaveLength(1);
     const ledger = (await tx.execute(sql`SELECT sum(l.haber-l.debe) AS balance FROM accounting_entry_lines l JOIN accounting_accounts a ON a.id=l.account_id WHERE a.codigo='2.1.1.01'`)).rows[0];
-    expect(Number(ledger.balance)).toBe(1420);
+    expect(Number(ledger.balance) - Number(openingLedger.balance)).toBe(1420);
     await expect(assertPurchaseInvoiceNotDuplicate(tx, { supplierId: f.supplier, tipoComprobante: "REMITO", numeroComprobante: f.number })).rejects.toThrow("duplicados");
     await expect(updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "FACT-A" }, undefined, true)).rejects.toThrow("cambió de estado");
   }));

@@ -28,16 +28,22 @@ describe("gateway errors preserve uncertain operations without showing HTML",()=
     const error=await apiRequest("POST","/api/test",{}).catch(error=>error);
     expect(parseApiErrorPayload(error)).toEqual(payload);
   });
-  it("retains the original invoice and payment intent and does not submit payment after a 504",async()=>{
-    const fetch=vi.fn(async()=>new Response(html,{status:504,headers:{"content-type":"text/html"}}));
+  it.each([502,503,504,524])("retains and replays the original intent after HTTP %s without paying before the invoice is confirmed",async status=>{
+    const fetch=vi.fn(async(_url:any,_options?:RequestInit)=>new Response(html,{status,headers:{"content-type":"text/html"}}));
     vi.stubGlobal("fetch",fetch);
     const submission=createPrefacturaSubmission(sessionStorage);
     const original=submission.prepare("synthetic",{creditOperationId:crypto.randomUUID(),tipoComprobante:"FA"},[{amount:"260000.00",method:"efectivo"}]);
-    let failure:Error;
-    try{await submission.run("synthetic",async(url,body)=>(await apiRequest("POST",url,body)).json());}catch(error){failure=error as Error;}
+    await expect(submission.run("synthetic",async(url,body)=>(await apiRequest("POST",url,body)).json())).rejects.toThrow(`HTTP ${status}`);
     expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("/api/billing/invoices");
     const reopened=createPrefacturaSubmission(sessionStorage);
-    expect(await reopened.discardRejectedInvoice("synthetic",failure!,async()=>false)).toBe(false);
     expect(reopened.pending("synthetic")).toEqual(original);
+    // A changed folio must not replace the uncertain invoice/payment intent.
+    expect(reopened.prepare("synthetic",{creditOperationId:"different"},[{amount:"1.00",method:"transferencia"}])).toEqual(original);
+    const replay=vi.fn(async(url:string,_body:Record<string,any>)=>url==="/api/billing/invoices"?{id:77,montoTotal:"260000.00"}:{id:"payment"});
+    await expect(reopened.run("synthetic",replay)).resolves.toMatchObject({invoice:{id:77},paymentCount:1});
+    expect(replay).toHaveBeenNthCalledWith(1,"/api/billing/invoices",original.invoiceRequest);
+    expect(replay).toHaveBeenNthCalledWith(2,"/api/payments",expect.objectContaining({...original.payments[0],invoiceData:expect.objectContaining({id:77,total:"260000.00"})}));
+    expect(reopened.pending("synthetic")?.invoice?.id).toBe(77);
   });
 });

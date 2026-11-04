@@ -27,6 +27,7 @@ const suite = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
 let server: http.Server;
 let baseUrl: string;
+let createdVatAccountId: number | undefined;
 
 async function request(method: string, path: string, body?: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -73,6 +74,9 @@ async function cleanupInvoice(invoiceId?: number) {
 
 suite("PostgreSQL real: pago automático al cargar la factura de Compras", () => {
   beforeAll(async () => {
+    // A blank CI schema seeds only base accounts; this fixture also exercises VAT.
+    const vat=await pool!.query<{id:number}>("INSERT INTO accounting_accounts(codigo,nombre,tipo,activo) VALUES('1.1.4.07.01','IVA compras 21% (fixture)','activo',true) ON CONFLICT(codigo) DO NOTHING RETURNING id");
+    createdVatAccountId=vat.rows[0]?.id;
     const { registerRoutes } = await import("../routes");
     const app = express();
     app.use(express.json());
@@ -86,6 +90,7 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    if(createdVatAccountId)await pool!.query("DELETE FROM accounting_accounts WHERE id=$1",[createdVatAccountId]);
     await pool?.end();
   });
 
