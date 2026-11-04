@@ -135,6 +135,21 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
     }
   });
 
+  it.each(['21','no_gravado'])('persiste envío %s, total y OP saldados con asiento balanceado', async (rate) => {
+    const supplierId=await makeSupplier(randomUUID());let invoiceId:number|undefined;
+    const total=rate==='21'?'133.10':'131.00';
+    try {
+      const account=(await pool!.query("SELECT id FROM accounting_accounts WHERE codigo='4.2.1.08.05.02'")).rows[0];
+      expect(account).toBeTruthy();
+      const created=await request('POST','/api/purchase-invoices',{tipoComprobante:'FACT-A',supplierId,numeroComprobante:`SHIPPING-${randomUUID()}`,fechaEmision:'2026-11-04',montoNeto:'100',montoIva21:'21',envioImporte:'10',envioAlicuota:rate,cuentaContableId:account.id,formasPago:[{formaPago:'efectivo',monto:total}]});
+      expect(created.status,JSON.stringify(created.body)).toBe(201);invoiceId=Number(created.body.id);
+      const invoice=(await pool!.query('SELECT * FROM purchase_invoices WHERE id=$1',[invoiceId])).rows[0];
+      expect(invoice).toMatchObject({monto_total:total,saldo_pendiente:'0.00',estado:'pagado',envio:{importe:'10.00'}});
+      const entry=(await pool!.query('SELECT SUM(debe)::text AS debe,SUM(haber)::text AS haber FROM accounting_entry_lines WHERE entry_id=$1',[invoice.asiento_id])).rows[0];
+      expect(Number(entry.debe)).toBe(Number(total));expect(entry.debe).toBe(entry.haber);
+    } finally {await cleanupInvoice(invoiceId);await pool!.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplierId]);}
+  });
+
   it.each(["9450.00", "9372.54"])("incluye la percepción en la cancelación y conserva pagos parciales reales: %s", async (paid) => {
     if(!pool)return;
     const supplierId=await makeSupplier(randomUUID());let invoiceId:number|undefined;

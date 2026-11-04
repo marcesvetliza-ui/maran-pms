@@ -4,7 +4,7 @@ import { canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
 import { matchesIssuer } from "@/lib/issuer-search";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import { formatDisplayDate } from "@shared/date-display";
-import {applyPurchaseDiscount,restorePurchaseDiscount,type PurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
+import {applyPurchaseAdjustments,restorePurchaseDiscount,type PurchaseDiscount,type PurchaseShipping} from "@shared/purchaseInvoiceDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
@@ -67,6 +67,7 @@ interface Invoice {
   fechaEmision: string;
   periodo?: string;
   condicionPago: string;
+  envio?: PurchaseShipping|null;
   descuento?: PurchaseDiscount | null;
   montoNeto: string;
   montoIva21: string;
@@ -263,6 +264,7 @@ function camelInvoice(r: any): Invoice {
     condicionPago: r.condicion_pago,
     ...mapPurchaseInvoiceAmountFields(r),
     descuento: r.descuento,
+    envio: r.envio,
     estado: r.estado,
     centroCosto: r.centro_costo,
     observaciones: r.observaciones,
@@ -311,6 +313,8 @@ const emptyForm = () => ({
   ley25413: "",
   cuentaContableId: "",
   centroCosto: "",
+  envioImporte: "",
+  envioAlicuota: "0",
   descuentoDescripcion: "",
   descuentoTipo: "importe",
   descuentoPorcentaje: "",
@@ -527,7 +531,7 @@ export function InvoiceDialog({
   useEffect(()=>{setPaymentAmountEdited(false);},[open,editingInvoice]);
   const f = (k: string, v: string) => {
     if(k === "montoPagadoAhora")setPaymentAmountEdited(true);
-    setForm((p) => ({ ...p, [k]: v, ...(k==="tipoComprobante"?{descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:""}:{}) }));
+    setForm((p) => ({ ...p, [k]: v, ...(k==="tipoComprobante"?{envioImporte:"",envioAlicuota:"0",descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:""}:{}) }));
   };
 
   // Si se abandona una liquidación antes de guardar, sus retenciones no deben
@@ -576,6 +580,9 @@ export function InvoiceDialog({
         observaciones: editingInvoice.observaciones || "",
         subtipoRetencion: editingInvoice.subtipoRetencion || "",
         ...(editingInvoice.descuento?.originales||{}),
+        ...(editingInvoice.envio?.originales||{}),
+        envioImporte: editingInvoice.envio?.importe||'',
+        envioAlicuota: editingInvoice.envio?.alicuota||'0',
         descuentoDescripcion: editingInvoice.descuento?.descripcion||'',
         descuentoTipo: editingInvoice.descuento?.tipo||'importe',
         descuentoPorcentaje: editingInvoice.descuento?.porcentaje||'',
@@ -697,7 +704,7 @@ export function InvoiceDialog({
     }
   }, [invItems, itemCategories, existingInvItems, form.tipoComprobante, form.cuentaContableId]);
 
-  const discountPreview=useMemo(()=>{try{const invoice=applyPurchaseDiscount(form);return {invoice,error:'',total:calculatePurchaseInvoiceTotal(invoice)};}catch(e:any){return {invoice:form,error:e.message,total:0};}},[form]);
+  const discountPreview=useMemo(()=>{try{const invoice=applyPurchaseAdjustments(form);return {invoice,error:'',total:calculatePurchaseInvoiceTotal(invoice)};}catch(e:any){return {invoice:form,error:e.message,total:0};}},[form]);
   const storedRemitoId = sourceRemito?.id || (isPurchaseRemito(editingInvoice?.tipoComprobante) ? editingInvoice?.id : undefined);
   const { data: storedRemito, isLoading: loadingRemito, isError: remitoLoadError } = useQuery<any>({
     queryKey: ["/api/purchase-invoices", storedRemitoId], enabled: open && !!storedRemitoId,
@@ -959,7 +966,7 @@ export function InvoiceDialog({
   };
 
   const discountDetails=('descuento' in discountPreview.invoice?discountPreview.invoice.descuento:null) as PurchaseDiscount|null;
-  const discountSection=['FACT-A','FACT-B','FACT-C'].includes(form.tipoComprobante)?<section className="col-span-2 space-y-3 rounded-xl border bg-muted/20 p-4"><div><h3 className="font-semibold">Descuentos</h3><p className="text-xs text-muted-foreground">{form.tipoComprobante==='FACT-B'?'Ingresá el descuento final informado por el proveedor.':'Se aplica sobre el subtotal antes de impuestos y percepciones; el IVA de Factura A se ajusta proporcionalmente.'} Los costos de los artículos no cambian.</p></div><div className="grid gap-3 sm:grid-cols-3"><label className="text-sm sm:col-span-3">Descripción<Input aria-label="Descripción del descuento" value={form.descuentoDescripcion} onChange={e=>f('descuentoDescripcion',e.target.value)} placeholder="Ej.: Bonificación comercial"/></label>{form.tipoComprobante!=='FACT-B'&&<label className="text-sm">Calcular por<select aria-label="Tipo de descuento" className="h-9 w-full rounded-md border bg-background px-3" value={form.descuentoTipo} onChange={e=>f('descuentoTipo',e.target.value)}><option value="importe">Importe</option><option value="porcentaje">Porcentaje</option></select></label>}{form.tipoComprobante!=='FACT-B'&&form.descuentoTipo==='porcentaje'&&<label className="text-sm">Porcentaje<Input aria-label="Porcentaje de descuento" type="number" min="0" max="100" step="0.01" value={form.descuentoPorcentaje} onChange={e=>f('descuentoPorcentaje',e.target.value)}/></label>}<label className="text-sm">Importe descontado<Input aria-label="Importe de descuento" type="number" min="0" step="0.01" value={form.descuentoTipo==='porcentaje'?(discountDetails?.importe||''):form.descuentoImporte} onChange={e=>{f('descuentoTipo','importe');f('descuentoPorcentaje','');f('descuentoImporte',e.target.value);}}/></label></div>{discountPreview.error&&<p role="alert" className="text-sm text-destructive">{discountPreview.error}</p>}{discountDetails&&<div className="space-y-1 rounded-lg bg-background p-3 text-sm"><p>{form.tipoComprobante==='FACT-B'?'Importe previo al descuento':'Subtotal antes de impuestos'}: <strong>${fmt(discountDetails.base)}</strong></p><p>Descuento: <strong>−${fmt(discountDetails.importe)}</strong></p><p>{form.tipoComprobante==='FACT-B'?'Importe después del descuento':'Subtotal después del descuento'}: <strong>${fmt(Number(discountDetails.base)-Number(discountDetails.importe))}</strong></p>{form.tipoComprobante==='FACT-A'&&<p>IVA después del descuento: <strong>${fmt(['montoIva21','montoIva105','montoIva27','montoIva5','montoIva25'].reduce((n,k)=>n+$n((discountPreview.invoice as any)[k]),0))}</strong></p>}</div>}</section>:null;
+  const discountSection=['FACT-A','FACT-B','FACT-C'].includes(form.tipoComprobante)?<><details className="col-span-2 space-y-3 rounded-xl border bg-muted/20 p-4"><summary className="cursor-pointer font-semibold">Descuento {discountDetails?`−$${fmt(discountDetails.importe)}`:"(opcional)"}</summary><div><p className="text-xs text-muted-foreground">{form.tipoComprobante==='FACT-B'?'Ingresá el descuento final informado por el proveedor.':'Se aplica sobre el subtotal antes de impuestos y percepciones; el IVA de Factura A se ajusta proporcionalmente.'} Los costos de los artículos no cambian.</p></div><div className="grid gap-3 sm:grid-cols-3"><label className="text-sm sm:col-span-3">Descripción<Input aria-label="Descripción del descuento" value={form.descuentoDescripcion} onChange={e=>f('descuentoDescripcion',e.target.value)} placeholder="Ej.: Bonificación comercial"/></label>{form.tipoComprobante!=='FACT-B'&&<label className="text-sm">Calcular por<select aria-label="Tipo de descuento" className="h-9 w-full rounded-md border bg-background px-3" value={form.descuentoTipo} onChange={e=>f('descuentoTipo',e.target.value)}><option value="importe">Importe</option><option value="porcentaje">Porcentaje</option></select></label>}{form.tipoComprobante!=='FACT-B'&&form.descuentoTipo==='porcentaje'&&<label className="text-sm">Porcentaje<Input aria-label="Porcentaje de descuento" type="number" min="0" max="100" step="0.01" value={form.descuentoPorcentaje} onChange={e=>f('descuentoPorcentaje',e.target.value)}/></label>}<label className="text-sm">Importe descontado<Input aria-label="Importe de descuento" type="number" min="0" step="0.01" value={form.descuentoTipo==='porcentaje'?(discountDetails?.importe||''):form.descuentoImporte} onChange={e=>{f('descuentoTipo','importe');f('descuentoPorcentaje','');f('descuentoImporte',e.target.value);}}/></label></div>{discountDetails&&<div className="space-y-1 rounded-lg bg-background p-3 text-sm"><p>{form.tipoComprobante==='FACT-B'?'Importe previo al descuento':'Subtotal antes de impuestos'}: <strong>${fmt(discountDetails.base)}</strong></p><p>Descuento: <strong>−${fmt(discountDetails.importe)}</strong></p><p>{form.tipoComprobante==='FACT-B'?'Importe después del descuento':'Subtotal después del descuento'}: <strong>${fmt(Number(discountDetails.base)-Number(discountDetails.importe))}</strong></p>{form.tipoComprobante==='FACT-A'&&<p>IVA después del descuento: <strong>${fmt(['montoIva21','montoIva105','montoIva27','montoIva5','montoIva25'].reduce((n,k)=>n+$n((discountPreview.invoice as any)[k]),0)-$n((discountPreview.invoice as any).envio?.iva))}</strong></p>}</div>}</details><details className="col-span-2 space-y-3 rounded-xl border bg-muted/20 p-4"><summary className="cursor-pointer font-semibold">Envío {form.envioImporte?`+$${fmt((discountPreview.invoice as any).envio?.total||form.envioImporte)}`:'(opcional)'}</summary><p className="text-xs text-muted-foreground">Cargo adicional del proveedor. Cargalo separado de los importes de mercadería; no modifica el stock ni los costos de los artículos.</p><label className="block text-sm">{form.tipoComprobante==='FACT-A'?'Importe neto del envío':'Importe final del envío'}<Input aria-label="Importe de envío" type="number" min="0" step="0.01" value={form.envioImporte} onChange={e=>f('envioImporte',e.target.value)}/></label>{form.tipoComprobante==='FACT-A'&&<label className="block text-sm">IVA del envío<select aria-label="IVA del envío" className="h-9 w-full rounded-md border bg-background px-3" value={form.envioAlicuota} onChange={e=>f('envioAlicuota',e.target.value)}><option value="0">No gravado</option><option value="exento">Exento</option>{['2.5','5','10.5','21','27'].map(rate=><option key={rate} value={rate}>{rate}%</option>)}</select></label>}</details>{discountPreview.error&&<p role="alert" className="col-span-2 text-sm text-destructive">{discountPreview.error}</p>}</>:null;
 
   const steps = isEditing
     ? ["Encabezado", "Montos", "Retenciones", "Clasificación"]
@@ -1043,7 +1050,7 @@ export function InvoiceDialog({
                       setForm((p) => ({
                         ...p,
                         ...clearCardRetentions(p, v),
-                        tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
+                        tipoComprobante: v, envioImporte:"",envioAlicuota:"0",descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
@@ -1054,7 +1061,7 @@ export function InvoiceDialog({
                       // total y el no fiscal lo calcula desde los artículos.
                       setForm((p) => ({
                         ...p,
-                        tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
+                        tipoComprobante: v, envioImporte:"",envioAlicuota:"0",descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
                         formaPagoInmediata: "cuenta_corriente", montoPagadoAhora: "", formasPagoExtra: [],
                         montoNeto: "",
                         montoExento: "",
@@ -1080,7 +1087,7 @@ export function InvoiceDialog({
                         { existingItemId: "", quantity: "1", unit: "unidad", costPrice: "0", warehouseId: defaultWarehouseId, vatRate: "" },
                       ]);
                     } else {
-                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"" }));
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v, envioImporte:"",envioAlicuota:"0",descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"" }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
@@ -1591,14 +1598,14 @@ export function InvoiceDialog({
                       setForm((p) => ({
                         ...p,
                         ...clearCardRetentions(p, v),
-                        tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
+                        tipoComprobante: v, envioImporte:"",envioAlicuota:"0",descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"",
                         alicuotaIva: "0",
                         cuentaContableId: v === "RETENCION" ? "" : p.cuentaContableId,
                         subtipoRetencion: v === "RETENCION" ? p.subtipoRetencion : "",
                         ...ALL_IVA_FIELDS,
                       }));
                     } else {
-                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v, descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"" }));
+                      setForm((p) => ({ ...p, ...clearCardRetentions(p, v), tipoComprobante: v, envioImporte:"",envioAlicuota:"0",descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:"" }));
                     }
                   }}>
                     <SelectTrigger data-testid="select-tipo-comprobante">
@@ -2167,9 +2174,11 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ["Cuenta contable", account ? `${account.codigo} — ${account.nombre}` : "—"],
   ];
   const montos: [string, string][] = [
-    ...(invoice.descuento?[["Descuento — "+invoice.descuento.descripcion,"−"+fmt2(invoice.descuento.importe)] as [string,string]]:[]),
+    ...(invoice.envio?[["Envío (incluido en bases e IVA)",fmt2(invoice.envio.total)] as [string,string]]:[]),
+    ...(invoice.descuento?[[ "Descuento — "+invoice.descuento.descripcion,"−"+fmt2(invoice.descuento.importe)] as [string,string]]:[]),
     [isRetencion ? "Importe final" : "Monto Neto (gravado)", fmt2(invoice.montoNeto)],
     ...(invoice.montoExento && parseFloat(invoice.montoExento) !== 0 ? [["Exento", fmt2(invoice.montoExento)] as [string, string]] : []),
+    ...(invoice.montoNoGravado && parseFloat(invoice.montoNoGravado) !== 0 ? [["No gravado", fmt2(invoice.montoNoGravado)] as [string,string]] : []),
     ["IVA 21%", fmt2(invoice.montoIva21)],
     ["IVA 10.5%", fmt2(invoice.montoIva105)],
     ["IVA 27%", fmt2(invoice.montoIva27)],

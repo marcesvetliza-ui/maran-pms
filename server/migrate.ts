@@ -1276,7 +1276,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
     billing_operations: ["operation_id", "owner_type", "owner_id", "payload_hash", "request_snapshot", "fiscal_identity", "stage", "invoice_id", "error_code"],
     invoice_counters: [],
-    purchase_invoices: ["subtipo_retencion", "descuento", "special_details"],
+    purchase_invoices: ["subtipo_retencion", "descuento", "envio", "special_details"],
     purchase_invoice_lines: ["id", "invoice_id", "line_number", "item_id", "item_name", "item_sku", "quantity", "unit_price", "vat_rate", "line_total", "warehouse_id"],
   },
   indexes: {
@@ -2513,6 +2513,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   // ── preventive_tasks: registro de demora ─────────────────────────────────
+  await withTimeout("purchase_invoices.envio", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "envio", "jsonb")))
+  );
   await withTimeout("purchase_invoices.descuento", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "descuento", "jsonb")))
   );

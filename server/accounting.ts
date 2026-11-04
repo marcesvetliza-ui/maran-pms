@@ -70,7 +70,7 @@ export async function generarAsiento(
   const isTarjeta = invoice.tipoComprobante === "LIQ-TARJETA";
 
   // Montos
-  const neto = parseNum(invoice.montoNeto);
+  const neto = parseNum(invoice.montoNeto) + parseNum(invoice.montoExento) + parseNum(invoice.montoNoGravado);
   const iva21 = parseNum(invoice.montoIva21);
   const iva105 = parseNum(invoice.montoIva105);
   const iva27 = parseNum(invoice.montoIva27);

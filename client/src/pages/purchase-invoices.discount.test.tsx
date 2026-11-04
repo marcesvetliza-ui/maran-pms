@@ -13,7 +13,7 @@ const supplier={id:1,razonSocial:'Proveedor Descuentos SA',cuit:'30-11111111-1',
 function mount(invoice?:any){render(<QueryClientProvider client={queryClient}><InvoiceDialog open onClose={vi.fn()} suppliers={[supplier]} accounts={[]} embedded unifiedLayout editingInvoice={invoice}/></QueryClientProvider>);}
 async function fill(type='Factura A'){
  const user=userEvent.setup();mount();
- await user.click(screen.getByTestId('select-supplier'));await user.click(await screen.findByText('Proveedor Descuentos SA'));if(type!=='Factura A'){await user.click(screen.getByTestId('select-tipo-comprobante'));await user.click(await screen.findByRole('option',{name:type}));}await user.type(screen.getByTestId('input-numero-comprobante'),'123');await user.type(screen.getByTestId('input-neto-line-0'),type==='Factura B'?'121':'100');await user.type(screen.getByLabelText('Descripción del descuento'),'Bonificación');return user;
+ await user.click(screen.getByTestId('select-supplier'));await user.click(await screen.findByText('Proveedor Descuentos SA'));if(type!=='Factura A'){await user.click(screen.getByTestId('select-tipo-comprobante'));await user.click(await screen.findByRole('option',{name:type}));}await user.type(screen.getByTestId('input-numero-comprobante'),'123');await user.type(screen.getByTestId('input-neto-line-0'),type==='Factura B'?'121':'100');await user.click(screen.getByText(/^Descuento \(opcional\)/));await user.type(screen.getByLabelText('Descripción del descuento'),'Bonificación');return user;
 }
 it('A calcula IVA reducido y permite reemplazar el porcentaje por un importe',async()=>{
  const user=await fill();await user.selectOptions(screen.getByLabelText('Tipo de descuento'),'porcentaje');await user.type(screen.getByLabelText('Porcentaje de descuento'),'10');expect((await screen.findAllByText('$108,90')).length).toBeGreaterThan(0);expect(screen.getByLabelText('Importe de descuento')).toHaveValue(10);
@@ -24,4 +24,11 @@ it('C acepta porcentaje sin IVA',async()=>{const user=await fill('Factura C');aw
 it('editar recupera el subtotal original y conserva el mismo descuento',async()=>{
  const input={tipoComprobante:'FACT-A',montoNeto:'100',montoIva21:'21',descuentoDescripcion:'Bonificación',descuentoTipo:'porcentaje',descuentoPorcentaje:'10'};const discounted=applyPurchaseDiscount(input);mount({...discounted,id:1,numeroComprobante:'123',fechaEmision:'2026-10-07',supplierId:1,proveedorNombre:'Proveedor',estado:'pendiente'});
  await waitFor(()=>expect(screen.getByTestId('input-neto-line-0')).toHaveValue(100));expect(screen.getByLabelText('Porcentaje de descuento')).toHaveValue(10);expect(screen.getByText('$108,90')).toBeInTheDocument();
+});
+
+it('envío desplegable suma el total y el pago completo sin crear un artículo',async()=>{
+ const user=await fill();await user.click(screen.getByTestId('select-forma-pago-inmediata'));await user.click(await screen.findByRole('option',{name:'Efectivo'}));await user.click(screen.getByText(/^Envío \(opcional\)/));
+ await user.type(screen.getByLabelText('Importe de envío'),'10');await user.selectOptions(screen.getByLabelText('IVA del envío'),'21');
+ expect((await screen.findAllByText('$133,10')).length).toBeGreaterThan(0);expect(screen.getByTestId('input-monto-pagado-ahora')).toHaveValue(133.1);
+ await user.click(screen.getByTestId('btn-submit-invoice'));await waitFor(()=>expect(writes).toHaveLength(1));expect(writes[0]).toMatchObject({envioImporte:'10',envioAlicuota:'21',montoNeto:'100.00',formasPago:[{formaPago:'efectivo',monto:'133.10'}]});
 });
