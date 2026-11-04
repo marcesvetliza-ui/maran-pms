@@ -10,7 +10,8 @@ function canonicalColumn(column:SQL,empty='') {
  const text=sql`upper(regexp_replace(coalesce(${column},''),'[[:space:]]','','g'))`;
  return sql`CASE WHEN ${text}='' THEN ${empty} WHEN ${text} ~ '^[0-9]+$' THEN coalesce(nullif(ltrim(${text},'0'),''),'0') ELSE ${text} END`;
 }
-/** Call as the first step inside the INSERT transaction, before any accounting or stock write. */
+/** Cancelled rows retain their history but no longer reserve the document identity.
+ * Call as the first step inside the INSERT transaction, before any accounting or stock write. */
 export async function assertPurchaseInvoiceNotDuplicate(tx:Transaction,input:Identity) {
  const type=String(input.tipoComprobante??'').trim().toUpperCase();
  const number=canonicalPurchaseNumber(input.numeroComprobante);
@@ -23,7 +24,8 @@ export async function assertPurchaseInvoiceNotDuplicate(tx:Transaction,input:Ide
  for(const identity of identities.sort())await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`purchase-invoice:${identity}:${document}`},0))`);
  const duplicate=await tx.execute(sql`
   SELECT id,numero_comprobante,numero_comprobante_ext FROM purchase_invoices
-  WHERE id <> ${input.excludeInvoiceId ?? 0} AND (
+  WHERE coalesce(estado,'') <> 'anulado'
+    AND id <> ${input.excludeInvoiceId ?? 0} AND (
     (upper(btrim(tipo_comprobante))=${type}
       AND ${canonicalColumn(sql`numero_comprobante`)}=${number}
       AND ${canonicalColumn(sql`punto_venta`,'0')}=${pv})

@@ -79,6 +79,31 @@ suite('Purchase invoice identity guard — real PostgreSQL, isolated schema',()=
   expect((await pool!.query('SELECT * FROM purchase_invoices')).rows).toHaveLength(0);
   await expect(create(identity)).resolves.toEqual(expect.any(Number));
  });
+ it('allows replacement after cancellation, preserves the original, then blocks another active copy',async()=>{
+  const old=await seed({...identity,estado:'anulado'});
+  const replacement=await create({...identity,puntoVenta:'1',numeroComprobante:'123'});
+  expect(replacement).not.toBe(old);
+  await expect(create(identity)).rejects.toMatchObject({statusCode:409,existingId:replacement});
+  expect((await pool!.query('SELECT id,estado FROM purchase_invoices ORDER BY id')).rows).toEqual([{id:old,estado:'anulado'},{id:replacement,estado:'pendiente'}]);
+  expect((await pool!.query('SELECT * FROM effects')).rows).toHaveLength(3);
+ });
+ it.each(['pendiente','parcial','pagado'])('keeps blocking a duplicate with state %s',async estado=>{
+  await seed({...identity,estado});await expect(create(identity)).rejects.toMatchObject({statusCode:409});
+ });
+ it('ignores the historical remito identity only when its owning document is cancelled',async()=>{
+  const id=await seed({...identity,tipoComprobante:'FACT-B',numeroComprobante:'999'});
+  await pool!.query('UPDATE purchase_invoices SET special_details=$1::jsonb WHERE id=$2',[JSON.stringify({remitoHistory:[{previous:{tipo_comprobante:'FACT-A',punto_venta:'1',numero_comprobante:'123'}}]}),id]);
+  await expect(create(identity)).rejects.toMatchObject({statusCode:409});
+  await pool!.query("UPDATE purchase_invoices SET estado='anulado' WHERE id=$1",[id]);
+  await expect(create(identity)).resolves.toEqual(expect.any(Number));
+ });
+ it('serializes two replacement attempts after cancellation so only one creates downstream effects',async()=>{
+  await seed({...identity,estado:'anulado'});
+  let entered=0;let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});const barrier=async()=>{if(++entered===2)release();await gate;};
+  const result=await Promise.allSettled([create(identity,barrier),create({...identity,supplierId:2,proveedorCuit:'30123456781',puntoVenta:'1',numeroComprobante:'123'},barrier)]);
+  expect(result.filter(r=>r.status==='fulfilled')).toHaveLength(1);expect(result.find(r=>r.status==='rejected')).toMatchObject({reason:{statusCode:409}});
+  expect((await pool!.query('SELECT * FROM purchase_invoices')).rows).toHaveLength(2);expect((await pool!.query('SELECT * FROM effects')).rows).toHaveLength(3);
+ });
  it('preserves historical duplicates and cancelled documents instead of deleting or rewriting them',async()=>{
   await seed({...identity,estado:'anulado'});await seed(identity);
   await expect(create(identity)).rejects.toMatchObject({statusCode:409});
