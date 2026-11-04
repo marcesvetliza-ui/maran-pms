@@ -9,7 +9,7 @@ const NON_FISCAL = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "vo
 const FISCAL = new Set(["FA", "FB", "FC", "FT", "FM", "FMB", "NCA", "NCB", "NCC", "NCT", "NCM", "NCMB", "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB"]);
 export function normalizedDocumentType(type: unknown): string {
   const value = String(type ?? "").trim();
-  return ({ factura_a: "FA", factura_b: "FB", factura_c: "FC", factura_t: "FT", "Factura A": "FA", "Factura B": "FB", "Factura C": "FC" } as Record<string,string>)[value] || value;
+  return ({ voucher: "voucher_justo", consumo_interno: "voucher_consumo_interno", factura_a: "FA", factura_b: "FB", factura_c: "FC", factura_t: "FT", "Factura A": "FA", "Factura B": "FB", "Factura C": "FC" } as Record<string,string>)[value] || value;
 }
 export function isNonFiscalDocument(type: unknown): boolean { return NON_FISCAL.has(normalizedDocumentType(type)); }
 export type CashDocument = { id: number; type: string; pointOfSale: number; number: number; status: string | null };
@@ -37,9 +37,15 @@ export function cashDocumentSummary(movements: Array<CashDocumentEvidence & {pay
   return Object.entries(totals).map(([key, cents]) => ({key:key as CashDocumentClass, label:CASH_DOCUMENT_LABELS[key as CashDocumentClass], total:cents / 100}));
 }
 /** Internal imputations/prepaid redemptions are not a fresh collection. */
-export function nonFiscalCollectionError(type: unknown, methods: unknown[]): string | null {
+export function nonFiscalCollectionError(type: unknown, methods: unknown[], options: { restaurant?: boolean } = {}): string | null {
   if (!isNonFiscalDocument(type)) return null;
   const noCollection = new Set(["", "none", "sin_cobro", "sin_pago", "no_charge", "courtesy", "cortesia", "room_charge", "cuenta_habitacion", "cargo_habitacion", "venta_previa", "gift_voucher"]);
-  return methods.some(method => !isCashMethod(method) && !noCollection.has(String(method ?? "").trim().toLowerCase()))
+  const restaurantInternal = new Set(["ticket", "voucher", "voucher_justo", "voucher_room_service", "voucher_pedidos_ya", "voucher_consumo_interno"]);
+  const permittedSettlement = (method: unknown) => {
+    const value = String(method ?? "").trim().toLowerCase();
+    return options.restaurant === true && ((value === "consumo_interno" && restaurantInternal.has(normalizedDocumentType(type)))
+      || (value === "pedidos_ya" && normalizedDocumentType(type) === "voucher_pedidos_ya"));
+  };
+  return methods.some(method => !permittedSettlement(method) && !isCashMethod(method) && !noCollection.has(String(method ?? "").trim().toLowerCase()))
     ? "Los comprobantes no fiscales solo admiten cobros en efectivo o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal." : null;
 }

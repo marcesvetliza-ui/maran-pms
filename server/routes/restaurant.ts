@@ -1,3 +1,4 @@
+import { restaurantCashPosting } from "@shared/restaurant-settlement";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import type { Express } from "express";
 import { storage } from "../db-storage";
@@ -5,12 +6,30 @@ import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
 import { restaurantPaymentTransaction, afterRestaurantPaymentCommit } from "../restaurantPaymentTransaction";
 import { db, pool, withDatabaseTransaction } from "../db";
-import { restaurantOrders, orderItems, orderSplits, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
+import { restaurantOrders, orderItems, orderSplits, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements, cashMovements } from "@shared/schema";
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
-import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
+import { generateRestaurantOrderReceiptPdf, getRestaurantReceiptTypeLabel } from "../restaurantPdfs";
 import { assertFinancialSchemaReady } from "../migrate";
 import { getArgentinaOperationalDate, getArgentinaOperationalParts } from "../utils/argentinaDateTime";
+
+async function registerRestaurantCashMovement(...args: Parameters<typeof storage.registerCashMovement>) {
+  const posting = restaurantCashPosting(args[4]);
+  const originalMethod = args[4];
+  const methodLabel = ({ consumo_interno: "Consumo Interno", pedidos_ya: "Pedidos Ya", room_charge: "Cargo a Habitación", cuenta_habitacion: "Cargo a Habitación", gift_voucher: "Voucher de Regalo" } as Record<string, string>)[originalMethod] || originalMethod;
+  args[3] += ` · ${getRestaurantReceiptTypeLabel(args[8])} · ${methodLabel}`;
+  args[4] = posting.paymentMethod;
+  args[6] = posting.movementType;
+  return storage.registerCashMovement(...args);
+}
+
+async function restaurantReceiptTotal(order: { id: string; status: string; total: string | null }) {
+  if (order.status !== "closed") return order.total || "0";
+  const [settlement] = await db.select({ total: sql<string>`sum(${cashMovements.amount}::numeric)` })
+    .from(cashMovements).where(and(eq(cashMovements.sourceId, order.id), eq(cashMovements.anulado, false),
+      inArray(cashMovements.sourceType, ["restaurant_order", "restaurant_partial", "restaurant_split"])));
+  return settlement?.total ?? order.total ?? "0";
+}
 
 // Serializa la apertura de mesa: el chequeo de "¿hay una orden activa para
 // esta mesa?" y el insert de la orden nueva no son atómicos entre sí, así que
@@ -459,10 +478,13 @@ export function registerRestaurantRoutes(app: Express) {
         return res.status(409).json({ error: "El pedido ya fue cerrado" });
       }
 
-      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId, itemDescriptions } = req.body;
+      const { chargeToRoom, roomNumber, reservationId, roomReservationId, receiptType, paymentMethod, discount, discountType, ccEntityType, ccEntityId, emitInvoice, vatCondition, customerRazonSocial, customerCuit, customerDni, puntoVenta: pvOverride, reservationAdvanceCredit, paymentSplits, voucherCode, voucherId, itemDescriptions, comments } = req.body;
 
 
-      const collectionError = nonFiscalCollectionError(receiptType, Array.isArray(paymentSplits) && paymentSplits.length ? paymentSplits.map((row:any)=>row.method) : [chargeToRoom ? "room_charge" : (paymentMethod || "cash")]);
+      if (comments !== undefined && (typeof comments !== "string" || comments.length > 2000)) {
+        return res.status(400).json({ error: "Los comentarios deben tener hasta 2000 caracteres" });
+      }
+      const collectionError = nonFiscalCollectionError(receiptType, Array.isArray(paymentSplits) && paymentSplits.length ? paymentSplits.map((row:any)=>row.method) : [chargeToRoom ? "room_charge" : (paymentMethod || "cash")], { restaurant: true });
       if (collectionError) return res.status(400).json({error:collectionError});
       // CUIT is mandatory when actually emitting Factura A / Factura C
       if (emitInvoice && ["factura_a", "factura_c"].includes(receiptType || "") && !(customerCuit || "").trim()) {
@@ -552,7 +574,7 @@ export function registerRestaurantRoutes(app: Express) {
         receiptType: receiptType || null,
         paymentMethod: effectivePaymentMethod,
         total: String(finalTotal.toFixed(2)),
-        notes: discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : undefined,
+        notes: [comments !== undefined ? comments.trim() : order.notes, discountAmount > 0 ? `Descuento: $${discountAmount.toFixed(2)}` : null].filter(Boolean).join("\n") || null,
       });
       if (!updatedOrder) {
         return res.status(409).json({ error: "El pedido ya fue cerrado" });
@@ -595,11 +617,11 @@ export function registerRestaurantRoutes(app: Express) {
           const splitAmt = parseFloat(split.amount || "0");
           if (splitAmt <= 0) continue;
           try {
-            await storage.registerCashMovement(
+            await registerRestaurantCashMovement(
               "restaurant", "restaurant_order", req.params.id,
               `${cashLabel} (${split.method})`,
               split.method, String(splitAmt.toFixed(2)),
-              split.method === "consumo_interno" ? "expense" : "income",
+              "income",
               undefined, receiptType
             );
           } catch (e) {
@@ -609,11 +631,11 @@ export function registerRestaurantRoutes(app: Express) {
         }
       } else {
         try {
-          await storage.registerCashMovement(
+          await registerRestaurantCashMovement(
             "restaurant", "restaurant_order", req.params.id, cashLabel,
             effectivePaymentMethod,
             String(finalTotal.toFixed(2)),
-            effectivePaymentMethod === "consumo_interno" ? "expense" : "income",
+            "income",
             undefined, receiptType
           );
         } catch (e) {
@@ -1104,7 +1126,10 @@ export function registerRestaurantRoutes(app: Express) {
   app.patch("/api/restaurant/orders/:id/split/:splitId", restaurantPaymentTransaction(async (req, res) => {
     try {
       const { method, receiptType, roomReservationId, amount, emitInvoice, vatCondition, customerRazonSocial, customerCuit, puntoVenta: pvOverride } = req.body;
-      const collectionError = nonFiscalCollectionError(receiptType, [method]);
+      if (req.body.comments !== undefined && (typeof req.body.comments !== "string" || req.body.comments.length > 2000)) {
+        return res.status(400).json({ error: "Los comentarios deben tener hasta 2000 caracteres" });
+      }
+      const collectionError = nonFiscalCollectionError(receiptType, [method], { restaurant: true });
       if (collectionError) return res.status(400).json({error:collectionError});
 
 
@@ -1140,7 +1165,13 @@ export function registerRestaurantRoutes(app: Express) {
         paidAt: new Date(),
       }).where(and(eq(orderSplits.id, req.params.splitId), eq(orderSplits.orderId, req.params.id), eq(orderSplits.isPaid, "false"))).returning();
       if (!split) return res.status(409).json({ error: "Esta parte ya fue cobrada" });
+      if (req.body.comments !== undefined) await storage.updateRestaurantOrder(req.params.id, { notes: req.body.comments.trim() });
 
+      if (method === "cuenta_habitacion") {
+        await registerRestaurantCashMovement("restaurant", "restaurant_split", req.params.id,
+          `Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
+          method, split.amount, "informational", (req as any).user?.username, receiptType || undefined);
+      }
       // If charging to room, create the charge on the reservation (+ folio)
       if (method === "cuenta_habitacion" && roomReservationId) {
         try {
@@ -1159,11 +1190,11 @@ export function registerRestaurantRoutes(app: Express) {
         // Antes ningún split pagado en efectivo/tarjeta/etc. generaba
         // movimiento de caja — el dinero cobrado quedaba fuera de Caja.
         try {
-          await storage.registerCashMovement(
+          await registerRestaurantCashMovement(
             "restaurant", "restaurant_split", req.params.id,
             `Pedido ${order?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
             method, split.amount,
-            method === "consumo_interno" ? "expense" : "income",
+            "income",
             (req as any).user?.username, receiptType || undefined,
           );
         } catch (e) {
@@ -1300,7 +1331,10 @@ export function registerRestaurantRoutes(app: Express) {
       } = req.body;
 
 
-      const collectionError = nonFiscalCollectionError(receiptType, [method]);
+      if (req.body.comments !== undefined && (typeof req.body.comments !== "string" || req.body.comments.length > 2000)) {
+        return res.status(400).json({ error: "Los comentarios deben tener hasta 2000 caracteres" });
+      }
+      const collectionError = nonFiscalCollectionError(receiptType, [method], { restaurant: true });
       if (collectionError) return res.status(400).json({error:collectionError});
       if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
         return res.status(400).json({ error: "Seleccioná al menos un ítem" });
@@ -1332,17 +1366,19 @@ export function registerRestaurantRoutes(app: Express) {
       const amount = subtotal.toFixed(2);
       if (paymentCents(amount) === null) return res.status(400).json({ error: "Importe a cobrar inválido" });
 
+      if (req.body.comments !== undefined) await storage.updateRestaurantOrder(req.params.id, { notes: req.body.comments.trim() });
+
       // Mark selected items as paid
       for (const item of selectedItems) {
         await storage.updateOrderItem(item.id, { paid: true } as any);
       }
 
-      // Register in caja (skip for room charges)
-      if (method !== "cuenta_habitacion") {
+      // Every settlement remains visible in caja; room charges are informational.
+      {
         try {
-          await storage.registerCashMovement(
+          await registerRestaurantCashMovement(
             "restaurant", "restaurant_partial", req.params.id,
-            `Restaurante — Pedido ${order.orderNumber} (cobro parcial)`,
+            `Restaurante — Pedido ${order.orderNumber} (ítems ${selectedItems.map(item => item.id).join(",")})`,
             method, amount, "income",
             (req as any).user?.username, receiptType || "cierre_mesa"
           );
@@ -2497,6 +2533,26 @@ export function registerRestaurantRoutes(app: Express) {
   });
 
   // ── Email: Enviar comprobante de pedido por email ─────────────────────────
+  app.get("/api/restaurant/orders/:id/receipt-pdf", requireAuth, async (req, res) => {
+    try {
+      const order = await storage.getRestaurantOrder(req.params.id);
+      if (!order) return res.status(404).json({ error: "Pedido no encontrado" });
+      const items = await Promise.all((await storage.getOrderItems(order.id)).map(async item => {
+        const menu = await storage.getMenuItem(item.menuItemId);
+        return { name: (item.notes || "").match(/^\[(.+?)\]/)?.[1] || menu?.name || "Ítem",
+          quantity: item.quantity, unitPrice: item.unitPrice, subtotal: item.subtotal };
+      }));
+      const pdf = await generateRestaurantOrderReceiptPdf({ orderNumber: order.orderNumber,
+        orderLabel: order.orderLabel, waiterName: order.waiterName, receiptType: order.receiptType,
+        closedAt: order.closedAt ? String(order.closedAt) : null, total: await restaurantReceiptTotal(order), items, comments: order.notes });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'inline; filename="Ticket_Restaurante.pdf"');
+      res.send(pdf);
+    } catch (error) {
+      res.status(500).json({ error: "No se pudo generar el ticket" });
+    }
+  });
+
   app.post("/api/restaurant/orders/:id/receipt-email", requireAuth, async (req, res) => {
     try {
       const { to } = req.body;
@@ -2536,8 +2592,9 @@ export function registerRestaurantRoutes(app: Express) {
         waiterName: order.waiterName,
         receiptType: order.receiptType,
         closedAt: (order as any).closedAt ? String((order as any).closedAt) : null,
-        total: order.total ?? "0",
+        total: await restaurantReceiptTotal(order),
         items: enrichedItems,
+        comments: order.notes,
       });
 
       const orderSlug = (order.orderLabel || `pedido-${order.orderNumber}`).replace(/\s+/g, "_");

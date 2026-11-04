@@ -34,13 +34,15 @@ suite("PostgreSQL: reception close non-cash settlement summary", () => {
       // must not inflate totalCash/totalGeneral, but it still needs to count
       // as a non-cash settlement so the shift close doesn't silently drop it.
       await movement("retencion_ganancias", "2000.00", "informational");
+      await movement("room_charge", "400.00", "informational");
 
       const result = await storage.closeShift(shiftId, "pg-test", 44000);
       expect(result.summary.totalCash).toBe("44000.00");
       expect(result.summary.totalCurrentAccount).toBe("100000.00");
       expect(result.summary.totalVoucher).toBe("25000.00");
-      expect(result.summary.nonCashSettlementsTotal).toBe("127000.00");
-      expect(result.summary.nonCashSettlementsCount).toBe(3);
+      expect(result.summary.totalRoomCharge).toBe("400.00");
+      expect(result.summary.nonCashSettlementsTotal).toBe("127400.00");
+      expect(result.summary.nonCashSettlementsCount).toBe(4);
       expect(result.summary.totalGeneral).toBe("44000.00");
       expect(result.turnoNuevo.status).toBe("open");
       const persisted = await pool.query(
@@ -50,8 +52,8 @@ suite("PostgreSQL: reception close non-cash settlement summary", () => {
       );
       expect(persisted.rows[0]).toMatchObject({
         total_cash: "44000.00", total_current_account: "100000.00",
-        total_voucher: "25000.00", non_cash_settlements_total: "127000.00",
-        non_cash_settlements_count: 3, total_general: "44000.00",
+        total_voucher: "25000.00", non_cash_settlements_total: "127400.00",
+        non_cash_settlements_count: 4, total_general: "44000.00",
       });
     } finally {
       await pool.query("DELETE FROM cash_movements WHERE shift_id=$1", [shiftId]);

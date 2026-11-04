@@ -8061,7 +8061,7 @@ export class DatabaseStorage implements IStorage {
       const amt = parseFloat(m.amount);
       const method = methodNorm[m.paymentMethod] ?? m.paymentMethod;
       if (m.movementType === "informational") {
-        if (method === "current_account" || method === "voucher") {
+        if (method === "current_account" || method === "voucher" || method === "room_charge") {
           totals[method] += amt;
           nonCashSettlementsTotal += amt;
           nonCashSettlementsCount++;

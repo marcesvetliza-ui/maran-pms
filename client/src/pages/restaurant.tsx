@@ -1,3 +1,4 @@
+import { restaurantNonFiscalMethods } from "@shared/restaurant-settlement";
 import { formatDisplayDate } from "@shared/date-display";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -154,6 +155,7 @@ type OrderSplit = {
 
 type RestaurantOrder = {
   id: string;
+  notes?: string | null;
   orderNumber: string;
   tableId: string | null;
   areaId: string | null;
@@ -302,6 +304,7 @@ const paymentMethodLabels: Record<string, string> = {
   cuenta_habitacion: "Cargo a Habitación",
   gift_voucher: "Voucher de Regalo",
   consumo_interno: "Consumo Interno",
+  pedidos_ya: "Pedidos Ya",
 };
 
 function deriveReceiptFromVat(vatCondition: string | null | undefined): "factura_a" | "factura_b" {
@@ -733,6 +736,7 @@ export default function RestaurantPage() {
   const [closeReceiptType, setCloseReceiptType] = useState("ticket");
   const [closePaymentMethod, setClosePaymentMethod] = useState("efectivo");
   const [closeSalesCondition, setCloseSalesCondition] = useState<"contado" | "cuenta_corriente">("contado");
+  const [closeComments, setCloseComments] = useState("");
   const [closeDiscount, setCloseDiscount] = useState("");
   const [closeDiscountType, setCloseDiscountType] = useState<"amount" | "percent">("percent");
   const [closeRoomId, setCloseRoomId] = useState("");
@@ -1145,6 +1149,7 @@ export default function RestaurantPage() {
     const initialAmount = Math.max(0, fullTotal - totalAdvanceCredit);
     setClosePaymentSplits([{ id: "1", method: "efectivo", amount: String(initialAmount.toFixed(2)) }]);
     setCloseNonFiscalOverride("__default__");
+    setCloseComments(currentOrder.notes || "");
     setShowAlternateClientSearch(false);
     setCloseBillingClientSearch("");
     setCloseBillingClientSearchOpen(false);
@@ -1573,7 +1578,7 @@ export default function RestaurantPage() {
 
   const payItemsMutation = useMutation({
     mutationFn: async (data: any) => {
-      const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/pay-items`, data);
+      const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/pay-items`, { ...data, comments: closeComments });
       return res.json();
     },
     onSuccess: (data) => {
@@ -1615,6 +1620,7 @@ export default function RestaurantPage() {
         vatCondition: data.vatCondition,
         customerRazonSocial: data.customerRazonSocial,
         customerCuit: data.customerCuit,
+        comments: closeComments,
       });
       return res.json();
     },
@@ -1772,6 +1778,7 @@ export default function RestaurantPage() {
       paymentSplits?: {method: string; amount: number; roomReservationId?: string}[];
       voucherCode?: string; voucherId?: string;
       itemDescriptions?: Record<string, string>;
+      comments?: string;
     }) => {
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
@@ -1795,6 +1802,7 @@ export default function RestaurantPage() {
         voucherCode: data.voucherCode,
         voucherId: data.voucherId,
         itemDescriptions: data.itemDescriptions,
+        comments: data.comments,
       });
       return res.json();
     },
@@ -2419,6 +2427,8 @@ export default function RestaurantPage() {
       ${advanceAmt > 0 ? `<tr><td colspan="3" style="padding:4px 8px;font-size:11px;color:#666;text-align:right">Total consumido: $${subtotal.toLocaleString("es-AR",{minimumFractionDigits:2})}</td></tr>` : ""}
     </tbody></table>
     <hr>
+    ${closeComments.trim() ? `<div style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px"><b>Comentarios:</b>
+${esc(closeComments.trim())}</div><hr>` : ""}
     <p style="text-align:center;font-size:11px;color:#666">Este no es el comprobante fiscal final.</p>
     <script>window.onload=function(){window.print()}<\/script>
     </body></html>`);
@@ -3192,6 +3202,9 @@ export default function RestaurantPage() {
                       <span className="text-sm font-semibold">
                         ${parseFloat(order.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                       </span>
+                      <Button size="sm" variant="outline" className="h-8" onClick={() => window.open(`/api/restaurant/orders/${order.id}/receipt-pdf`, "_blank")}>
+                        <Printer className="h-4 w-4 mr-1" /> Ticket
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -5580,8 +5593,8 @@ export default function RestaurantPage() {
                   const splitTotal = closePaymentSplits.reduce((s, sp) => s + parseFloat(sp.amount || "0"), 0);
                   const remaining = Math.round((finalTotal - splitTotal) * 100) / 100;
                   const availablePayMethods = !isFactura
-                    ? { efectivo: "Efectivo", gift_voucher: "Voucher de Regalo", consumo_interno: "Consumo Interno" }
-                    : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => !["cuenta_corriente", "consumo_interno"].includes(k))) as Record<string, string>;
+                    ? restaurantNonFiscalMethods(effReceiptType)
+                    : Object.fromEntries(Object.entries(paymentMethodLabels).filter(([k]) => !["cuenta_corriente", "consumo_interno", "pedidos_ya"].includes(k))) as Record<string, string>;
                   const allClientsForSearch: {id: string; name: string; cuit: string; vatCondition: string; type: "guest" | "company"; condicionVenta: string}[] = closeBillingClientSearch.length >= 2 ? [
                     ...companies.filter(c => {
                       const q = closeBillingClientSearch.toLowerCase();
@@ -5709,6 +5722,11 @@ export default function RestaurantPage() {
                           <Select value={closeNonFiscalOverride} onValueChange={v => {
                             setCloseNonFiscalOverride(v as typeof closeNonFiscalOverride);
                             if (v) setCloseSalesCondition("contado");
+                            const preferred = v === "voucher_room_service" ? "cuenta_habitacion"
+                              : v === "voucher_pedidos_ya" ? "pedidos_ya"
+                              : v === "voucher_consumo_interno" ? "consumo_interno" : "efectivo";
+                            setClosePaymentSplits(prev => prev.map(s => ({ ...s, method: preferred,
+                              roomId: preferred === "cuenta_habitacion" ? s.roomId : undefined, roomSearch: "" })));
                           }}>
                             <SelectTrigger className="w-36 h-9 text-xs" data-testid="select-non-fiscal-override">
                               <SelectValue placeholder="Cambiar..." />
@@ -5894,7 +5912,7 @@ export default function RestaurantPage() {
                           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                           <div className="text-xs space-y-0.5">
                             <p className="font-semibold">Consumo Interno</p>
-                            <p>No se emite comprobante fiscal. El costo se registrará como egreso en caja.</p>
+                            <p>No se emite comprobante fiscal. El importe se registra en caja como Voucher, sin modificar el efectivo.</p>
                           </div>
                         </div>
                       )}
@@ -6548,6 +6566,7 @@ export default function RestaurantPage() {
                               customerCuit: isFactura ? (payItemBillingCuit || undefined) : undefined,
                               discount: payItemDiscount || undefined,
                               discountType: payItemDiscountType,
+                              comments: closeComments,
                               itemDescriptions: Object.fromEntries(
                                 selectedItems
                                   .filter((item: any) => invoiceDescriptionOverrides[item.id] !== undefined && invoiceDescriptionOverrides[item.id] !== displayItemName(item))
@@ -6568,6 +6587,11 @@ export default function RestaurantPage() {
               </div>
             )}
           </section></div>
+          <div className="space-y-2 border-t pt-3">
+            <Label htmlFor="restaurant-close-comments">Notas / comentarios</Label>
+            <Textarea id="restaurant-close-comments" value={closeComments} onChange={e => setCloseComments(e.target.value)}
+              maxLength={2000} rows={3} placeholder="Se imprimirán en el ticket no fiscal" data-testid="input-close-comments" />
+          </div>
           <DialogFooter className="operational-footer flex-col sm:flex-row gap-2">
             <div className="mr-auto min-w-0 text-sm" aria-label="Total a cobrar de la mesa"><span className="block text-muted-foreground">A cobrar</span><strong className="text-xl">${Math.max(0, parseFloat(getUpdatedOrder()?.total || "0") - (closeDiscountType === "percent" ? parseFloat(getUpdatedOrder()?.total || "0") * parseFloat(closeDiscount || "0") / 100 : parseFloat(closeDiscount || "0")) - totalAdvanceCredit).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
 
@@ -6674,10 +6698,9 @@ export default function RestaurantPage() {
                         amount: parseFloat(s.amount || "0"),
                         roomReservationId: s.method === "cuenta_habitacion" ? s.roomId : undefined,
                       }));
-                // Keep an explicitly selected voucher identifiable even when the
-                // payment method is Consumo Interno (which still records an expense).
+                // Preserve the voucher subtype for administrative traceability.
                 const finalReceiptType = primaryPaymentMethod === "consumo_interno" && closeNonFiscalOverride === "__default__"
-                  ? "consumo_interno" : effReceiptType;
+                  ? "voucher_consumo_interno" : effReceiptType;
                 // Gift voucher: incluir código y id del voucher si está validado
                 const hasGiftVoucher = closePaymentSplits.some(s => s.method === "gift_voucher");
                 closeOrderMutation.mutate({
@@ -6703,6 +6726,7 @@ export default function RestaurantPage() {
                   paymentSplits: validSplits && validSplits.length > 1 ? validSplits : undefined,
                   voucherCode: hasGiftVoucher ? (closeGiftVoucher?.voucherCode || undefined) : undefined,
                   voucherId: hasGiftVoucher ? (closeGiftVoucher?.id || undefined) : undefined,
+                  comments: closeComments,
                   itemDescriptions: Object.fromEntries(
                     getOrderItems()
                       .filter(item => invoiceDescriptionOverrides[item.id] !== undefined && invoiceDescriptionOverrides[item.id] !== displayItemName(item))

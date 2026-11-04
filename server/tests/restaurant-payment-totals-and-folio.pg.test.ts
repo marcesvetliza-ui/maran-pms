@@ -161,6 +161,87 @@ suite("PostgreSQL: restaurant payment totals, room validation and partial folio"
     expect((await pool!.query("SELECT id FROM cash_movements WHERE source_id=$1", [o.id])).rows).toEqual(before);
   });
 
+  it("Room Service charges the selected in-house folio once and keeps an informational receipt", async () => {
+    const o = await order();
+    const body = { receiptType: "voucher_room_service", paymentMethod: "cuenta_habitacion", roomReservationId: reservationId,
+      comments: "  Llevar a la habitación. Sin sal.  " };
+    expect((await request("POST", `/api/restaurant/orders/${o.id}/close`, body)).status).toBe(200);
+    expect((await storage.getRestaurantOrder(o.id))?.notes).toBe("Llevar a la habitación. Sin sal.");
+    const charges = (await pool!.query("SELECT amount FROM charges WHERE reservation_id=$1 AND description LIKE $2", [reservationId, `%${(await storage.getRestaurantOrder(o.id))!.orderNumber}%`])).rows;
+    expect(charges).toEqual([{ amount: "100.01" }]);
+    const cash = (await pool!.query("SELECT payment_method,movement_type,amount FROM cash_movements WHERE source_id=$1", [o.id])).rows;
+    expect(cash).toEqual([{ payment_method: "room_charge", movement_type: "informational", amount: "100.01" }]);
+    expect((await request("POST", `/api/restaurant/orders/${o.id}/close`, body)).status).toBe(409);
+    expect((await pool!.query("SELECT id FROM cash_movements WHERE source_id=$1", [o.id])).rows).toHaveLength(1);
+    const pdf = await fetch(`${baseUrl}/api/restaurant/orders/${o.id}/receipt-pdf`);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get("content-type")).toMatch(/application\/pdf/);
+    expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString()).toBe("%PDF");
+  });
+
+  it.each([
+    ["voucher_pedidos_ya", "pedidos_ya"],
+    ["voucher_consumo_interno", "consumo_interno"],
+    ["voucher_justo", "consumo_interno"],
+    ["ticket", "consumo_interno"],
+  ])("keeps %s / %s individually visible as Voucher without paying cash out", async (receiptType, paymentMethod) => {
+    const o = await order("250.00");
+    const result = await request("POST", `/api/restaurant/orders/${o.id}/close`, { receiptType, paymentMethod });
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    const rows = (await pool!.query("SELECT payment_method,movement_type,amount,source_label,receipt_type FROM cash_movements WHERE source_id=$1", [o.id])).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ payment_method: "voucher", movement_type: "informational", amount: "250.00", receipt_type: receiptType });
+    expect(rows[0].source_label).toContain(paymentMethod === "pedidos_ya" ? "Pedidos Ya" : "Consumo Interno");
+    expect((await storage.getRestaurantOrder(o.id))?.paymentMethod).toBe(paymentMethod);
+  });
+
+  it("rejects invalid comments before closing or creating cash and preserves prior notes", async () => {
+    const o = await order();
+    await storage.updateRestaurantOrder(o.id, { notes: "Nota anterior" });
+    expect((await request("POST", `/api/restaurant/orders/${o.id}/close`, { receiptType: "ticket", paymentMethod: "efectivo", comments: "x".repeat(2001) })).status).toBe(400);
+    await expectNoPaymentSideEffects(o.id);
+    expect((await storage.getRestaurantOrder(o.id))?.notes).toBe("Nota anterior");
+    expect((await request("POST", `/api/restaurant/orders/${o.id}/close`, { receiptType: "ticket", paymentMethod: "efectivo" })).status).toBe(200);
+    expect((await storage.getRestaurantOrder(o.id))?.notes).toBe("Nota anterior");
+  });
+
+  it("records separate cash and internal voucher amounts on a mixed settlement", async () => {
+    const o = await order("100.00");
+    const result = await request("POST", `/api/restaurant/orders/${o.id}/close`, { receiptType: "ticket",
+      paymentSplits: [{ method: "efectivo", amount: 40 }, { method: "consumo_interno", amount: 60 }] });
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    const rows = (await pool!.query("SELECT payment_method,movement_type,amount FROM cash_movements WHERE source_id=$1 ORDER BY amount", [o.id])).rows;
+    expect(rows).toEqual([{ payment_method: "efectivo", movement_type: "income", amount: "40.00" }, { payment_method: "voucher", movement_type: "informational", amount: "60.00" }]);
+  });
+
+  it("preserves comments on item payments and retains their full amounts in caja", async () => {
+    const o = await order("30.00", ["10.00", "20.00"]);
+    for (const item of o.items) {
+      const result = await request("POST", `/api/restaurant/orders/${o.id}/pay-items`, {
+        itemIds: [item.id], method: "consumo_interno", receiptType: "voucher_consumo_interno", comments: "Turno cocina" });
+      expect(result.status, JSON.stringify(result.body)).toBe(200);
+    }
+    expect((await storage.getRestaurantOrder(o.id))?.notes).toBe("Turno cocina");
+    const rows = (await pool!.query("SELECT amount,payment_method,movement_type FROM cash_movements WHERE source_id=$1 ORDER BY amount", [o.id])).rows;
+    expect(rows).toEqual([{amount:"10.00",payment_method:"voucher",movement_type:"informational"}, {amount:"20.00",payment_method:"voucher",movement_type:"informational"}]);
+    const response = await fetch(`${baseUrl}/api/restaurant/orders/${o.id}/receipt-pdf`);
+    expect(response.status).toBe(200);
+  });
+
+  it("preserves comments on split payments without extra cash on the room part", async () => {
+    const o = await order("100.00");
+    const divided = await request("POST", `/api/restaurant/orders/${o.id}/split`, { parts: 2 });
+    for (const split of divided.body) {
+      const result = await request("PATCH", `/api/restaurant/orders/${o.id}/split/${split.id}`, {
+        method: "cuenta_habitacion", receiptType: "voucher_room_service", roomReservationId: reservationId, comments: "Cena habitación" });
+      expect(result.status, JSON.stringify(result.body)).toBe(200);
+    }
+    expect((await storage.getRestaurantOrder(o.id))?.notes).toBe("Cena habitación");
+    const rows = (await pool!.query("SELECT amount,payment_method,movement_type FROM cash_movements WHERE source_id=$1", [o.id])).rows;
+    expect(rows).toHaveLength(2);
+    expect(rows.every(row => row.movement_type === "informational" && row.payment_method === "room_charge" && row.amount === "50.00")).toBe(true);
+  });
+
   it("combined tenders with the same method are not deduplicated", async () => {
     const o = await order();
     const r = await request("POST", `/api/restaurant/orders/${o.id}/close`, {

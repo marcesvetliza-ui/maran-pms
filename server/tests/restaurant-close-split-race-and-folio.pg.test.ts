@@ -252,12 +252,14 @@ suite("PostgreSQL real: cierre/split de Restaurant — idempotencia, caja, folio
         expect(pay2.status, JSON.stringify(pay2.body)).toBe(200);
         expect(pay2.body.allPaid).toBe(true);
 
-        // No se generó un segundo movimiento de caja para la parte de habitación.
+        // La parte de habitación aparece como informativa sin aumentar el efectivo.
         const cashAfterSecond = await pool.query(
-          "SELECT id FROM cash_movements WHERE source_type = 'restaurant_split' AND source_id = $1",
+          "SELECT payment_method,movement_type,amount FROM cash_movements WHERE source_type = 'restaurant_split' AND source_id = $1",
           [orderId],
         );
-        expect(cashAfterSecond.rows).toHaveLength(1);
+        expect(cashAfterSecond.rows).toHaveLength(2);
+        expect(cashAfterSecond.rows).toContainEqual({ payment_method: "room_charge", movement_type: "informational", amount: split2.amount });
+        expect(cashAfterSecond.rows.filter(row => row.movement_type === "income")).toHaveLength(1);
 
         // El cargo a la reserva existe en `charges` (saldo que ve recepción)...
         const charge = await pool.query(
