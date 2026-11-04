@@ -216,3 +216,37 @@ describe("InvoiceDialog — asistente clásico (pasos): forma de pago en el últ
     expect(addItemButton.compareDocumentPosition(formaPago) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
+
+
+it("incluye la percepción agregada después de elegir Efectivo en el pago total", async () => {
+  queryClient.clear();
+  const capture: { body: any } = { body: undefined };
+  vi.stubGlobal("fetch", buildFetchMock(capture));
+  const user = userEvent.setup();
+  renderDialog(); await fillMinimo(user);
+  await user.click(screen.getByTestId("select-forma-pago-inmediata"));
+  await user.click(await screen.findByRole("option", { name: "Efectivo" }));
+  expect((screen.getByTestId("input-monto-pagado-ahora") as HTMLInputElement).value).toBe("1210.00");
+  await user.type(screen.getByTestId("input-percep-iibb"), "10");
+  await waitFor(() => expect((screen.getByTestId("input-monto-pagado-ahora") as HTMLInputElement).value).toBe("1220.00"));
+  await user.click(screen.getByTestId("btn-submit-invoice"));
+  await waitFor(() => expect(capture.body?.formasPago).toEqual([{formaPago:"efectivo",monto:"1220.00"}]));
+  vi.unstubAllGlobals();
+});
+
+it("conserva un pago parcial escrito al agregar percepciones y permite volver a pagar el total", async () => {
+  queryClient.clear(); vi.stubGlobal("fetch", buildFetchMock());
+  const user=userEvent.setup();renderDialog();await fillMinimo(user);
+  await user.click(screen.getByTestId("select-forma-pago-inmediata"));
+  await user.click(await screen.findByRole("option",{name:"Efectivo"}));
+  const input=screen.getByTestId("input-monto-pagado-ahora") as HTMLInputElement;
+  await user.clear(input);await user.type(input,"700");
+  await user.type(screen.getByTestId("input-percep-iibb"),"10");
+  expect(input.value).toBe("700");
+  expect(screen.getByText(/resto \(\$520[.,]00\) queda pendiente/)).toBeInTheDocument();
+  await user.click(screen.getByText("Pagar el total del comprobante"));
+  await waitFor(()=>expect(Number(input.value)).toBe(1220));
+  await user.type(screen.getByTestId("input-percep-iva"),"5");
+  await waitFor(()=>expect(Number(input.value)).toBe(1225));
+  vi.unstubAllGlobals();
+});

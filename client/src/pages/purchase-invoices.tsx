@@ -523,7 +523,12 @@ export function InvoiceDialog({
 
   const isEditing = !!editingInvoice;
 
-  const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v, ...(k==="tipoComprobante"?{descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:""}:{}) }));
+  const [paymentAmountEdited,setPaymentAmountEdited] = useState(false);
+  useEffect(()=>{setPaymentAmountEdited(false);},[open,editingInvoice]);
+  const f = (k: string, v: string) => {
+    if(k === "montoPagadoAhora")setPaymentAmountEdited(true);
+    setForm((p) => ({ ...p, [k]: v, ...(k==="tipoComprobante"?{descuentoDescripcion:"",descuentoTipo:"importe",descuentoPorcentaje:"",descuentoImporte:""}:{}) }));
+  };
 
   // Si se abandona una liquidación antes de guardar, sus retenciones no deben
   // quedar ocultas en otro tipo de comprobante y alterar el total enviado.
@@ -706,6 +711,16 @@ export function InvoiceDialog({
   const total = form.tipoComprobante === "REMITO-NF" ? (isEditing ? storedSubtotal : nonFiscalTotal) : discountPreview.total;
 
 
+  // The suggested whole payment follows the final invoice, including later
+  // perceptions/discounts. An amount typed by the operator or a split stays
+  // explicit and must never be silently increased.
+  useEffect(()=>{
+    if(form.formaPagoInmediata === "cuenta_corriente") {setPaymentAmountEdited(false);return;}
+    if(paymentAmountEdited || form.formasPagoExtra.length) return;
+    const whole = total.toFixed(2);
+    setForm(previous => previous.montoPagadoAhora === whole ? previous : {...previous,montoPagadoAhora:whole});
+  },[total,form.formaPagoInmediata,form.formasPagoExtra.length,paymentAmountEdited]);
+
   // El desglose "IVA desagregado por alícuota" solo aporta algo cuando hay
   // más de una alícuota en juego — con una sola, repite exactamente lo que
   // ya muestra esa misma línea de la tabla de Netos Gravados.
@@ -748,6 +763,8 @@ export function InvoiceDialog({
               onChange={(e) => f("montoPagadoAhora", e.target.value)}
               data-testid="input-monto-pagado-ahora"
             />
+            <p className="mt-1 text-xs text-muted-foreground">{paymentAmountEdited || form.formasPagoExtra.length ? "Importe manual: el saldo no cubierto queda pendiente." : "Pago total: incluye impuestos y percepciones y se actualiza con el comprobante."}</p>
+            {paymentAmountEdited && !form.formasPagoExtra.length && <Button type="button" size="sm" variant="outline" className="mt-1" onClick={()=>setPaymentAmountEdited(false)}>Pagar el total del comprobante</Button>}
           </div>
           {form.formasPagoExtra.map((row, i) => (
             <div key={i} className="flex gap-2 items-end mt-2">
