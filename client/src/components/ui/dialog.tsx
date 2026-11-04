@@ -6,7 +6,25 @@ import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-const Dialog = DialogPrimitive.Root
+const DialogOpener = React.createContext<React.MutableRefObject<HTMLElement | null> | null>(null)
+function Dialog({ open, defaultOpen, onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  const opener = React.useRef<HTMLElement | null>(null)
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false)
+  const currentOpen = open ?? internalOpen
+  const wasOpen = React.useRef(false)
+  React.useLayoutEffect(() => {
+    if (currentOpen && !wasOpen.current && document.activeElement instanceof HTMLElement &&
+        document.activeElement !== document.body) opener.current = document.activeElement
+    wasOpen.current = currentOpen
+  }, [currentOpen])
+  return <DialogOpener.Provider value={opener}>
+    <DialogPrimitive.Root {...props} open={currentOpen} onOpenChange={next => {
+      if (next && document.activeElement instanceof HTMLElement) opener.current = document.activeElement
+      if (open === undefined) setInternalOpen(next)
+      onOpenChange?.(next)
+    }} />
+  </DialogOpener.Provider>
+}
 
 const DialogTrigger = DialogPrimitive.Trigger
 
@@ -32,7 +50,9 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onPointerDownOutside, onInteractOutside, ...props }, ref) => (
+>(({ className, children, onPointerDownOutside, onInteractOutside, onCloseAutoFocus, ...props }, ref) => {
+  const opener = React.useContext(DialogOpener)
+  return (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -50,6 +70,14 @@ const DialogContent = React.forwardRef<
         className
       )}
       {...props}
+      onCloseAutoFocus={event => {
+        onCloseAutoFocus?.(event)
+        if (!event.defaultPrevented && opener?.current?.isConnected &&
+            opener.current !== document.body && !opener.current.closest('[data-state="closed"]')) {
+          event.preventDefault()
+          opener.current.focus({ preventScroll: true })
+        }
+      }}
     >
       {children}
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
@@ -58,7 +86,8 @@ const DialogContent = React.forwardRef<
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </DialogPortal>
-))
+  )
+})
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({

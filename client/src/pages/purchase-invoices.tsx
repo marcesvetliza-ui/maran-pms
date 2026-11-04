@@ -39,6 +39,7 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { InlineSearch } from "@/components/inline-search";
 import { Link } from "wouter";
 import { getLocalToday, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import {
@@ -479,12 +480,6 @@ export function InvoiceDialog({
   const [invItems, setInvItems] = useState<InvItemRow[]>([]);
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierDropdownOpen, setSupplierDropdownOpen] = useState(false);
-  const supplierBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelSupplierBlur = () => {
-    if (supplierBlurTimer.current) clearTimeout(supplierBlurTimer.current);
-    supplierBlurTimer.current = null;
-  };
-  useEffect(() => () => cancelSupplierBlur(), []);
   const [existingItemOpen, setExistingItemOpen] = useState<Record<number, boolean>>({});
   const [netoLines, setNetoLines] = useState<NetoLine[]>([emptyNetoLine()]);
   const [automaticNetos, setAutomaticNetos] = useState(true);
@@ -1150,7 +1145,7 @@ export function InvoiceDialog({
                   <Label>Proveedor</Label>
                 <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
                   <div className="flex gap-2 items-center">
-                    <div className="relative flex-1">
+                    <InlineSearch className="relative flex-1" open={supplierDropdownOpen} onOpenChange={setSupplierDropdownOpen}>
                       <input
                         type="text"
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -1159,11 +1154,10 @@ export function InvoiceDialog({
                           ? supplierSearch
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
-                          : ""}
-                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
-                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
+                          : supplierSearch}
+                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { setSupplierDropdownOpen(true); }}
+                        onClick={() => { if (!supplierDropdownOpen) { setSupplierDropdownOpen(true); } }}
                         disabled={!!sourceRemito || isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante)} data-testid="select-supplier"
                         autoComplete="off"
                       />
@@ -1174,24 +1168,25 @@ export function InvoiceDialog({
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
                             .slice(0, 60)
                             .map((s) => (
-                              <div
+                              <button type="button" data-search-option tabIndex={-1}
                                 key={s.id}
-                                className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                                onMouseDown={event => event.preventDefault()}
+                                onClick={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
                                   <span className="truncate">{s.razonSocial}</span>
                                 </div>
                                 <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
-                              </div>
+                              </button>
                             ))}
                           {suppliers.filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch)).length === 0 && (
                             <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
                           )}
                         </div>
                       )}
-                    </div>
+                    </InlineSearch>
                   </div>
                 </div>
                 <div>
@@ -1649,7 +1644,7 @@ export function InvoiceDialog({
                   <Label>Proveedor</Label>
                 <p className="text-xs text-muted-foreground">¿No aparece? <Link href="/accounting-suppliers" className="text-primary underline">Cargar proveedor en el ABM</Link></p>
                   <div className="flex gap-2 items-center">
-                    <div className="relative flex-1">
+                    <InlineSearch className="relative flex-1" open={supplierDropdownOpen} onOpenChange={setSupplierDropdownOpen}>
                       <input
                         type="text"
                         className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -1658,11 +1653,10 @@ export function InvoiceDialog({
                           ? supplierSearch
                           : form.supplierId
                           ? suppliers.find((s) => String(s.id) === form.supplierId)?.razonSocial || ""
-                          : ""}
-                        onChange={(e) => { cancelSupplierBlur(); setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
-                        onFocus={() => { cancelSupplierBlur(); setSupplierSearch(""); setSupplierDropdownOpen(true); }}
-                        onClick={() => { cancelSupplierBlur(); if (!supplierDropdownOpen) { setSupplierSearch(""); setSupplierDropdownOpen(true); } }}
-                        onBlur={() => { supplierBlurTimer.current = setTimeout(() => setSupplierDropdownOpen(false), 150); }}
+                          : supplierSearch}
+                        onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
+                        onFocus={() => { setSupplierDropdownOpen(true); }}
+                        onClick={() => { if (!supplierDropdownOpen) { setSupplierDropdownOpen(true); } }}
                         disabled={!!sourceRemito || isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante)} data-testid="select-supplier"
                         autoComplete="off"
                       />
@@ -1673,24 +1667,25 @@ export function InvoiceDialog({
                             .sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"))
                             .slice(0, 60)
                             .map((s) => (
-                              <div
+                              <button type="button" data-search-option tabIndex={-1}
                                 key={s.id}
-                                className="flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
-                                onMouseDown={() => { cancelSupplierBlur(); handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
+                                className="w-full text-left flex items-center justify-between gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-accent"
+                                onMouseDown={event => event.preventDefault()}
+                                onClick={() => { handleSupplierChange(String(s.id)); setSupplierSearch(""); setSupplierDropdownOpen(false); }}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
                                   <Check className={`h-4 w-4 shrink-0 ${form.supplierId === String(s.id) ? "opacity-100" : "opacity-0"}`} />
                                   <span className="truncate">{s.razonSocial}</span>
                                 </div>
                                 <span className="text-xs text-muted-foreground shrink-0">{s.cuit}</span>
-                              </div>
+                              </button>
                             ))}
                           {suppliers.filter((s) => matchesIssuer(s.razonSocial, s.cuit, supplierSearch)).length === 0 && (
                             <div className="px-3 py-2 text-sm text-muted-foreground">Sin resultados</div>
                           )}
                         </div>
                       )}
-                    </div>
+                    </InlineSearch>
                   </div>
                 </div>
                 <div>

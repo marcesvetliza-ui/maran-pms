@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Keyboard users must see raw buttons/inline search choices as well as the UI
+   library's controls. Scroll margins keep focus away from sticky toolbars. */
+:where(input, textarea, select, button, a[href], [tabindex], [contenteditable="true"]) {
+  scroll-margin-block: 5rem;
+}
+:where(input, textarea, select, button, a[href], [tabindex], [contenteditable="true"]):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
 /* ── Placeholder text — visually distinct from real data ─────────────────── */
 input::placeholder,
 textarea::placeholder {

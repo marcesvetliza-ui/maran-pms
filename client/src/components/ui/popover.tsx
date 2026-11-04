@@ -2,15 +2,40 @@ import * as React from "react"
 import * as PopoverPrimitive from "@radix-ui/react-popover"
 
 import { cn } from "@/lib/utils"
+import { usePopupTabNavigation, type PopupTabNavigation } from "@/lib/popup-tab-navigation"
 
-const Popover = PopoverPrimitive.Root
+const PopoverNavigation = React.createContext<PopupTabNavigation | null>(null)
+function Popover({ open, defaultOpen, onOpenChange, ...props }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+  const [internalOpen, setInternalOpen] = React.useState(defaultOpen ?? false)
+  const setOpen = (next: boolean) => {
+    if (open === undefined) setInternalOpen(next)
+    onOpenChange?.(next)
+  }
+  const navigation = usePopupTabNavigation(() => setOpen(false))
+  return <PopoverNavigation.Provider value={navigation}>
+    <PopoverPrimitive.Root {...props} open={open ?? internalOpen} onOpenChange={setOpen} />
+  </PopoverNavigation.Provider>
+}
 
-const PopoverTrigger = PopoverPrimitive.Trigger
+const PopoverTrigger = React.forwardRef<
+  React.ElementRef<typeof PopoverPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Trigger>
+>((props, ref) => {
+  const navigation = React.useContext(PopoverNavigation)
+  const attach = React.useCallback((node: HTMLButtonElement | null) => {
+    if (navigation) navigation.trigger.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }, [navigation?.trigger, ref])
+  return <PopoverPrimitive.Trigger {...props} ref={attach} />
+})
+PopoverTrigger.displayName = "PopoverTrigger"
 
 const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->(({ className, align = "center", sideOffset = 4, ...props }, ref) => {
+>(({ className, align = "center", sideOffset = 4, onKeyDown, onCloseAutoFocus, ...props }, ref) => {
+  const navigation = React.useContext(PopoverNavigation)
   // A Popover portaled to document.body (Radix's default) sits outside an
   // ancestor Dialog's own DOM subtree even though it's logically nested
   // inside it — they end up as sibling portal roots under <body>. Radix
@@ -40,6 +65,16 @@ const PopoverContent = React.forwardRef<
           className
         )}
         {...props}
+        onKeyDown={event => {
+          onKeyDown?.(event)
+          // Only data-entry Command pickers leave on TAB. Calendars and other
+          // popovers keep their own native internal tab order.
+          if ((event.target as HTMLElement).closest("[cmdk-root]")) navigation?.onKeyDown(event)
+        }}
+        onCloseAutoFocus={event => {
+          onCloseAutoFocus?.(event)
+          navigation?.onCloseAutoFocus(event)
+        }}
       />
     </PopoverPrimitive.Portal>
   );

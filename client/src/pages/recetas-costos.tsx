@@ -1,3 +1,4 @@
+import { InlineSearch } from "@/components/inline-search";
 import {RecipeIngredientPicker} from "@/components/recipe-ingredient-picker";
 import { useState } from "react";
 import { RecipeIngredientUnit } from "@/components/recipe-ingredient-unit";
@@ -1190,14 +1191,14 @@ export default function RecetasCostosPage() {
               {ingredientSourceType === "inventario" ? (
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
-                  <div className="relative">
+                  <InlineSearch className="relative" open={ingredientComboOpen} onOpenChange={setIngredientComboOpen}>
                     {!ingredientComboOpen ? (
                       <Button
                         type="button"
                         variant="outline"
                         className="w-full justify-between font-normal"
                         data-testid="btn-ingredient-combo"
-                        onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
+                        onClick={() => { setIngredientComboOpen(true); }}
                       >
                         <span className={newIngredientName ? "" : "text-muted-foreground"}>
                           {newIngredientName || "Buscar artículo..."}
@@ -1218,9 +1219,6 @@ export default function RecetasCostosPage() {
                             placeholder="Escribí el nombre del artículo..."
                             value={ingredientSearch}
                             onChange={(e) => setIngredientSearch(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); }
-                            }}
                             data-testid="input-ingredient-search"
                           />
                           <button
@@ -1243,10 +1241,12 @@ export default function RecetasCostosPage() {
                               <button
                                 key={item.id}
                                 type="button"
+                                data-search-option
+                                tabIndex={-1}
                                 className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
                                 data-testid={`combo-item-${item.id}`}
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
+                                onMouseDown={event => event.preventDefault()}
+                                onClick={() => {
                                   setNewIngredientInventoryId(item.id);
                                   setNewIngredientSubRecipeId("");
                                   setNewIngredientName(item.name);
@@ -1271,7 +1271,7 @@ export default function RecetasCostosPage() {
                         </div>
                       </div>
                     )}
-                  </div>
+                  </InlineSearch>
                   {newIngredientInventoryId
                     ? <p className="text-xs text-green-600">✓ Vinculado — el stock se descontará al cerrar la orden</p>
                     : <p className="text-xs text-muted-foreground">Seleccioná un artículo para vincular el stock automáticamente</p>
@@ -1865,11 +1865,11 @@ export default function RecetasCostosPage() {
                 {ingredientSourceType === "inventario" ? (
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Buscar artículo del inventario</Label>
-                    <div className="relative">
+                    <InlineSearch className="relative" open={ingredientComboOpen} onOpenChange={setIngredientComboOpen}>
                       {!ingredientComboOpen ? (
                         <Button
                           type="button" variant="outline" className="w-full justify-between font-normal"
-                          onClick={() => { setIngredientComboOpen(true); setIngredientSearch(""); }}
+                          onClick={() => { setIngredientComboOpen(true); }}
                         >
                           <span className={newIngredientName ? "" : "text-muted-foreground"}>
                             {newIngredientName || "Buscar artículo..."}
@@ -1890,7 +1890,6 @@ export default function RecetasCostosPage() {
                               placeholder="Escribí el nombre del artículo..."
                               value={ingredientSearch}
                               onChange={(e) => setIngredientSearch(e.target.value)}
-                              onKeyDown={(e) => { if (e.key === "Escape") { setIngredientComboOpen(false); setIngredientSearch(""); } }}
                             />
                             <button type="button" className="text-muted-foreground hover:text-foreground"
                               onClick={() => { setIngredientComboOpen(false); setIngredientSearch(""); }}>✕</button>
@@ -1902,10 +1901,10 @@ export default function RecetasCostosPage() {
                               );
                               if (filtered.length === 0) return <p className="text-sm text-muted-foreground text-center py-4">No se encontraron artículos activos. Revisá la clasificación o elegí Preparación con stock para un semielaborado.</p>;
                               return filtered.map((item: any) => (
-                                <button key={item.id} type="button"
+                                <button key={item.id} type="button" data-search-option tabIndex={-1}
                                   className="w-full text-left px-3 py-2 hover:bg-accent flex flex-col gap-0.5"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
+                                  onMouseDown={event => event.preventDefault()}
+                                  onClick={() => {
                                     setNewIngredientInventoryId(item.id);
                                     setNewIngredientSubRecipeId("");
                                     setNewIngredientName(item.name);
@@ -1924,7 +1923,7 @@ export default function RecetasCostosPage() {
                           </div>
                         </div>
                       )}
-                    </div>
+                    </InlineSearch>
                   </div>
                 ) : (
                   <div className="space-y-1">

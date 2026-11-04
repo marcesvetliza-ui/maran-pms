@@ -1,3 +1,4 @@
+import { focusFormControl } from "@/lib/popup-tab-navigation";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import {InventoryPriceComparison} from "@/components/inventory-price-comparison";
 import {stockReportHtml,stockReportCsv,type StockReport} from "@/lib/inventory-stock-report";
@@ -8,7 +9,7 @@ import {InventorySourceReversal} from '@/components/inventory-source-reversal';
 import {InventoryUnitConversions, type InventoryConversionDraft} from "@/components/inventory-unit-conversions";
 import {InventoryPendingConsumptions} from "@/components/inventory-pending-consumptions";
 import { InventoryMovementDetail } from "@/components/inventory-movement-detail";
-import { Fragment, useState, useEffect } from "react";
+import { Fragment, useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -3275,6 +3276,17 @@ export function TransferForm({
   const [toWarehouseId, setToWarehouseId] = useState(preselectedToWarehouse || "");
   const [notes, setNotes] = useState("");
 
+  const transferFields = useRef<HTMLDivElement>(null);
+  const pendingRowFocus = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingRowFocus.current === null) return;
+    const target = transferFields.current?.querySelector<HTMLElement>(
+      `[data-testid="row-transfer-item-${pendingRowFocus.current}"] [role="combobox"]`,
+    );
+    pendingRowFocus.current = null;
+    if (target) focusFormControl(target);
+  }, [rows.length]);
+
   const stockQueries = useQueries({
     queries: rows.map((row) => ({
       queryKey: ["/api/inventory/items", row.itemId, "warehouses"],
@@ -3296,11 +3308,17 @@ export function TransferForm({
 
   const updateRow = (i: number, patch: Partial<TransferRowData>) =>
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const addRow = () => setRows((prev) => [...prev, { itemId: "", quantity: 1 }]);
-  const removeRow = (i: number) => setRows((prev) => prev.filter((_, j) => j !== i));
+  const addRow = () => {
+    pendingRowFocus.current = rows.length;
+    setRows((prev) => [...prev, { itemId: "", quantity: 1 }]);
+  };
+  const removeRow = (i: number) => {
+    pendingRowFocus.current = Math.max(0, Math.min(i, rows.length - 2));
+    setRows((prev) => prev.filter((_, j) => j !== i));
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" ref={transferFields}>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <Label>Desde *</Label>
