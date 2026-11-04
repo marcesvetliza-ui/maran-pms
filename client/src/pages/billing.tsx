@@ -3117,7 +3117,7 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
       toast({ title: "Comprobante actualizado" });
       onClose();
     },
-    onError: (error: Error) => toast({ title: "No se pudo editar", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "No se pudo editar", description: parseApiError(error), variant: "destructive" }),
   });
 
   if (!invoice) return null;
