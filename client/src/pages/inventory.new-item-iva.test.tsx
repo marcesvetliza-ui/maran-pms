@@ -1,5 +1,5 @@
 vi.mock('@/App',()=>({useAuth:()=>({hasPermission:()=>true,permissionsReady:true})}));
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -100,4 +100,12 @@ it("guarda las equivalencias con el artículo nuevo, sin guardado separado", asy
   expect(screen.queryByRole("button", {name:"Guardar equivalencias"})).not.toBeInTheDocument();
   await user.click(screen.getByTestId("button-save-item"));
   expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({conversions:[{fromUnit:"caja",factor:"12.5"}]}));
+});
+
+it("permite avanzar con TAB desde Clasificación ABC hasta Tipo de artículo sin modificar la clasificación", async () => {
+  const user = userEvent.setup(); renderForm();
+  await user.click(screen.getByTestId("select-abc-class"));
+  await user.tab();
+  await waitFor(() => expect(screen.getByTestId("select-item-kind")).toHaveFocus());
+  expect(screen.getByTestId("select-abc-class")).toHaveTextContent("C — Menor valor/rotación");
 });

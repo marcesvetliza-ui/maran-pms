@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -78,4 +79,13 @@ it('uses the same order and search in base elaborations while excluding itself',
  fireEvent.change(dialog.getByRole('textbox',{name:'Buscar elaboración base'}),{target:{value:'húngaros'}});
  fireEvent.click(dialog.getByRole('button',{name:/Ñoquis húngaros/}));
  expect(dialog.getByText('kg',{selector:'div'})).toBeTruthy();
+});
+
+it('permite salir de la categoría de receta con TAB hacia la descripción sin cambiarla', async () => {
+ const user=userEvent.setup(); const dialog=await openDish();
+ await user.click(dialog.getByTestId('button-toggle-basic-data'));
+ await user.click(dialog.getByTestId('select-recipe-item-category'));
+ await user.tab();
+ await waitFor(()=>expect(dialog.getByTestId('input-recipe-item-description')).toHaveFocus());
+ expect(dialog.getByTestId('select-recipe-item-category')).toHaveTextContent('Platos');
 });
