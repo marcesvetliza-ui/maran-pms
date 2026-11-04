@@ -3181,7 +3181,7 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
           </div>
         ) : isReservaCash ? (
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Factura de reserva cobrada con un medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente.</p>
+            <p className="text-xs text-muted-foreground">Corrige el medio del cobro ya registrado, sin cobrar nuevamente. Admite un pago único o su crédito íntegro reaplicado y conciliado. No permite pasar a Cuenta Corriente.</p>
             <div>
               <Label className="text-xs">Forma de pago</Label>
               <Select value={reservaMethod} onValueChange={setReservaMethod}>

@@ -29,7 +29,18 @@ async function state(f:{id:string,invoice:number}) {
     folio:(await pool.query('SELECT * FROM folios WHERE id=$1::text',[f.id])).rows,
     movements:(await pool.query('SELECT * FROM folio_movements WHERE folio_id=$1::text ORDER BY id',[f.id])).rows,
     invoice:(await pool.query('SELECT * FROM sales_invoices WHERE id=$1',[f.invoice])).rows,
+    invoiceHistory:(await pool.query('SELECT * FROM sales_invoices WHERE reserva_id=$1 ORDER BY id',[f.id])).rows,
   };
+}
+async function reapplicationFixture(explicitRelease=false) {
+  const f=await fixture(),original=f.invoice;
+  await pool.query("UPDATE sales_invoices SET estado='anulada',monto_acreditado=monto_total WHERE id=$1",[original]);
+  const note=(await pool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,nota_credito_id,reconciliation_status)
+    VALUES('NCA',9994,nextval('cash_movements_receipt_number_seq'),CURRENT_DATE,'Synthetic','Consumidor Final',163500,163500,'emitida',$1,$2,'conciliada') RETURNING id`,[f.id,original])).rows[0].id;
+  const target=(await pool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,monto_acreditado,estado,reserva_id,cash_forma_pago,reconciliation_status,credit_reapplication_intent)
+    VALUES('FA',9994,nextval('cash_movements_receipt_number_seq'),CURRENT_DATE,'Synthetic','Consumidor Final',163500,163500,0,'emitida',$1,'tarjeta_credito','conciliada',$2::jsonb) RETURNING id`,[f.id,JSON.stringify({operationId:randomUUID(),invoiceTotal:163500,status:'completed',payments:[{paymentId:f.id,amount:163500}],ordinaryAdvances:[]})])).rows[0].id;
+  await pool.query('UPDATE payments SET invoice_ref=$2 WHERE id=$1',[f.id,JSON.stringify({id:original,cae:'synthetic-preserve',reapplications:[{invoiceId:target,tipoComprobante:'FA',amount:163500}],...(explicitRelease?{fundingReleases:{[String(original)]:16350000}}:{})})]);
+  return {...f,invoice:target,original,note};
 }
 suite('Invoice payment correction against real PostgreSQL',()=>{
   beforeAll(async()=>{({pool}=await import('../db'));({editReservationInvoiceCashMethod:edit}=await import('../billing/reservationInvoicePaymentEdit'));});
@@ -90,5 +101,41 @@ suite('Invoice payment correction against real PostgreSQL',()=>{
     expect(after.cash.filter(c=>!c.anulado)).toHaveLength(1);
     expect(after.cash).toHaveLength(1);
     expect(after.folio[0].balance).toBe('0.00');
+  });
+  it.each([false,true])('corrects one fully released/reapplied receipt, retaining NC/original/fiscal links (explicit release=%s)',async(explicit)=>{
+    const f=await reapplicationFixture(explicit),before=await state(f);
+    await edit(f.invoice,'tarjeta_debito','Synthetic operator');
+    const after=await state(f);
+    expect(after.payments).toEqual([{...before.payments[0],method:'tarjeta_debito'}]);
+    expect(after.cash).toEqual([{...before.cash[0],payment_method:'tarjeta_debito'}]);
+    expect(after.folio).toEqual(before.folio);
+    expect(after.invoiceHistory.filter(i=>i.id!==f.invoice)).toEqual(before.invoiceHistory.filter(i=>i.id!==f.invoice));
+    expect(after.invoice[0]).toEqual({...before.invoice[0],cash_forma_pago:'tarjeta_debito',cash_forma_pago_detalle:[{method:'tarjeta_debito',amount:163500}]});
+    expect(after.movements.filter(m=>m.type==='payment')).toHaveLength(1);
+    expect(after.movements.find(m=>m.type==='adjustment')?.description).toContain('tarjeta_credito → tarjeta_debito');
+    await edit(f.invoice,'tarjeta_debito','Synthetic operator');
+    expect(await state(f)).toEqual(after);
+  });
+  it.each(['missing-nc','unreconciled-nc','pending-application','partial-application','extra-application','wrong-payment','partial-credit','restored-credit','invalid-release','closed-shift','cash-mismatch'])('refuses unsafe reapplied credit: %s',async(kind)=>{
+    const f=await reapplicationFixture(true);
+    if(kind==='missing-nc')await pool.query('DELETE FROM sales_invoices WHERE id=$1',[f.note]);
+    if(kind==='unreconciled-nc')await pool.query("UPDATE sales_invoices SET reconciliation_status='pendiente' WHERE id=$1",[f.note]);
+    if(kind==='pending-application')await pool.query(`UPDATE sales_invoices SET credit_reapplication_intent=jsonb_set(credit_reapplication_intent,'{status}','"pending"') WHERE id=$1`,[f.invoice]);
+    if(kind==='partial-application')await pool.query(`UPDATE payments SET invoice_ref=jsonb_set(invoice_ref::jsonb,'{reapplications,0,amount}','100')::text WHERE id=$1`,[f.id]);
+    if(kind==='extra-application')await pool.query(`UPDATE payments SET invoice_ref=jsonb_set(invoice_ref::jsonb,'{reapplications}',(invoice_ref::jsonb->'reapplications')||'[ {"invoiceId":999999,"amount":1} ]'::jsonb)::text WHERE id=$1`,[f.id]);
+    if(kind==='wrong-payment')await pool.query(`UPDATE sales_invoices SET credit_reapplication_intent=jsonb_set(credit_reapplication_intent,'{payments,0,paymentId}','"other"') WHERE id=$1`,[f.invoice]);
+    if(kind==='partial-credit')await pool.query('UPDATE sales_invoices SET monto_acreditado=100 WHERE id=$1',[f.original]);
+    if(kind==='restored-credit')await pool.query(`UPDATE payments SET invoice_ref=jsonb_set(invoice_ref::jsonb,ARRAY['fundingReleases',$2::text],'100')::text WHERE id=$1`,[f.id,String(f.original)]);
+    if(kind==='invalid-release')await pool.query(`UPDATE payments SET invoice_ref=jsonb_set(invoice_ref::jsonb,ARRAY['fundingReleases',$2::text],'"invalid"')::text WHERE id=$1`,[f.id,String(f.original)]);
+    if(kind==='closed-shift')await pool.query("UPDATE cash_shifts SET status='closed' WHERE id=$1",[f.id]);
+    if(kind==='cash-mismatch')await pool.query('UPDATE cash_movements SET amount=1 WHERE id=$1',[f.id]);
+    const before=await state(f);
+    await expect(edit(f.invoice,'tarjeta_debito','Synthetic operator')).rejects.toMatchObject({statusCode:kind==='closed-shift'?403:409});
+    expect(await state(f)).toEqual(before);
+  });
+  it('rolls back a reapplied correction if audit persistence fails',async()=>{
+    const f=await reapplicationFixture(),before=await state(f);
+    await expect(edit(f.invoice,'tarjeta_debito','bad\0operator')).rejects.toBeTruthy();
+    expect(await state(f)).toEqual(before);
   });
 });

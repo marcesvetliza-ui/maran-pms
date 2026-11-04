@@ -1,12 +1,43 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
-import { parseReservationInvoiceRef } from "@shared/reservationFolio";
+import { parseReservationInvoiceRef, reservationPaymentReleasedCents } from "@shared/reservationFolio";
 import { db } from "../db";
 import { normalizeToSpanishPaymentMethod } from "../payment-method";
 
 const methods = new Set(["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago"]);
 const reject = (message: string, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 const cents = (value: unknown) => Math.round(Number(value) * 100);
+const saleTypes = new Set(['FA','FB','FC','FT','FM','FMB']);
+
+/** Only one whole receipt, fully released by reconciled NCs and applied to
+ * exactly one replacement invoice. Partial/shared coverage needs its own UI.
+ * This validates both independent durable links: payment history and invoice
+ * reconciliation intent. Matching amounts alone never authorize a correction.
+ */
+function exclusiveReapplication(invoice: any, payment: any, ref: any, invoices: any[]): number | null {
+  const original = invoices.find(row => String(row.id)===String(ref?.id));
+  const applications = ref?.reapplications;
+  const intent = invoice.credit_reapplication_intent;
+  if (!original || !saleTypes.has(original.tipo_comprobante) || original.estado!=='anulada' ||
+      cents(original.monto_total)!==cents(payment.amount) || cents(original.monto_acreditado)!==cents(original.monto_total) ||
+      !Array.isArray(applications) || applications.length!==1 || String(applications[0]?.invoiceId)!==String(invoice.id) ||
+      cents(applications[0]?.amount)!==cents(payment.amount) ||
+      !intent || intent.status!=='completed' || !intent.operationId || invoice.reconciliation_status!=='conciliada' ||
+      cents(intent.invoiceTotal)!==cents(invoice.monto_total) ||
+      !Array.isArray(intent.payments) || intent.payments.length!==1 || intent.payments[0]?.paymentId!==payment.id ||
+      cents(intent.payments[0]?.amount)!==cents(payment.amount) ||
+      (intent.ordinaryAdvances && (!Array.isArray(intent.ordinaryAdvances) || intent.ordinaryAdvances.length)) ||
+      (intent.settlement && (intent.settlement.destination!=='none' || cents(intent.settlement.amount || 0)!==0))) return null;
+  const notes = invoices.filter(row => String(row.nota_credito_id)===String(original.id));
+  if (!notes.length || notes.some(row => !['NCA','NCB','NCC','NCT','NCM','NCMB'].includes(row.tipo_comprobante) ||
+    row.estado!=='emitida' || row.reconciliation_status!=='conciliada' || cents(row.monto_total)<=0) ||
+    notes.reduce((sum,row) => sum+cents(row.monto_total),0)!==cents(original.monto_total)) return null;
+  if (ref.fundingReleases && (typeof ref.fundingReleases!=='object' || Array.isArray(ref.fundingReleases) ||
+      Object.keys(ref.fundingReleases).some(id => id!==String(original.id) ||
+        ref.fundingReleases[id]!==cents(payment.amount)))) return null;
+  if (reservationPaymentReleasedCents(ref,original.id,cents(payment.amount),1)!==cents(payment.amount)) return null;
+  return Number(original.id);
+}
 
 /** Correct the method of an existing, fully linked reservation receipt.
  * No new payment, balance change, fiscal emission or historical-shift rewrite.
@@ -42,19 +73,25 @@ export async function editLinkedReservationInvoicePayment(invoiceId: number, met
     }
     const direct = await tx.execute(sql`SELECT id FROM cash_movements WHERE source_type='comprobante' AND source_id=${String(invoiceId)} AND anulado=false`);
     if (direct.rows.length) throw reject("Cambió el vínculo del cobro. Actualizá el comprobante antes de editar.");
-    const linked = payments.filter(p => p.status==='active' &&
-      (p.id===invoice.payment_id || String(parseReservationInvoiceRef(p.invoice_ref)?.id)===String(invoiceId)));
+    const linked = payments.filter(p => {
+      const ref = parseReservationInvoiceRef(p.invoice_ref);
+      return p.status==='active' && (p.id===invoice.payment_id || String(ref?.id)===String(invoiceId) ||
+        (Array.isArray(ref?.reapplications) && ref.reapplications.some((row:any) => String(row?.invoiceId)===String(invoiceId))));
+    });
     if (linked.length!==1 || (invoice.payment_id && linked[0]?.id!==invoice.payment_id)) {
       throw reject("No se identifica un único cobro vinculado a esta factura. Requiere revisar el pago del folio.");
     }
     const payment = linked[0], ref = parseReservationInvoiceRef(payment.invoice_ref);
     const oldMethod = normalizeToSpanishPaymentMethod(payment.method);
+    const reapplied = !!ref && String(ref.id)!==String(invoiceId);
+    const originalId = reapplied ? exclusiveReapplication(invoice,payment,ref,invoices) : null;
     if (payment.group_payment_id || !methods.has(oldMethod) ||
-        (payment.invoice_ref && (!ref || String(ref.id)!==String(invoiceId))) ||
-        ref?.reapplications?.length || (ref?.fundingReleases && Object.keys(ref.fundingReleases).length) ||
+        (reapplied ? originalId===null : (payment.invoice_ref && !ref) ||
+          (ref?.reapplications && (!Array.isArray(ref.reapplications) || ref.reapplications.length)) ||
+          (ref?.fundingReleases && Object.keys(ref.fundingReleases).length)) ||
         cents(payment.amount)!==cents(invoice.monto_total) || cents(payment.amount)<=0 ||
-        invoices.some(row => Number(row.id)!==invoiceId && row.payment_id===payment.id && row.estado!=='descartada')) {
-      throw reject("El pago tiene una liquidación compartida, crédito o un importe diferente. Requiere revisar el folio.");
+        invoices.some(row => Number(row.id)!==invoiceId && Number(row.id)!==originalId && row.payment_id===payment.id && row.estado!=='descartada')) {
+      throw reject("El pago tiene una liquidación compartida, una reaplicación sin conciliar o un importe diferente. Requiere revisar el folio.");
     }
     const cashRows = (await tx.execute(sql`SELECT * FROM cash_movements WHERE payment_id=${payment.id} AND anulado=false FOR UPDATE`)).rows as any[];
     const movements = (await tx.execute(sql`SELECT m.* FROM folio_movements m
