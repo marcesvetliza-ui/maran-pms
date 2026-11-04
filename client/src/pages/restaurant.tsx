@@ -1,3 +1,4 @@
+import { RestaurantMoveDestination, restaurantMoveDestinations } from "@/components/restaurant-move-destination";
 import { restaurantNonFiscalMethods } from "@shared/restaurant-settlement";
 import { formatDisplayDate } from "@shared/date-display";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
@@ -1561,8 +1562,8 @@ export default function RestaurantPage() {
   };
 
   const transferItemsInSplitMutation = useMutation({
-    mutationFn: async ({ orderId, itemIds, targetOrderId }: { orderId: string; itemIds: string[]; targetOrderId: string }) => {
-      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/transfer-items`, { itemIds, targetOrderId });
+    mutationFn: async ({ orderId, itemIds, targetOrderId, newOrderData }: { orderId: string; itemIds: string[]; targetOrderId: string; newOrderData?: { waiterName: string; areaId: string | null; orderLabel: string; covers: number } }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/transfer-items`, { itemIds, targetOrderId, newOrderData });
       return res.json();
     },
     onSuccess: () => {
@@ -4760,7 +4761,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                   >
                     <option value="">— Elegí el destino —</option>
                     <option value="new">✦ Nuevo ticket (ticket separado)</option>
-                    {orders.filter(o => o.id !== currentOrder?.id && o.status === "open").map(o => (
+                    {restaurantMoveDestinations(orders, currentOrder?.id).map(o => (
                       <option key={o.id} value={o.id}>
                         {o.tableId
                           ? `Mesa ${(o as any).table?.tableNumber || o.tableId}`
@@ -6266,24 +6267,17 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                         </label>
                       ))}
                     </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm">Comanda destino</Label>
-                      <Select value={moveItemTargetOrderId} onValueChange={setMoveItemTargetOrderId}>
-                        <SelectTrigger data-testid="select-move-target-order">
-                          <SelectValue placeholder="Seleccionar comanda..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {((orders || []) as RestaurantOrder[])
-                            .filter((o: RestaurantOrder) => o.id !== currentOrder?.id && o.status === "open")
-                            .map((o: RestaurantOrder) => (
-                              <SelectItem key={o.id} value={o.id}>
-                                {(o as any).orderLabel || o.orderNumber}
-                                {(o as any).table ? ` — Mesa ${(o as any).table.tableNumber}` : ""}
-                              </SelectItem>
-                            ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    <RestaurantMoveDestination orders={orders || []} sourceId={currentOrder?.id}
+                      value={moveItemTargetOrderId} onChange={value => {
+                        setMoveItemTargetOrderId(value);
+                        if (value === "new") setTransferNewWaiter("");
+                      }} />
+                    {moveItemTargetOrderId === "new" && (
+                      <div className="space-y-1.5">
+                        <Label className="text-sm">Mozo de la nueva comanda *</Label>
+                        {renderMozoSelect(transferNewWaiter, setTransferNewWaiter, "select-move-new-waiter", "transfer")}
+                      </div>
+                    )}
                     <div className="flex gap-2 pt-1">
                       <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); }}>
                         Cancelar
@@ -6291,10 +6285,11 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       <Button
                         size="sm"
                         className="flex-1"
-                        disabled={moveItemSelectedIds.size === 0 || !moveItemTargetOrderId || transferItemsInSplitMutation.isPending}
+                        disabled={moveItemSelectedIds.size === 0 || !moveItemTargetOrderId || (moveItemTargetOrderId === "new" && !transferNewWaiter.trim()) || transferItemsInSplitMutation.isPending}
                         onClick={() => {
                           if (currentOrder && moveItemTargetOrderId) {
-                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), targetOrderId: moveItemTargetOrderId });
+                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), targetOrderId: moveItemTargetOrderId,
+                              newOrderData: moveItemTargetOrderId === "new" ? { waiterName: transferNewWaiter.trim(), areaId: currentOrder.areaId, orderLabel: "Ticket separado", covers: 1 } : undefined });
                           }
                         }}
                         data-testid="button-confirm-move-items"
