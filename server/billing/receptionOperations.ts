@@ -1,3 +1,4 @@
+import { canCloseCancelledReceptionOperation } from "./cancelledReceptionOperation";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import type { Express } from "express";
 import { sql } from "drizzle-orm";
@@ -45,11 +46,12 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const ccDone = operation.request_snapshot?.reservationSettlementMethod !== "cuenta_corriente" && operation.request_snapshot?.cashFormaPago !== "cuenta_corriente" || intent?.settlement?.status === "completed";
   const creditsDone = !(operation.request_snapshot?.creditReapplications?.length || operation.request_snapshot?.ordinaryAdvanceApplications?.length) || intent?.status === "completed";
   const issued = ["emitida", "parcial"].includes(String(invoice?.estado));
+  const canCloseCancelled = await canCloseCancelledReceptionOperation(db, operation, invoice);
   const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone;
   return {
-    operationId: operation.operation_id, stage: issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection,
+    operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled,
     acknowledgedPaymentIds: acknowledged, financiallyComplete, code: operation.error_code,
-    message: operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}, está ocupada por otro registro. No se solicitó autorización. Administración debe revisar la numeración.` : null,
+    message: invoice?.estado === "anulada" ? `La factura ${invoice.tipo_comprobante} ${invoice.punto_venta}-${invoice.numero} de este intento está anulada. ${canCloseCancelled ? "Podés cerrar el intento anterior sin emitir ni cobrar y volver a revisar la cuenta vigente." : "Su anulación o sus cobros requieren conciliación antes de cerrar el intento."}` : operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}, está ocupada por otro registro. No se solicitó autorización. Administración debe revisar la numeración.` : null,
     invoice: issued ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
     attempt: recovery?.version === 2 ? { invoiceRequest: operation.request_snapshot,
       invoice: issued && ccDone && creditsDone ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
@@ -90,10 +92,25 @@ export function registerReceptionOperationRoutes(app: Express) {
       const result = await withReservationFinancialLock(req.params.reservationId, async () => {
         const operation = (await db.execute(sql`SELECT * FROM billing_operations WHERE operation_id=${req.params.operationId} AND owner_type='reservation' AND owner_id=${req.params.reservationId}`)).rows[0] as BillingOperation;
         if (!operation) throw fail("El intento es anterior a estos controles. Requiere revisión; no se descarta automáticamente.");
-        if (operation.stage === "corrected") return { corrected: true, request: operation.request_snapshot };
+        if (operation.stage === "corrected") return { corrected: true, closedCancelled: operation.error_code === "BILLING_CANCELLED_OPERATION_CLOSED", request: operation.request_snapshot };
         const identity = operation.fiscal_identity;
         return withSeriesLock(`funding-fiscal:${identity.environment}:${identity.issuer}:${identity.type}:${identity.pointOfSale}`, async () => {
           const status = await receptionOperationStatus(operation);
+          if (status.canCloseCancelled) {
+            return db.transaction(async tx => {
+              const current = (await tx.execute(sql`SELECT * FROM billing_operations WHERE operation_id=${operation.operation_id} FOR UPDATE`)).rows[0] as BillingOperation;
+              if (current?.stage === "corrected" && current.error_code === "BILLING_CANCELLED_OPERATION_CLOSED") return { corrected: true, closedCancelled: true };
+              if (!current || current.owner_id !== operation.owner_id || current.owner_type !== "reservation") throw fail("La operación cambió. Actualizá la pantalla.");
+              const cancelled = (await tx.execute(current.invoice_id
+                ? sql`SELECT * FROM sales_invoices WHERE id=${current.invoice_id} AND reserva_id=${current.owner_id} FOR UPDATE`
+                : sql`SELECT * FROM sales_invoices WHERE reserva_id=${current.owner_id} AND credit_reapplication_intent->>'operationId'=${current.operation_id} ORDER BY id DESC LIMIT 1 FOR UPDATE`)).rows[0] as any;
+              if (!await canCloseCancelledReceptionOperation(tx, current, cancelled, true)) throw fail("La anulación cambió o requiere conciliación. Conservamos el intento.");
+              await tx.execute(sql`UPDATE billing_operations SET stage='corrected',error_code='BILLING_CANCELLED_OPERATION_CLOSED',updated_at=now() WHERE operation_id=${current.operation_id}`);
+              await tx.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp)
+                VALUES(${req.user?.id || null},'update','billing','billing_operation',${current.operation_id},'Intento anterior cerrado por factura totalmente anulada; sin emisión ni cobro',${JSON.stringify({ operationId: current.operation_id, invoiceId: cancelled.id, requestHash: current.payload_hash, priorStage: current.stage })},now())`);
+              return { corrected: true, closedCancelled: true };
+            });
+          }
           if (!status.safeToCorrect && !status.canVerifyRejection) throw fail("El resultado fiscal no permite descartar el intento. Completá la misma operación o pedí una conciliación.");
           const invoice = operation.invoice_id ? (await db.execute(sql`SELECT * FROM sales_invoices WHERE id=${operation.invoice_id}`)).rows[0] as any : null;
           if (invoice) {
