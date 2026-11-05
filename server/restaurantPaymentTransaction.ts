@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Request, Response, RequestHandler } from "express";
-import { eq } from "drizzle-orm";
+import { inArray, asc } from "drizzle-orm";
 import { restaurantOrders } from "@shared/schema";
 import { db, withDatabaseTransaction } from "./db";
 
@@ -17,6 +17,7 @@ export function afterRestaurantPaymentCommit(action: AfterCommit): void {
 /** Buffer the response until every local payment effect has committed. */
 export function restaurantPaymentTransaction(
   handler: (req: Request, res: Response) => Promise<unknown>,
+  lockOrderIds: (req:Request)=>string[] = req=>[req.params.id],
 ): RequestHandler {
   return async (req, res) => {
     let body: any;
@@ -35,7 +36,7 @@ export function restaurantPaymentTransaction(
         // Serialize close, installment and item payments for the same order.
         // Its paid/closed flags cannot become visible ahead of their effects.
         await db.select({ id: restaurantOrders.id }).from(restaurantOrders)
-          .where(eq(restaurantOrders.id, req.params.id)).for("update");
+          .where(inArray(restaurantOrders.id,[...new Set(lockOrderIds(req))].sort())).orderBy(asc(restaurantOrders.id)).for("update");
         await afterCommitContext.run(actions, () => handler(req, stagedResponse));
         if (status >= 400) throw new RejectedPayment();
       });
