@@ -1,3 +1,4 @@
+import {useSessionPermissions} from "@/hooks/use-session-permissions";
 import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, createContext, useContext, useCallback, lazy, Suspense } from "react";
 import { Switch, Route, useRoute, useLocation } from "wouter";
@@ -474,11 +475,9 @@ function AuthenticatedApp() {
   // para el rol de este usuario, servido por role_permissions (ver
   // server/permissions.ts) en vez de los arrays de roles hardcodeados que
   // tenía cada pantalla.
-  const { data: permissionsData, isSuccess: permissionsReady } = useQuery<{ role: string; resourceKeys: string[] }>({
-    queryKey: ["/api/permissions/mine"],
-    enabled: !!user,
-  });
-  const resourceKeySet = new Set(permissionsData?.resourceKeys ?? []);
+  const permissions=useSessionPermissions(user);
+  const permissionsReady=permissions.ready;
+  const resourceKeySet = new Set(permissions.resourceKeys);
   const hasPermission = (resourceKey: string) => resourceKeySet.has(resourceKey);
 
   // Escuchar eventos de auth desde otros tabs del mismo navegador
@@ -582,6 +581,13 @@ function AuthenticatedApp() {
     setUser(null);
     queryClient.clear();
   };
+
+  if(user && !checking && !posChecking && !permissionsReady && permissions.isError){
+    return <div role="alert" className="min-h-screen flex flex-col items-center justify-center gap-4 p-6">
+      <p>No se pudieron cargar tus permisos. Tu sesión sigue abierta; podés reintentar.</p>
+      <Button onClick={()=>permissions.refetch()}>Reintentar carga</Button>
+    </div>;
+  }
 
   // user && !permissionsReady: recién logueado, todavía no llegó
   // /api/permissions/mine — sin esto, el sidebar se armaría un instante con
