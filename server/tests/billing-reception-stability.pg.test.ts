@@ -152,4 +152,52 @@ suite("Estabilidad de facturación de Recepción con PostgreSQL y ARCA simulado"
     expect((await pool!.query("SELECT stage FROM billing_operations WHERE operation_id=$1", [f.op])).rows[0].stage).toBe("rejected");
     expect(mocks.authorize).toHaveBeenCalledTimes(1);
   }));
+  it.each(["conciliada", null])("closes only the stale cancelled CC intent, retaining invoice100, its NC and replacement125 (NC status %s)", async ncStatus => fixture(async f => {
+    const requestSnapshot = { ...f.request, cashFormaPago: "cuenta_corriente", reservationSettlementMethod: "cuenta_corriente", prefacturaRecovery: { version: 2, payments: [], checkoutRequested: true } };
+    const issued = await emitirFactura({ ...f.data, requestSnapshot });
+    const id = Number(issued.id);
+    await pool!.query("UPDATE sales_invoices SET estado='anulada',monto_acreditado=monto_total WHERE id=$1",[id]);
+    await pool!.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,nota_credito_id,reconciliation_status) VALUES('NCB',$1,100,CURRENT_DATE,'Cancel fixture','Consumidor Final',100,100,'emitida',$2,$3,$4),('FB',$1,125,CURRENT_DATE,'Replacement fixture','Consumidor Final',100,100,'emitida',$2,NULL,'conciliada')`,[f.point,f.reservation,id,ncStatus]);
+    const before=(await pool!.query("SELECT * FROM sales_invoices WHERE punto_venta=$1 ORDER BY id",[f.point])).rows;
+    const status=await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/reception-status`);
+    expect(status.body).toMatchObject({ stage: "cancelled", canCloseCancelled: true, safeToCorrect: false, invoice: null });
+    const originalJournal=(await pool!.query("SELECT * FROM billing_operations WHERE operation_id=$1",[f.op])).rows[0];
+    for(let i=0;i<2;i++) {
+      const closed=await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/correct-reception`,"POST");
+      expect(closed.status,JSON.stringify(closed.body)).toBe(200);
+      expect(closed.body).toMatchObject({ corrected: true, closedCancelled: true });
+    }
+    expect((await request(`/api/billing/reservations/${f.reservation}/pending-operation`)).body.pending).toBeNull();
+    expect((await pool!.query("SELECT * FROM sales_invoices WHERE punto_venta=$1 ORDER BY id",[f.point])).rows).toEqual(before);
+    const journal=(await pool!.query("SELECT * FROM billing_operations WHERE operation_id=$1",[f.op])).rows[0];
+    expect(journal).toMatchObject({ stage: "corrected", error_code: "BILLING_CANCELLED_OPERATION_CLOSED", invoice_id: id, payload_hash: originalJournal.payload_hash, request_snapshot: originalJournal.request_snapshot });
+    expect((await pool!.query("SELECT id FROM audit_logs WHERE entity_type='billing_operation' AND entity_id=$1",[f.op])).rows).toHaveLength(1);
+    expect((await pool!.query("SELECT id FROM payments WHERE reservation_id=$1",[f.reservation])).rows).toHaveLength(0);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);expect(mocks.consult).not.toHaveBeenCalled();
+  }));
+
+  it.each(["pending_nc", "partial_nc", "new_money"])("does not close a cancelled operation with unresolved evidence: %s", async condition => fixture(async f => {
+    const snapshot={...f.request,cashFormaPago:"cuenta_corriente",prefacturaRecovery:{...f.request.prefacturaRecovery,payments:condition==='new_money'?f.request.prefacturaRecovery.payments:[]}};
+    const issued=await emitirFactura({...f.data,requestSnapshot:snapshot});
+    await pool!.query("UPDATE sales_invoices SET estado='anulada',monto_acreditado=monto_total WHERE id=$1",[issued.id]);
+    await pool!.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,nota_credito_id,reconciliation_status) VALUES('NCB',$1,100,CURRENT_DATE,'Cancel fixture','Consumidor Final',100,$2,'emitida',$3,$4,$5)`,[f.point,condition==='partial_nc'?50:100,f.reservation,issued.id,condition==='pending_nc'?'pendiente':'conciliada']);
+    expect((await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/reception-status`)).body.canCloseCancelled).toBe(false);
+    expect((await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/correct-reception`,"POST")).status).toBe(409);
+    expect((await pool!.query("SELECT stage FROM billing_operations WHERE operation_id=$1",[f.op])).rows[0].stage).toBe('authorized');
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+  }));
+
+  it("retires a fully completed legacy CC attempt after cancellation without requiring an invented NC or touching its ledger", async () => fixture(async f => {
+    const snapshot={...f.request,cashFormaPago:"cuenta_corriente",prefacturaRecovery:{version:2,payments:[],checkoutRequested:true}};
+    const issued=await emitirFactura({...f.data,requestSnapshot:snapshot});
+    const intent={operationId:f.op,status:"completed",payments:[],invoiceTotal:100,settlement:{status:"completed",destination:"cuenta_corriente",amount:100}};
+    await pool!.query("UPDATE sales_invoices SET estado='anulada',monto_acreditado=monto_total,reconciliation_status=NULL,credit_reapplication_intent=$2::jsonb WHERE id=$1",[issued.id,JSON.stringify(intent)]);
+    const before=(await pool!.query("SELECT * FROM sales_invoices WHERE id=$1",[issued.id])).rows[0];
+    expect((await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/reception-status`)).body.canCloseCancelled).toBe(true);
+    const closed=await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/correct-reception`,"POST");
+    expect(closed.status,JSON.stringify(closed.body)).toBe(200);expect(closed.body.closedCancelled).toBe(true);
+    expect((await pool!.query("SELECT * FROM sales_invoices WHERE id=$1",[issued.id])).rows[0]).toEqual(before);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);expect(mocks.consult).not.toHaveBeenCalled();
+  }));
+
 });

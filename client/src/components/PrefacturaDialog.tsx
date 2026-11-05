@@ -661,6 +661,17 @@ export function PrefacturaDialog({
         setSubmitError(null); await refetchReceptionStatus();
         toast({ title: "Factura autorizada verificada", description: "No se volvió a emitir. Completá la operación pendiente para terminar su registro." }); return;
       }
+      if (result.closedCancelled) {
+        submission.current!.complete(reservationId);
+        setHasPendingSubmission(false); setSubmitError(null);
+        const next = newSettlementOperationId(); setCreditOperationId(next);
+        window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
+        queryClient.invalidateQueries({ queryKey: pendingOperationKey });
+        queryClient.invalidateQueries({ queryKey: operationStatusKey });
+        await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
+        toast({ title: "Intento anterior cerrado", description: "Se conserva la factura anulada. Volvé a abrir la habitación para revisar la cuenta vigente; no se emitió ni cobró nada." });
+        onClose(); return;
+      }
       if (!result.corrected) return;
       const request = result.request || {};
       submission.current!.complete(reservationId);
@@ -2512,7 +2523,7 @@ export function PrefacturaDialog({
               <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
                 <p className="text-sm">{rejectionError ? "No se pudo consultar el intento fiscal. Volvé a abrir la prefactura antes de emitir." : serverAttempt ? "Hay un intento A rechazado por la condición IVA Exento. Verificá el rechazo para recuperar los datos originales y preparar una Factura B sin emitir ni cobrar." : "Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado."}</p>
                 {pendingAttempt?.invoiceRequest && <div className="rounded border bg-background p-3 text-sm space-y-1" data-testid="billing-original-intent">
-                  <p className="font-semibold">Datos del intento que se va a completar</p>
+                  <p className="font-semibold">{receptionStatus?.stage === "cancelled" ? "Datos del intento anterior" : "Datos del intento que se va a completar"}</p>
                   <p>{pendingAttempt.invoiceRequest.cliente?.razonSocial || "Receptor original"} · {pendingAttempt.invoiceRequest.tipoComprobante} · PV {pendingAttempt.invoiceRequest.puntoVentaOverride ?? "original"}</p>
                   <p>{pendingAttempt.invoiceRequest.reservationSettlementMethod === "cuenta_corriente" || pendingAttempt.invoiceRequest.cashFormaPago === "cuenta_corriente" ? "Cargo a Cuenta Corriente; sin cobro de caja." : pendingAttempt.payments.length ? pendingAttempt.payments.map(payment => `${PAYMENT_METHOD_LABELS[payment.method] || (String(payment.method).startsWith("retencion_") ? "Retención" : payment.method)}: $${fmtMoney(payment.amount)}`).join(" · ") : "Sin cobro nuevo preparado."}</p>
                   <p className="text-muted-foreground">Para cambiar estos datos, usá la acción de corrección cuando esté habilitada. El reintento conserva el pedido original.</p>
@@ -2521,8 +2532,8 @@ export function PrefacturaDialog({
                 {hasPendingSubmission && receptionStatus && <p className="my-2 text-sm" data-testid="billing-operation-state">
                   {receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
                 </p>}
-                {hasPendingSubmission && (receptionStatus?.safeToCorrect || receptionStatus?.canVerifyRejection) && <Button type="button" variant="outline" onClick={() => correctReceptionAttempt.mutate()} disabled={isSubmitting || correctReceptionAttempt.isPending} data-testid="button-correct-reception-attempt">{correctReceptionAttempt.isPending ? "Verificando…" : receptionStatus.canVerifyRejection ? "Verificar rechazo y corregir datos" : "Corregir datos del intento"}</Button>}
-                {hasPendingSubmission && !serverAttempt && <Button onClick={() => void doSubmit()} disabled={isSubmitting || correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!pointError || receptionStatus?.stage === "blocked" || receptionStatus?.canVerifyRejection === true} data-testid="button-retry-prefactura">
+                {hasPendingSubmission && (receptionStatus?.safeToCorrect || receptionStatus?.canVerifyRejection || receptionStatus?.canCloseCancelled) && <Button type="button" variant="outline" onClick={() => correctReceptionAttempt.mutate()} disabled={isSubmitting || correctReceptionAttempt.isPending} data-testid="button-correct-reception-attempt">{correctReceptionAttempt.isPending ? "Verificando…" : receptionStatus.canCloseCancelled ? "Cerrar intento de factura anulada" : receptionStatus.canVerifyRejection ? "Verificar rechazo y corregir datos" : "Corregir datos del intento"}</Button>}
+                {hasPendingSubmission && !serverAttempt && receptionStatus?.stage !== "cancelled" && <Button onClick={() => void doSubmit()} disabled={isSubmitting || correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!pointError || receptionStatus?.stage === "blocked" || receptionStatus?.canVerifyRejection === true} data-testid="button-retry-prefactura">
                   {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
                 </Button>}
                 {canCorrectExemptRejection && <Button type="button" variant="outline" className="mt-2 sm:ml-2" disabled={isSubmitting || folioLoading || correctExemptRejection.isPending} onClick={() => correctExemptRejection.mutate()} data-testid="button-correct-exempt-rejection">
