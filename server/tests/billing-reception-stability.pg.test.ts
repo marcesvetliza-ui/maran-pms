@@ -9,6 +9,9 @@ const mocks = vi.hoisted(() => ({ point: 9900, environment: "homologacion", auth
 vi.mock("../billing/billingConfig", () => ({ getBillingConfig: async () => ({ arcaAmbiente: mocks.environment, puntoVenta: mocks.point, puntoVentaHomolog: mocks.point, arcaCuit: "30717698130" }) }));
 vi.mock("../billing/wsaaClient", () => ({ getTokenAuth: mocks.token }));
 vi.mock("../billing/wsfevClient", () => ({ feCAESolicitar: mocks.authorize, feCompConsultar: mocks.consult }));
+// All ARCA transports below are fixtures (fetch, WSAA and WSFE). Allow the
+// simulated integration through the pilot boundary without enabling real I/O.
+vi.mock("../external-comms-policy", () => ({ assertExternalCommAllowed: vi.fn() }));
 vi.mock("../auth", () => ({ requireAuth: (req: any, _res: any, next: any) => { req.user = { role: "admin" }; next(); }, requirePermission: () => (_req: any, _res: any, next: any) => next() }));
 const suite = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
