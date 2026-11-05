@@ -1,3 +1,4 @@
+import { assertReservationInvoiceRecoverable } from "./reservationRecoveryState";
 import { checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
@@ -228,7 +229,7 @@ export async function reconcileReservationCreditInvoice(invoiceId: number): Prom
       if (!invoice || !intent || !Array.isArray(intent.payments)) {
         throw new Error("La factura no tiene un intento de crédito recuperable");
       }
-      if (invoice.estado !== "emitida") throw new Error("La factura todavía no fue emitida");
+      assertReservationInvoiceRecoverable(invoice);
       if (intent.status === "completed" && invoice.reconciliation_status === "conciliada") return invoice;
       if (money(intent.invoiceTotal) !== money(invoice.monto_total)) {
         throw new Error("El total emitido no coincide con el intento de crédito");

@@ -44,14 +44,15 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const intent = invoice?.credit_reapplication_intent;
   const ccDone = operation.request_snapshot?.reservationSettlementMethod !== "cuenta_corriente" && operation.request_snapshot?.cashFormaPago !== "cuenta_corriente" || intent?.settlement?.status === "completed";
   const creditsDone = !(operation.request_snapshot?.creditReapplications?.length || operation.request_snapshot?.ordinaryAdvanceApplications?.length) || intent?.status === "completed";
-  const financiallyComplete = invoice?.estado === "emitida" && acknowledged.length === expected.length && ccDone && creditsDone;
+  const issued = ["emitida", "parcial"].includes(String(invoice?.estado));
+  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone;
   return {
-    operationId: operation.operation_id, stage: invoice?.estado === "emitida" ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection,
+    operationId: operation.operation_id, stage: issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection,
     acknowledgedPaymentIds: acknowledged, financiallyComplete, code: operation.error_code,
     message: operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}, está ocupada por otro registro. No se solicitó autorización. Administración debe revisar la numeración.` : null,
-    invoice: invoice?.estado === "emitida" ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
+    invoice: issued ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
     attempt: recovery?.version === 2 ? { invoiceRequest: operation.request_snapshot,
-      invoice: invoice?.estado === "emitida" && ccDone && creditsDone ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
+      invoice: issued && ccDone && creditsDone ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
       payments: expected, checkoutRequested: recovery.checkoutRequested === true, acknowledgedPaymentIds: acknowledged } : null,
   };
 }

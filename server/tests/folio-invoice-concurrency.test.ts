@@ -99,6 +99,11 @@ vi.mock("../billing/invoiceService", () => ({
   }),
 }));
 
+vi.mock("../billing/reservationCreditReconciliation", async importOriginal => ({
+  ...await importOriginal<typeof import("../billing/reservationCreditReconciliation")>(),
+  reconcileReservationCreditInvoice: vi.fn(async () => undefined),
+}));
+
 vi.mock("../db-storage", () => ({
   storage: {
     getReservation: vi.fn(async () => ({
@@ -214,6 +219,37 @@ describe("folio invoice source guard", () => {
       });
       expect(state.releaseCalls).toBe(1);
     });
+  });
+
+  it("recovers an already settled partially credited invoice without issuing or charging again", async () => {
+    const operationId = "operation-12345678901234567890";
+    state.invoices = [{ id: 125, reserva_id: "reservation-1", estado: "parcial", monto_total: "398200.00", monto_acreditado: "86200.00",
+      reconciliation_status: "conciliada", tipo_comprobante: "FA", punto_venta: 5, numero: 125,
+      credit_reapplication_intent: { operationId, payments: [], status: "completed", settlement: { destination: "cuenta_corriente", status: "completed" } } }];
+    await withServer(async baseUrl => {
+      for (let i = 0; i < 2; i++) {
+        const response = await fetch(`${baseUrl}/api/billing/reservations/reservation-1/operations/${operationId}/recover`, { method: "POST" });
+        expect(response.status).toBe(200);
+        expect((await response.json()).invoice).toMatchObject({ id: 125, numero: 125, puntoVenta: 5 });
+      }
+    });
+    expect(state.emitted).toHaveLength(0);
+    expect(state.invoices).toHaveLength(1);
+    const { storage } = await import("../db-storage");
+    expect(storage.createAccountMovement).not.toHaveBeenCalled();
+    expect(storage.registerCashMovement).not.toHaveBeenCalled();
+  });
+
+  it.each(["anulada", "autorizacion_rechazada"])("does not recover or reissue an invoice in state %s", async estado => {
+    const operationId = "operation-12345678901234567890";
+    state.invoices = [{ id: 125, reserva_id: "reservation-1", estado, tipo_comprobante: "FA", punto_venta: 5, numero: 125,
+      credit_reapplication_intent: { operationId, payments: [], status: "completed" } }];
+    await withServer(async baseUrl => {
+      const response = await fetch(`${baseUrl}/api/billing/reservations/reservation-1/operations/${operationId}/recover`, { method: "POST" });
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toContain(estado);
+    });
+    expect(state.emitted).toHaveLength(0);
   });
 
   it("allows only one of two simultaneous invoices to consume the same charge", async () => {
