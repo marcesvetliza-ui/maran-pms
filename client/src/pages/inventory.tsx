@@ -3067,7 +3067,7 @@ export function NewItemForm({
               ))}
             </SelectContent>
           </Select>
-          {initialItem && <p className="text-xs text-muted-foreground">{unitCorrectionMode?.enabled?'Corrección temporal de unidades habilitada. Conserva los valores numéricos de stock y del historial. Las recetas con unidades anteriores no bloquean el guardado: conservan sus costos previos y quedan pendientes de revisión.':'La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.'}</p>}
+          {initialItem && <p className="text-xs text-muted-foreground">{unitCorrectionMode?.enabled?'Corrección temporal de unidades habilitada. Conserva los valores numéricos de stock y del historial. Las recetas con unidades anteriores no bloquean el guardado: conservan sus costos previos y quedan pendientes de revisión. Los consumos pendientes tampoco bloquean el cambio y quedan para revisar antes de aplicarlos.':'La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.'}</p>}
         </div>
         {canCost && <div className="space-y-2">
           <Label>Costo Unitario</Label>

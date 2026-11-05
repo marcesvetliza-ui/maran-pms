@@ -5671,8 +5671,15 @@ export class DatabaseStorage implements IStorage {
         const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM recipes WHERE output_inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM treatment_supplies WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
         if(references.rows.length&&!correction)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
         if(correction){
-          const pending=await tx.execute(sql`SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb LIMIT 1`);
-          if(pending.rows.length)throw Object.assign(new Error('El artículo tiene consumos pendientes: resolvelos antes de corregir la unidad.'),{statusCode:409});
+          // Keep the original quantities/units, but require deliberate review before
+          // a queued consumption can use the corrected catalogue basis.
+          await tx.execute(sql`UPDATE inventory_consumption_jobs j SET
+            lines=(SELECT jsonb_agg(CASE WHEN line->>'itemId'=${id} THEN
+              line || jsonb_build_object('unitCorrectionReview',true,'originalBaseUnit',COALESCE(line->>'originalBaseUnit',${String(current.rows[0].unit)}))
+              ELSE line END ORDER BY ordinal)
+              FROM jsonb_array_elements(j.lines) WITH ORDINALITY AS entries(line,ordinal)),
+            error='Unidad base corregida: revisá la receta y actualizá el consumo pendiente antes de reintentar.'
+            WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb`);
         }
         validateInventoryConversions(conversions??[],String(itemValues.unit));
         await tx.execute(sql`DELETE FROM inventory_unit_conversions WHERE item_id=${id}`);

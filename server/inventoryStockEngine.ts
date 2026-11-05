@@ -16,6 +16,11 @@ export async function consumeStockLines(tx:any,lines:ConsumptionLine[],source:{t
  const ids=[...new Set(lines.map(l=>l.itemId).filter((v):v is string=>!!v))].sort();
  const items=new Map<string,any>();
  for(const id of ids){const r=await tx.execute(sql`SELECT * FROM inventory_items WHERE id=${id} FOR UPDATE`);if(!r.rows[0]||r.rows[0].is_active!=='true')throw fail('Artículo inexistente o inactivo');items.set(id,r.rows[0]);}
+ // Read the persisted snapshot AFTER locking items: a concurrent catalogue
+ // correction must not allow an old retry snapshot to consume in the new unit.
+ const pending=await tx.execute(sql`SELECT lines FROM inventory_consumption_jobs WHERE source_type=${source.type} AND source_id=${source.id} AND status='pending'`);
+ if(pending.rows.some((job:any)=>Array.isArray(job.lines)&&job.lines.some((line:any)=>line.unitCorrectionReview===true)))
+  throw fail('Unidad base corregida: revisá la receta y actualizá el consumo pendiente antes de reintentar.');
  for(const line of lines){
   if(!line.itemId)throw fail(`Falta vincular ${line.name || 'un insumo'} con Inventario`);
   if(!Number.isFinite(line.quantity)||line.quantity<0)throw fail('Cantidad inválida');if(line.quantity===0)continue;

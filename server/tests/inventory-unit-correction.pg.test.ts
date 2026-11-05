@@ -66,11 +66,26 @@ suite('Temporary inventory base-unit correction on disposable PostgreSQL',()=>{
   role='reception';expect((await request('GET','/api/inventory/unit-correction-mode')).status).toBe(403);
   expect((await request('PATCH',`/api/inventory/items/${id}/metadata`,{name:id,minStock:'2',unit:'kg',allowUnitCorrection:true})).status).toBe(403);
  });
- it('still blocks quantity changes, invalid units, and pending consumption',async()=>{
+ it('still blocks quantity changes and invalid units',async()=>{
   expect((await request('PATCH',`/api/inventory/items/${id}`,{unit:'kg',currentStock:99})).status).toBe(409);
   expect((await request('PATCH',`/api/inventory/items/${id}`,{unit:'invalid'})).status).toBe(400);
-  await pool.query("INSERT INTO inventory_consumption_jobs(id,source_type,source_id,lines,status) VALUES($1::text,'test',$1::text,$2::jsonb,'pending')",[id,JSON.stringify([{itemId:id,quantity:1}])]);
-  const before=await snapshot();expect((await request('PATCH',`/api/inventory/items/${id}`,{unit:'kg'})).status).toBe(409);expect(await snapshot()).toEqual(before);
+
+ });
+ it.each(['admin','resp_deposito'])('allows %s to correct units while preserving and holding pending consumption',async actorRole=>{
+  role=actorRole;
+  const lines=[{itemId:id,quantity:1}];
+  await pool.query("INSERT INTO inventory_consumption_jobs(id,source_type,source_id,lines,status) VALUES($1::text,'test',$1::text,$2::jsonb,'pending')",[id,JSON.stringify(lines)]);
+  const before=await snapshot();
+  const saved=await request('PATCH',`/api/inventory/items/${id}`,{unit:'kg'});
+  expect(saved.status,JSON.stringify(saved.body)).toBe(200);
+  const after=await snapshot();expect(after.stock).toEqual(before.stock);expect(after.movements).toEqual(before.movements);
+  const job=(await pool.query('SELECT * FROM inventory_consumption_jobs WHERE id=$1',[id])).rows[0];
+  expect(job.status).toBe('pending');expect(job.lines).toEqual([{...lines[0],unitCorrectionReview:true,originalBaseUnit:'unidad'}]);
+  const {processConsumptionJob}=await import('../inventoryStockEngine');
+  const {db}=await import('../db');
+  // Even a stale retry snapshot must see the persisted review marker.
+  const retry=await processConsumptionJob(db,{...job,lines});expect(retry.status).toBe('pending');expect(retry.warnings[0].itemName).toContain('Unidad base corregida');
+  expect((await snapshot()).stock).toEqual(before.stock);
  });
  it.each(['admin','resp_deposito'])('temporarily saves for %s despite legacy recipe units, preserves costs and clears the warning after fixing equivalences',async actorRole=>{
   role=actorRole;
