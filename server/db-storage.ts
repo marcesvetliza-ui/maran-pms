@@ -1,3 +1,4 @@
+import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { activeSalesRecord } from "./salesArchive";
 import { inventoryUnitCorrectionWindow } from './inventoryUnitCorrection';
@@ -1861,6 +1862,9 @@ export class DatabaseStorage implements IStorage {
           return { ...existing, paymentRequestReplayed: true };
         }
       }
+      const accountTransferGroup = input.accountSettlement && paymentMethod === "current_account"
+        ? await lockAccountTransferGroup(tx, input.payment.reservationId)
+        : null;
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this
       // repair by payment identity and make the event explicitly idempotent.
@@ -1953,6 +1957,9 @@ export class DatabaseStorage implements IStorage {
           }
           return existing;
         }
+      }
+      if (accountTransferGroup) {
+        await assertGroupAccountTransferBalance(tx, accountTransferGroup, input.payment.reservationId, canonicalAmount);
       }
       const [payment] = await tx.insert(payments).values({
         ...input.payment,

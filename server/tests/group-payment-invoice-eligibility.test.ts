@@ -352,7 +352,7 @@ describe("group-funded reservation invoice guard", () => {
     });
   });
 
-  it("rejects new reservation cash collections for linked groups before ARCA despite client group/source IDs", async () => {
+  it.each(["efectivo", "cuenta_corriente"])("keeps fiscal reservation settlement %s in the group circuit before ARCA despite client group/source IDs", async method => {
     // The authoritative query resolves the reservation-group link. Funding
     // amounts and client-provided source/group IDs must not determine whether
     // an additional room-level collection is allowed.
@@ -372,8 +372,9 @@ describe("group-funded reservation invoice guard", () => {
         }],
         reservaId: "reservation-1",
         groupId: "client-controlled-other-group",
-        cashFormaPago: "efectivo",
-        cashFormaPagoDetalle: [{ method: "efectivo", amount: 100 }],
+        cashFormaPago: method,
+        cashFormaPagoDetalle: [{ method, amount: 100 }],
+        ...(method === "cuenta_corriente" ? { ccEntityType: "guest", ccEntityId: "guest-1", creditOperationId: "8b6f9b7d-0e9e-4bc3-8f60-8d0d1a8c6a10" } : {}),
         sourceChargeIds: ["unallocated-or-fabricated-source"],
         sourceChargeAmounts: { "unallocated-or-fabricated-source": 100 },
       });

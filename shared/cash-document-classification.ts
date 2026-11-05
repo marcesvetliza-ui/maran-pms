@@ -43,9 +43,13 @@ export function nonFiscalCollectionError(type: unknown, methods: unknown[], opti
   const restaurantInternal = new Set(["ticket", "voucher", "voucher_justo", "voucher_room_service", "voucher_pedidos_ya", "voucher_consumo_interno"]);
   const permittedSettlement = (method: unknown) => {
     const value = String(method ?? "").trim().toLowerCase();
-    return options.restaurant === true && ((value === "consumo_interno" && restaurantInternal.has(normalizedDocumentType(type)))
+    return (normalizedDocumentType(type) === "cierre_habitacion" && ["cuenta_corriente", "current_account"].includes(value))
+      || options.restaurant === true && ((value === "consumo_interno" && restaurantInternal.has(normalizedDocumentType(type)))
       || (value === "pedidos_ya" && normalizedDocumentType(type) === "voucher_pedidos_ya"));
   };
   return methods.some(method => !permittedSettlement(method) && !isCashMethod(method) && !noCollection.has(String(method ?? "").trim().toLowerCase()))
-    ? "Los comprobantes no fiscales solo admiten cobros en efectivo o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal." : null;
+    ? normalizedDocumentType(type) === "cierre_habitacion"
+      ? "El cierre de habitación admite efectivo, Cuenta Corriente o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal."
+      : "Los comprobantes no fiscales solo admiten cobros en efectivo o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal."
+    : null;
 }

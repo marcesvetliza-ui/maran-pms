@@ -599,6 +599,7 @@ export function PrefacturaDialog({
 
   // Partial payment warning
   const [showPartialWarning, setShowPartialWarning] = useState(false);
+  const [showAccountCheckoutWarning, setShowAccountCheckoutWarning] = useState(false);
 
   // True when a folio re-fetch (after NC/ND/reversal) changed the balance while the
   // user already had multiple payment rows — we leave the rows untouched but surface
@@ -1376,6 +1377,10 @@ export function PrefacturaDialog({
         setShowPartialWarning(true);
         return;
       }
+    }
+    if (mode === "checkout" && doCheckout && tipo === "cierre_habitacion" && saleCondition === "cuenta_corriente" && selectedBalance > 0.01) {
+      setShowAccountCheckoutWarning(true);
+      return;
     }
     doSubmit();
   }
@@ -2791,6 +2796,18 @@ export function PrefacturaDialog({
           refetchTransferRemaining();
         }}
       />
+
+      <Dialog open={showAccountCheckoutWarning} onOpenChange={setShowAccountCheckoutWarning}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Check-out con deuda en cuenta corriente</DialogTitle></DialogHeader>
+          <p className="text-sm">La habitación tiene saldo pendiente. Se trasladarán <strong>${fmtMoney(selectedBalance)}</strong> a la cuenta corriente de <strong>{razonSocial || "la entidad elegida"}</strong> para cobrar después.</p>
+          <p className="text-sm text-muted-foreground">Se registrará el cierre no fiscal y se realizará el check-out. Este traslado no es un cobro: la deuda seguirá pendiente en la cuenta corriente.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAccountCheckoutWarning(false)}>Volver a revisar</Button>
+            <Button onClick={() => { setShowAccountCheckoutWarning(false); void doSubmit(); }} data-testid="confirm-account-checkout">Confirmar traslado y check-out</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Partial payment warning dialog */}
       <Dialog open={showPartialWarning} onOpenChange={o => { if (!o) setShowPartialWarning(false); }}>
