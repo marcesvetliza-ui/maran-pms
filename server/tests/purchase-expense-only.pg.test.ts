@@ -174,7 +174,7 @@ runWithPg("registros de gasto de Compras", () => {
       expect(exportResponse.status).toBe(200);
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(Buffer.from(await exportResponse.arrayBuffer()));
-      const values = workbook.worksheets[0].getColumn(7).values.map(value => String(value));
+      const values = workbook.worksheets[0].getColumn(4).values.map(value => String(value));
       expect(values).not.toContain(payload.numeroComprobante);
 
       const cancelled = await request(`/api/purchase-invoices/${recordId}`, "DELETE");

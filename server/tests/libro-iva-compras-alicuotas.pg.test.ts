@@ -112,13 +112,17 @@ suite("PostgreSQL real: Libro IVA Compras reparte el gravado por alícuota", () 
       let foundRow: any[] | undefined;
       ws.eachRow((row) => {
         const values = row.values as any[];
-        if (values[7] === numero) foundRow = values; // numcomext
+        if (String(values[4]) === numero) foundRow = values; // Número de Comprobante del modelo
       });
       expect(foundRow, "no se encontró la fila del comprobante en el Excel").toBeTruthy();
-      // gravado21=12, gravado10_5=13, gravado27=14, gravado2_5=15, gravado5=16
-      expect(Number(foundRow![12])).toBeCloseTo(100, 2);
-      expect(Number(foundRow![13])).toBeCloseTo(300, 2);
-      expect(Number(foundRow![14])).toBeCloseTo(0, 2);
+      // Bases del modelo: IVA 21% en V (22), IVA 10,5% en T (20), IVA 27% en X (24).
+      expect(Number(foundRow![22])).toBeCloseTo(100, 2);
+      expect(Number(foundRow![20])).toBeCloseTo(300, 2);
+      expect(Number(foundRow![24])).toBeCloseTo(0, 2);
+
+      expect(wb.worksheets[0].getCell('B1').value).toBe('Tipo de comprobante');
+      expect(foundRow![2]).toBe('1 - Factura A');
+      expect(wb.getWorksheet('Detalle contable')).toBeTruthy();
 
       // TXT de alícuotas (RG 3685): la base de cada línea debe ser su propio neto.
       const txtResponse = await fetch(`${baseUrl}/api/exports/libro-iva-compras?periodo=09/2026&tipo=alicuotas`);
