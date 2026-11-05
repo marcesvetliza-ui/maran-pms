@@ -1,3 +1,4 @@
+import { addPurchaseIvaModelSheet } from "./libro-iva-compras-excel";
 import { purchaseDocumentLabel } from "@shared/purchase-remito";
 import type { Express } from "express";
 import { db } from "./db";
@@ -468,7 +469,7 @@ export function registerExportRoutes(app: Express) {
       if (!periodo) return res.status(400).json({ error: "Se requiere 'periodo' (MM/YYYY)" });
 
       const rows = (await db.execute(sql`
-        SELECT pi.*, s.razon_social AS supplier_nombre, s.condicion_iva
+        SELECT pi.*, s.razon_social AS supplier_nombre, s.cuit AS supplier_cuit, s.condicion_iva
         FROM purchase_invoices pi
         LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
         WHERE pi.periodo = ${periodo} AND pi.estado != 'anulado'
@@ -484,7 +485,8 @@ export function registerExportRoutes(app: Express) {
 
       if (tipo === "excel") {
         const wb = new ExcelJS.Workbook();
-        const ws = wb.addWorksheet("Libro IVA Compras");
+        addPurchaseIvaModelSheet(wb, rows, row => gravadoPorAlicuota(row, netoPorFactura.get(Number(row.id))), netoPorFactura, H.cuit);
+        const ws = wb.addWorksheet("Detalle contable");
         const headers = [
           "_iva","codiva","codcom","comprobante","codpos","numcom","numcomext","fecemi",
           "codpro","proveedor","cuit","gravado21","gravado10_5","gravado27","gravado2_5","gravado5",
