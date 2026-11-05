@@ -1,12 +1,13 @@
 import {sql} from 'drizzle-orm';
 import {db,withDatabaseTransaction} from './db';
 import {stockUnits} from './inventorySafety';
-import {inventoryUnitFactor,convertInventoryQuantity} from './inventoryUnits';
+import {inventoryUnitFactor,convertInventoryQuantity,canonicalInventoryUnit} from './inventoryUnits';
 export type ConsumptionLine={itemId:string|null;quantity:number;unit?:string;warehouseId?:string|null;name?:string};
 const fail=(message:string,statusCode=409)=>Object.assign(new Error(message),{statusCode});
 export const stockAmount=(n:number)=>(n/1000).toFixed(3);
 export async function unitFactor(tx:any,itemId:string,from:string,to:string){
- const r=await tx.execute(sql`SELECT factor FROM inventory_unit_conversions WHERE item_id=${itemId} AND from_unit=${from}`);
+ const canonical=canonicalInventoryUnit(from);
+ const r=await tx.execute(sql`SELECT factor FROM inventory_unit_conversions WHERE item_id=${itemId} AND from_unit IN (${canonical},${from}) ORDER BY CASE WHEN from_unit=${canonical} THEN 0 ELSE 1 END LIMIT 1`);
  return inventoryUnitFactor(from,to,r.rows[0]?Number(r.rows[0].factor):undefined);
 }
 /** Caller owns transaction; locks all items in stable order before any warehouse. */
