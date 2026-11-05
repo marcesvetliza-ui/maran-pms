@@ -1,4 +1,4 @@
-export { INVENTORY_UNITS, inventoryUnitFactor } from "@shared/inventoryUnits";
+export { INVENTORY_UNITS, inventoryUnitFactor, canonicalInventoryUnit } from "@shared/inventoryUnits";
 const fail=(message:string)=>Object.assign(new Error(message),{statusCode:409});
 export function convertInventoryQuantity(quantity:number,factor:number):number{
  if(!Number.isFinite(quantity)||quantity<0||!Number.isFinite(factor)||factor<=0)throw fail('Cantidad o equivalencia inválida');

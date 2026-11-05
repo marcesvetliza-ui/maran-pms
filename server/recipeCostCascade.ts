@@ -6,6 +6,16 @@ import { recipes, recipeIngredients, inventoryItems } from "@shared/schema";
 
 type Executor = Omit<typeof db, "$client">;
 
+async function recipeUnitFactor(executor:Executor,ingredient:any,from:string,to:string,calculate:()=>number|Promise<number>):Promise<number> {
+  try { return await calculate(); }
+  catch(error:any) {
+    if(error?.statusCode!==409)throw error;
+    const [recipe]=await executor.select({name:recipes.name}).from(recipes).where(eq(recipes.id,ingredient.recipeId));
+    error.message=`Revisá la receta "${recipe?.name || ingredient.recipeId}": "${ingredient.ingredientName || 'Ingrediente'}" usa ${from} y su origen está en ${to}. ${error.message}`;
+    throw error;
+  }
+}
+
 /**
  * Costo total de los ingredientes de una receta, aplicando merma (la
  * cantidad bruta real = cantidad / (1 - merma/100)) — misma fórmula que usa
@@ -71,13 +81,13 @@ export async function cascadeRecipeCostsFromInventoryItem(
   if(!stockItem)return;
   const ingredients=await executor.select().from(recipeIngredients).where(eq(recipeIngredients.inventoryItemId,inventoryItemId));
   for(const ingredient of ingredients){
-    const factor=await unitFactor(executor,inventoryItemId,ingredient.unit,stockItem.unit);
+    const factor=await recipeUnitFactor(executor,ingredient,ingredient.unit,stockItem.unit,()=>unitFactor(executor,inventoryItemId,ingredient.unit,stockItem.unit));
     await executor.update(recipeIngredients).set({unitCost:(newCost*factor).toFixed(4)}).where(eq(recipeIngredients.id,ingredient.id));
   }
 
   const producedRecipes=await executor.select({id:recipes.id}).from(recipes).where(eq(recipes.outputInventoryItemId,inventoryItemId));
   const producedDependents=producedRecipes.length ? await executor.select().from(recipeIngredients).where(inArray(recipeIngredients.subRecipeId,producedRecipes.map(r=>r.id))) : [];
-  for(const dependent of producedDependents){const factor=await unitFactor(executor,inventoryItemId,dependent.unit,stockItem.unit);await executor.update(recipeIngredients).set({unitCost:(newCost*factor).toFixed(4)}).where(eq(recipeIngredients.id,dependent.id));}
+  for(const dependent of producedDependents){const factor=await recipeUnitFactor(executor,dependent,dependent.unit,stockItem.unit,()=>unitFactor(executor,inventoryItemId,dependent.unit,stockItem.unit));await executor.update(recipeIngredients).set({unitCost:(newCost*factor).toFixed(4)}).where(eq(recipeIngredients.id,dependent.id));}
   const directRows = await executor
     .select({ recipeId: recipeIngredients.recipeId })
     .from(recipeIngredients)
@@ -110,7 +120,7 @@ export async function cascadeRecipeCostsFromInventoryItem(
       .where(eq(recipeIngredients.subRecipeId, recipeId));
 
     for (const dep of dependents) {
-      const perDependentUnit=producedItem ? Number(producedItem.costPrice || 0)*await unitFactor(executor,producedItem.id,dep.unit,producedItem.unit) : newCostPerUnit*inventoryUnitFactor(dep.unit,recipe.productionUnit || dep.unit);
+      const perDependentUnit=await recipeUnitFactor(executor,dep,dep.unit,producedItem?.unit || recipe.productionUnit || dep.unit,async()=>producedItem ? Number(producedItem.costPrice || 0)*await unitFactor(executor,producedItem.id,dep.unit,producedItem.unit) : newCostPerUnit*inventoryUnitFactor(dep.unit,recipe.productionUnit || dep.unit));
       const prevCost = parseFloat(String(dep.unitCost || "0"));
       // Comparar redondeado a centavos: la columna es numeric(10,2), así que
       // una diferencia menor nunca se refleja y seguir propagando no aporta

@@ -2583,7 +2583,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
 
       <Dialog open={!!editingArticle} onOpenChange={open=>{if(!open && !editArticleMutation.isPending)setEditingArticle(null);}}>
         <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
-          {editingArticle && <><NewItemForm key={editingArticle.id} initialItem={editingArticle} canCost={canCost} categories={categories} brands={brands} suppliers={accountingSuppliers} existingItems={items} onSubmit={data=>editArticleMutation.mutate(data)} isPending={editArticleMutation.isPending} onCancel={()=>setEditingArticle(null)}/><InventoryUnitConversions itemId={editingArticle.id} stockUnit={editingArticle.unit}/></>}
+          {editingArticle && <><NewItemForm key={editingArticle.id} initialItem={editingArticle} canCost={canCost} categories={categories} brands={brands} suppliers={accountingSuppliers} existingItems={items} onSubmit={data=>editArticleMutation.mutate(data)} isPending={editArticleMutation.isPending} onCancel={()=>setEditingArticle(null)}/></>}
         </DialogContent>
       </Dialog>
       <Dialog open={!!inventoryAction} onOpenChange={open=>{if(!open && !inventoryActionMutation.isPending)setInventoryAction(null);}}>
@@ -3131,7 +3131,9 @@ export function NewItemForm({
         <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
       </div>
       {initialItem&&unit!==initialItem.unit&&<p className="text-sm text-amber-700 dark:text-amber-400">Las equivalencias anteriores no se reutilizan al cambiar la unidad base. Configurá las que correspondan a la nueva unidad; se conserva un registro de las anteriores.</p>}
-      {(!initialItem||unit!==initialItem.unit) && <InventoryUnitConversions stockUnit={unit} value={conversions} onChange={setConversions}/>}
+      {initialItem && unit!==initialItem.unit && <p className="text-sm">Guardá el artículo para aplicar la nueva unidad y sus equivalencias juntas.</p>}
+      <InventoryUnitConversions key={`${initialItem?.id || 'new'}:${unit}`} stockUnit={unit}
+        {...(initialItem && unit===initialItem.unit ? {itemId:initialItem.id} : {value:conversions,onChange:setConversions})}/>
       {!initialItem && missingRequiredFields.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="text-missing-required-fields">
           Falta completar: {missingRequiredFields.join(", ")}.
