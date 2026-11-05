@@ -144,3 +144,10 @@ describe("reservation credit settlement", () => {
     await expect(hook(tx, { montoTotal: "44000.00" })).rejects.toThrow(/reservado por otra factura/i);
   });
 });
+
+describe("Issued invoice recovery after a credit note", () => {
+  it("never reapplies the gross settlement of a credited invoice that is still pending", async () => {
+    const { assertReservationInvoiceRecoverable } = await import("../billing/reservationRecoveryState");
+    expect(() => assertReservationInvoiceRecoverable({ estado: "parcial", monto_acreditado: "10", credit_reapplication_intent: { status: "completed", settlement: { status: "pending" } } })).toThrow(/nota de crédito/);
+  });
+});

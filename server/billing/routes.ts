@@ -1,3 +1,4 @@
+import { assertReservationInvoiceRecoverable } from "./reservationRecoveryState";
 import { giftVoucherItemsExpiryError } from "@shared/gift-voucher-expiry";
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "../reservationAccountTransfer";
 import { registerReceptionOperationRoutes } from "./receptionOperations";
@@ -2545,8 +2546,8 @@ export function registerBillingRoutes(app: Express) {
             recoveryInvoiceId: Number(invoice.id),
             creditReapplicationIntent: invoice.credit_reapplication_intent,
           } as NewInvoiceData);
-        } else if (invoice.estado !== "emitida") {
-          throw new FolioInvoiceValidationError("El comprobante no está disponible para recuperación", 409);
+        } else {
+          assertReservationInvoiceRecoverable(invoice);
         }
         await reconcileReservationCreditInvoice(Number(emitted.id));
         await reconcileReservationCreditSettlement(Number(emitted.id), true);

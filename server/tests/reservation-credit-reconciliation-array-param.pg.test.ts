@@ -73,4 +73,21 @@ suite("reservation credit reconciliation — array param regression", () => {
       if (invoiceId) await db.execute(sql`DELETE FROM sales_invoices WHERE id = ${invoiceId}`);
     }
   });
+  it.each([false, true])("recovers a partial issued invoice exactly once (previously reconciled: %s)", async completed => {
+    let id: number | undefined;
+    const reservation = randomUUID();
+    const intent = { operationId: randomUUID(), invoiceTotal: 100, payments: [], status: completed ? "completed" : "pending", settlement: { status: "completed", destination: "cuenta_corriente", amount: 100 } };
+    try {
+      const result = await db.execute(sql`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,monto_acreditado,estado,reserva_id,credit_reapplication_intent,reconciliation_status)
+        VALUES('FA',78901,${Math.floor(Math.random()*100000000)},CURRENT_DATE,'Recovery fixture','Consumidor Final',100,100,${completed ? 10 : 0},'parcial',${reservation},${JSON.stringify(intent)}::jsonb,${completed ? 'conciliada' : 'pendiente'}) RETURNING id`);
+      id = Number(result.rows[0].id);
+      await reconcileReservationCreditInvoice(id);
+      await reconcileReservationCreditInvoice(id);
+      const saved = (await db.execute(sql`SELECT estado,monto_acreditado,reconciliation_status,credit_reapplication_intent FROM sales_invoices WHERE id=${id}`)).rows[0] as any;
+      expect(saved).toMatchObject({ estado: "parcial", reconciliation_status: "conciliada", credit_reapplication_intent: { status: "completed", settlement: { status: "completed" } } });
+      expect(Number(saved.monto_acreditado)).toBe(completed ? 10 : 0);
+      expect((await db.execute(sql`SELECT id FROM payments WHERE reservation_id=${reservation}`)).rows).toHaveLength(0);
+    } finally { if (id) await db.execute(sql`DELETE FROM sales_invoices WHERE id=${id}`); }
+  });
+
 });
