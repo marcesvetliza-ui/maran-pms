@@ -2072,10 +2072,27 @@ function HistorialTab() {
       </Card>
 
       <Dialog open={!!detailShiftId} onOpenChange={() => setDetailShiftId(null)}>
-        <DialogContent className="w-[95vw] max-w-3xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent aria-describedby={undefined} className="flex h-[94dvh] max-h-[94dvh] w-[calc(100vw-1rem)] max-w-[1700px] flex-col gap-0 overflow-hidden p-0 sm:h-[92dvh] sm:w-[95vw]">
+          <DialogHeader className="shrink-0 border-b bg-background px-5 py-4 pr-14 text-left sm:px-7 sm:pr-16">
             <DialogTitle>Detalle del Turno</DialogTitle>
+            {shiftDetail && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Badge className={AREA_COLORS[shiftDetail.shift.area] || ""}>
+                  {AREA_LABEL_MAP[shiftDetail.shift.area] || shiftDetail.shift.area}
+                </Badge>
+                <span className="text-sm font-medium">
+                  {formatShiftLabel(shiftDetail.shift)}
+                  <span className="ml-1 text-xs text-muted-foreground font-normal">#{shiftDetail.shift.shiftNumber}</span>
+                </span>
+                <Badge variant="outline">{shiftDetail.shift.status === "closed" ? "Cerrado · solo lectura" : "Abierto · solo lectura"}</Badge>
+                <span className="min-w-0 break-words text-sm text-muted-foreground">
+                  {shiftDetail.shift.openedBy} — {formatDateTime(shiftDetail.shift.openedAt)}
+                  {shiftDetail.shift.closedAt && ` / ${shiftDetail.shift.closedBy} — ${formatDateTime(shiftDetail.shift.closedAt)}`}
+                </span>
+              </div>
+            )}
           </DialogHeader>
+          <div data-testid="cash-detail-scroll" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5 [overflow-wrap:anywhere] sm:px-7">
           {shiftDetail?.shift.area === "spa" && detailShiftId && <SpaCancellationHistory shiftId={detailShiftId} />}
           {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <ReservationCancellationHistory shiftId={detailShiftId} />}
           {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <CashCardRectificationHistory shiftId={detailShiftId} />}
@@ -2089,25 +2106,10 @@ function HistorialTab() {
             <p role="alert" className="text-sm text-destructive">No se pudo cargar el detalle de este turno.</p>
           ) : shiftDetail ? (
             <div className="space-y-6">
-              <div className="flex flex-wrap items-center gap-4">
-                <Badge className={AREA_COLORS[shiftDetail.shift.area] || ""}>
-                  {AREA_LABEL_MAP[shiftDetail.shift.area] || shiftDetail.shift.area}
-                </Badge>
-                <span className="text-sm font-medium">
-                  {formatShiftLabel(shiftDetail.shift)}
-                  <span className="ml-1 text-xs text-muted-foreground font-normal">#{shiftDetail.shift.shiftNumber}</span>
-                </span>
-                <Badge variant="outline">{shiftDetail.shift.status === "closed" ? "Cerrado · solo lectura" : "Abierto · solo lectura"}</Badge>
-                <span className="text-sm text-muted-foreground">
-                  {shiftDetail.shift.openedBy} — {formatDateTime(shiftDetail.shift.openedAt)}
-                  {shiftDetail.shift.closedAt && ` / ${shiftDetail.shift.closedBy} — ${formatDateTime(shiftDetail.shift.closedAt)}`}
-                </span>
-              </div>
-
               {shiftDetail.summary ? (
                 <div className="rounded-lg border p-4 space-y-3">
                   <h3 className="font-semibold">Totales registrados en el cierre</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-2 text-sm">
+                  <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-x-5 gap-y-2 text-sm">
                     {([
                       ["Efectivo", shiftDetail.summary.totalCash],
                       ["Débito", shiftDetail.summary.totalDebitCard],
@@ -2118,13 +2120,13 @@ function HistorialTab() {
                       ["Cargo a habitación", shiftDetail.summary.totalRoomCharge],
                       ["Voucher", shiftDetail.summary.totalVoucher],
                     ] as const).map(([label, amount]) => (
-                      <div key={label} className="flex justify-between gap-2 border-b pb-1">
-                        <span className="text-muted-foreground">{label}</span>
-                        <span className="font-medium">{formatCurrency(Number(amount || 0))}</span>
+                      <div key={label} className="flex min-w-0 items-start justify-between gap-3 border-b pb-1">
+                        <span className="min-w-0 break-words text-muted-foreground">{label}</span>
+                        <span className="shrink-0 whitespace-nowrap text-right font-medium tabular-nums">{formatCurrency(Number(amount || 0))}</span>
                       </div>
                     ))}
                   </div>
-                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm border-t pt-2">
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 break-words text-sm border-t pt-2">
                     <span><strong>Total general:</strong> {formatCurrency(Number(shiftDetail.summary.totalGeneral || 0))}</span>
                     <span><strong>Movimientos:</strong> {shiftDetail.summary.transactionCount ?? 0}</span>
                     <span><strong>Liquidaciones no monetarias:</strong> {formatCurrency(Number(shiftDetail.summary.nonCashSettlementsTotal || 0))} ({shiftDetail.summary.nonCashSettlementsCount ?? 0})</span>
@@ -2137,12 +2139,15 @@ function HistorialTab() {
 
               <div>
                 <h3 className="font-semibold mb-2">Desglose de movimientos registrados</h3>
-                <SummaryTable movements={shiftDetail.movements} />
+                <div role="region" aria-label="Desglose de movimientos registrados" tabIndex={0} className="max-w-full overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>div]:overflow-visible [&_td:last-child]:whitespace-nowrap [&_td:last-child]:tabular-nums [&_.truncate]:min-w-0 [&_.truncate]:whitespace-normal [&_.truncate]:overflow-visible">
+                  <SummaryTable movements={shiftDetail.movements} />
+                </div>
               </div>
 
               <div>
                 <h3 className="font-semibold mb-2">Comprobantes y movimientos, uno por uno</h3>
-                <Table>
+                <div role="region" aria-label="Comprobantes y movimientos del turno" tabIndex={0} className="max-w-full overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>div]:overflow-visible">
+                <Table className="min-w-[900px] table-fixed [&_th:nth-child(1)]:w-[12%] [&_th:nth-child(2)]:w-[23%] [&_th:nth-child(3)]:w-[27%] [&_th:nth-child(4)]:w-[12%] [&_th:nth-child(5)]:w-[10%] [&_th:nth-child(6)]:w-[16%]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Hora</TableHead>
@@ -2197,8 +2202,8 @@ function HistorialTab() {
                             >Ver recibo</a>
                           )}
                         </TableCell>
-                        <TableCell>{cleanCashMovementLabel(m.description || m.sourceLabel) || "-"}</TableCell>
-                        <TableCell>{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
+                        <TableCell className="whitespace-normal break-words">{cleanCashMovementLabel(m.description || m.sourceLabel) || "-"}</TableCell>
+                        <TableCell className="whitespace-normal break-words">{PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
                             {cashReceiptTypes(m).length
@@ -2211,11 +2216,11 @@ function HistorialTab() {
                             <span className="block text-xs text-amber-700 dark:text-amber-400">Sin factura vinculada</span>
                           )}
                         </TableCell>
-                        <TableCell className={`text-right font-medium ${m.anulado ? "line-through text-muted-foreground" : ""}`}>
+                        <TableCell className={`whitespace-nowrap text-right font-medium tabular-nums ${m.anulado ? "line-through text-muted-foreground" : ""}`}>
                           {formatCurrency(Number(m.amount))}
-                          {m.anulado && <div className="text-xs font-normal">Anulado{m.motivoAnulacion ? ` · ${m.motivoAnulacion}` : ""}</div>}
+                          {m.anulado && <div className="whitespace-normal text-xs font-normal">Anulado{m.motivoAnulacion ? ` · ${m.motivoAnulacion}` : ""}</div>}
                           {!m.anulado && m.movementType !== "income" && (
-                            <div className="text-xs font-normal text-muted-foreground">
+                            <div className="whitespace-normal text-xs font-normal text-muted-foreground">
                               {m.movementType === "informational" ? "Informativo · no monetario" : "Egreso"}
                             </div>
                           )}
@@ -2224,6 +2229,7 @@ function HistorialTab() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               </div>
 
               {cancelledOrdersError && shiftDetail.shift.area === "restaurant" && (
@@ -2235,7 +2241,8 @@ function HistorialTab() {
                     <XCircle className="h-4 w-4" />
                     Tickets Cancelados ({cancelledOrders.length})
                   </h3>
-                  <Table>
+                  <div role="region" aria-label="Tickets cancelados del turno" tabIndex={0} className="max-w-full overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>div]:overflow-visible">
+                  <Table className="min-w-[760px] table-fixed [&_th:nth-child(1)]:w-[12%] [&_th:nth-child(2)]:w-[15%] [&_th:nth-child(3)]:w-[10%] [&_th:nth-child(4)]:w-[23%] [&_th:nth-child(5)]:w-[40%]">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Hora</TableHead>
@@ -2251,16 +2258,17 @@ function HistorialTab() {
                           <TableCell>{o.closedAt ? formatTime(o.closedAt) : "-"}</TableCell>
                           <TableCell className="font-medium">{o.orderLabel || o.orderNumber}</TableCell>
                           <TableCell>{o.table?.tableNumber ? `Mesa ${o.table.tableNumber}` : "—"}</TableCell>
-                          <TableCell className="text-right line-through text-muted-foreground">
+                          <TableCell className="whitespace-nowrap text-right tabular-nums line-through text-muted-foreground">
                             {formatCurrency(o.total || 0)}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground italic max-w-[160px] truncate" title={o.cancellationReason}>
+                          <TableCell className="whitespace-normal break-words text-sm text-muted-foreground italic" title={o.cancellationReason}>
                             {o.cancellationReason || "—"}
                           </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 </div>
               )}
 
@@ -2277,6 +2285,7 @@ function HistorialTab() {
               )}
             </div>
           ) : null}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
