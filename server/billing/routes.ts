@@ -1,3 +1,4 @@
+import { giftVoucherItemsExpiryError } from "@shared/gift-voucher-expiry";
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "../reservationAccountTransfer";
 import { registerReceptionOperationRoutes } from "./receptionOperations";
 import { registerCashCardRectificationRoutes } from './cashCardRectificationRoutes';
@@ -1140,6 +1141,8 @@ export function registerBillingRoutes(app: Express) {
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
+      const giftExpiryError = giftVoucherItemsExpiryError(items);
+      if (giftExpiryError) return res.status(400).json({ error: giftExpiryError });
       if (req.body.prefacturaRecovery?.version === 2 && !isNonFiscalTipo(String(tipoComprobante)) && reservaId && typeof creditOperationId === "string" && /^[0-9a-f-]{20,}$/i.test(creditOperationId)) {
         assertFinancialSchemaReady();
         const config = await getBillingConfig();
@@ -2056,6 +2059,7 @@ export function registerBillingRoutes(app: Express) {
                     valueType: "descriptivo",
                     buyerName: persistedCliente?.razonSocial || "—",
                     beneficiaryName,
+                    expiresAt: (item as any)?.giftExpiresAt || null,
                     pricePaid: ((Number((item as any)?.precioUnitario) || 0) * quantity).toFixed(2),
                     saleInvoiceId: emitted.id,
                     linkedTreatmentSaleId: saleId,

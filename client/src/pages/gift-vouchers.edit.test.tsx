@@ -125,6 +125,19 @@ describe("Vouchers — editar", () => {
     queryClient.clear();
   });
 
+  it("muestra el vencimiento guardado y lo incluye al imprimir el voucher",async()=>{
+    const active=voucher({id:"v-expiry",status:"activo",expiresAt:"2030-12-31",beneficiaryName:"María Prueba"});
+    mockFetch([active]);renderPage();
+    expect(await screen.findByText("31/12/30")).toBeInTheDocument();
+    const write=vi.fn();const popup=vi.spyOn(window,"open").mockReturnValue({document:{write,close:vi.fn()}} as any);
+    try {
+      const user=userEvent.setup();await user.click(screen.getByTestId("button-actions-v-expiry"));
+      await user.click(screen.getByRole("menuitem",{name:/Imprimir voucher/}));
+      expect(write).toHaveBeenCalledWith(expect.stringContaining("31 de diciembre de 2030"));
+      expect(write).toHaveBeenCalledWith(expect.stringContaining("María Prueba"));
+    } finally {popup.mockRestore();}
+  });
+
   it("un voucher activo permite editar descripción, beneficiario, vencimiento y notas", async () => {
     const active = voucher({ id: "v-active", status: "activo" });
     mockFetch([active]);

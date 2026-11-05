@@ -10,7 +10,10 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
 import * as http from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// Never contact ARCA from the local lifecycle fixture.
+vi.mock("../billing/billingConfig",()=>({getBillingConfig:async()=>({arcaAmbiente:"ficticio",puntoVenta:1,razonSocial:"Prueba",cuit:"30000000007"}),updateBillingConfig:vi.fn()}));
 
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL
@@ -41,6 +44,8 @@ async function startServer() {
   });
   registerBillingRoutes(app);
   registerSpaRoutes(app);
+  const { registerGiftVouchersRoutes } = await import("../routes/gift-vouchers");
+  registerGiftVouchersRoutes(app);
   httpServer = await new Promise<http.Server>((resolve) => {
     const server = http.createServer(app);
     server.listen(0, "127.0.0.1", () => resolve(server));
@@ -78,6 +83,7 @@ runIfDatabaseIsConfigured("Voucher por prestación — vinculado a una venta de 
   it("emitir con un regalo crea el voucher vinculado; agendar lo reserva; completar el turno lo consume", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();
+    const expiry = `${new Date().getUTCFullYear()+1}-12-31`;
     const treatmentId = `treatment-${suffix}`;
     const cabinId = `cabin-${suffix}`;
     let invoiceId: number | null = null;
@@ -102,7 +108,7 @@ runIfDatabaseIsConfigured("Voucher por prestación — vinculado a una venta de 
         items: [{
           descripcion: "Masaje relajante", cantidad: 1, precioUnitario: 30000,
           alicuotaIva: "21", subtotalNeto: 24793.39, subtotal: 30000,
-          spaTreatmentId: treatmentId, giftBeneficiaryName: "María Gómez",
+          spaTreatmentId: treatmentId, giftBeneficiaryName: "María Gómez", giftExpiresAt: expiry,
         }],
       });
       expect(emitResponse.status).toBe(201);
@@ -115,7 +121,7 @@ runIfDatabaseIsConfigured("Voucher por prestación — vinculado a una venta de 
 
       const voucherRow = await pool.query(
         `SELECT id, area, value_type, description, buyer_name, beneficiary_name,
-                status, linked_treatment_sale_id, sale_invoice_id, price_paid
+                status, linked_treatment_sale_id, sale_invoice_id, price_paid, expires_at
          FROM gift_vouchers WHERE linked_treatment_sale_id = $1`,
         [saleId],
       );
@@ -130,8 +136,13 @@ runIfDatabaseIsConfigured("Voucher por prestación — vinculado a una venta de 
         linked_treatment_sale_id: saleId,
         sale_invoice_id: invoiceId,
         price_paid: "30000.00",
+        expires_at: expiry,
       }]);
       voucherId = voucherRow.rows[0].id;
+      const voucherDetail = await request("GET", `/api/gift-vouchers/${voucherId}`);
+      expect(voucherDetail.body).toMatchObject({beneficiaryName:"María Gómez",expiresAt:expiry});
+      const vouchers = await request("GET", "/api/gift-vouchers?area=spa");
+      expect(vouchers.body).toEqual(expect.arrayContaining([expect.objectContaining({id:voucherId,expiresAt:expiry})]));
 
       // Reintentar la misma emisión (ej. reintento de red) no debe duplicar el voucher.
       const events = await pool.query(
@@ -207,6 +218,21 @@ runIfDatabaseIsConfigured("Voucher por prestación — vinculado a una venta de 
       if (invoiceId) await pool.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
       await pool.query("DELETE FROM spa_cabins WHERE id = $1", [cabinId]);
       await pool.query("DELETE FROM spa_treatments WHERE id = $1", [treatmentId]);
+    }
+  });
+
+  it("rechaza la fecha inválida antes de persistir un comprobante",async()=>{
+    if(!pool)return;
+    const buyer=`Invalid expiry ${randomUUID()}`;
+    try {
+      const response=await request("POST","/api/billing/invoices",{
+        tipoComprobante:"FB",cliente:{razonSocial:buyer,condicionIva:"consumidor_final"},
+        items:[{descripcion:"Tratamiento de prueba",cantidad:1,precioUnitario:100,subtotal:100,subtotalNeto:82.64,alicuotaIva:"21",spaTreatmentId:"test-expiry-invalid",giftBeneficiaryName:"Prueba",giftExpiresAt:"2027-02-30"}],
+      });
+      expect(response.status).toBe(400);expect(response.body.error).toMatch(/fecha válida/);
+      expect((await pool.query("SELECT id FROM sales_invoices WHERE cliente_razon_social=$1",[buyer])).rows).toHaveLength(0);
+    } finally {
+      await pool.query("DELETE FROM sales_invoices WHERE cliente_razon_social=$1",[buyer]);
     }
   });
 
