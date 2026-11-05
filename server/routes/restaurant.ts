@@ -1,3 +1,4 @@
+import {selectRestaurantItemQuantities} from "../restaurantItemQuantities";
 import { restaurantCashPosting } from "@shared/restaurant-settlement";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import type { Express } from "express";
@@ -1344,10 +1345,16 @@ export function registerRestaurantRoutes(app: Express) {
 
       const order = await storage.getRestaurantOrder(req.params.id);
       if (!order) return res.status(404).json({ error: "Orden no encontrada" });
-      if (order.status === "closed") return res.status(400).json({ error: "La orden ya está cerrada" });
+      if (["closed","cancelled"].includes(order.status)) return res.status(400).json({ error: "La orden ya está cerrada" });
 
       const allItems = await storage.getOrderItems(req.params.id);
-      const selectedItems = allItems.filter((i: any) => itemIds.includes(i.id) && !i.paid);
+      const selectedItems = await selectRestaurantItemQuantities(req.params.id,itemIds,req.body.itemQuantities);
+      // Preserve custom descriptions when a partial row receives a new ID.
+      if(itemDescriptions && req.body.itemQuantities){
+        for(const item of selectedItems){
+          if(itemDescriptions[item.sourceItemId]!==undefined)itemDescriptions[item.id]=itemDescriptions[item.sourceItemId];
+        }
+      }
       if (selectedItems.length === 0) {
         return res.status(400).json({ error: "Los ítems seleccionados ya fueron cobrados o no existen" });
       }
@@ -1526,17 +1533,17 @@ export function registerRestaurantRoutes(app: Express) {
   }));
 
   // Transfer items between orders
-  app.post("/api/restaurant/orders/:id/transfer-items", async (req, res) => {
+  app.post("/api/restaurant/orders/:id/transfer-items", restaurantPaymentTransaction(async (req, res) => {
     try {
       const sourceOrder = await storage.getRestaurantOrder(req.params.id);
       if (!sourceOrder) return res.status(404).json({ error: "Orden origen no encontrada" });
-      if (sourceOrder.status === "closed") return res.status(400).json({ error: "La orden origen está cerrada" });
+      if (["closed","cancelled"].includes(sourceOrder.status)) return res.status(400).json({ error: "La orden origen está cerrada" });
 
       const { itemIds, targetOrderId, newOrderData } = req.body;
       if (!itemIds || itemIds.length === 0) return res.status(400).json({ error: "Seleccioná al menos un ítem" });
 
-      const sourceItemsBefore = await storage.getOrderItems(req.params.id);
-      const requestedItems = sourceItemsBefore.filter((i: any) => itemIds.includes(i.id));
+      if(targetOrderId===req.params.id)return res.status(400).json({error:"Elegí otra comanda de destino"});
+      const requestedItems = await selectRestaurantItemQuantities(req.params.id,itemIds,req.body.itemQuantities);
       if (requestedItems.some((i: any) => i.paid)) {
         return res.status(400).json({ error: "No se pueden transferir ítems ya cobrados" });
       }
@@ -1560,11 +1567,13 @@ export function registerRestaurantRoutes(app: Express) {
       } else {
         const target = await storage.getRestaurantOrder(finalTargetOrderId);
         if (!target) return res.status(404).json({ error: "Orden destino no encontrada" });
-        if (target.status === "closed") return res.status(400).json({ error: "La orden destino está cerrada" });
+        if (["closed","cancelled"].includes(target.status)) return res.status(400).json({ error: "La orden destino está cerrada" });
+        const assigned=await db.select({id:orderSplits.id}).from(orderSplits).where(eq(orderSplits.orderId,finalTargetOrderId));
+        if(assigned.length)return res.status(409).json({error:"La comanda destino ya tiene partes asignadas"});
       }
 
       // Move items
-      await storage.moveOrderItems(itemIds, finalTargetOrderId);
+      await storage.moveOrderItems(requestedItems.map(item=>item.id), finalTargetOrderId);
 
       // Recalculate source order total — solo ítems pendientes: los ya
       // cobrados (vía pay-items) no deben volver a sumarse al total, o la
@@ -1596,9 +1605,9 @@ export function registerRestaurantRoutes(app: Express) {
       res.json({ targetOrderId: finalTargetOrderId, targetOrder: updatedTarget });
     } catch (error) {
       console.error("Error transferring items:", error);
-      res.status((error as any)?.statusCode === 409 ? 409 : 500).json({ error: (error as any)?.statusCode === 409 ? (error as Error).message : "Error al transferir ítems" });
+      res.status((error as any)?.statusCode || 500).json({ error: (error as Error).message || "Error al transferir ítems" });
     }
-  });
+  }, req=>[req.params.id,...(typeof req.body.targetOrderId==='string' && req.body.targetOrderId!=='new'?[req.body.targetOrderId]:[])]));
 
   // Recipes
   app.get("/api/restaurant/recipes", async (req, res) => {

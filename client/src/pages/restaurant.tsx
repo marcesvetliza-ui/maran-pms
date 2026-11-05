@@ -1,3 +1,5 @@
+import {RestaurantItemQuantityPicker} from "@/components/restaurant-item-quantity-picker";
+import {restaurantPortionCents} from "@shared/restaurant-item-quantities";
 import { RestaurantMoveDestination, restaurantMoveDestinations } from "@/components/restaurant-move-destination";
 import { restaurantNonFiscalMethods } from "@shared/restaurant-settlement";
 import { formatDisplayDate } from "@shared/date-display";
@@ -862,11 +864,13 @@ export default function RestaurantPage() {
   const [splitDialogMode, setSplitDialogMode] = useState<"equal_parts" | "move_items" | "pay_items">("equal_parts");
 
   // Mover ítems mode (in split dialog)
-  const [moveItemSelectedIds, setMoveItemSelectedIds] = useState<Set<string>>(new Set());
+  const [moveItemQuantities,setMoveItemQuantities]=useState<Record<string,number>>({});
+  const moveItemSelectedIds=new Set(Object.keys(moveItemQuantities));
   const [moveItemTargetOrderId, setMoveItemTargetOrderId] = useState("");
 
   // Cobrar ítems mode (in split dialog)
-  const [payItemSelectedIds, setPayItemSelectedIds] = useState<Set<string>>(new Set());
+  const [payItemQuantities,setPayItemQuantities]=useState<Record<string,number>>({});
+  const payItemSelectedIds=new Set(Object.keys(payItemQuantities));
   const [payItemMethod, setPayItemMethod] = useState("efectivo");
   const [payItemReceipt, setPayItemReceipt] = useState("ticket");
   const [payItemRoomId, setPayItemRoomId] = useState("");
@@ -1562,13 +1566,13 @@ export default function RestaurantPage() {
   };
 
   const transferItemsInSplitMutation = useMutation({
-    mutationFn: async ({ orderId, itemIds, targetOrderId, newOrderData }: { orderId: string; itemIds: string[]; targetOrderId: string; newOrderData?: { waiterName: string; areaId: string | null; orderLabel: string; covers: number } }) => {
-      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/transfer-items`, { itemIds, targetOrderId, newOrderData });
+    mutationFn: async ({ orderId, itemIds, itemQuantities, targetOrderId, newOrderData }: { orderId: string; itemIds: string[]; itemQuantities?: Array<{id:string;quantity:number;expectedQuantity:number;expectedSubtotal:string}>; targetOrderId: string; newOrderData?: { waiterName: string; areaId: string | null; orderLabel: string; covers: number } }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/transfer-items`, { itemIds, itemQuantities, targetOrderId, newOrderData });
       return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
-      setMoveItemSelectedIds(new Set());
+      setMoveItemQuantities({});
       setMoveItemTargetOrderId("");
       setIsSplitMode(false);
       setIsCloseDialogOpen(false);
@@ -1584,7 +1588,7 @@ export default function RestaurantPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
-      setPayItemSelectedIds(new Set());
+      setPayItemQuantities({});
       setPayItemDiscount("");
       setIsSplitMode(false);
       if (data?.allPaid) {
@@ -5436,7 +5440,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
       </Dialog>
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
-      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
+      <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemQuantities({}); setMoveItemTargetOrderId(""); setPayItemQuantities({}); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
         <DialogContent className="operational-dialog restaurant-checkout">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -5977,7 +5981,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                     variant={splitDialogMode === "move_items" ? "default" : "outline"}
                     size="sm"
                     className="text-xs h-8 px-2"
-                    onClick={() => { setSplitDialogMode("move_items"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); }}
+                    onClick={() => { setSplitDialogMode("move_items"); setMoveItemQuantities({}); setMoveItemTargetOrderId(""); }}
                     data-testid="button-split-mode-move"
                   >
                     <ArrowRightLeft className="h-3 w-3 mr-1 shrink-0" />Mover mesa
@@ -5986,7 +5990,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                     variant={splitDialogMode === "pay_items" ? "default" : "outline"}
                     size="sm"
                     className="text-xs h-8 px-2"
-                    onClick={() => { setSplitDialogMode("pay_items"); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); }}
+                    onClick={() => { setSplitDialogMode("pay_items"); setPayItemQuantities({}); setPayItemDiscount(""); }}
                     data-testid="button-split-mode-pay"
                   >
                     <CreditCard className="h-3 w-3 mr-1 shrink-0" />Cobrar ítems
@@ -6251,22 +6255,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                 {splitDialogMode === "move_items" && (
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">Seleccioná los ítems a mover a otra comanda:</p>
-                    <div className="border rounded-md divide-y max-h-44 overflow-y-auto">
-                      {getOrderItems().filter((i: any) => !i.paid).map((item: any) => (
-                        <label key={item.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/30">
-                          <Checkbox
-                            checked={moveItemSelectedIds.has(item.id)}
-                            onCheckedChange={() => {
-                              const next = new Set(moveItemSelectedIds);
-                              if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-                              setMoveItemSelectedIds(next);
-                            }}
-                          />
-                          <span className="flex-1 text-sm">{item.menuItem?.name || "Ítem"} <span className="text-muted-foreground text-xs">x{item.quantity}</span></span>
-                          <span className="text-sm font-medium">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                        </label>
-                      ))}
-                    </div>
+                    <RestaurantItemQuantityPicker items={getOrderItems().filter((i:any)=>!i.paid)} quantities={moveItemQuantities} onChange={setMoveItemQuantities}/>
                     <RestaurantMoveDestination orders={orders || []} sourceId={currentOrder?.id}
                       value={moveItemTargetOrderId} onChange={value => {
                         setMoveItemTargetOrderId(value);
@@ -6279,7 +6268,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       </div>
                     )}
                     <div className="flex gap-2 pt-1">
-                      <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setMoveItemSelectedIds(new Set()); setMoveItemTargetOrderId(""); }}>
+                      <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setMoveItemQuantities({}); setMoveItemTargetOrderId(""); }}>
                         Cancelar
                       </Button>
                       <Button
@@ -6288,7 +6277,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                         disabled={moveItemSelectedIds.size === 0 || !moveItemTargetOrderId || (moveItemTargetOrderId === "new" && !transferNewWaiter.trim()) || transferItemsInSplitMutation.isPending}
                         onClick={() => {
                           if (currentOrder && moveItemTargetOrderId) {
-                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), targetOrderId: moveItemTargetOrderId,
+                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), itemQuantities: getOrderItems().filter((i:any)=>moveItemSelectedIds.has(i.id)).map((i:any)=>({id:i.id,quantity:moveItemQuantities[i.id],expectedQuantity:i.quantity,expectedSubtotal:i.subtotal})), targetOrderId: moveItemTargetOrderId,
                               newOrderData: moveItemTargetOrderId === "new" ? { waiterName: transferNewWaiter.trim(), areaId: currentOrder.areaId, orderLabel: "Ticket separado", covers: 1 } : undefined });
                           }
                         }}
@@ -6304,7 +6293,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                 {/* ── Modo: Cobrar ítems seleccionados ─────────────────── */}
                 {splitDialogMode === "pay_items" && (() => {
                   const allItems = getOrderItems().filter((i: any) => !i.paid);
-                  const selectedItems = allItems.filter((i: any) => payItemSelectedIds.has(i.id));
+                  const selectedItems = allItems.filter((i: any) => payItemSelectedIds.has(i.id)).map((i:any)=>({...i,quantity:payItemQuantities[i.id],subtotal:(restaurantPortionCents(i.subtotal,i.quantity,Math.min(payItemQuantities[i.id],i.quantity))/100).toFixed(2)}));
                   const rawSub = selectedItems.reduce((s: number, i: any) => s + parseFloat(i.subtotal || "0"), 0);
                   const disc = parseFloat(payItemDiscount || "0");
                   const discAmt = payItemDiscountType === "percent" ? rawSub * disc / 100 : disc;
@@ -6324,29 +6313,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                     <div className="space-y-3">
                       {/* Item selection */}
                       <p className="text-sm text-muted-foreground">Seleccioná los ítems a cobrar:</p>
-                      <div className="border rounded-md divide-y max-h-40 overflow-y-auto">
-                        {allItems.length === 0 && <p className="text-sm text-muted-foreground text-center py-3">No hay ítems pendientes</p>}
-                        {allItems.map((item: any) => (
-                          <div key={item.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/30">
-                            <Checkbox
-                              checked={payItemSelectedIds.has(item.id)}
-                              onCheckedChange={() => {
-                                const next = new Set(payItemSelectedIds);
-                                if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
-                                setPayItemSelectedIds(next);
-                              }}
-                            />
-                            <Input
-                              value={invoiceDescriptionOverrides[item.id] ?? displayItemName(item)}
-                              onChange={(e) => setInvoiceDescriptionOverrides((p) => ({ ...p, [item.id]: e.target.value }))}
-                              className="h-7 text-sm flex-1 min-w-0"
-                              data-testid={`input-invoice-description-${item.id}`}
-                            />
-                            <span className="text-muted-foreground text-xs shrink-0">x{item.quantity}</span>
-                            <span className="text-sm font-medium shrink-0">${parseFloat(item.subtotal).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                          </div>
-                        ))}
-                      </div>
+                      <RestaurantItemQuantityPicker items={allItems} quantities={payItemQuantities} onChange={setPayItemQuantities} names={Object.fromEntries(allItems.map((i:any)=>[i.id,invoiceDescriptionOverrides[i.id]??displayItemName(i)]))} onNameChange={(id,name)=>setInvoiceDescriptionOverrides(p=>({...p,[id]:name}))}/>
 
                       {/* Subtotal + discount */}
                       {payItemSelectedIds.size > 0 && (
@@ -6537,7 +6504,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       )}
 
                       <div className="flex gap-2 pt-1">
-                        <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setPayItemSelectedIds(new Set()); setPayItemDiscount(""); }}>
+                        <Button variant="outline" size="sm" className="flex-1" onClick={() => { setSplitDialogMode("equal_parts"); setPayItemQuantities({}); setPayItemDiscount(""); }}>
                           Cancelar
                         </Button>
                         <Button
@@ -6550,6 +6517,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                             payItemsMutation.mutate({
                               orderId: currentOrder.id,
                               itemIds: Array.from(payItemSelectedIds),
+                              itemQuantities: allItems.filter((i:any)=>payItemSelectedIds.has(i.id)).map((i:any)=>({id:i.id,quantity:payItemQuantities[i.id],expectedQuantity:i.quantity,expectedSubtotal:i.subtotal})),
                               method: payItemMethod,
                               receiptType: payItemReceipt,
                               roomReservationId: payItemMethod === "cuenta_habitacion" ? payItemRoomId : undefined,

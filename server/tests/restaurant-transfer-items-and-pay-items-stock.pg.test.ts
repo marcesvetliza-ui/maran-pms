@@ -83,6 +83,47 @@ suite("PostgreSQL real: transfer-items y pay-items de Restaurant", () => {
     await pool?.end();
   });
 
+  it('collects one unit, rejects the stale retry and preserves the remaining units',async()=>{
+    if(!pool)return;const source=await createOpenOrder('25000.00');
+    try{
+      const item=await storage.createOrderItem({orderId:source,menuItemId:randomUUID(),quantity:2,unitPrice:'12500.00',subtotal:'25000.00',status:'ready',notes:'Sin sal',course:2,sentAt:new Date()} as any);
+      const body={itemIds:[item.id],itemQuantities:[{id:item.id,quantity:1,expectedQuantity:2,expectedSubtotal:'25000.00'}],method:'efectivo',receiptType:'ticket'};
+      const responses=await Promise.all([1,2].map(()=>request('POST',`/api/restaurant/orders/${source}/pay-items`,body)));
+      expect(responses.map(r=>r.status).sort()).toEqual([200,409]);
+      const result=responses.find(r=>r.status===200)!;expect(result.body.amount).toBe('12500.00');expect(result.body.remainingTotal).toBe('12500.00');
+      const rows=await storage.getOrderItems(source);expect(rows).toHaveLength(2);expect(rows.reduce((n,r)=>n+r.quantity,0)).toBe(2);
+      expect(rows.find(r=>r.paid)?.quantity).toBe(1);expect(rows.find(r=>!r.paid)?.quantity).toBe(1);
+      for(const row of rows){expect(row.status).toBe('ready');expect(row.notes).toBe('Sin sal');expect(row.course).toBe(2);expect(row.sentAt).toBeTruthy();}
+      expect((await pool.query("SELECT id FROM cash_movements WHERE source_type='restaurant_partial' AND source_id=$1",[source])).rows).toHaveLength(1);
+      expect((await pool.query("SELECT id FROM inventory_consumption_jobs WHERE source_id=$1",[source])).rows).toHaveLength(0);
+      const pending=rows.find(r=>!r.paid)!;
+      const finish=await request('POST',`/api/restaurant/orders/${source}/pay-items`,{itemIds:[pending.id],itemQuantities:[{id:pending.id,quantity:1,expectedQuantity:1,expectedSubtotal:'12500.00'}],method:'efectivo',receiptType:'ticket'});
+      expect(finish.status,JSON.stringify(finish.body)).toBe(200);expect(finish.body.allPaid).toBe(true);
+      expect((await storage.getRestaurantOrder(source))?.status).toBe('closed');
+      const jobs=await pool.query('SELECT lines FROM inventory_consumption_jobs WHERE source_id=$1',[source]);expect(jobs.rows).toHaveLength(1);expect(jobs.rows[0].lines.reduce((n:number,line:any)=>n+line.quantity,0)).toBe(2);
+    }finally{await cleanupOrder(source);}
+  });
+  it('moves one of four waters atomically and preserves cents, kitchen state and remaining quantities',async()=>{
+    if(!pool)return;const source=await createOpenOrder('48.01'),target=await createOpenOrder('0.00');
+    try{
+      const item=await storage.createOrderItem({orderId:source,menuItemId:randomUUID(),quantity:4,unitPrice:'12.00',subtotal:'48.01',status:'served',notes:'Fría',course:1,sentAt:new Date()} as any);
+      const body={itemIds:[item.id],itemQuantities:[{id:item.id,quantity:1,expectedQuantity:4,expectedSubtotal:'48.01'}],targetOrderId:target};
+      const moved=await request('POST',`/api/restaurant/orders/${source}/transfer-items`,body);expect(moved.status,JSON.stringify(moved.body)).toBe(200);
+      const original=(await storage.getOrderItems(source))[0],portion=(await storage.getOrderItems(target))[0];
+      expect(original.quantity).toBe(3);expect(original.subtotal).toBe('36.01');expect(portion.quantity).toBe(1);expect(portion.subtotal).toBe('12.00');expect(portion.status).toBe('served');expect(portion.sentAt).toEqual(item.sentAt);
+      const retry=await request('POST',`/api/restaurant/orders/${source}/transfer-items`,body);expect(retry.status).toBe(409);
+      expect((await storage.getOrderItems(target))).toHaveLength(1);expect((await storage.getRestaurantOrder(source))?.total).toBe('36.01');
+      const foreign=await request('POST',`/api/restaurant/orders/${source}/transfer-items`,{itemIds:[portion.id],targetOrderId:target});expect(foreign.status).toBe(400);
+    }finally{await cleanupOrder(source);await cleanupOrder(target);}
+  });
+  it('rolls back a partial row split when the destination is invalid',async()=>{
+    if(!pool)return;const source=await createOpenOrder('100.00');
+    try{
+      const item=await storage.createOrderItem({orderId:source,menuItemId:randomUUID(),quantity:3,unitPrice:'33.33',subtotal:'100.00'} as any);
+      const invalid=await request('POST',`/api/restaurant/orders/${source}/transfer-items`,{itemIds:[item.id],itemQuantities:[{id:item.id,quantity:1,expectedQuantity:3,expectedSubtotal:'100.00'}],targetOrderId:randomUUID()});
+      expect(invalid.status).toBe(404);const rows=await storage.getOrderItems(source);expect(rows).toHaveLength(1);expect(rows[0].quantity).toBe(3);expect(rows[0].subtotal).toBe('100.00');
+    }finally{await cleanupOrder(source);}
+  });
   describe("Defecto 1 — transferir ítems pendientes no debe recobrar lo ya pagado", () => {
     it("tras cobrar el plato y transferir solo la bebida, el origen queda en 0 (no en el monto ya cobrado)", async () => {
       if (!pool) return;
