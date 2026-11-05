@@ -1,4 +1,4 @@
-import {cascadeRecipeCostsFromInventoryItem} from "./recipeCostCascade";
+import {refreshRecipeCostsForInventoryEntry} from "./recipeCostCascade";
 import {sql} from 'drizzle-orm';
 import {db,withDatabaseTransaction} from './db';
 import {stockUnits} from './inventorySafety';
@@ -41,7 +41,7 @@ export async function reverseInventorySource(type:string,id:string,reason:string
    await db.execute(sql`INSERT INTO stock_movements(item_id,movement_type,quantity,previous_stock,new_stock,source_type,source_id,notes,warehouse_id,created_at,created_by) VALUES(${line.itemId},'ajuste',${stockAmount(Math.abs(line.delta))},${stockAmount(line.previous)},${stockAmount(line.next)},'source_stock_reversal',${guard.rows[0].id},${reason.trim()},${line.warehouseId},now(),${actor})`);
   }
   for(const [id,delta] of totals)await db.execute(sql`UPDATE inventory_items SET current_stock=${stockAmount(stockUnits(items.get(id).current_stock ?? 0)-delta)} WHERE id=${id}`);
-  if(productionCost){await db.execute(sql`UPDATE inventory_items SET cost_price=${productionCost.cost.toFixed(4)} WHERE id=${productionCost.itemId}`);await cascadeRecipeCostsFromInventoryItem(db,productionCost.itemId,productionCost.cost);}
+  if(productionCost){await db.execute(sql`UPDATE inventory_items SET cost_price=${productionCost.cost.toFixed(4)} WHERE id=${productionCost.itemId}`);await refreshRecipeCostsForInventoryEntry(db,productionCost.itemId,productionCost.cost);}
   await db.execute(sql`UPDATE inventory_consumption_jobs SET status='cancelled',error=${reason.trim()} WHERE source_type=${type} AND source_id=${id}`);
   await db.execute(sql`UPDATE inventory_source_reversals SET completed_at=now() WHERE id=${guard.rows[0].id}`);
   await db.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${actor},'update','inventory','source_stock_reversal',${guard.rows[0].id},${reason.trim()},${JSON.stringify({type,id,changes})},now())`);

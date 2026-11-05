@@ -3308,6 +3308,11 @@ export async function registerRoutes(
       }
       await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
         `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`,req.user?.id);
+      if(stockRows.length)rawInvoice.inventoryWarnings=(await tx.execute(sql`
+        SELECT id,name,unit_correction_note AS note FROM inventory_items
+        WHERE id IN (${sql.join([...new Set(stockRows.map(row=>row.itemId))].map(id=>sql`${id}`),sql`,`)})
+          AND unit_correction_pending=true`)).rows;
+
 
       // Si se eligió una forma de pago real (no Cuenta Corriente), generar
       // de una la Orden de Pago de esta factura para que quede pagada (total

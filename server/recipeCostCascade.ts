@@ -1,3 +1,4 @@
+import {inventoryUnitCorrectionWindow} from "./inventoryUnitCorrection";
 import {inventoryUnitFactor} from "./inventoryUnits";
 import {unitFactor} from "./inventoryStockEngine";
 import { eq, inArray } from "drizzle-orm";
@@ -135,4 +136,17 @@ export async function cascadeRecipeCostsFromInventoryItem(
   }
   await executor.update(inventoryItems).set({unitCorrectionPending:false,unitCorrectionNote:null}).where(eq(inventoryItems.id,inventoryItemId));
 
+}
+
+/** Operational entries must remain usable during authorised catalogue cleanup.
+ * A savepoint preserves ALL previous recipe costs if any legacy unit is missing.
+ * SQL errors and errors other than missing equivalences still abort the caller.
+ */
+export async function refreshRecipeCostsForInventoryEntry(executor:Executor,inventoryItemId:string,newCost:number):Promise<void> {
+  try {
+    await executor.transaction(inner=>cascadeRecipeCostsFromInventoryItem(inner,inventoryItemId,newCost));
+  } catch(error:any) {
+    if(!inventoryUnitCorrectionWindow.enabled || error?.code!=='INVENTORY_UNIT_EQUIVALENCE_REQUIRED')throw error;
+    await executor.update(inventoryItems).set({unitCorrectionPending:true,unitCorrectionNote:String(error.message)}).where(eq(inventoryItems.id,inventoryItemId));
+  }
 }

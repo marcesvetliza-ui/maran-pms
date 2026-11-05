@@ -5694,7 +5694,7 @@ export class DatabaseStorage implements IStorage {
           await tx.transaction(inner=>cascadeRecipeCostsFromInventoryItem(inner, id, parseFloat(String(result.costPrice ?? 0))));
           result.unitCorrectionPending=false; result.unitCorrectionNote=null;
         } catch(error:any) {
-          if(!correction || error?.code!=="INVENTORY_UNIT_EQUIVALENCE_REQUIRED") throw error;
+          if(!inventoryUnitCorrectionWindow.enabled || error?.code!=="INVENTORY_UNIT_EQUIVALENCE_REQUIRED") throw error;
           const note=String(error.message);
           await tx.update(inventoryItems).set({unitCorrectionPending:true,unitCorrectionNote:note}).where(eq(inventoryItems.id,id));
           result.unitCorrectionPending=true;result.unitCorrectionNote=note;

@@ -861,19 +861,23 @@ export function InvoiceDialog({
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
       if (invItems.length > 0) {
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/items"] });
         queryClient.invalidateQueries({ queryKey: ["/api/inventory/movements"] });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
+      queryClient.invalidateQueries({ predicate: q => typeof q.queryKey[0] === "string" && /^\/api\/inventory\/items(?:\?|$)/.test(q.queryKey[0]) });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       resetDialog();
       const desc = invItems.length > 0
         ? `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
         : "El comprobante fue registrado correctamente.";
-      toast({ title: "Comprobante registrado", description: desc });
+      const pendingRecipes = Array.isArray(result?.inventoryWarnings) && result.inventoryWarnings.length > 0;
+      toast({ title: pendingRecipes ? "Comprobante registrado; recetas pendientes de revisión" : "Comprobante registrado",
+        description: pendingRecipes ? `${desc} Se conservan los costos anteriores de las recetas hasta revisar sus equivalencias.` : desc,
+        ...(pendingRecipes ? {duration: 10000} : {}) });
     },
     onError: (e: any) => {
       // apiRequest throws "STATUS: {json body}" — extract JSON to get the server message
@@ -883,7 +887,7 @@ export function InvoiceDialog({
       if (jsonStart >= 0) {
         try { description = JSON.parse(raw.substring(jsonStart)).error || raw; } catch {}
       }
-      const isDuplicate = raw.startsWith("409");
+      const isDuplicate = raw.startsWith("409") && /No se permiten duplicados|PURCHASE_INVOICE_DUPLICATE/.test(description);
       toast({
         title: isDuplicate ? "Comprobante duplicado" : "Error al registrar comprobante",
         description,
