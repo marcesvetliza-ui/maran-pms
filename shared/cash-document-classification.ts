@@ -40,6 +40,11 @@ export function cashDocumentSummary(movements: Array<CashDocumentEvidence & {pay
 export function nonFiscalCollectionError(type: unknown, methods: unknown[]): string | null {
   if (!isNonFiscalDocument(type)) return null;
   const noCollection = new Set(["", "none", "sin_cobro", "sin_pago", "no_charge", "courtesy", "cortesia", "room_charge", "cuenta_habitacion", "cargo_habitacion", "venta_previa", "gift_voucher"]);
-  return methods.some(method => !isCashMethod(method) && !noCollection.has(String(method ?? "").trim().toLowerCase()))
-    ? "Los comprobantes no fiscales solo admiten cobros en efectivo o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal." : null;
+  const permittedSettlement = (method: unknown) => normalizedDocumentType(type) === "cierre_habitacion"
+    && ["cuenta_corriente", "current_account"].includes(String(method ?? "").trim().toLowerCase());
+  return methods.some(method => !permittedSettlement(method) && !isCashMethod(method) && !noCollection.has(String(method ?? "").trim().toLowerCase()))
+    ? normalizedDocumentType(type) === "cierre_habitacion"
+      ? "El cierre de habitación admite efectivo, Cuenta Corriente o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal."
+      : "Los comprobantes no fiscales solo admiten cobros en efectivo o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal."
+    : null;
 }

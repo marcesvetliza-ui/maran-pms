@@ -18,3 +18,8 @@ describe("non-fiscal issuance collection guard",()=>{
   await expect(emitirFactura({tipoComprobante:"FB",cashFormaPago:"transferencia"} as any)).rejects.toThrow("test configuration boundary");
  });
 });
+
+it("permite CC en cierre de habitación hasta el emisor, sin habilitar tarjetas",async()=>{
+ billingConfig.mockRejectedValueOnce(new Error("test CC configuration boundary"));
+ await expect(emitirFactura({tipoComprobante:"cierre_habitacion",cashFormaPago:"cuenta_corriente"} as any)).rejects.toThrow("test CC configuration boundary");
+});

@@ -1,3 +1,4 @@
+import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "../reservationAccountTransfer";
 import { registerReceptionOperationRoutes } from "./receptionOperations";
 import { beginBillingOperation } from "./operationJournal";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
@@ -1192,11 +1193,12 @@ export function registerBillingRoutes(app: Express) {
         const directSettlementMethods = new Set([
           "efectivo", "cash", "tarjeta", "tarjeta_debito", "tarjeta_credito",
           "debito", "transferencia", "mercadopago", "cheque", "echeq",
-          "cuenta_corriente",
         ]);
         const settlementMethods = normalizedCashFormaPagoDetalle?.map((entry) => entry.method)
           ?? (cashFormaPago ? [String(cashFormaPago)] : []);
-        const includesDirectSettlement = isReservationCcSettlement
+        // Room closure moves existing debt; it neither collects money nor
+        // requests a new group fiscal document. Other group issuance rules stay.
+        const includesDirectSettlement = (isReservationCcSettlement && tipoComprobante !== "cierre_habitacion")
           || settlementMethods.some((method) => directSettlementMethods.has(String(method).toLowerCase()));
         const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
         const authoritativeAdvanceRequest = creditOperationId
@@ -1569,6 +1571,14 @@ export function registerBillingRoutes(app: Express) {
             invoiceTotal,
             [{ amount: appliedCredit + Math.min(invoiceTotal - appliedCredit, ordinaryAdvanceAmount) }],
           );
+          // Reject an already-covered group balance before persisting a new
+          // closure. The ledger rechecks under the parent row lock at commit.
+          if (isReservationCcSettlement && tipoComprobante === "cierre_habitacion" && uncoveredAmount > 0) {
+            await db.transaction(async tx => {
+              const linkedGroup = await lockAccountTransferGroup(tx, reservationId);
+              if (linkedGroup) await assertGroupAccountTransferBalance(tx, linkedGroup, reservationId, uncoveredAmount.toFixed(2));
+            });
+          }
           const settlement = {
             destination: uncoveredAmount <= 0
               ? "none"
