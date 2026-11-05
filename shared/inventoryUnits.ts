@@ -17,5 +17,5 @@ export function inventoryUnitFactor(from:string,to:string,configured?:number):nu
  if(from==='docena'&&to==='unidad')return 12;
  if(from==='unidad'&&to==='docena')return 1/12;
  if(configured!==undefined && Number.isFinite(configured)&&configured>0)return configured;
- throw fail(`Falta equivalencia explícita de ${from} a ${to} para este artículo`);
+ throw Object.assign(fail(`Falta equivalencia explícita de ${from} a ${to} para este artículo`),{code:"INVENTORY_UNIT_EQUIVALENCE_REQUIRED"});
 }

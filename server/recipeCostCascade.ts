@@ -133,4 +133,6 @@ export async function cascadeRecipeCostsFromInventoryItem(
       dirty.add(dep.recipeId);
     }
   }
+  await executor.update(inventoryItems).set({unitCorrectionPending:false,unitCorrectionNote:null}).where(eq(inventoryItems.id,inventoryItemId));
+
 }

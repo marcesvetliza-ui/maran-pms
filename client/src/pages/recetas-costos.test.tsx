@@ -89,3 +89,13 @@ it('permite salir de la categoría de receta con TAB hacia la descripción sin c
  await waitFor(()=>expect(dialog.getByTestId('input-recipe-item-description')).toHaveFocus());
  expect(dialog.getByTestId('select-recipe-item-category')).toHaveTextContent('Platos');
 });
+
+it('shows pending unit-correction costs on the recipe page before opening a dialog',async()=>{
+ const key=['/api/inventory/items?itemKind=materia_prima,venta_directa,semielaborado'];
+ queryClient.removeQueries({queryKey:key});
+ queryClient.setDefaultOptions({queries:{retry:false,staleTime:Infinity,queryFn:async({queryKey})=>String(queryKey[0]).startsWith('/api/inventory/items')?[{id:'milk',name:'Leche entera',unit:'litro',unitCorrectionPending:true,unitCorrectionNote:'Revisá Salsa panimal'}]:recipeRows}});
+ render(<QueryClientProvider client={queryClient}><RecetasCostosPage/></QueryClientProvider>);
+ expect(await screen.findByRole('status')).toHaveTextContent('Leche entera');
+ expect(screen.getByRole('status')).toHaveTextContent('costos anteriores');
+ expect(screen.queryByRole('dialog')).toBeNull();
+});

@@ -1,3 +1,4 @@
+import {InventoryRecipeCostWarning} from "@/components/inventory-recipe-cost-warning";
 import { InlineSearch } from "@/components/inline-search";
 import {RecipeIngredientPicker} from "@/components/recipe-ingredient-picker";
 import { useState } from "react";
@@ -187,7 +188,7 @@ export default function RecetasCostosPage() {
 
   const { data: inventoryItems = [] } = useQuery<any[]>({
     queryKey: ["/api/inventory/items?itemKind=materia_prima,venta_directa,semielaborado"],
-    enabled: isRecipeDialogOpen || isBaseRecipeDialogOpen,
+    enabled: true,
   });
 
   const createRecipeMutation = useMutation({
@@ -488,6 +489,7 @@ export default function RecetasCostosPage() {
 
   return (
     <div className="p-6 space-y-6">
+      <InventoryRecipeCostWarning items={inventoryItems}/>
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">

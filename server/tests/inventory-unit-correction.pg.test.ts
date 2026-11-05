@@ -3,7 +3,9 @@ import http from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {beforeAll,beforeEach,afterEach,afterAll,describe,it,expect} from 'vitest';
 import {inventoryUnitCorrectionWindow} from '../inventoryUnitCorrection';
-const suite=process.env.DATABASE_URL==='postgresql://postgres:remito_test@127.0.0.1:55432/remito_test'?describe:describe.skip;
+const testUrl=process.env.DATABASE_URL;
+if(testUrl && (!['127.0.0.1','localhost'].includes(new URL(testUrl).hostname) || !/test/.test(new URL(testUrl).pathname)))throw new Error('Solo base local de pruebas');
+const suite=testUrl?describe:describe.skip;
 let pool:typeof import('../db').pool,server:http.Server,url:string,id:string,role='admin';
 const actor='unit-correction-test';
 async function request(method:string,path:string,body?:any){const r=await fetch(url+path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};}
@@ -15,7 +17,7 @@ async function snapshot(){return {
 };}
 suite('Temporary inventory base-unit correction on disposable PostgreSQL',()=>{
  beforeAll(async()=>{
-  ({pool}=await import('../db'));await (await import('../permissions')).loadRolePermissionsCache();
+  ({pool}=await import('../db'));await (await import('../inventoryStage2Schema')).ensureInventoryStage2Schema();await (await import('../permissions')).loadRolePermissionsCache();
   const app=express();app.use(express.json());app.use((req,_res,next)=>{req.user={id:actor,username:actor,role} as any;req.isAuthenticated=()=>true;next();});
   (await import('../routes/inventory')).registerInventoryRoutes(app);server=http.createServer(app);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+(server.address() as any).port;
  });
@@ -70,12 +72,28 @@ suite('Temporary inventory base-unit correction on disposable PostgreSQL',()=>{
   await pool.query("INSERT INTO inventory_consumption_jobs(id,source_type,source_id,lines,status) VALUES($1::text,'test',$1::text,$2::jsonb,'pending')",[id,JSON.stringify([{itemId:id,quantity:1}])]);
   const before=await snapshot();expect((await request('PATCH',`/api/inventory/items/${id}`,{unit:'kg'})).status).toBe(409);expect(await snapshot()).toEqual(before);
  });
- it('preserves recipe quantities and requires a valid new-base equivalence before committing',async()=>{
-  await pool.query("INSERT INTO recipes(id,name,is_base) VALUES($1::text,$1::text,false)",[id]);
+ it.each(['admin','resp_deposito'])('temporarily saves for %s despite legacy recipe units, preserves costs and clears the warning after fixing equivalences',async actorRole=>{
+  role=actorRole;
+  await pool.query("INSERT INTO recipes(id,name,is_base) VALUES($1::text,'Receta heredada',false)",[id]);
   await pool.query("INSERT INTO recipe_ingredients(id,recipe_id,inventory_item_id,ingredient_name,quantity,unit,unit_cost) VALUES($1::text,$1::text,$1::text,'Prueba',1,'caja',600)",[id]);
-  const before=await snapshot();expect((await request('PATCH',`/api/inventory/items/${id}/metadata`,{name:id,minStock:'2',unit:'kg',conversions:[]})).status).toBe(409);expect(await snapshot()).toEqual(before);
-  const saved=await request('PATCH',`/api/inventory/items/${id}/metadata`,{name:id,minStock:'2',unit:'kg',conversions:[{fromUnit:'caja',factor:'2'}]});expect(saved.status,JSON.stringify(saved.body)).toBe(200);
-  const ingredient=(await pool.query('SELECT quantity,unit,unit_cost FROM recipe_ingredients WHERE id=$1',[id])).rows[0];expect(Number(ingredient.quantity)).toBe(1);expect(ingredient.unit).toBe('caja');expect(Number(ingredient.unit_cost)).toBe(200);
+  const before=await snapshot();const saved=await request('PATCH',`/api/inventory/items/${id}/metadata`,{name:id,minStock:'2',unit:'kg',conversions:[]});
+  expect(saved.status,JSON.stringify(saved.body)).toBe(200);expect(saved.body.unitCorrectionPending).toBe(true);expect(saved.body.unitCorrectionNote).toContain('Receta heredada');
+  const after=await snapshot();expect(after.item[0].unit).toBe('kg');expect(after.stock).toEqual(before.stock);expect(after.movements).toEqual(before.movements);
+  let ingredient=(await pool.query('SELECT quantity,unit,unit_cost FROM recipe_ingredients WHERE id=$1',[id])).rows[0];expect(Number(ingredient.quantity)).toBe(1);expect(ingredient.unit).toBe('caja');expect(Number(ingredient.unit_cost)).toBe(600);
+  const audit=(await pool.query('SELECT details FROM audit_logs WHERE entity_id=$1',[id])).rows[0].details;expect(JSON.stringify(audit)).toContain('unitCorrectionPending');
+  // No general cost-write bypass: only an authorised BASE UNIT change may defer.
+  inventoryUnitCorrectionWindow.enabled=false;role='admin';
+  expect((await request('PATCH',`/api/inventory/items/${id}/metadata`,{name:id,minStock:'2',unit:'kg',costPrice:101})).status).toBe(409);
+  expect(Number((await pool.query('SELECT cost_price FROM inventory_items WHERE id=$1',[id])).rows[0].cost_price)).toBe(100);
+  const fixed=await request('PUT',`/api/inventory/items/${id}/unit-conversions`,{conversions:[{fromUnit:'caja',factor:'2'}]});expect(fixed.status,JSON.stringify(fixed.body)).toBe(200);
+  ingredient=(await pool.query('SELECT quantity,unit,unit_cost FROM recipe_ingredients WHERE id=$1',[id])).rows[0];expect(Number(ingredient.unit_cost)).toBe(200);
+  expect((await pool.query('SELECT unit_correction_pending,unit_correction_note FROM inventory_items WHERE id=$1',[id])).rows[0]).toEqual({unit_correction_pending:false,unit_correction_note:null});
+ });
+ it('does not treat a SQL cost overflow as a missing equivalence',async()=>{
+  await pool.query("INSERT INTO recipes(id,name,is_base) VALUES($1::text,'Error técnico',false)",[id]);
+  await pool.query("INSERT INTO recipe_ingredients(id,recipe_id,inventory_item_id,ingredient_name,quantity,unit,unit_cost) VALUES($1::text,$1::text,$1::text,'Prueba',1,'caja',600)",[id]);
+  const before=await snapshot();const saved=await request('PATCH',`/api/inventory/items/${id}/metadata`,{name:id,minStock:'2',unit:'kg',conversions:[{fromUnit:'caja',factor:'9999999'}]});
+  expect(saved.status).toBe(500);expect(await snapshot()).toEqual(before);
  });
  it('a failed equivalence rolls back unit, stock and historical conversion deletion',async()=>{
   const before=await snapshot();expect((await request('PATCH',`/api/inventory/items/${id}`,{unit:'kg',conversions:[{fromUnit:'g',factor:99}]})).status).toBe(400);expect(await snapshot()).toEqual(before);

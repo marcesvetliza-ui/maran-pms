@@ -6,7 +6,7 @@ El editor tenía un formulario de equivalencias de la unidad guardada fuera del 
 
 Recetas permite L y unidades, mientras Inventario usa litro y unidad. La resolución reconoce esos nombres equivalentes, mL/ml y mayúsculas de kg/g; busca primero equivalencias con unidad canónica y conserva compatibilidad con una clave histórica. No convierte litros a kilos ni porciones a unidades por inferencia.
 
-Si una receta o subreceta sigue usando dimensiones incompatibles, la cascada devuelve su nombre, ingrediente y unidades. La escritura completa se revierte: no se dejan costos o unidades parcialmente actualizados. No se eliminan recetas ni se corrigen sus cantidades automáticamente.
+Si una receta o subreceta sigue usando dimensiones incompatibles, la cascada devuelve su nombre, ingrediente y unidades. Fuera de la corrección temporal se revierte la escritura completa. Desde la ampliación autorizada el05/11/2026, una corrección temporal puede guardar la unidad y conservar los costos anteriores de todas las recetas, con aviso persistente; ver inventory-unit-correction-window.md. No se eliminan recetas ni se corrigen sus cantidades automáticamente.
 
 El desbloqueo temporal permanece igual, para los roles autorizados de catálogo, incluido responsable de depósito. Se conservan cantidades numéricas y stock histórico según ese modo. No se modificó directamente el artículo del hotel.
 

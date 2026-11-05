@@ -5654,6 +5654,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null; conversions?:unknown }, options?:{allowUnitCorrection?:boolean}): Promise<InventoryItem | undefined> {
+    if ('unitCorrectionPending' in item || 'unitCorrectionNote' in item) throw Object.assign(new Error('El estado de revisión de recetas lo administra el sistema'),{statusCode:400});
     const { accountingSupplierIds, preferredAccountingSupplierId, conversions, ...itemValues } = item;
     if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
       throw new Error("La lista de proveedores contables es inválida");
@@ -5664,10 +5665,10 @@ export class DatabaseStorage implements IStorage {
       const current=await tx.execute(sql`SELECT unit, is_active FROM inventory_items WHERE id=${id} FOR UPDATE`);
       const unitChanged=itemValues.unit!==undefined && current.rows.length>0 && itemValues.unit!==current.rows[0].unit;
       if (itemValues.isActive === "false" && current.rows[0]?.is_active !== "false") await protectInventoryItemDeactivation(tx, id);
+      const correction=unitChanged && inventoryUnitCorrectionWindow.enabled && options?.allowUnitCorrection===true;
       if(unitChanged){
         if(!INVENTORY_UNITS.includes(itemValues.unit as any))throw Object.assign(new Error('Unidad de inventario inválida'),{statusCode:400});
         const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM recipes WHERE output_inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM treatment_supplies WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
-        const correction=inventoryUnitCorrectionWindow.enabled && options?.allowUnitCorrection===true;
         if(references.rows.length&&!correction)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
         if(correction){
           const pending=await tx.execute(sql`SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb LIMIT 1`);
@@ -5680,7 +5681,17 @@ export class DatabaseStorage implements IStorage {
       const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
       if (!result) return [];
       if (itemValues.costPrice !== undefined || unitChanged) {
-        await cascadeRecipeCostsFromInventoryItem(tx, id, parseFloat(String(result.costPrice ?? 0)));
+        try {
+          // A savepoint rolls back the ENTIRE cost cascade, including recipes
+          // visited before the incompatible legacy ingredient was encountered.
+          await tx.transaction(inner=>cascadeRecipeCostsFromInventoryItem(inner, id, parseFloat(String(result.costPrice ?? 0))));
+          result.unitCorrectionPending=false; result.unitCorrectionNote=null;
+        } catch(error:any) {
+          if(!correction || error?.code!=="INVENTORY_UNIT_EQUIVALENCE_REQUIRED") throw error;
+          const note=String(error.message);
+          await tx.update(inventoryItems).set({unitCorrectionPending:true,unitCorrectionNote:note}).where(eq(inventoryItems.id,id));
+          result.unitCorrectionPending=true;result.unitCorrectionNote=note;
+        }
       }
       if (accountingSupplierIds !== undefined) {
         const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
