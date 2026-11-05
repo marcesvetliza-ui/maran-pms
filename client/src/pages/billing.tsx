@@ -1,3 +1,4 @@
+import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
@@ -701,6 +702,7 @@ type Item = {
    * gift voucher "por prestación" vinculado a la venta, a nombre de este
    * beneficiario. Solo aplica a ítems con spaTreatmentId. */
   giftBeneficiaryName?: string;
+  giftExpiresAt?: string;
 };
 
 export type EmitirFacturaInitialValues = {
@@ -1151,6 +1153,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       if (it.precioUnitario === 0) errs[`precio_${i}`] = "Precio debe ser distinto de 0";
       if (it.giftBeneficiaryName !== undefined && !it.giftBeneficiaryName.trim()) {
         errs[`gift_beneficiary_${i}`] = "Nombre del beneficiario requerido";
+      }
+      if (it.giftBeneficiaryName !== undefined && giftVoucherExpiryError(it.giftExpiresAt)) {
+        errs[`gift_expiry_${i}`] = giftVoucherExpiryError(it.giftExpiresAt)!;
       }
     });
     if (requireLinkedRecipient) {
@@ -1990,7 +1995,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
               <div className="space-y-1">
                 {items.map((it, i) => (
                   <div key={i} className="flex justify-between text-sm">
-                    <span>{it.descripcion}{it.cantidad > 1 ? ` ×${it.cantidad}` : ""}</span>
+                    <div><span>{it.descripcion}{it.cantidad > 1 ? ` ×${it.cantidad}` : ""}</span>
+                      {it.giftBeneficiaryName !== undefined && <p className="text-xs text-muted-foreground">Regalo para {it.giftBeneficiaryName} · {it.giftExpiresAt ? `Válido hasta ${formatDisplayDate(it.giftExpiresAt)}` : "Sin vencimiento"}</p>}</div>
                     <span className="font-medium">${fPeso(it.subtotal)}</span>
                   </div>
                 ))}
@@ -2457,20 +2463,31 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                         id={`item-is-gift-${idx}`}
                         data-testid={`checkbox-item-is-gift-${idx}`}
                         checked={item.giftBeneficiaryName !== undefined}
-                        onCheckedChange={(checked) => updateItem(idx, "giftBeneficiaryName", checked ? "" : undefined)}
+                        onCheckedChange={(checked) => {
+                          updateItem(idx, "giftBeneficiaryName", checked ? "" : undefined);
+                          if (!checked) updateItem(idx, "giftExpiresAt", undefined);
+                        }}
                       />
                       <Label htmlFor={`item-is-gift-${idx}`} className="text-xs flex items-center gap-1 cursor-pointer">
                         <Gift className="w-3.5 h-3.5" /> Es un regalo — genera un voucher por prestación
                       </Label>
                     </div>
                     {item.giftBeneficiaryName !== undefined && (
-                      <Input
-                        data-testid={`item-gift-beneficiary-${idx}`}
-                        value={item.giftBeneficiaryName}
-                        onChange={e => updateItem(idx, "giftBeneficiaryName", e.target.value)}
-                        placeholder="Nombre del beneficiario"
-                        className={fieldErrors[`gift_beneficiary_${idx}`] ? "border-red-500" : ""}
-                      />
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label htmlFor={`item-gift-beneficiary-${idx}`} className="text-xs">Beneficiario</Label>
+                          <Input id={`item-gift-beneficiary-${idx}`} data-testid={`item-gift-beneficiary-${idx}`}
+                            value={item.giftBeneficiaryName} onChange={e => updateItem(idx, "giftBeneficiaryName", e.target.value)}
+                            placeholder="Nombre del beneficiario" className={fieldErrors[`gift_beneficiary_${idx}`] ? "border-red-500" : ""} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor={`item-gift-expires-${idx}`} className="text-xs">Válido hasta (opcional)</Label>
+                          <Input id={`item-gift-expires-${idx}`} data-testid={`item-gift-expires-${idx}`} type="date"
+                            value={item.giftExpiresAt || ""} onChange={e => updateItem(idx, "giftExpiresAt", e.target.value || undefined)}
+                            className={fieldErrors[`gift_expiry_${idx}`] ? "border-red-500" : ""} />
+                          {fieldErrors[`gift_expiry_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`gift_expiry_${idx}`]}</p>}
+                        </div>
+                      </div>
                     )}
                     {fieldErrors[`gift_beneficiary_${idx}`] && <p className="text-xs text-red-500">{fieldErrors[`gift_beneficiary_${idx}`]}</p>}
                   </div>

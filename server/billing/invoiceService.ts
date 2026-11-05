@@ -35,6 +35,7 @@ export interface InvoiceItem {
    * gift voucher "por prestación" vinculado a la venta, a nombre de este
    * beneficiario. Requiere spaTreatmentId. */
   giftBeneficiaryName?: string;
+  giftExpiresAt?: string;
 }
 
 export type NonFiscalTipo =
