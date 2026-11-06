@@ -2810,6 +2810,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     `)))
   );
 
+  await withTimeout("restaurant_areas.display_order", T, () =>
+    db.execute(sql`ALTER TABLE restaurant_areas ADD COLUMN IF NOT EXISTS display_order integer DEFAULT 0`)
+  );
+
   // Seed "Evento por Mesa" restaurant area if not present
   await withTimeout("restaurant_areas.evento_por_mesa_seed", T, () =>
     db.execute(sql`
