@@ -1,3 +1,4 @@
+import { iibbRateFromAmount } from '@shared/iibbRate';
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { generarAsientoOP } from "./accounting";
@@ -106,7 +107,8 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
   const dep = parseFloat(String(input.depBancario ?? "0")) || 0;
   const ef = parseFloat(String(input.efectivo ?? "0")) || 0;
   const ch = parseFloat(String(input.cheques ?? "0")) || 0;
-  const alicuotaIibb = parseFloat(String(input.alicuotaIibb ?? "0")) || 0;
+  const baseIibb = baseNetosIibb > 0 ? baseNetosIibb : totalFacturas;
+  const alicuotaIibb = retIibb > 0 ? iibbRateFromAmount(baseIibb, retIibb) : 0;
   const opFecha = fecha || getArgentinaToday();
   const opRes = await tx.execute(sql`
     INSERT INTO payment_orders (numero, supplier_id, fecha, forma_pago, dep_bancario, efectivo, cheques, total_facturas, retencion_iibb, retencion_ganancias, retencion_iva, retencion_prof_libs, compensacion, total_abonado, observaciones, alicuota_iibb_op)
@@ -160,7 +162,7 @@ export async function createPaymentOrder(tx: Executor, input: CreatePaymentOrder
     const cuit = (sup.rows[0] as any)?.cuit || "";
     await tx.execute(sql`
       INSERT INTO iibb_retentions (nro_constancia, supplier_id, cuit_proveedor, fecha_retencion, fecha_comprobante, nro_comprobante, importe_base, alicuota, importe_retenido)
-      VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${opFecha}, ${opFecha}, ${nextNum}, ${baseNetosIibb > 0 ? baseNetosIibb : totalFacturas}, ${alicuotaIibb}, ${retIibb})
+      VALUES (${nroConstancia}, ${supplierId}, ${cuit}, ${opFecha}, ${opFecha}, ${nextNum}, ${baseIibb}, ${alicuotaIibb}, ${retIibb})
     `);
   }
 
