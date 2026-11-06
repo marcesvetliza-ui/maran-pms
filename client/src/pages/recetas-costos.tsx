@@ -74,6 +74,8 @@ type MenuItem = {
   description: string | null;
   price: string;
   preparationTime: number | null;
+  isEditable?: string | null;
+  defaultCourse?: number | null;
   isAvailable: string | null;
   isActive: string | null;
   allergens: string | null;
@@ -121,6 +123,10 @@ export default function RecetasCostosPage() {
 
   const [isRecipeDialogOpen, setIsRecipeDialogOpen] = useState(false);
   const [selectedRecipeItem, setSelectedRecipeItem] = useState<MenuItem | null>(null);
+  const [copySourceId,setCopySourceId]=useState('');
+  const [copySearch,setCopySearch]=useState('');
+  const [copyPickerOpen,setCopyPickerOpen]=useState(false);
+
   const [newIngredientName, setNewIngredientName] = useState("");
   const [newIngredientQty, setNewIngredientQty] = useState("");
   const [newIngredientUnit, setNewIngredientUnit] = useState("g");
@@ -190,6 +196,16 @@ export default function RecetasCostosPage() {
     enabled: isRecipeDialogOpen || isBaseRecipeDialogOpen,
   });
 
+  const copySource=recipes.find(recipe=>recipe.id===copySourceId);
+  const copyDishMutation=useMutation({
+    mutationFn:async(data:MenuItemFormValues)=> (await apiRequest('POST',`/api/restaurant/recipes/${copySourceId}/copy-dish`,{...data,price:String(data.price)})).json(),
+    onSuccess:async(result:any)=>{
+      await Promise.all([queryClient.invalidateQueries({queryKey:['/api/restaurant/menu/items']}),queryClient.invalidateQueries({queryKey:['/api/restaurant/recipes']}),queryClient.invalidateQueries({predicate:q=>typeof q.queryKey[0]==='string'&&/^\/api\/inventory\/items(?:\?|$)/.test(q.queryKey[0])})]);
+      setSelectedRecipeItem(result.menuItem);setCopySourceId('');setCopyPickerOpen(false);setIsEditingBasicData(false);
+      toast({title:'Plato y receta copiados',description:result.warnings?.length?'La copia se guardó; hay costos pendientes de revisar por equivalencias de unidades.':'La copia es independiente de la receta original.'});
+    },
+    onError:(error:any)=>toast({title:'No se pudo copiar la receta',description:error.message,variant:'destructive'}),
+  });
   const createRecipeMutation = useMutation({
     mutationFn: async (menuItemId: string) => {
       const res = await apiRequest("POST", "/api/restaurant/recipes", { menuItemId });
@@ -505,7 +521,8 @@ export default function RecetasCostosPage() {
           </Button>
           <Button
             onClick={() => {
-              setSelectedRecipeItem(null);
+              setSelectedRecipeItem(null);setCopySourceId('');setCopySearch('');setCopyPickerOpen(false);
+            setCopySourceId('');setCopySearch('');setCopyPickerOpen(false);
               setEditingMenuItem(null);
               setIsEditingBasicData(true);
               menuItemForm.reset({
@@ -934,6 +951,7 @@ export default function RecetasCostosPage() {
             setIsEditingBasicData(false);
             setEditingMenuItem(null);
             setSelectedRecipeItem(null);
+            setCopySourceId('');setCopySearch('');setCopyPickerOpen(false);
           }
         }}
       >
@@ -951,6 +969,22 @@ export default function RecetasCostosPage() {
           </DialogHeader>
 
           <div className="space-y-4 overflow-y-auto flex-1 pr-1">
+            {!selectedRecipeItem&&<div className="rounded-md border p-3 space-y-3">
+              <Button type="button" variant="outline" onClick={()=>setCopyPickerOpen(v=>!v)}>Copiar receta existente</Button>
+              {copyPickerOpen&&<>
+                <Input aria-label="Buscar receta para copiar" placeholder="Buscar plato con receta..." value={copySearch} onChange={e=>setCopySearch(e.target.value)}/>
+                <div className="max-h-44 overflow-y-auto space-y-1">
+                {recipes.filter(recipe=>!recipe.isBase&&recipe.menuItemId&&recipe.isActive!=='false'&&recipe.ingredients.length>0).filter(recipe=>{const item=menuItems.find(item=>item.id===recipe.menuItemId);return item&&item.isActive!=='false'&&item.name.toLocaleLowerCase().includes(copySearch.toLocaleLowerCase());}).map(recipe=>{const item=menuItems.find(item=>item.id===recipe.menuItemId)!;return <Button type="button" variant={copySourceId===recipe.id?'secondary':'ghost'} className="w-full justify-start" key={recipe.id} onClick={()=>{setCopySourceId(recipe.id);menuItemForm.reset({name:`${item.name} (copia)`,categoryId:item.categoryId,description:item.description||'',price:Number(item.price),preparationTime:item.preparationTime||0,isAvailable:item.isAvailable||'true',isEditable:item.isEditable||'false',defaultCourse:item.defaultCourse??undefined});}}>{item.name}</Button>;})}
+                </div>
+              </>}
+              {copySource&&<div className="space-y-2 text-sm">
+                <p>Se copiarán {copySource.ingredients.length} ingredientes. Podés cambiar el nombre y el precio antes de guardar, incluido $0 para media pensión.</p>
+                <p className="text-muted-foreground">Los cambios posteriores en la receta original no se actualizarán en esta copia.</p>
+                <div className="max-h-48 overflow-y-auto"><table className="w-full"><thead><tr><th className="text-left">Ingrediente</th><th>Cantidad</th><th>Merma</th></tr></thead><tbody>{copySource.ingredients.map(ing=><tr key={ing.id}><td>{ing.ingredientName}</td><td className="text-center">{ing.quantity} {ing.unit}</td><td className="text-center">{ing.merma||0}%</td></tr>)}</tbody></table></div>
+                <Button type="button" variant="ghost" onClick={()=>setCopySourceId('')}>Quitar receta de origen</Button>
+              </div>}
+            </div>}
+
             {/* Basic data section — always expanded for new dish, collapsible for existing */}
             <div className="border rounded-md">
               {selectedRecipeItem ? (
@@ -974,6 +1008,7 @@ export default function RecetasCostosPage() {
                     <form
                       onSubmit={menuItemForm.handleSubmit(async (data) => {
                         if (!selectedRecipeItem) {
+                          if(copySourceId){copyDishMutation.mutate(data);return;}
                           // NEW DISH: create dish then recipe
                           createMenuItemMutation.mutate(data, {
                             onSuccess: async (createdItem: MenuItem) => {
@@ -1138,11 +1173,11 @@ export default function RecetasCostosPage() {
                         <Button
                           type="submit"
                           size="sm"
-                          disabled={createMenuItemMutation.isPending || updateMenuItemMutation.isPending}
+                          disabled={copyDishMutation.isPending || createMenuItemMutation.isPending || updateMenuItemMutation.isPending}
                           data-testid="button-save-recipe-item-basic-data"
                         >
                           {(createMenuItemMutation.isPending || updateMenuItemMutation.isPending) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                          {selectedRecipeItem ? "Guardar datos" : "Crear Plato y cargar receta →"}
+                          {selectedRecipeItem ? "Guardar datos" : copySourceId ? "Crear plato con receta copiada" : "Crear Plato y cargar receta →"}
                         </Button>
                       </div>
                     </form>
@@ -1654,7 +1689,7 @@ export default function RecetasCostosPage() {
                 <Button type="button" variant="outline" onClick={() => { setIsMenuItemDialogOpen(false); setIsNewItemWizard(false); }}>Cancelar</Button>
                 <Button
                   type="submit"
-                  disabled={createMenuItemMutation.isPending || updateMenuItemMutation.isPending}
+                  disabled={copyDishMutation.isPending || createMenuItemMutation.isPending || updateMenuItemMutation.isPending}
                   data-testid="button-save-menu-item"
                 >
                   {(createMenuItemMutation.isPending || updateMenuItemMutation.isPending) && (

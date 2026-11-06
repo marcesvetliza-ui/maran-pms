@@ -45,4 +45,9 @@ export function withDatabaseTransaction<T>(action: () => Promise<T>): Promise<T>
   if (transactionContext.getStore()) return action();
   return rootDb.transaction((tx) => transactionContext.run(tx, action));
 }
+/** An isolated atomic operation, even when called within another transaction. */
+export function withDatabaseSavepoint<T>(action:()=>Promise<T>):Promise<T>{
+  const executor=transactionContext.getStore()??rootDb;
+  return executor.transaction(tx=>transactionContext.run(tx,action));
+}
 export { pool };

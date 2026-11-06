@@ -79,3 +79,23 @@ it('uses the same order and search in base elaborations while excluding itself',
  fireEvent.click(dialog.getByRole('button',{name:/Ñoquis húngaros/}));
  expect(dialog.getByText('kg',{selector:'div'})).toBeTruthy();
 });
+
+it('previews a copied recipe and creates a zero-price MP dish only after explicit save',async()=>{
+ const menuRows:any[]=[{id:'menu',categoryId:'category',name:'Pollo con salsa',price:'10000',isAvailable:'true',preparationTime:15}];
+ queryClient.setDefaultOptions({queries:{retry:false,staleTime:Infinity,queryFn:async({queryKey})=>String(queryKey[0]).includes('/menu/items')?menuRows:String(queryKey[0]).includes('/recipes')?recipeRows:[]},mutations:{retry:false}});
+ render(<QueryClientProvider client={queryClient}><RecetasCostosPage/></QueryClientProvider>);
+ fireEvent.click(screen.getByTestId('button-add-menu-item'));
+ fireEvent.click(screen.getByRole('button',{name:'Copiar receta existente'}));
+ fireEvent.change(screen.getByLabelText('Buscar receta para copiar'),{target:{value:'Pollo'}});
+ fireEvent.click(screen.getByRole('button',{name:'Pollo con salsa'}));
+ expect(screen.getByTestId('input-recipe-item-name')).toHaveValue('Pollo con salsa (copia)');expect(screen.getByTestId('input-recipe-item-price')).toHaveValue(10000);
+ expect(screen.getByText(/Los cambios posteriores en la receta original/)).toBeVisible();expect(apiRequest).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByTestId('input-recipe-item-name'),{target:{value:'Pollo con salsa MP'}});fireEvent.change(screen.getByTestId('input-recipe-item-price'),{target:{value:'0'}});
+ vi.mocked(apiRequest).mockImplementation(async(_method,_path,data:any)=>{
+  const item={id:'copy-menu',...data};menuRows.push(item);const recipe={id:'copy-recipe',menuItemId:item.id,ingredients:[{...ingredient,id:'copy-ingredient'}]};recipeRows.push(recipe);
+  return {json:async()=>({menuItem:item,recipe,warnings:[]})} as Response;
+ });
+ fireEvent.click(screen.getByRole('button',{name:'Crear plato con receta copiada'}));
+ await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('POST','/api/restaurant/recipes/dish/copy-dish',expect.objectContaining({name:'Pollo con salsa MP',price:'0',categoryId:'category'})));
+ await screen.findByText('Receta — Pollo con salsa MP');expect(vi.mocked(apiRequest).mock.calls).toHaveLength(1);
+});
