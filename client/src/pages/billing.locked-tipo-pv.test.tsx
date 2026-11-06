@@ -87,6 +87,19 @@ describe("EmitirFacturaDialog — tipo bloqueado y Punto de Venta por área", ()
     );
   });
 
+  it('offers and selects the configured homologation point even when reception only has operational points',async()=>{
+    vi.stubGlobal('fetch',buildFetchMock(POS_CONFIGS_SINGLE_MATCH));
+    renderDialog({allowedTipos:['FB'],cashArea:'recepcion',config:{arcaAmbiente:'homologacion',puntoVentaHomolog:5,puntoVenta:21},showPaymentMethod:true});
+    await waitFor(()=>expect(screen.getByTestId('select-punto-venta')).toHaveTextContent('PV 0005'));
+    expect(screen.getByTestId('select-punto-venta')).toBeDisabled();
+    expect(screen.queryByText(/PV 0021/)).not.toBeInTheDocument();
+  });
+  it('keeps the operational reception point for nonfiscal documents in homologation',async()=>{
+    vi.stubGlobal('fetch',buildFetchMock(POS_CONFIGS_SINGLE_MATCH));
+    renderDialog({allowedTipos:['cierre_habitacion'],cashArea:'recepcion',config:{arcaAmbiente:'homologacion',puntoVentaHomolog:5,puntoVenta:21}});
+    await waitFor(()=>expect(screen.getByTestId('select-punto-venta')).toHaveTextContent('PV 0021'));
+    expect(screen.getByTestId('select-punto-venta')).not.toBeDisabled();
+  });
   it("preselecciona el Punto de Venta cuando hay un único PV electrónico activo para el área", async () => {
     vi.stubGlobal("fetch", buildFetchMock(POS_CONFIGS_SINGLE_MATCH));
     renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion", showPaymentMethod: true });

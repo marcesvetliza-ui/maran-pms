@@ -1,3 +1,4 @@
+import {billingPointOptions} from "@shared/billing-point-of-sale";
 import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
 import { canReviewCreditNoteAccount } from "@shared/credit-note-account-recovery";
 import { CashCardRectification } from '@/components/cash-card-rectification';
@@ -904,6 +905,10 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const initializedOperationRef = useRef<string | null>(null);
   const pvAutoSelectedForRef = useRef<string | null>(null);
   const { data: posConfigsData = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"] });
+  const homologFiscal=config?.arcaAmbiente==='homologacion' && ['FA','FB','FC','FM','FMB'].includes(tipo);
+  const invoicePointOptions=homologFiscal?billingPointOptions(config,posConfigsData):posConfigsData.filter((p:any)=>p.activo&&p.tipo==='electronico');
+  const effectivePuntoVentaNum=homologFiscal?String(invoicePointOptions[0]?.numero??''):puntoVentaNum;
+
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"] });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"] });
   const { data: guestMatches = [] } = useQuery<any[]>({
@@ -1061,7 +1066,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   // for posConfigsData to load and never overrides a value already set
   // (auto or manual) for this same operation.
   useEffect(() => {
-    if (!open || !cashArea) return;
+    if (!open || !cashArea || homologFiscal) return;
     if (pvAutoSelectedForRef.current === dialogOperationKey) return;
     if (posConfigsData.length === 0) return; // wait for the PV list to load, retry next render
     // Decide once per operation — resetForm() above always clears
@@ -1078,7 +1083,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       const preferred = [...matches].sort((a: any, b: any) => Number(a.numero) - Number(b.numero))[0];
       setPuntoVentaNum(String(preferred.numero));
     }
-  }, [open, cashArea, posConfigsData, dialogOperationKey]);
+  }, [open, cashArea, posConfigsData, dialogOperationKey, homologFiscal]);
 
   function applyEntity(entity: any) {
     const rs = entity.razonSocial || entity.nombreFantasia || "";
@@ -1761,7 +1766,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       items,
       ...(paymentId ? { paymentId } : {}),
       ...(reservationId ? { reservaId: reservationId } : {}),
-      puntoVenta: puntoVentaNum ? parseInt(puntoVentaNum) : undefined,
+      puntoVenta: effectivePuntoVentaNum ? parseInt(effectivePuntoVentaNum) : undefined,
       ...(resolvedGroupId ? {
         groupId: resolvedGroupId,
         ...(groupPaymentId ? { groupPaymentId } : {}),
@@ -2159,20 +2164,20 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           </div>
         )}
 
-        {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").length > 0 && (
+        {invoicePointOptions.length > 0 && (
           <div className="space-y-1">
             <Label>Punto de Venta (ARCA)</Label>
-            <Select value={puntoVentaNum} onValueChange={setPuntoVentaNum}>
+            <Select value={effectivePuntoVentaNum} onValueChange={setPuntoVentaNum} disabled={homologFiscal}>
               <SelectTrigger data-testid="select-punto-venta"><SelectValue placeholder="PV por defecto (configuración)" /></SelectTrigger>
               <SelectContent>
-                {posConfigsData.filter((p: any) => p.activo && p.tipo === "electronico").map((p: any) => (
+                {invoicePointOptions.map((p: any) => (
                   <SelectItem key={p.id} value={String(p.numero)}>
                     PV {String(p.numero).padStart(4, "0")} — {p.nombre}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Si no se selecciona, se usa el PV configurado en Facturación.</p>
+            <p className="text-xs text-muted-foreground">{homologFiscal?"Se usa el punto de pruebas configurado en Facturación. El punto de caja de la sesión se conserva.":"Si no se selecciona, se usa el PV configurado en Facturación."}</p>
           </div>
         )}
         </div>
