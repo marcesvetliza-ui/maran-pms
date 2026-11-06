@@ -1,3 +1,5 @@
+import { fetchReportJson } from "@/lib/report-request";
+import { ReportQueryError } from "@/components/report-query-error";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -187,11 +189,12 @@ export default function AdminReportesPage() {
 function EstadoResultadosReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/estado-resultados", periodo],
-    queryFn: () => fetch(`/api/reports/estado-resultados?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/estado-resultados?periodo=${encodeURIComponent(periodo)}`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando...</div>;
   if (!data) return null;
 
@@ -309,11 +312,12 @@ function EstadoResultadosReport() {
 function KpisReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/kpis", periodo],
-    queryFn: () => fetch(`/api/reports/kpis?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/kpis?periodo=${encodeURIComponent(periodo)}`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando KPIs...</div>;
   if (!data) return null;
 
@@ -404,11 +408,12 @@ function OcupacionReport() {
   const [desde, setDesde] = useState(format(startOfMonth(now), "yyyy-MM-dd"));
   const [hasta, setHasta] = useState(format(endOfMonth(now), "yyyy-MM-dd"));
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/ocupacion", desde, hasta],
-    queryFn: () => fetch(`/api/reports/ocupacion?desde=${desde}&hasta=${hasta}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/ocupacion?desde=${desde}&hasta=${hasta}`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando ocupación...</div>;
 
   const getHeatColor = (pct: number) => {
@@ -505,11 +510,12 @@ function OcupacionReport() {
 function IngresosReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/ingresos", periodo],
-    queryFn: () => fetch(`/api/reports/ingresos?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/ingresos?periodo=${encodeURIComponent(periodo)}`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando ingresos...</div>;
   if (!data) return null;
 
@@ -601,11 +607,12 @@ function IngresosReport() {
 function CostosReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/costos", periodo],
-    queryFn: () => fetch(`/api/reports/costos?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/costos?periodo=${encodeURIComponent(periodo)}`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando costos...</div>;
   if (!data) return null;
 
@@ -705,11 +712,12 @@ function CostosReport() {
 function ProveedoresReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/proveedores", periodo],
-    queryFn: () => fetch(`/api/reports/proveedores?periodo=${encodeURIComponent(periodo)}&top=10`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/proveedores?periodo=${encodeURIComponent(periodo)}&top=10`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando ranking...</div>;
   if (!data) return null;
 
@@ -726,9 +734,10 @@ function ProveedoresReport() {
         </div>
       </div>
 
+      <p className="text-sm text-muted-foreground">Total de los proveedores mostrados: $ {fPeso(data.totalComprasDelRanking)}. El total del período incluye todos los proveedores, sin comprobantes anulados.</p>
       <div className="grid grid-cols-2 gap-3">
         <KpiCard title="Total compras del período" value={data.totalComprasDelPeriodo ?? 0} unit="$" />
-        <KpiCard title="Proveedores activos" value={`${data.cantidadProveedoresActivos ?? 0}`} />
+        <KpiCard title="Proveedores con compras" value={`${data.cantidadProveedoresActivos ?? 0}`} />
       </div>
 
       <Card>
@@ -796,11 +805,12 @@ function ProveedoresReport() {
 function ComparativoReport() {
   const [año, setAño] = useState(() => getArgentinaToday().slice(0, 4));
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/reports/comparativo", año],
-    queryFn: () => fetch(`/api/reports/comparativo?anio=${año}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetchReportJson(`/api/reports/comparativo?anio=${año}`),
   });
 
+  if (isError) return <ReportQueryError retry={refetch} />;
   if (isLoading) return <div className="p-8 text-muted-foreground">Calculando comparativo anual...</div>;
   if (!data) return null;
 
@@ -896,11 +906,10 @@ const CHART_COLORS = ["#3b82f6","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899
 function VentasRestaurantReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/restaurant/reports/sales-stats", periodo],
     queryFn: () =>
-      fetch(`/api/restaurant/reports/sales-stats?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" })
-        .then(r => r.json()),
+      fetchReportJson(`/api/restaurant/reports/sales-stats?periodo=${encodeURIComponent(periodo)}`),
   });
 
   const r  = data?.resumen        ?? {};
@@ -922,6 +931,8 @@ function VentasRestaurantReport() {
   ]);
 
   const noData = !isLoading && r.totalOrdenes === 0;
+
+  if (isError) return <ReportQueryError retry={refetch} />;
 
   return (
     <div className="space-y-6">
@@ -1224,11 +1235,10 @@ function FoodCostReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
   const [filtro, setFiltro]   = useState<"all" | "food" | "beverage">("all");
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/restaurant/reports/food-cost", periodo],
     queryFn: () =>
-      fetch(`/api/restaurant/reports/food-cost?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" })
-        .then(r => r.json()),
+      fetchReportJson(`/api/restaurant/reports/food-cost?periodo=${encodeURIComponent(periodo)}`),
   });
 
   const resumen = data?.resumen ?? {};
@@ -1272,6 +1282,8 @@ function FoodCostReport() {
         CostoTeorico: d.costoTotal, BeverageCostPct: d.foodCostPct.toFixed(1) + "%", TieneReceta: d.tieneReceta ? "Sí" : "No",
     }))},
   ]);
+
+  if (isError) return <ReportQueryError retry={refetch} />;
 
   return (
     <div className="space-y-6">
@@ -1492,11 +1504,10 @@ function DesviosReport() {
   const [periodo, setPeriodo] = useState(currentPeriodo());
   const [filtro, setFiltro]   = useState<"todos" | "alerta" | "critico">("todos");
 
-  const { data, isLoading } = useQuery<any>({
+  const { data, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/restaurant/reports/desvios", periodo],
     queryFn: () =>
-      fetch(`/api/restaurant/reports/desvios?periodo=${encodeURIComponent(periodo)}`, { credentials: "include" })
-        .then(r => r.json()),
+      fetchReportJson(`/api/restaurant/reports/desvios?periodo=${encodeURIComponent(periodo)}`),
   });
 
   const handleExport = () => {
@@ -1534,6 +1545,8 @@ function DesviosReport() {
     }));
 
   const noData = !isLoading && todos.length === 0;
+
+  if (isError) return <ReportQueryError retry={refetch} />;
 
   return (
     <div className="space-y-6">

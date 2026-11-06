@@ -160,7 +160,7 @@ async function ingresosPorCuentas(desde: string, hasta: string): Promise<{ accou
   })));
 }
 
-async function costosCompras(desde: string, hasta: string): Promise<any[]> {
+export async function costosCompras(desde: string, hasta: string): Promise<any[]> {
   const r = await db.execute(sql`
     SELECT
       aa.codigo,
@@ -171,7 +171,7 @@ async function costosCompras(desde: string, hasta: string): Promise<any[]> {
     FROM purchase_invoices pi
     LEFT JOIN accounting_accounts aa ON aa.id = pi.cuenta_contable_id
     WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
-      AND (pi.estado != 'anulado' OR pi.tipo_comprobante NOT IN ('RESUMEN-BANCO', 'RETENCION', 'LIQ-TARJETA'))
+      AND COALESCE(pi.estado, '') <> 'anulado'
     GROUP BY aa.codigo, aa.nombre
     ORDER BY aa.codigo
   `);
@@ -711,41 +711,41 @@ export function registerReportsRoutes(app: Express) {
       const prevP = prevPeriodo(periodo);
       const { desde: prevDesde, hasta: prevHasta } = periodoToRange(prevP);
 
+      // Window totals are evaluated before LIMIT: the headline and percentages
+      // cover every current purchase, not just the displayed suppliers.
       const ranking = await db.execute(sql`
-        SELECT
-          s.razon_social AS proveedor,
-          s.cuit AS cuit,
-          COUNT(pi.id) AS cantidad_facturas,
-          COALESCE(SUM(pi.monto_total::numeric), 0) AS total_comprado
-        FROM purchase_invoices pi
-        JOIN accounting_suppliers s ON s.id = pi.supplier_id
-        WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
-        GROUP BY s.razon_social, s.cuit
-        ORDER BY total_comprado DESC
-        LIMIT ${top}
+        WITH por_proveedor AS (
+          SELECT pi.supplier_id, COALESCE(s.razon_social, 'Sin proveedor') AS proveedor,
+                 s.cuit, COUNT(pi.id) AS cantidad_facturas,
+                 COALESCE(SUM(pi.monto_total::numeric), 0) AS total_comprado
+          FROM purchase_invoices pi
+          LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
+          WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
+            AND COALESCE(pi.estado, '') <> 'anulado'
+          GROUP BY pi.supplier_id, s.razon_social, s.cuit
+        )
+        SELECT *, SUM(total_comprado) OVER() AS total_periodo,
+               COUNT(supplier_id) OVER() AS proveedores_periodo
+        FROM por_proveedor
+        ORDER BY total_comprado DESC, supplier_id
+        LIMIT ${Math.max(1, Math.min(100, top))}
       `);
-
-      const totalCompras = (ranking.rows as any[]).reduce((s, r) => s + $n(r.total_comprado), 0);
-
+      const totalCompras = $n((ranking.rows[0] as any)?.total_periodo);
+      const totalRanking = (ranking.rows as any[]).reduce((sum, row) => sum + $n(row.total_comprado), 0);
       const prevCompras = await db.execute(sql`
-        SELECT s.razon_social AS proveedor,
-               COALESCE(SUM(pi.monto_total::numeric), 0) AS total
-        FROM purchase_invoices pi JOIN accounting_suppliers s ON s.id = pi.supplier_id
-        WHERE pi.fecha_emision BETWEEN ${prevDesde} AND ${prevHasta}
-        GROUP BY s.razon_social
+        SELECT supplier_id, COALESCE(SUM(monto_total::numeric), 0) AS total
+        FROM purchase_invoices
+        WHERE fecha_emision BETWEEN ${prevDesde} AND ${prevHasta}
+          AND COALESCE(estado, '') <> 'anulado'
+        GROUP BY supplier_id
       `);
       const prevMap: Record<string, number> = {};
-      (prevCompras.rows as any[]).forEach(r => { prevMap[r.proveedor] = $n(r.total); });
-
-      const cantProveedoresActivos = (await db.execute(sql`
-        SELECT COUNT(DISTINCT supplier_id) AS c FROM purchase_invoices
-        WHERE fecha_emision BETWEEN ${desde} AND ${hasta}
-      `)).rows[0] as any;
+      (prevCompras.rows as any[]).forEach(r => { prevMap[r.supplier_id] = $n(r.total); });
 
       const varByProv = (ranking.rows as any[]).map(r => ({
         proveedor: r.proveedor,
-        variacion: prevMap[r.proveedor]
-          ? Math.round(($n(r.total_comprado) - prevMap[r.proveedor]) / prevMap[r.proveedor] * 1000) / 10
+        variacion: prevMap[r.supplier_id]
+          ? Math.round(($n(r.total_comprado) - prevMap[r.supplier_id]) / prevMap[r.supplier_id] * 1000) / 10
           : 0,
       }));
 
@@ -760,7 +760,8 @@ export function registerReportsRoutes(app: Express) {
           porcentajeDelTotal: pct($n(r.total_comprado), totalCompras),
         })),
         totalComprasDelPeriodo: totalCompras,
-        cantidadProveedoresActivos: $n(cantProveedoresActivos?.c),
+        totalComprasDelRanking: totalRanking,
+        cantidadProveedoresActivos: $n((ranking.rows[0] as any)?.proveedores_periodo),
         mayorAlza: varByProv.filter(v => v.variacion > 0).sort((a, b) => b.variacion - a.variacion).slice(0, 3),
         mayorBaja: varByProv.filter(v => v.variacion < 0).sort((a, b) => a.variacion - b.variacion).slice(0, 3),
       });
@@ -1388,7 +1389,9 @@ export function registerReportsRoutes(app: Express) {
       const dataRes = await fetch(`http://localhost:5000/api/reports/${tipo}?${queryStr}`, {
         headers: { cookie: req.headers.cookie || "" },
       });
+      if (!dataRes.ok) return res.status(dataRes.status).json({ error: 'No se pudo consultar el reporte. No se generó la descarga.' });
       const data = await dataRes.json() as any;
+      if (!data || typeof data !== 'object' || 'error' in data) return res.status(502).json({ error: 'Respuesta de reporte inválida. No se generó la descarga.' });
 
       const pdfBuf = await new Promise<Buffer>((resolve, reject) => {
         const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -1460,7 +1463,9 @@ export function registerReportsRoutes(app: Express) {
       const dataRes = await fetch(`http://localhost:5000/api/reports/${tipo}?${queryStr}`, {
         headers: { cookie: req.headers.cookie || "" },
       });
+      if (!dataRes.ok) return res.status(dataRes.status).json({ error: 'No se pudo consultar el reporte. No se generó la descarga.' });
       const data = await dataRes.json() as any;
+      if (!data || typeof data !== 'object' || 'error' in data) return res.status(502).json({ error: 'Respuesta de reporte inválida. No se generó la descarga.' });
 
       const wb = new ExcelJS.Workbook();
       wb.creator = "Maran Suite System";
