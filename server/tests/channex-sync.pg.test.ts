@@ -1,3 +1,4 @@
+vi.mock('../channex/access',()=>({registerChannexAccessRoutes:()=>{},requireChannex:()=> (req:any,_res:any,next:any)=>{req.user={id:'channex-sync-test',username:'channex-sync-test',role:'admin'};next();}}));
 /**
  * Fase 1 de la integración con Channex: bandeja aislada de la operación
  * real (no es "solo lectura" en sentido estricto — confirmar el feed sí es
@@ -58,7 +59,7 @@ vi.mock("../channex/client", async (importOriginal) => {
     fetchChannexRoomTypes: vi.fn(),
     fetchChannexRatePlans: vi.fn(),
     fetchPendingBookingRevisions: vi.fn(),
-    fetchChannexBooking: vi.fn(),
+    fetchChannexBookingRevision: vi.fn(),
     acknowledgeBookingRevision: vi.fn(),
   };
 });

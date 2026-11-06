@@ -1,3 +1,4 @@
+import {connectionUrl,productionEnabled} from './connectionPolicy';
 import { and, eq } from "drizzle-orm";
 import { db } from "../db";
 import {
@@ -13,7 +14,7 @@ import {
 import {
   acknowledgeBookingRevision,
   ChannexApiError,
-  fetchChannexBooking,
+  fetchChannexBookingRevision,
   fetchChannexRatePlans,
   fetchChannexRoomTypes,
   fetchPendingBookingRevisions,
@@ -50,6 +51,7 @@ function toCredentials(connection: ChannexConnection) {
 async function getConnectionOrThrow(connectionId: string): Promise<ChannexConnection> {
   const [connection] = await db.select().from(channexConnections).where(eq(channexConnections.id, connectionId));
   if (!connection) throw new Error("Conexión de Channex no encontrada");
+  connectionUrl(connection);
   return connection;
 }
 
@@ -226,6 +228,7 @@ export type BookingSyncSummary = {
  */
 export async function syncBookings(connectionId: string): Promise<BookingSyncSummary> {
   const connection = await getConnectionOrThrow(connectionId);
+  if(connection.environment==='real'&&(!connection.isActive||!productionEnabled('inbound')))throw Error('La recepción de producción todavía está desactivada.');
   const credentials = toCredentials(connection);
   const revisions = await fetchPendingBookingRevisions(credentials, connection.channexPropertyId);
 
@@ -330,6 +333,7 @@ export type ConfirmBookingsSummary = {
  */
 export async function confirmBookings(connectionId: string, revisionIds?: string[]): Promise<ConfirmBookingsSummary> {
   const connection = await getConnectionOrThrow(connectionId);
+  if(connection.environment==='real'&&(!connection.isActive||!productionEnabled('inbound')))throw Error('La recepción de producción todavía está desactivada.');
   const credentials = toCredentials(connection);
 
   const rows = await db.select().from(channexBookings).where(eq(channexBookings.connectionId, connectionId));
@@ -374,9 +378,12 @@ export async function retryBooking(bookingRowId: string): Promise<ChannexBooking
   const [row] = await db.select().from(channexBookings).where(eq(channexBookings.id, bookingRowId));
   if (!row) throw new Error("Reserva de Channex no encontrada");
   const connection = await getConnectionOrThrow(row.connectionId);
+  if(connection.environment==='real'&&(!connection.isActive||!productionEnabled('inbound')))throw Error('La recepción de producción todavía está desactivada.');
   const credentials = toCredentials(connection);
 
-  const remote = await fetchChannexBooking(credentials, row.channexBookingId);
+  if (!row.channexRevisionId) throw new Error("La reserva no conserva una revisión. Volvé a consultar el feed.");
+  const remote = await fetchChannexBookingRevision(credentials, row.channexRevisionId);
+  if (remote && String(remote.attributes?.booking_id) !== String(row.channexBookingId)) throw new Error("La revisión no pertenece a esta reserva");
   if (!remote) throw new Error("Channex no devolvió esa reserva");
 
   const extracted = extractBookingFields(remote);

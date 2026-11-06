@@ -1,3 +1,4 @@
+import {useChannexAccess} from '@/hooks/use-channex-access';
 import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
@@ -128,7 +129,6 @@ const menuSections = [
     items: [
       { label: "Motor de Reservas", icon: MonitorSmartphone, href: "/admin/booking-engine", resourceKey: "sidebar:/admin/booking-engine" },
       { label: "Canales OTAs",      icon: Globe,             href: "/ota-channels",         resourceKey: "sidebar:/ota-channels" },
-      { label: "Channex (prueba)",  icon: Satellite,         href: "/channex",              resourceKey: "sidebar:/channex" },
       { label: "Grupos",            icon: Users,             href: "/groups",               resourceKey: "sidebar:/groups" },
       { label: "Empresas",          icon: Building2,         href: "/companies",            resourceKey: "sidebar:/companies" },
       { label: "Agencias",          icon: Briefcase,         href: "/agencies",             resourceKey: "sidebar:/agencies" },
@@ -412,7 +412,9 @@ const SUB_COLLAPSED_KEY = "sidebar_collapsed_subgroups";
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission: roleHasPermission } = useAuth();
+  const {data:otaAccess}=useChannexAccess();
+  const hasPermission=(key:string)=>key==='sidebar:/ota-channels'?!!otaAccess?.read:roleHasPermission(key);
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {

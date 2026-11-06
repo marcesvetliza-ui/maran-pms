@@ -1,3 +1,4 @@
+import {DEMO_URL,PRODUCTION_URL,productionEnabled} from './connectionPolicy';
 /**
  * Cliente HTTP mínimo para la API de Channex (channel manager).
  *
@@ -23,12 +24,14 @@ export type ChannexConnectionCredentials = {
 export class ChannexApiError extends Error {
   status: number;
   body: unknown;
+  retryAfter: string | null;
 
-  constructor(message: string, status: number, body: unknown) {
+  constructor(message: string, status: number, body: unknown, retryAfter: string | null = null) {
     super(message);
     this.name = "ChannexApiError";
     this.status = status;
     this.body = body;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -39,7 +42,10 @@ async function channexRequest(
   path: string,
   init: { method?: string } = {},
 ): Promise<any> {
-  const url = `${connection.baseUrl.replace(/\/$/, "")}${path}`;
+  const baseUrl=connection.baseUrl.replace(/\/$/,'');
+  if(![DEMO_URL,PRODUCTION_URL].includes(baseUrl))throw new ChannexApiError('Dirección de Channex no permitida',400,null);
+  if(baseUrl===PRODUCTION_URL&&init.method&&init.method!=='GET'&&!productionEnabled('inbound'))throw new ChannexApiError('La recepción de producción aún no está habilitada',409,null);
+  const url = `${baseUrl}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -50,11 +56,15 @@ async function channexRequest(
         "Content-Type": "application/json",
       },
       signal: controller.signal,
+      redirect: "error",
     });
     const text = await response.text();
-    const body = text ? JSON.parse(text) : null;
+    let body: any = null;
+    try { body = text ? JSON.parse(text) : null; } catch {
+      if (response.ok) throw new ChannexApiError("Channex devolvió una respuesta inválida", response.status, null);
+    }
     if (!response.ok) {
-      throw new ChannexApiError(`Channex respondió ${response.status} en ${path}`, response.status, body);
+      throw new ChannexApiError(`Channex respondió ${response.status} en ${path}`, response.status, body, response.headers.get("retry-after"));
     }
     return body;
   } catch (err) {
@@ -97,8 +107,8 @@ export async function fetchPendingBookingRevisions(connection: ChannexConnection
   return body?.data ?? [];
 }
 
-export async function fetchChannexBooking(connection: ChannexConnectionCredentials, bookingId: string): Promise<any | null> {
-  const body = await channexRequest(connection, `/bookings/${encodeURIComponent(bookingId)}`);
+export async function fetchChannexBookingRevision(connection: ChannexConnectionCredentials, revisionId: string): Promise<any | null> {
+  const body = await channexRequest(connection, `/booking_revisions/${encodeURIComponent(revisionId)}`);
   return body?.data ?? null;
 }
 

@@ -34,7 +34,7 @@ export function registerAdminPermissionsRoutes(app: Express) {
       const rows = await db
         .select({ role: rolePermissions.role, resourceKey: rolePermissions.resourceKey })
         .from(rolePermissions);
-      const catalog = Object.entries(RESOURCE_KEY_LABELS).map(([resourceKey, meta]) => ({
+      const catalog = Object.entries(RESOURCE_KEY_LABELS).filter(([key])=>!['api:channex:config','sidebar:/channex','sidebar:/ota-channels'].includes(key)).map(([resourceKey, meta]) => ({
         resourceKey,
         ...meta,
       }));

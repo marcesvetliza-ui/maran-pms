@@ -1,3 +1,4 @@
+import {ReservationChannexSettlement} from '@/components/channex-settlement';
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
 import { ReservationNightlyPricing, ReservationFolioSummary, type ReservationNightlyPricingHandle } from "@/components/reservation-nightly-pricing";
@@ -3402,6 +3403,7 @@ export function ReservationDetailDialog({
               </div>
             </div>
 
+            {reservation.reservationCode?.startsWith("CHX-") && <ReservationChannexSettlement reservationId={reservation.id} open={open}/> }
             {(reservation.notes || reservation.groupNotes) && (
               <div className="p-3 border rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">Observaciones</p>

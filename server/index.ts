@@ -224,6 +224,21 @@ app.use((req, res, next) => {
       return;
     }
     startupReady = true;
+    try {
+      const {pool}=await import('./db');
+      const {ensureChannexAccessSchema}=await import('./channex/access');
+      await ensureChannexAccessSchema();
+      const {ensureChannexAriSchema}=await import('./channex/ariSchema');
+      await ensureChannexAriSchema(pool);
+      const {ensureChannexInboundSchema}=await import('./channex/inboundSchema');
+      await ensureChannexInboundSchema(pool);
+      const {startChannexAriWorker}=await import('./channex/ariWorker');
+      const {startInboundWorker}=await import('./channex/inboundWorker');
+      httpServer.once('close',startChannexAriWorker(pool));
+      httpServer.once('close',startInboundWorker(pool));
+      const {setChannexPrepared}=await import('./channex/runtimeState');
+      setChannexPrepared();
+    } catch (error:any) { logger.warn('[channex] Integración inactiva: '+(error?.message||'No se pudo preparar su configuración.')); }
 
     const { seedDatabase, refreshRealData } = await import("./seed");
     await mig("seedDatabase", seedDatabase);

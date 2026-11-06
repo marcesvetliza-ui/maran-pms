@@ -1,3 +1,8 @@
+import {productionEnabled} from './channex/connectionPolicy';
+import {isChannexPrepared} from './channex/runtimeState';
+import { registerChannexInboundWebhook } from './channex/inboundRoutes';
+import { registerRateCalendarRoutes } from './rates/calendarRoutes';
+import { requireChannex } from './channex/access';
 import { getFinancialSchemaStatus } from "./migrate";
 import { BUILD_REVISION } from "./buildRevision";
 import { activeSalesRecord } from "./salesArchive";
@@ -35,7 +40,7 @@ const NIGHT_AUDIT_RUN_RESOURCE_KEY = "api:night-audit:run";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
 import { voidSpaPayment } from "./spaCancellation";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { systemUsers, spaProfessionals, spaClients, systemSettings } from "@shared/schema";
 import { lostFoundItems, systemIncidents, events as eventsTable, nightAuditLogs } from "@shared/schema";
 import { eq, sql, desc, asc, gte, lte, and, or, ilike, like, inArray, ne, type SQL } from "drizzle-orm";
@@ -305,6 +310,8 @@ export async function registerRoutes(
       version: "1.0.0",
       revision: BUILD_REVISION,
       financialReady,
+      otaIntegrationPrepared:isChannexPrepared(),
+      otaProductionEnabled:productionEnabled('ari')||productionEnabled('inbound'),
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
     });
@@ -354,6 +361,8 @@ export async function registerRoutes(
     res.status(401).json({ message: "No autenticado" });
   });
 
+  registerChannexInboundWebhook(app,pool);
+  app.use(['/api/ota-channels','/api/ota-reservations'],(req,res,next)=>requireChannex(req.method==='GET'?'read':'config')(req,res,next));
   registerAuthBootstrapRoute(app);
   // Registrado antes del gate: /2fa/verify-login necesita ser alcanzable con
   // una sesión "pending2FA" (que requireAuth del gate rechazaría), y las
@@ -4008,6 +4017,7 @@ export async function registerRoutes(
   registerRevenueRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);
+  registerRateCalendarRoutes(app);
   registerChannexRoutes(app);
   registerPlanningRoutes(app);
   registerPackagesRoutes(app);
