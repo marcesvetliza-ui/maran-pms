@@ -1,3 +1,4 @@
+import {useRestaurantLayout} from '@/hooks/use-restaurant-layout';
 import {RestaurantItemQuantityPicker} from "@/components/restaurant-item-quantity-picker";
 import {restaurantPortionCents} from "@shared/restaurant-item-quantities";
 import { RestaurantMoveDestination } from "@/components/restaurant-move-destination";
@@ -720,7 +721,6 @@ export default function RestaurantPage() {
   const [reservationDate, setReservationDate] = useState(getArgentinaToday());
   const [editingReservation, setEditingReservation] = useState<TableReservation | null>(null);
   const [isEditReservationOpen, setIsEditReservationOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
   const [draggedTable, setDraggedTable] = useState<RestaurantTable | null>(null);
   const [isAddTableDialogOpen, setIsAddTableDialogOpen] = useState(false);
   const [isEditTableDialogOpen, setIsEditTableDialogOpen] = useState(false);
@@ -2023,9 +2023,11 @@ export default function RestaurantPage() {
     },
   });
 
+  const layout = useRestaurantLayout(tables,toast);
+  const isEditMode = layout.editing;
   const filteredTables = selectedArea === "all"
-    ? tables
-    : tables.filter((t) => t.areaId === selectedArea);
+    ? layout.tables
+    : layout.tables.filter((t) => t.areaId === selectedArea);
 
   const activeOrders = orders.filter((o) => o.status !== "closed" && o.status !== "cancelled");
   const closedOrders = orders.filter((o) => o.status === "closed");
@@ -2310,12 +2312,7 @@ export default function RestaurantPage() {
 
   const handleDrop = (x: number, y: number, areaId: string) => {
     if (!draggedTable || !isEditMode) return;
-    const existingTable = tables.find(t => t.positionX === x && t.positionY === y && t.areaId === areaId && t.id !== draggedTable.id);
-    if (existingTable) return;
-    updateTableMutation.mutate({
-      id: draggedTable.id,
-      data: { positionX: x, positionY: y },
-    });
+    layout.move(draggedTable.id,x,y,areaId);
     setDraggedTable(null);
   };
 
@@ -2677,13 +2674,15 @@ export default function RestaurantPage() {
                 <Button
                   variant={isEditMode ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setIsEditMode(!isEditMode)}
+                  onClick={layout.toggle}
+                  disabled={layout.saving}
                   data-testid="button-edit-layout"
                 >
                   {isEditMode ? <Check className="h-4 w-4 mr-2" /> : <Settings className="h-4 w-4 mr-2" />}
-                  {isEditMode ? "Guardar Layout" : "Editar Layout"}
+                  {layout.saving ? "Guardando layout…" : isEditMode ? "Guardar Layout" : "Editar Layout"}
                 </Button>
               )}
+              {isEditMode && <Button size="sm" variant="outline" disabled={layout.saving} onClick={()=>{layout.discard();setDraggedTable(null);}}>Descartar movimientos</Button>}
               {isEditMode && (
                 <Button
                   size="sm"
@@ -2702,6 +2701,8 @@ export default function RestaurantPage() {
             </div>
           </div>
 
+          {isEditMode && <p className="text-sm text-muted-foreground" role="status">Mové las mesas y presioná Guardar Layout. También podés tocar una mesa y luego su destino. Sobre otra mesa se intercambian las posiciones. {layout.changes} mesas con cambios.</p>}
+          {layout.error && <p role="alert" className="text-sm text-destructive">{layout.error}</p>}
           {/* Reservas sin mesa asignada — hoy */}
           {(() => {
             const todayFloor = getArgentinaToday();
@@ -2904,11 +2905,12 @@ export default function RestaurantPage() {
                             return (
                               <button
                                 key={table.id}
-                                draggable={isEditMode}
+                                draggable={isEditMode && !layout.saving}
                                 onDragStart={() => handleDragStart(table)}
+                                onDragEnd={() => setDraggedTable(null)}
                                 onDragOver={handleDragOver}
                                 onDrop={() => handleDrop(x, y, area.id)}
-                                onClick={() => handleTableClick(table)}
+                                onClick={() => { if(isEditMode){if(draggedTable&&draggedTable.id!==table.id)handleDrop(x,y,area.id);else setDraggedTable(table);}else handleTableClick(table); }}
                                 className={`p-2 border-2 transition-all flex flex-col items-center justify-center gap-0.5 relative ${
                                   tableStatusColors[effectiveStatus]
                                 } ${table.shape === "round" ? "rounded-full" : "rounded-md"} ${
@@ -2983,6 +2985,12 @@ export default function RestaurantPage() {
                           return (
                             <div
                               key={`empty-${x}-${y}`}
+                              role={isEditMode?'button':undefined}
+                              tabIndex={isEditMode?0:undefined}
+                              aria-label={isEditMode?`Mover mesa a columna ${x+1}, fila ${y+1} de ${area.name}`:undefined}
+                              data-testid={`layout-cell-${area.id}-${x}-${y}`}
+                              onClick={()=>{if(isEditMode)handleDrop(x,y,area.id);}}
+                              onKeyDown={e=>{if(isEditMode&&['Enter',' '].includes(e.key)){e.preventDefault();handleDrop(x,y,area.id);}}}
                               className={`rounded-md transition-all ${
                                 isEditMode
                                   ? "border-2 border-dashed border-muted-foreground/20 hover:border-primary/40 hover:bg-primary/5"
