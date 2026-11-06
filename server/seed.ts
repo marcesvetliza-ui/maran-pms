@@ -195,13 +195,13 @@ export async function seedDatabase() {
 
   console.log("Seeding restaurant areas...");
   await db.insert(restaurantAreas).values([
-    { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor", capacity: 72, hasTables: "true", isActive: "true", notes: "Mesas cuadradas" },
-    { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor", capacity: 56, hasTables: "true", isActive: "true", notes: "Mesas redondas" },
-    { id: "area-terraza", name: "Terraza", areaType: "outdoor", capacity: 24, hasTables: "true", isActive: "true", notes: "Mesas exteriores - temporada verano" },
-    { id: "area-rs", name: "Room Service", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
-    { id: "area-delivery", name: "Delivery", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
-    { id: "area-solarium", name: "Solarium", areaType: "outdoor", capacity: 0, hasTables: "false", isActive: "true", notes: null },
-    { id: "area-spa", name: "SPA", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+    { id: "area1", displayOrder: 0, name: "Sector Bodega (Mesas 1-18)", areaType: "indoor", capacity: 72, hasTables: "true", isActive: "true", notes: "Mesas cuadradas" },
+    { id: "area2", displayOrder: 1, name: "Sector Moneda (Mesas 19-32)", areaType: "indoor", capacity: 56, hasTables: "true", isActive: "true", notes: "Mesas redondas" },
+    { id: "area-terraza", displayOrder: 2, name: "Terraza", areaType: "outdoor", capacity: 24, hasTables: "true", isActive: "true", notes: "Mesas exteriores - temporada verano" },
+    { id: "area-rs", displayOrder: 3, name: "Room Service", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+    { id: "area-delivery", displayOrder: 4, name: "Delivery", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+    { id: "area-solarium", displayOrder: 5, name: "Solarium", areaType: "outdoor", capacity: 0, hasTables: "false", isActive: "true", notes: null },
+    { id: "area-spa", displayOrder: 6, name: "SPA", areaType: "private", capacity: 0, hasTables: "false", isActive: "true", notes: null },
   ]);
 
   console.log("Seeding restaurant tables...");
@@ -542,9 +542,6 @@ export async function refreshRealData() {
     await db.execute(sql`UPDATE event_rooms SET name = 'Salón Solárium' WHERE name = 'Salón Mirador'`);
     // Ensure display_order column exists in restaurant_areas
     await db.execute(sql`ALTER TABLE restaurant_areas ADD COLUMN IF NOT EXISTS display_order integer DEFAULT 0`);
-    // Set display order for known areas
-    await db.execute(sql`UPDATE restaurant_areas SET display_order = 0 WHERE id = 'area1'`);
-    await db.execute(sql`UPDATE restaurant_areas SET display_order = 1 WHERE id = 'area2'`);
 
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS account_movements (
@@ -807,13 +804,13 @@ export async function refreshRealData() {
     `);
 
     const realAreas = [
-      { id: "area1", name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },
-      { id: "area2", name: "Sector Moneda (Mesas 19-32)", areaType: "indoor" as const, capacity: 56, hasTables: "true" as const, isActive: "true" as const },
-      { id: "area-terraza", name: "Terraza", areaType: "outdoor" as const, capacity: 24, hasTables: "true" as const, isActive: "true" as const },
-      { id: "area-rs", name: "Room Service", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
-      { id: "area-delivery", name: "Delivery", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
-      { id: "area-solarium", name: "Solarium", areaType: "outdoor" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
-      { id: "area-spa", name: "SPA", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area1", displayOrder: 0, name: "Sector Bodega (Mesas 1-18)", areaType: "indoor" as const, capacity: 72, hasTables: "true" as const, isActive: "true" as const },
+      { id: "area2", displayOrder: 1, name: "Sector Moneda (Mesas 19-32)", areaType: "indoor" as const, capacity: 56, hasTables: "true" as const, isActive: "true" as const },
+      { id: "area-terraza", displayOrder: 2, name: "Terraza", areaType: "outdoor" as const, capacity: 24, hasTables: "true" as const, isActive: "true" as const },
+      { id: "area-rs", displayOrder: 3, name: "Room Service", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area-delivery", displayOrder: 4, name: "Delivery", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area-solarium", displayOrder: 5, name: "Solarium", areaType: "outdoor" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
+      { id: "area-spa", displayOrder: 6, name: "SPA", areaType: "private" as const, capacity: 0, hasTables: "false" as const, isActive: "true" as const },
     ];
 
     const existingAreas = await db.select({ id: restaurantAreas.id }).from(restaurantAreas);
@@ -822,8 +819,6 @@ export async function refreshRealData() {
     for (const area of realAreas) {
       if (!existingAreaIds.includes(area.id)) {
         await db.insert(restaurantAreas).values(area).onConflictDoNothing();
-      } else {
-        await db.update(restaurantAreas).set({ name: area.name, areaType: area.areaType, capacity: area.capacity, hasTables: area.hasTables }).where(eq(restaurantAreas.id, area.id));
       }
     }
     // NOTE: We do NOT delete areas not in realAreas — they may be user-created custom areas (e.g. custom event rooms).

@@ -1,3 +1,4 @@
+import { RestaurantAreaSettings } from '@/components/restaurant-area-settings';
 import {useRestaurantLayout} from '@/hooks/use-restaurant-layout';
 import {RestaurantItemQuantityPicker} from "@/components/restaurant-item-quantity-picker";
 import {restaurantPortionCents} from "@shared/restaurant-item-quantities";
@@ -102,6 +103,7 @@ type RestaurantArea = {
   hasTables: string | null;
   isActive: string;
   notes: string | null;
+  displayOrder?: number | null;
 };
 
 type RestaurantTable = {
@@ -1558,6 +1560,7 @@ export default function RestaurantPage() {
       setEditingAreaId(null);
       toast({ title: "Área actualizada" });
     },
+    onError: (error) => toast({ title: "No se pudo guardar el nombre", description: parseApiError(error), variant: "destructive" }),
   });
 
   const handleSaveAreaName = (id: string) => {
@@ -2680,6 +2683,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
               ))}
             </div>
             <div className="ml-auto flex items-center gap-2">
+              {canEditLayout && <RestaurantAreaSettings areas={areas}/>}
               {canEditLayout && (
                 <Button
                   variant={isEditMode ? "default" : "outline"}
@@ -2772,7 +2776,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           ) : (
             <div className="grid gap-6">
               {(selectedArea === "all"
-                ? [...areas].sort((a, b) => (a.areaType === "event" ? 1 : b.areaType === "event" ? -1 : 0))
+                ? areas
                 : areas.filter((a) => a.id === selectedArea)
               ).map((area) => {
                 if (area.hasTables === "false") {

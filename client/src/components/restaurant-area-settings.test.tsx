@@ -1,0 +1,22 @@
+import {render,screen,waitFor,cleanup} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
+import {afterEach,it,expect,vi} from 'vitest';
+import {RestaurantAreaSettings} from './restaurant-area-settings';
+vi.mock('@/hooks/use-toast',()=>({useToast:()=>({toast:vi.fn()})}));
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+it('saves a renamed and reordered list together, retains the draft after failure, and reopens the saved list',async()=>{
+ const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});
+ const areas=[{id:'bodega',name:'Bodega',displayOrder:0,capacity:72},{id:'moneda',name:'Moneda',displayOrder:1,capacity:56}];client.setQueryData(['/api/restaurant/areas'],areas);
+ let fail=true,payload:any;
+ vi.stubGlobal('fetch',vi.fn(async(_url:any,options:any)=>{payload=JSON.parse(options.body);return new Response(JSON.stringify(fail?{error:'No se pudo guardar'}:{saved:true}),{status:fail?500:200});}));
+ const user=userEvent.setup();const view=render(<QueryClientProvider client={client}><RestaurantAreaSettings areas={areas}/></QueryClientProvider>);
+ await user.click(screen.getByRole('button',{name:'Configurar sectores'}));
+ await user.clear(screen.getByLabelText('Nombre del sector 2'));await user.type(screen.getByLabelText('Nombre del sector 2'),'Sector Moneda (Mesas 1-14)');
+ await user.click(screen.getByRole('button',{name:'Subir Sector Moneda (Mesas 1-14)'}));
+ await user.click(screen.getByRole('button',{name:'Guardar sectores'}));await screen.findByRole('alert');expect(screen.getByLabelText('Nombre del sector 1')).toHaveValue('Sector Moneda (Mesas 1-14)');
+ expect(payload.areas).toEqual([{id:'moneda',name:'Sector Moneda (Mesas 1-14)',expectedName:'Moneda',expectedOrder:1},{id:'bodega',name:'Bodega',expectedName:'Bodega',expectedOrder:0}]);
+ fail=false;await user.click(screen.getByRole('button',{name:'Guardar sectores'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+ const saved=client.getQueryData<any[]>(['/api/restaurant/areas'])!;expect(saved[0]).toMatchObject({id:'moneda',displayOrder:0,capacity:56});
+ view.rerender(<QueryClientProvider client={client}><RestaurantAreaSettings areas={saved}/></QueryClientProvider>);await user.click(screen.getByRole('button',{name:'Configurar sectores'}));expect(screen.getByLabelText('Nombre del sector 1')).toHaveValue('Sector Moneda (Mesas 1-14)');
+});

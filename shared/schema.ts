@@ -1236,6 +1236,7 @@ export const restaurantAreas = pgTable("restaurant_areas", {
   capacity: integer("capacity").notNull().default(20),
   hasTables: text("has_tables").default("true"),
   isActive: text("is_active").default("true"),
+  displayOrder: integer("display_order").default(0),
   notes: text("notes"),
 });
 

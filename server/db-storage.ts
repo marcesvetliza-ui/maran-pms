@@ -4503,7 +4503,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getRestaurantAreas(): Promise<RestaurantArea[]> {
-    return db.select().from(restaurantAreas).where(eq(restaurantAreas.isActive, "true"));
+    return db.select().from(restaurantAreas).where(eq(restaurantAreas.isActive, "true")).orderBy(sql`COALESCE(${restaurantAreas.displayOrder},0)`,asc(restaurantAreas.id));
   }
 
   async getRestaurantArea(id: string): Promise<RestaurantArea | undefined> {
