@@ -4546,9 +4546,9 @@ export default function RestaurantPage() {
           setIsSplitMode(false);
         }
       }}>
-        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] flex flex-col">
+        <DialogContent className="operational-dialog restaurant-workspace-dialog">
           <DialogHeader>
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <DialogTitle>
                   {getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber} - {getUpdatedOrder()?.tableId ? `Mesa ${getUpdatedOrder()?.table?.tableNumber || selectedTable?.tableNumber}` : (areas.find(a => a.id === getUpdatedOrder()?.areaId)?.name || "")}
@@ -4629,7 +4629,7 @@ export default function RestaurantPage() {
           </DialogHeader>
 
           {orderView === "folio" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-lg">Resumen de Consumos</h3>
                 {!isTransferMode && getOrderItems().length > 0 && (
@@ -4799,7 +4799,7 @@ export default function RestaurantPage() {
           )}
 
           {orderView === "comanda" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <h3 className="font-semibold text-lg">Comanda</h3>
               {getOrderItems().length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No hay items en este pedido</p>
@@ -4873,7 +4873,7 @@ export default function RestaurantPage() {
           )}
 
           {orderView === "review" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <div className="flex items-center gap-2">
                 <ClipboardList className="h-5 w-5 text-primary" />
                 <h3 className="font-semibold text-lg">Confirmar Comanda</h3>
@@ -4927,7 +4927,7 @@ export default function RestaurantPage() {
           )}
 
           {orderView === "delete" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <h3 className="font-semibold text-lg">Eliminar Items</h3>
               {getOrderItems().length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No hay items para eliminar</p>
@@ -4968,7 +4968,7 @@ export default function RestaurantPage() {
           )}
 
           {orderView === "menu" && !pendingItem && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               {/* Buscador */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -5116,7 +5116,7 @@ export default function RestaurantPage() {
           )}
 
           {orderView === "menu" && pendingItem && (
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <div className="p-4 border rounded-md bg-muted/30">
                 <h3 className="font-semibold text-lg mb-1">{pendingItem.name}</h3>
                 <p className="text-muted-foreground">
@@ -5418,7 +5418,7 @@ export default function RestaurantPage() {
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemQuantities({}); setMoveItemTargetOrderId(""); setPayItemQuantities({}); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
-        <DialogContent className="operational-dialog restaurant-checkout">
+        <DialogContent className="operational-dialog restaurant-workspace-dialog restaurant-checkout">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
