@@ -1,3 +1,5 @@
+import { expandAccommodationCoverage, isAccommodationSource, type AccommodationNight } from '@shared/accommodationNights';
+import { PrefacturaNightEdit } from './prefactura-night-edit';
 import { billingPointOptions, billingPointError } from "@shared/billing-point-of-sale";
 import { useAuth } from "@/App";
 import { ReservationChargeVoid } from "@/components/reservation-charge-void";
@@ -54,6 +56,8 @@ interface PrefacturaFolioData {
   nights: number;
   roomRate: string;
   roomTotal: number;
+  accommodationNights?: AccommodationNight[];
+  pricingRevision?: number;
   charges: any[];
   fiscalAdjustments?: any[];
   totalCharges: number;
@@ -191,6 +195,7 @@ export function getRemainingChargeAmounts(
   allOriginalItems: SelectedFolioItem[],
   invoicedAmounts: Record<string, number>,
 ): Record<string, number> {
+  invoicedAmounts = expandAccommodationCoverage(invoicedAmounts, allOriginalItems.filter(item=>item.id.startsWith("accommodation:")));
   return Object.fromEntries(allOriginalItems.map((item) => [
     item.id,
     Math.max(0, item.amount - (invoicedAmounts[item.id] || 0)),
@@ -203,9 +208,9 @@ export function getRemainingChargeAmounts(
  * billed again after the original invoice has been fully credited.
  */
 export function getEffectiveFolioItemAmounts(
-  folio: Pick<PrefacturaFolioData, "roomTotal" | "charges">,
+  folio: Pick<PrefacturaFolioData, "roomTotal" | "charges" | "accommodationNights">,
 ): Record<string, number> {
-  const amounts: Record<string, number> = { accommodation: folio.roomTotal };
+  const amounts: Record<string, number> = folio.accommodationNights?.length ? Object.fromEntries(folio.accommodationNights.map(n=>[n.id,n.amount])) : { accommodation: folio.roomTotal };
   for (const charge of folio.charges || []) {
     const id = String(charge.id);
     const amount = parseFloat(String(charge.amount)) || 0;
@@ -225,22 +230,17 @@ export function getEffectiveFolioItemAmounts(
  */
 export function getSelectedFolioItems(
   selectedIds: Set<string>,
-  folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges">,
+  folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges" | "accommodationNights">,
   itemDescriptions: Record<string, string> = {},
   remainingAmounts?: Record<string, number>,
 ): SelectedFolioItem[] {
   const items: SelectedFolioItem[] = [];
   const effectiveAmounts = getEffectiveFolioItemAmounts(folio);
 
-  const accommodationAmount = remainingAmounts?.accommodation ?? effectiveAmounts.accommodation;
-  if (selectedIds.has("accommodation") && accommodationAmount > 0.01) {
-    items.push({
-      id: "accommodation",
-      amount: accommodationAmount,
-      originalAmount: folio.roomTotal,
-      description: itemDescriptions.accommodation ||
-        `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights !== 1 ? "s" : ""})`,
-    });
+  const lodging = folio.accommodationNights?.length ? folio.accommodationNights.map(n=>({id:n.id,amount:n.amount,date:n.date})) : [{id:'accommodation',amount:folio.roomTotal,date:''}];
+  for (const night of lodging) {
+    const amount=remainingAmounts?.[night.id] ?? effectiveAmounts[night.id];
+    if(selectedIds.has(night.id) && amount>0.01)items.push({id:night.id,amount,originalAmount:night.amount,description:itemDescriptions[night.id] || (night.date ? `Alojamiento Hab. ${folio.roomNumber} · noche ${night.date.split('-').reverse().join('/')}` : `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights!==1?'s':''})`)});
   }
 
   for (const charge of folio.charges || []) {
@@ -262,13 +262,13 @@ export function getSelectedFolioItems(
 }
 
 export function getAllBillableFolioItems(
-  folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges">,
+  folio: Pick<PrefacturaFolioData, "roomTotal" | "roomNumber" | "nights" | "charges" | "accommodationNights">,
   itemDescriptions: Record<string, string> = {},
   remainingAmounts?: Record<string, number>,
 ): SelectedFolioItem[] {
   const allIds = new Set<string>();
   const effectiveAmounts = getEffectiveFolioItemAmounts(folio);
-  if (effectiveAmounts.accommodation > 0) allIds.add("accommodation");
+  for(const [id,amount] of Object.entries(effectiveAmounts)) if(isAccommodationSource(id)&&amount>0)allIds.add(id);
   for (const charge of folio.charges || []) {
     if (charge.category !== "transfer_out" && charge.category !== "transfer_in" && !isReservationCreditNoteAdjustment(charge) &&
       (effectiveAmounts[String(charge.id)] ?? 0) > 0) {
@@ -1141,7 +1141,7 @@ export function PrefacturaDialog({
   const originalBillableItems = folio
     ? getAllBillableFolioItems(folio, itemDescriptions)
     : [];
-  const invoicedAmountsByCharge = getInvoicedAmountsByCharge(safeEmittedInvoices);
+  const invoicedAmountsByCharge = expandAccommodationCoverage(getInvoicedAmountsByCharge(safeEmittedInvoices),folio?.accommodationNights||[]);
   const remainingAmountsByCharge = getRemainingChargeAmounts(
     originalBillableItems,
     invoicedAmountsByCharge,
@@ -1318,7 +1318,7 @@ export function PrefacturaDialog({
   const hasReservationAgency = !!(reservation?.agencyId || (reservation as any)?.agency?.id || reservationGuest?.agencyId);
   const allowedBillingTargets: Array<"guest" | "company" | "agency"> = ["guest", "company", "agency"];
   const billingTargetLocked = false;
-  const hasSelectedAccommodation = selectedSourceIds.includes("accommodation");
+  const hasSelectedAccommodation = selectedSourceIds.some(isAccommodationSource);
   // Factura T solo corresponde a un huésped extranjero (nunca a una empresa o
   // agencia) facturando alojamiento — la misma condición que ya exige el
   // servidor en POST /api/billing/invoices.
@@ -1791,20 +1791,11 @@ export function PrefacturaDialog({
       const nextSelection = new Set<string>();
       const freshInvoicedAmounts = getInvoicedAmountsByCharge(refreshedInvoices.data || []);
       if (freshFolio) {
-        if (freshFolio.roomTotal > 0 &&
-          (freshFolio.roomTotal - (freshInvoicedAmounts.accommodation || 0)) > 0.01) {
-          nextSelection.add("accommodation");
-        }
-        for (const charge of freshFolio.charges || []) {
-          const id = String(charge.id);
-          if (charge.category !== "transfer_out" &&
-            charge.category !== "transfer_in" &&
-            parseFloat(charge.amount) > 0 &&
-            (parseFloat(charge.amount) - (freshInvoicedAmounts[id] || 0)) > 0.01) {
-            nextSelection.add(id);
-          }
-        }
+        const items=getAllBillableFolioItems(freshFolio,itemDescriptions);
+        const remaining=getRemainingChargeAmounts(items,freshInvoicedAmounts);
+        for(const item of items)if(remaining[item.id]>0.01)nextSelection.add(item.id);
       }
+
       if (nextSelection.size > 0) {
         const freshOriginalItems = getAllBillableFolioItems(freshFolio!, itemDescriptions);
         const freshRemainingAmounts = getRemainingChargeAmounts(
@@ -2257,8 +2248,18 @@ export function PrefacturaDialog({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {folio.accommodationNights?.some(n=>n.derived) && <TableRow><TableCell colSpan={5} className="text-xs text-muted-foreground">Reserva anterior: detalle distribuido desde el total contratado; no representa tarifas históricas por fecha.</TableCell></TableRow>}
+                    {!!folio.accommodationNights?.length && (getInvoicedAmountsByCharge(safeEmittedInvoices).accommodation||0)>0 && <TableRow><TableCell colSpan={5} className="text-xs text-muted-foreground">Facturación anterior agrupada: la cobertura se aplica por orden de fechas para calcular el saldo disponible. No acredita qué noche se facturó históricamente; la edición de importes permanece bloqueada.</TableCell></TableRow>}
+                    {!!folio.accommodationNights?.length && folio.accommodationNights.map(night=>{
+                      const item={id:night.id,originalAmount:night.amount,description:itemDescriptions[night.id]||`Alojamiento Hab. ${folio.roomNumber} · noche ${night.date.split('-').reverse().join('/')}`};
+                      return <ChargeRow key={item.id} selectionDisabled={night.amount<=0} id={item.id} amount={item.originalAmount} description={item.description}
+                        alreadyPaid={Math.max(0,item.originalAmount-(remainingAmountsByCharge[item.id]??item.originalAmount))} alreadyInvoiced={fullyInvoicedChargeIds.has(item.id)} selected={selectedIds.has(item.id)}
+                        onToggle={()=>{if(fullyInvoicedChargeIds.has(item.id))return;setSelectedIds(prev=>{const next=new Set(prev);next.has(item.id)?next.delete(item.id):next.add(item.id);return next;});}}
+                        editing={editingId===item.id} editingValue={editingValue} onStartEdit={()=>startEdit(item.id,item.description)} onEditChange={setEditingValue} onSaveEdit={saveEdit} onCancelEdit={()=>setEditingId(null)}
+                        editAction={<PrefacturaNightEdit reservationId={String(reservationId)} date={night.date} amount={night.amount} total={folio.roomTotal} revision={folio.pricingRevision||0} disabled={isSubmitting||hasPendingSubmission||!!serverAttempt||discoveringOperation||!!operationDiscoveryError||(getInvoicedAmountsByCharge(safeEmittedInvoices).accommodation||0)>0.005||(invoicedAmountsByCharge[item.id]||0)>0.005} onSaved={async()=>{await refetchFolio();await refetchEmittedInvoices();setItemDescriptions(prev=>{const next={...prev};delete next[item.id];return next;});}}/>}/>;
+                    })}
                     {/* Accommodation row */}
-                    {folio.roomTotal > 0 && (
+                    {folio.roomTotal > 0 && !folio.accommodationNights?.length && (
                       <ChargeRow
                         id="accommodation"
                         amount={folio.roomTotal}
@@ -2797,8 +2798,8 @@ export function PrefacturaDialog({
         reservationId={reservationId}
         folio={folio ?? null}
         transferRemaining={transferRemaining}
-        selectedChargeIds={selectedSourceIds.filter(id => id !== "accommodation")}
-        includeAccommodation={selectedSourceIds.includes("accommodation")}
+        selectedChargeIds={selectedSourceIds.filter(id => !isAccommodationSource(id))}
+        includeAccommodation={!!folio && (folio.accommodationNights?.length ? folio.accommodationNights.every(n=>n.amount<=0||selectedSourceIds.includes(n.id)) : selectedSourceIds.includes("accommodation"))}
         onSuccess={() => {
           setShowBulkTransfer(false);
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
@@ -3557,10 +3558,11 @@ function NotaDebitoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction, voidAction,
+  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction, voidAction, selectionDisabled,
 }: {
   editAction?: React.ReactNode;
   voidAction?: React.ReactNode;
+  selectionDisabled?: boolean;
   id: string; amount: number; description: string; date?: string; alreadyPaid: number;
   selected: boolean; onToggle: () => void;
   editing: boolean; editingValue: string;
@@ -3629,7 +3631,7 @@ function ChargeRow({
         {isTransfer ? (
           <ArrowRightLeft className={`h-3.5 w-3.5 mx-auto ${isTransferOut ? "text-orange-500" : "text-blue-500"}`} />
         ) : (
-          <Checkbox checked={selected} onCheckedChange={alreadyInvoiced ? undefined : onToggle} disabled={alreadyInvoiced} />
+          <Checkbox aria-label={`Seleccionar ${cleanDescription}`} checked={selected} onCheckedChange={alreadyInvoiced || selectionDisabled ? undefined : onToggle} disabled={alreadyInvoiced || selectionDisabled} />
         )}
       </TableCell>
       <TableCell>

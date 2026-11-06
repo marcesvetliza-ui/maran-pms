@@ -207,6 +207,22 @@ afterEach(() => {
 });
 
 describe("folio invoice source guard", () => {
+  it('supports separate nights, rejects concurrent duplicate night invoices and stale grouped clients',async()=>{
+    const {storage}=await import('../db-storage');
+    const mock=vi.spyOn(storage,'getReservation');
+    mock.mockResolvedValue({id:'reservation-1',checkInDate:'2026-11-01',checkOutDate:'2026-11-03',nights:2,totalRoomAmount:'200.00',pricingScheme:'nightly_v1',nightlyPricing:[{date:'2026-11-01',rateCents:10000,discountCents:0},{date:'2026-11-02',rateCents:10000,discountCents:0}]} as any);
+    try{await withServer(async baseUrl=>{
+      const post=(amounts:any)=>fetch(`${baseUrl}/api/billing/invoices`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(invoiceBody({sourceChargeIds:Object.keys(amounts),sourceChargeAmounts:amounts}))});
+      const duplicate=await Promise.all([post({'accommodation:2026-11-01':100}),post({'accommodation:2026-11-01':100})]);
+      expect(duplicate.map(r=>r.status).sort()).toEqual([201,409]);
+      expect((await post({'accommodation':200})).status).toBe(400);
+      const mixed=await post({'accommodation':50,'accommodation:2026-11-02':50});expect(mixed.status).toBe(409);
+      expect((await post({'accommodation:2026-11-02':100})).status).toBe(201);
+      expect((await post({'accommodation':100})).status).toBe(409);
+      expect(state.emitted.map(i=>i.sourceChargeAmounts)).toEqual([{'accommodation:2026-11-01':100},{'accommodation:2026-11-02':100}]);
+    });}finally{mock.mockRestore();}
+  });
+
   it("returns the recovery no-op contract for a brand-new operation under the reservation lock", async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(

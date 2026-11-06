@@ -202,6 +202,46 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
       await applicationPool.query("DELETE FROM groups WHERE id=$1",[group]);
     }
   });
+  const nightBody = (overrides:any={}) => ({date:'2090-01-01',amount:'100000.00',expectedAmount:90000,expectedTotal:285000,revision:0,reason:'Cambio individual solicitado',...overrides});
+  it('edita una noche desde prefactura, recalcula total y conserva cobros y facturas', async()=>{
+    const evidence=await moneyEvidence();
+    const response=await request(`/api/reservations/${editable}/accommodation-night`,nightBody());
+    expect(response.status,JSON.stringify(response.data)).toBe(200);
+    expect(response.data.totalRoomAmount).toBe('295000.00');expect(response.data.pricingRevision).toBe(1);
+    expect(response.data.nightlyPricing).toEqual([{date:'2090-01-01',rateCents:10000000,discountCents:0},...fixture.nightlyPricing.slice(1)]);
+    expect(await moneyEvidence()).toEqual(evidence);
+    const folio=await request(`/api/reservations/${editable}/folio`);expect(folio.data.accommodationNights.map((n:any)=>n.amount)).toEqual([100000,95000,100000]);
+    expect((await request(`/api/reservations/${editable}/accommodation-night`,nightBody())).status).toBe(409);
+  });
+  it('exige autenticación, permiso y motivo en la edición de prefactura',async()=>{
+    actor=null;expect((await request(`/api/reservations/${editable}/accommodation-night`,nightBody())).status).toBe(401);
+    actor='housekeeping';expect((await request(`/api/reservations/${editable}/accommodation-night`,nightBody())).status).toBe(403);
+    actor='admin';expect((await request(`/api/reservations/${editable}/accommodation-night`,nightBody({reason:''}))).status).toBe(400);
+    expect((await saved()).pricingRevision).toBe(0);
+  });
+  it('serializa dos ediciones simultáneas de una noche y deja una sola revisión',async()=>{
+    const results=await Promise.all([100000,110000].map(amount=>request(`/api/reservations/${editable}/accommodation-night`,nightBody({amount:String(amount)}))));
+    expect(results.map(r=>r.status).sort()).toEqual([200,409]);expect((await saved()).pricingRevision).toBe(1);
+  });
+  it('permite editar una noche sin cobertura, pero protege otra noche ya facturada',async()=>{
+    await applicationPool.query("UPDATE sales_invoices SET source_charge_amounts=$1,source_charge_ids=$2 WHERE reserva_id=$3",[JSON.stringify({'accommodation:2090-01-01':90000}),JSON.stringify(['accommodation:2090-01-01']),idFor('partial')]);
+    try{
+      const id=idFor('partial');
+      expect((await request(`/api/reservations/${id}/accommodation-night`,nightBody())).status).toBe(409);
+      const edit=await request(`/api/reservations/${id}/accommodation-night`,nightBody({date:'2090-01-02',expectedAmount:95000,amount:'98000'}));
+      expect(edit.status,JSON.stringify(edit.data)).toBe(200);expect(edit.data.nightlyPricing[0].rateCents).toBe(9000000);
+    }finally{await applicationPool.query("UPDATE sales_invoices SET source_charge_amounts=$1,source_charge_ids='[\"accommodation\"]' WHERE reserva_id=$2",[JSON.stringify({accommodation:50000}),idFor('partial')]);}
+  });
+  it('identifica un reparto legacy y lo persiste sólo al guardar una edición explícita',async()=>{
+    await applicationPool.query("UPDATE reservations SET pricing_scheme='legacy',nightly_pricing=NULL WHERE id=$1",[editable]);
+    try{
+      const folio=await request(`/api/reservations/${editable}/folio`);expect(folio.data.accommodationNights.every((n:any)=>n.derived)).toBe(true);
+      expect((await saved()).pricingScheme).toBe('legacy');
+      const edit=await request(`/api/reservations/${editable}/accommodation-night`,nightBody({expectedAmount:95000,amount:'100000'}));
+      expect(edit.status,JSON.stringify(edit.data)).toBe(200);expect(edit.data.pricingScheme).toBe('nightly_v1');expect(edit.data.totalRoomAmount).toBe('290000.00');
+    }finally{await applicationPool.query("UPDATE reservations SET pricing_scheme='nightly_v1' WHERE id=$1",[editable]);}
+  });
+
   it("la previsualización no escribe; guardar persiste total, revisión, actor, antes/después y motivo", async () => {
     const evidence = await moneyEvidence();
     const preview = await request(`${pathFor()}/preview`, rateBody());

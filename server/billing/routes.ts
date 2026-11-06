@@ -1,3 +1,4 @@
+import { accommodationNights, expandAccommodationCoverage, accommodationCoverageTotal, isAccommodationSource } from '@shared/accommodationNights';
 import { assertReservationInvoiceRecoverable } from "./reservationRecoveryState";
 import { giftVoucherItemsExpiryError } from "@shared/gift-voucher-expiry";
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "../reservationAccountTransfer";
@@ -1659,7 +1660,10 @@ export function registerBillingRoutes(app: Express) {
         const accommodationTotal = savedRoomTotal > 0
           ? savedRoomTotal
           : (parseFloat((reservation as any).finalRatePerNight || "0") * ((reservation as any).nights || 0));
-        const originalAmounts: Record<string, number> = { accommodation: accommodationTotal };
+        const nights = accommodationNights({ ...reservation, roomTotal: accommodationTotal });
+        const requestsNights = normalizedSourceChargeIds.some(id=>id.startsWith('accommodation:'));
+        if (requestsNights && (!nights.length || normalizedSourceChargeIds.includes('accommodation'))) throw new FolioInvoiceValidationError('No mezcles alojamiento agrupado con noches individuales; actualizá la prefactura',409);
+        const originalAmounts: Record<string, number> = requestsNights ? Object.fromEntries(nights.map(n=>[n.id,n.amount])) : { accommodation: accommodationTotal };
         if (paymentId && existingPaymentAmount !== null) {
           originalAmounts[`payment:${paymentId}`] = existingPaymentAmount;
         }
@@ -1705,12 +1709,16 @@ export function registerBillingRoutes(app: Express) {
               )
             )
         `);
-        const alreadyInvoiced: Record<string, number> = {};
+        let alreadyInvoiced: Record<string, number> = {};
         for (const invoice of priorInvoices.rows) {
-          for (const [id, amount] of Object.entries(parseInvoiceSourceAmounts(invoice))) {
+          const coverage = parseInvoiceSourceAmounts(invoice);
+          if (requestsNights && !Object.keys(coverage).length && Number((invoice as any).monto_total||0)>Number((invoice as any).monto_acreditado||0)) throw new FolioInvoiceValidationError('Hay comprobantes anteriores sin detalle de cargos. Revisá la cobertura antes de facturar por noche.',409);
+          for (const [id, amount] of Object.entries(coverage)) {
             alreadyInvoiced[id] = (alreadyInvoiced[id] || 0) + amount;
           }
         }
+
+        alreadyInvoiced = requestsNights ? expandAccommodationCoverage(alreadyInvoiced,nights) : { ...alreadyInvoiced, accommodation: accommodationCoverageTotal(alreadyInvoiced) };
 
         if (checkoutDiscount) {
           const pendingTotal = Object.entries(originalAmounts).reduce((sum, [id, amount]) => sum + Math.max(0, amount - (alreadyInvoiced[id] || 0)), 0);
