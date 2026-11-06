@@ -1809,7 +1809,11 @@ export function registerBillingRoutes(app: Express) {
           if (!Number.isFinite(original) || original <= 0) {
               throw new FolioInvoiceValidationError(`El cargo seleccionado (${id}) no existe o no es facturable`);
           }
-          if (Number(amount) + (checkoutDiscount?.sourceAmounts[id] || 0) > pending + 0.02) {
+          const requestedSourceAmount = Number(amount) + (checkoutDiscount?.sourceAmounts[id] || 0);
+          const exceedsCapacity = unitParent(id)
+            ? Math.round(requestedSourceAmount * 100) > Math.round(pending * 100)
+            : requestedSourceAmount > pending + 0.02;
+          if (exceedsCapacity) {
               throw new FolioInvoiceValidationError(
                 `Este cargo ya está facturado o tiene una emisión en curso. No queda saldo suficiente para facturar el importe seleccionado ($${Math.max(0, pending).toFixed(2)} disponible). Actualizá la prefactura para ver su estado.`,
                 409
