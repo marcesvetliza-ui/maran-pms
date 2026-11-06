@@ -124,6 +124,32 @@ suite("PostgreSQL real: transfer-items y pay-items de Restaurant", () => {
       expect(invalid.status).toBe(404);const rows=await storage.getOrderItems(source);expect(rows).toHaveLength(1);expect(rows[0].quantity).toBe(3);expect(rows[0].subtotal).toBe('100.00');
     }finally{await cleanupOrder(source);}
   });
+  it('opens an available destination table and moves a single unit in one transaction',async()=>{
+    if(!pool)return;const source=await createOpenOrder('100.00'),table=randomUUID(),area=randomUUID();let target:string|undefined;
+    try{
+      await pool.query("INSERT INTO restaurant_areas(id,name) VALUES($1,'Sector destino')",[area]);
+      await pool.query("INSERT INTO restaurant_tables(id,table_number,area_id,status) VALUES($1,'DEST-1',$2,'available')",[table,area]);
+      const item=await storage.createOrderItem({orderId:source,menuItemId:randomUUID(),quantity:2,unitPrice:'50.00',subtotal:'100.00',status:'served',notes:'Sin sal'} as any);
+      const response=await request('POST',`/api/restaurant/orders/${source}/transfer-items`,{itemIds:[item.id],itemQuantities:[{id:item.id,quantity:1,expectedQuantity:2,expectedSubtotal:'100.00'}],targetOrderId:`table:${table}`,newOrderData:{waiterName:'Mozo destino',areaId:'wrong-area',orderLabel:'Ticket separado'}});
+      expect(response.status,JSON.stringify(response.body)).toBe(200);target=response.body.targetOrderId;
+      expect(response.body.targetOrder).toMatchObject({tableId:table,areaId:area,waiterName:'Mozo destino',total:'50.00',orderLabel:null,orderType:'dine_in'});
+      expect((await pool.query('SELECT status FROM restaurant_tables WHERE id=$1',[table])).rows[0].status).toBe('occupied');
+      expect((await storage.getOrderItems(target!))[0]).toMatchObject({quantity:1,subtotal:'50.00',status:'served',notes:'Sin sal'});
+      expect((await storage.getOrderItems(source))[0].quantity).toBe(1);
+      expect((await pool.query('SELECT id FROM stock_movements WHERE source_id IN($1,$2)',[source,target])).rows).toHaveLength(0);
+    }finally{if(target)await cleanupOrder(target);await cleanupOrder(source);await pool.query('DELETE FROM restaurant_tables WHERE id=$1',[table]);await pool.query('DELETE FROM restaurant_areas WHERE id=$1',[area]);}
+  });
+  it('only one simultaneous transfer can open the available table; the losing source remains unchanged',async()=>{
+    if(!pool)return;const sources=await Promise.all([createOpenOrder('100.00'),createOpenOrder('100.00')]),table=randomUUID(),area=randomUUID();
+    try{
+      await pool.query("INSERT INTO restaurant_areas(id,name) VALUES($1,'Sector concurrencia')",[area]);await pool.query("INSERT INTO restaurant_tables(id,table_number,area_id,status) VALUES($1,'DEST-2',$2,'available')",[table,area]);
+      const items=await Promise.all(sources.map(orderId=>storage.createOrderItem({orderId,menuItemId:randomUUID(),quantity:2,unitPrice:'50.00',subtotal:'100.00'} as any)));
+      const results=await Promise.all(sources.map((source,index)=>request('POST',`/api/restaurant/orders/${source}/transfer-items`,{itemIds:[items[index].id],itemQuantities:[{id:items[index].id,quantity:1,expectedQuantity:2,expectedSubtotal:'100.00'}],targetOrderId:`table:${table}`,newOrderData:{waiterName:'Mozo prueba'}})));
+      expect(results.map(r=>r.status).sort()).toEqual([200,409]);
+      const loser=results.findIndex(r=>r.status===409);expect((await storage.getOrderItems(sources[loser]))).toHaveLength(1);expect((await storage.getOrderItems(sources[loser]))[0].quantity).toBe(2);
+      const active=await pool.query("SELECT id FROM restaurant_orders WHERE table_id=$1 AND status NOT IN('closed','cancelled')",[table]);expect(active.rows).toHaveLength(1);
+    }finally{const orders=await pool.query('SELECT id FROM restaurant_orders WHERE table_id=$1',[table]);for(const row of orders.rows)await cleanupOrder(row.id);for(const id of sources)await cleanupOrder(id);await pool.query('DELETE FROM restaurant_tables WHERE id=$1',[table]);await pool.query('DELETE FROM restaurant_areas WHERE id=$1',[area]);}
+  });
   describe("Defecto 1 — transferir ítems pendientes no debe recobrar lo ya pagado", () => {
     it("tras cobrar el plato y transferir solo la bebida, el origen queda en 0 (no en el monto ya cobrado)", async () => {
       if (!pool) return;
