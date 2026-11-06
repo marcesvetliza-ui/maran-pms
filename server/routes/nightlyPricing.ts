@@ -1,3 +1,4 @@
+import { accommodationNights } from '@shared/accommodationNights';
 import type { Express, Request, Response } from "express";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
@@ -77,6 +78,25 @@ export function registerNightlyPricingRoutes(app: Express) {
       next();
     } catch { res.status(503).json({ error: "No se pudo verificar tu permiso. Reintentá antes de modificar." }); }
   }];
+  app.post('/api/reservations/:id/accommodation-night', ...writeMiddleware, async (req,res)=>{
+    try {
+      const input=z.object({date:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),amount:z.string().regex(/^\d{1,8}(\.\d{1,2})?$/),expectedAmount:z.number().nonnegative(),expectedTotal:z.number().nonnegative(),revision:z.number().int().nonnegative(),reason:z.string().trim().min(3).max(1000)}).strict().parse(req.body);
+      const saved=await withReservationFinancialLock(req.params.id,()=>withDatabaseTransaction(async()=>{
+        const reservation=await storage.getReservation(req.params.id);if(!reservation)pricingError('Reserva no encontrada.',404);
+        if(['checked_out','cancelled','no_show'].includes(reservation.status))pricingError('La reserva está cerrada.',409);
+        if((reservation.pricingRevision||0)!==input.revision || Math.round(Number(reservation.totalRoomAmount)*100)!==Math.round(input.expectedTotal*100))pricingError('Los importes cambiaron. Actualizá la prefactura.',409);
+        const lines=accommodationNights(reservation),night=lines.find(n=>n.date===input.date);
+        if(!night || Math.round(night.amount*100)!==Math.round(input.expectedAmount*100))pricingError('La noche cambió o el detalle no coincide con el total. Actualizá la prefactura.',409);
+        const fiscal=await accommodationFiscalStatus(req.params.id,0,[input.date]);if(fiscal.blocked)pricingError(fiscal.blocked,409);
+        const cents=Math.round(Number(input.amount)*100);if(cents===Math.round(night.amount*100))pricingError('El importe no cambió.');
+        const after=lines.map(n=>({date:n.date,rateCents:n.date===input.date?cents:n.rateCents,discountCents:n.date===input.date?0:n.discountCents}));
+        const total=nightlyTotal(after);
+        const updated=await withNightlyWriter(reservation.pricingRevision||0,()=>storage.updateReservation(req.params.id,{pricingScheme:'nightly_v1',nightlyPricing:after,pricingRevision:(reservation.pricingRevision||0)+1,totalRoomAmount:amountString(total),finalRatePerNight:amountString(Math.round(total/after.length)),baseRatePerNight:amountString(Math.round(after.reduce((sum,n)=>sum+n.rateCents,0)/after.length)),discountType:'none',discountValue:'0',lastModifiedBy:req.user?.id}),[input.date]);
+        await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion) VALUES (${req.params.id},${req.user?.username||'Sistema'},'tarifa',${`Prefactura: noche ${input.date}, $${night.amount.toFixed(2)} → $${input.amount}. Motivo: ${input.reason}${night.derived?' · Detalle inicial distribuido desde el total contratado.':''}`})`);
+        return updated;
+      }));res.json(saved);
+    }catch(error){sendError(res,error);}
+  });
   app.post("/api/reservations/:id/nightly-pricing/preview", ...writeMiddleware, async (req, res) => {
     try {
       const { reservation: _, ...preview } = await buildProposal(req.params.id, requestSchema.parse(req.body));

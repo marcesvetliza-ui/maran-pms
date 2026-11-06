@@ -1,3 +1,4 @@
+import { isAccommodationSource } from '@shared/accommodationNights';
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { db, pool } from "./db";
@@ -5,8 +6,8 @@ import { withInvoiceAdvisoryLock } from "./billing/invoiceAdvisoryLock";
 import { initialNightlyPricing, nightlyTotal, amountString, pricingError } from "@shared/nightlyPricing";
 
 const financialScope = new AsyncLocalStorage<Set<string>>();
-const nightlyWriter = new AsyncLocalStorage<number>();
-export const withNightlyWriter = <T>(revision: number, action: () => Promise<T>) => nightlyWriter.run(revision, action);
+const nightlyWriter = new AsyncLocalStorage<{ revision:number; dates?:string[] }>();
+export const withNightlyWriter = <T>(revision: number, action: () => Promise<T>, dates?:string[]) => nightlyWriter.run({revision,dates}, action);
 export function withFinancialScopeLock<T>(key: string, action: () => Promise<T>): Promise<T> {
   const held = financialScope.getStore();
   if (held?.has(key)) return action();
@@ -27,13 +28,13 @@ const parseMap = (value: any): Record<string, any> | null => {
   catch { return null; }
 };
 /** Conservative fiscal policy: no attribution to nights; ambiguous fiscal history fails closed. */
-export async function accommodationFiscalStatus(id: string, totalCents = 0) {
+export async function accommodationFiscalStatus(id: string, totalCents = 0, editableDates?: string[]) {
   let coveredCents = 0, ambiguous = false, authorizing = false;
   const result = await db.execute(sql`
     SELECT id, estado, source_charge_amounts, source_charge_ids, monto_total, monto_acreditado,
       credit_reapplication_intent
     FROM sales_invoices
-    WHERE reserva_id=${id} AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB')
+    WHERE reserva_id=${id} AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB','cierre_habitacion')
       AND (estado IN ('emitida','parcial','autorizacion_pendiente')
         OR (estado='anulada' AND credit_reapplication_intent->'checkoutDiscount' IS NOT NULL))
   `);
@@ -41,7 +42,7 @@ export async function accommodationFiscalStatus(id: string, totalCents = 0) {
     const amounts = parseMap(invoice.source_charge_amounts);
     // No fiscal mapping is not proof of no lodging coverage.
     if (!amounts || Object.keys(amounts).length === 0 || Number(invoice.monto_acreditado || 0) > 0) ambiguous = true;
-    const amount = Number(amounts?.accommodation || 0);
+    const amount = Object.entries(amounts || {}).filter(([key])=>isAccommodationSource(key) && (!editableDates || key==='accommodation' || editableDates.some(date=>key===`accommodation:${date}`))).reduce((sum,[,value])=>sum+Number(value||0),0);
     if (!Number.isFinite(amount) || amount < 0) ambiguous = true;
     else if (amount > 0) {
       if (invoice.estado === "autorizacion_pendiente") authorizing = true;
@@ -79,7 +80,8 @@ export async function initializeNightlyPricing(data: Record<string, any>) {
   data.finalRatePerNight = amountString(Math.round(nightlyTotal(lines) / lines.length));
 }
 export async function guardPricingUpdate(existing: Record<string, any>, patch: Record<string, any>) {
-  const revision = nightlyWriter.getStore();
+  const writer = nightlyWriter.getStore();
+  const revision = writer?.revision;
   if (revision === undefined) {
     delete patch.pricingScheme; delete patch.nightlyPricing; delete patch.pricingRevision;
   }
@@ -94,6 +96,12 @@ export async function guardPricingUpdate(existing: Record<string, any>, patch: R
   if (existing.pricingScheme === "nightly_v1" && revision === undefined && changed.some(key => nightlyFields.includes(key))) {
     pricingError("Esta reserva usa precios por noche. Usá Editar tarifas o Modificar estadía desde el Folio.", 409);
   }
-  const blocked = await accommodationFiscalBlock(existing.id);
+  if (writer?.dates) {
+    if (['checkInDate','checkOutDate','nights','earlyCheckInCharge','lateCheckOutCharge','voucherId','voucherAppliedAmount'].some(key=>changed.includes(key))) pricingError('La edición individual no puede cambiar la estadía ni otros cargos.',409);
+    const before = existing.nightlyPricing;
+    const after = patch.nightlyPricing;
+    if (existing.pricingScheme === 'nightly_v1' && (!Array.isArray(before) || !Array.isArray(after) || before.length!==after.length || before.some((n:any,i:number)=>n.date!==after[i].date || (!writer.dates!.includes(n.date) && JSON.stringify(n)!==JSON.stringify(after[i]))))) pricingError('Sólo se puede cambiar la noche seleccionada.',409);
+  }
+  const blocked = (await accommodationFiscalStatus(existing.id,0,writer?.dates)).blocked;
   if (blocked) pricingError(blocked, 409);
 }

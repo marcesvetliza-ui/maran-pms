@@ -1,3 +1,4 @@
+import { accommodationNights } from '@shared/accommodationNights';
 import { withReservationFinancialLock } from "../nightlyPricingGuard";
 import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
@@ -1192,6 +1193,10 @@ export function registerReservationsRoutes(app: Express) {
         nights: reservation.nights,
         roomRate: reservation.finalRatePerNight,
         roomTotal,
+        pricingScheme: reservation.pricingScheme,
+        nightlyPricing: reservation.nightlyPricing,
+        pricingRevision: reservation.pricingRevision,
+        accommodationNights: accommodationNights({ ...reservation, roomTotal }),
         charges: operationalCharges,
         fiscalAdjustments: creditNoteAdjustments,
         totalCharges,
