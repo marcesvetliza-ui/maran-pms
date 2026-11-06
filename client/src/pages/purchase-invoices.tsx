@@ -1,3 +1,4 @@
+import { iibbRateFromAmount } from '@shared/iibbRate';
 import {matchesPurchaseReport,validatePurchaseReportFilters} from "@shared/purchase-invoice-report";
 import { isPurchaseRemito, purchaseDocumentLabel } from "@shared/purchase-remito";
 import { useAuth } from "@/App";
@@ -2330,6 +2331,7 @@ export function PaymentOrderDialog({
   const [partialAmount, setPartialAmount] = useState("");
   const [autoCalcActive, setAutoCalcActive] = useState(true);
   const [alicuotaIibbForm, setAlicuotaIibbForm] = useState("");
+  const [iibbAmountDriven, setIibbAmountDriven] = useState(false);
   const [form, setForm] = useState({
     fecha: getLocalToday(),
     formaPago: "transferencia",
@@ -2356,6 +2358,7 @@ export function PaymentOrderDialog({
   const f = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
   // When user edits a retention field manually, disable auto-calc
   const fRetention = (k: string, v: string) => {
+    if (k === "retencionIibb") setIibbAmountDriven(true);
     setAutoCalcActive(false);
     setForm((p) => ({ ...p, [k]: v }));
   };
@@ -2377,6 +2380,14 @@ export function PaymentOrderDialog({
   const baseNetosIibb = selectedFacturas.reduce(
     (s, inv) => isNC(inv) ? s : s + $n(inv.montoNeto), 0);
 
+  // Match the server's existing retention base, including its total fallback.
+  const baseIibb = baseNetosIibb > 0 ? baseNetosIibb : totalSelected;
+  useEffect(() => {
+    if (!iibbAmountDriven) return;
+    const rate = iibbRateFromAmount(baseIibb, Number(form.retencionIibb));
+    setAlicuotaIibbForm(rate > 0 && !hasNonFiscal ? rate.toFixed(4) : "");
+  }, [iibbAmountDriven, baseIibb, form.retencionIibb, hasNonFiscal]);
+
   const settlementTotal = hasNonFiscal && selectedFacturas.length === 1 && partialAmount !== "" ? Number(partialAmount) : totalSelected;
   useEffect(() => {
     if (!hasNonFiscal) return;
@@ -2390,6 +2401,7 @@ export function PaymentOrderDialog({
   // "Facturas no pendientes: #N (pagado)" hasta reiniciar sesión.
   useEffect(() => {
     if (supplier && open) {
+      setIibbAmountDriven(false);
       setAlicuotaIibbForm(String(supplier.alicuotaIibb ?? ""));
       setSelectedInvoices([]);
       setPartialAmount("");
@@ -2425,6 +2437,7 @@ export function PaymentOrderDialog({
   }, [totalSelected, baseNetosIibb, supplier, autoCalcActive, alicuotaIibbForm, hasNonFiscal]);
 
   const handleRecalcular = () => {
+    setIibbAmountDriven(false);
     setAutoCalcActive(true);
   };
 
@@ -2589,12 +2602,12 @@ export function PaymentOrderDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Alíc. IIBB (%) <span className="text-xs text-muted-foreground">base netos: ${fmt(baseNetosIibb)}</span></Label>
+              <Label>Alíc. IIBB (%) <span className="text-xs text-muted-foreground">base {baseNetosIibb > 0 ? "netos" : "total"}: ${fmt(baseIibb)}</span></Label>
               <Input
                 type="number"
-                step="0.01"
+                step="0.0001"
                 value={alicuotaIibbForm}
-                onChange={(e) => { setAlicuotaIibbForm(e.target.value); setAutoCalcActive(false); }}
+                onChange={(e) => { setIibbAmountDriven(false); setAlicuotaIibbForm(e.target.value); setAutoCalcActive(false); }}
                 placeholder="ej. 3.5"
                 data-testid="input-op-alicuota-iibb"
               />
