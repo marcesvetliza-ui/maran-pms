@@ -1,3 +1,4 @@
+import {copyDishRecipe} from "../copyDishRecipe";
 import {selectRestaurantItemQuantities} from "../restaurantItemQuantities";
 import { restaurantCashPosting } from "@shared/restaurant-settlement";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
@@ -1652,6 +1653,11 @@ export function registerRestaurantRoutes(app: Express) {
     } catch (error) {
       res.status(500).json({ error: "Error fetching recipe" });
     }
+  });
+
+  app.post('/api/restaurant/recipes/:id/copy-dish',requireAuth,async(req,res)=>{
+    try{res.status(201).json(await copyDishRecipe(req.params.id,req.body));}
+    catch(error:any){res.status(error.statusCode||500).json({error:error.message||'No se pudo copiar la receta'});}
   });
 
   app.post("/api/restaurant/recipes", async (req, res) => {
