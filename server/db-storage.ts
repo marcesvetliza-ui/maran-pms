@@ -1,3 +1,4 @@
+import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
 import {withLodgingInventoryMutationLock} from './inventoryMutationLock';
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
@@ -7267,9 +7268,6 @@ export class DatabaseStorage implements IStorage {
   async getExecutiveStats(from: string, to: string): Promise<any> {
     const allRooms = await db.select().from(rooms);
     const realRooms = allRooms.filter(isOperationalInventoryRoom);
-    const nonOperationalRoomIds = new Set(
-      allRooms.filter(room => !isOperationalInventoryRoom(room)).map(room => room.id),
-    );
     const totalRooms = realRooms.length;
 
     const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0, oos: 0 };
@@ -7279,80 +7277,19 @@ export class DatabaseStorage implements IStorage {
       else roomsByStatus[s] = (roomsByStatus[s] || 0) + 1;
     }
 
-    const rawPeriodReservations = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
-    const periodReservations = rawPeriodReservations.filter(
-      reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
-    );
-
-    let totalNightsSold = 0;
-    for (const r of periodReservations) {
-      const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(from).getTime()));
-      const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(to).getTime()));
-      const nights = Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
-      totalNightsSold += nights;
-    }
-
-    // Room revenue on an accrual basis (the reservation's own rate), not raw
-    // payments — a folio payment can include restaurant/spa/minibar consumption
-    // charged to the room, which would otherwise double-count against those
-    // areas' own figures. Extras use the same accrual logic: charges actually
-    // posted in the period, by category, regardless of when/whether collected.
-    const accommodationRevenue = periodReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
-    const periodCharges = await db.select().from(charges)
-      .where(and(gte(charges.date, from), lte(charges.date, to)));
-    const extrasRevenue = periodCharges
-      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
-      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
-    const totalRevenue = accommodationRevenue + extrasRevenue;
-
-    const daysInPeriod = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
-    const occupiedRooms = roomsByStatus.occupied || 0;
-    const availableRooms = roomsByStatus.available || 0;
-    const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
-
-    const adr = totalNightsSold > 0 ? Math.round(accommodationRevenue / totalNightsSold) : 0;
-    const revpar = Math.round(adr * occupancyRate / 100);
-
-    const byChannelMap = new Map<string, { reservations: number; revenue: number }>();
-    for (const r of periodReservations) {
-      const src = r.source || "directo";
-      if (!byChannelMap.has(src)) byChannelMap.set(src, { reservations: 0, revenue: 0 });
-      const entry = byChannelMap.get(src)!;
-      entry.reservations++;
-      entry.revenue += parseFloat(r.totalRoomAmount || "0");
-    }
-    const totalChannelRevenue = Array.from(byChannelMap.values()).reduce((s, v) => s + v.revenue, 0);
-    const byChannel = Array.from(byChannelMap.entries()).map(([source, data]) => ({
-      source,
-      reservations: data.reservations,
-      revenue: Math.round(data.revenue),
-      percentage: totalChannelRevenue > 0 ? Math.round((data.revenue / totalChannelRevenue) * 100) : 0,
-    })).sort((a, b) => b.revenue - a.revenue);
-
-    const prevFrom = new Date(new Date(from).getTime() - 365 * 86400000).toISOString().split("T")[0];
-    const prevTo = new Date(new Date(to).getTime() - 365 * 86400000).toISOString().split("T")[0];
-    const rawPrevReservations = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, prevTo), gte(reservations.checkOutDate, prevFrom)));
-    const prevReservations = rawPrevReservations.filter(
-      reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
-    );
-    const prevAccommodationRevenue = prevReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
-    const prevCharges = await db.select().from(charges)
-      .where(and(gte(charges.date, prevFrom), lte(charges.date, prevTo)));
-    const prevExtrasRevenue = prevCharges
-      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
-      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
-    const prevTotalRevenue = prevAccommodationRevenue + prevExtrasRevenue;
-    let prevNightsSold = 0;
-    for (const r of prevReservations) {
-      const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(prevFrom).getTime()));
-      const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(prevTo).getTime()));
-      prevNightsSold += Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
-    }
-    const prevAdr = prevNightsSold > 0 ? Math.round(prevAccommodationRevenue / prevNightsSold) : 0;
-    const prevOccupancyRate = totalRooms > 0 ? Math.round((prevReservations.length / totalRooms) * 100) : 0;
-    const prevRevpar = Math.round(prevAdr * prevOccupancyRate / 100);
+    const prevFrom = previousYearDate(from), prevTo = previousYearDate(to);
+    const [lodging,previous] = await Promise.all([loadLodging(from,to),loadLodging(prevFrom,prevTo)]);
+    const accommodationRevenue = lodging.summary.revenue;
+    const periodCharges = await db.select().from(charges).where(and(gte(charges.date,from),lte(charges.date,to)));
+    const extrasRevenue = periodCharges.filter(c=>(c.status??'active')==='active'&&['restaurant','spa','minibar'].includes(c.category??'')).reduce((sum,c)=>sum+parseFloat(c.amount||'0'),0);
+    const totalRevenue = accommodationRevenue+extrasRevenue;
+    const occupiedRooms = roomsByStatus.occupied||0,availableRooms=roomsByStatus.available||0;
+    const occupancyRate = lodging.summary.occupancy,adr=lodging.summary.adr,revpar=lodging.summary.revpar;
+    const byChannel = lodgingChannels(lodging).map(row=>({...row,percentage:accommodationRevenue?row.revenue/accommodationRevenue*100:0}));
+    const prevCharges = await db.select().from(charges).where(and(gte(charges.date,prevFrom),lte(charges.date,prevTo)));
+    const prevExtrasRevenue = prevCharges.filter(c=>(c.status??'active')==='active'&&['restaurant','spa','minibar'].includes(c.category??'')).reduce((sum,c)=>sum+parseFloat(c.amount||'0'),0);
+    const prevTotalRevenue = previous.summary.revenue+prevExtrasRevenue;
+    const prevAdr = previous.summary.adr,prevOccupancyRate=previous.summary.occupancy,prevRevpar=previous.summary.revpar;
 
     const today = getArgentinaToday();
     const todayReservations = await db.select().from(reservations)
@@ -7364,83 +7301,36 @@ export class DatabaseStorage implements IStorage {
     const pendingCheckIns = todayReservations.filter(r => r.status === "confirmed").length;
 
     return {
+      alojamiento: {resumen:lodging.summary,proyeccion:lodging.forecast,advertencias:lodging.warnings,criterio:lodging.methodology},
       occupancyRate, occupiedRooms, availableRooms, totalRooms,
-      totalRevenue: Math.round(totalRevenue), accommodationRevenue: Math.round(accommodationRevenue), extrasRevenue: Math.round(extrasRevenue),
+      totalRevenue: Math.round(totalRevenue*100)/100, accommodationRevenue, extrasRevenue: Math.round(extrasRevenue*100)/100,
       adr, revpar, byChannel,
-      previousYear: { occupancyRate: prevOccupancyRate, totalRevenue: Math.round(prevTotalRevenue), adr: prevAdr, revpar: prevRevpar },
+      previousYear: { occupancyRate: prevOccupancyRate, totalRevenue: Math.round(prevTotalRevenue*100)/100, adr: prevAdr, revpar: prevRevpar },
       todayCheckIns, todayCheckOuts, pendingCheckIns,
       roomsByStatus,
     };
   }
 
   async getReportOccupancy(from: string, to: string): Promise<any[]> {
-    const result: any[] = [];
-    const allRooms = await db.select().from(rooms);
-    const operationalRoomIds = new Set(allRooms.filter(isOperationalInventoryRoom).map(room => room.id));
-    const totalRooms = operationalRoomIds.size;
-    const start = new Date(from);
-    const end = new Date(to);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split("T")[0];
-      const dayReservations = await db.select().from(reservations)
-        .where(and(lte(reservations.checkInDate, dateStr), gt(reservations.checkOutDate, dateStr),
-          inArray(reservations.status, ["checked_in", "checked_out", "confirmed"])));
-      const occupied = dayReservations.filter(
-        reservation => !!reservation.roomId && operationalRoomIds.has(reservation.roomId),
-      ).length;
-      const available = totalRooms - occupied;
-      const occupancy = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0;
-      result.push({ date: dateStr, available, occupied, occupancy, totalRooms });
-    }
-    return result;
+    const lodging=await loadLodging(from,to);
+    return lodging.daily.map(day=>({date:day.date,available:day.capacity-day.actualNights,occupied:day.actualNights,occupancy:day.capacity?day.actualNights/day.capacity*100:0,totalRooms:day.capacity,forecast:day.forecastNights,lodgingWarnings:lodging.warnings}));
   }
 
   async getReportRevenueByRoomType(from: string, to: string): Promise<any[]> {
-    const types = await db.select().from(roomTypes);
-    const periodRes = await db.select({ reservation: reservations }).from(reservations)
-      .leftJoin(guests, eq(reservations.guestId, guests.id))
-      .where(and(
-        lte(reservations.checkInDate, to),
-        gte(reservations.checkOutDate, from),
-        visibleGuestCondition(),
-      )).then(rows => rows.map(row => row.reservation));
-
-    const result: any[] = [];
-    let grandTotal = 0;
-    for (const t of types) {
-      const typeRes = periodRes.filter(r => r.roomTypeId === t.id);
-      let nightsSold = 0;
-      let revenue = 0;
-      for (const r of typeRes) {
-        nightsSold += r.nights || 0;
-        revenue += parseFloat(r.totalRoomAmount || "0");
-      }
-      grandTotal += revenue;
-      const typeRooms = (await db.select().from(rooms).where(eq(rooms.roomTypeId, t.id))).length;
-      result.push({ type: t.name, rooms: typeRooms, nightsSold, revenue: Math.round(revenue), adr: nightsSold > 0 ? Math.round(revenue / nightsSold) : 0 });
-    }
-    return result.map(r => ({ ...r, percentage: grandTotal > 0 ? Math.round((r.revenue / grandTotal) * 100) : 0 }));
+    const lodging=await loadLodging(from,to),types=await lodgingByRoomType(lodging);
+    return types.map(row=>({type:row.tipo,rooms:row.rooms,nightsSold:row.nochesOcupadas,revenue:row.ingresos,adr:row.tarifaMedia,percentage:lodging.summary.revenue?row.ingresos/lodging.summary.revenue*100:0,missingRateNights:lodging.summary.missingRateNights,estimatedNights:lodging.summary.estimatedNights,lodgingWarnings:lodging.warnings}));
   }
 
   async getReportByChannel(from: string, to: string): Promise<any[]> {
-    const periodRes = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
-
-    const map = new Map<string, { reservations: number; nights: number; revenue: number }>();
-    for (const r of periodRes) {
-      const src = r.source || "directo";
-      if (!map.has(src)) map.set(src, { reservations: 0, nights: 0, revenue: 0 });
-      const e = map.get(src)!;
-      e.reservations++;
-      e.nights += r.nights || 0;
-      e.revenue += parseFloat(r.totalRoomAmount || "0");
-    }
+    const lodging=await loadLodging(from,to);
+    const channels=lodgingChannels(lodging);
+    const map=new Map(channels.map(row=>[row.source,{reservations:row.reservations,nights:row.nights,revenue:row.revenue}]));
     const total = Array.from(map.values()).reduce((s, v) => s + v.revenue, 0);
     const commissionRates: Record<string, number> = { booking: 15, airbnb: 14, expedia: 18, despegar: 17 };
     return Array.from(map.entries()).map(([source, d]) => {
       const commRate = commissionRates[source] || 0;
-      const commission = Math.round(d.revenue * commRate / 100);
-      return { source, reservations: d.reservations, nights: d.nights, revenue: Math.round(d.revenue), commission, net: Math.round(d.revenue - commission), percentage: total > 0 ? Math.round((d.revenue / total) * 100) : 0 };
+      const commission = Math.round(d.revenue * commRate) / 100;
+      return { lodgingWarnings:lodging.warnings, source, reservations: d.reservations, nights: d.nights, revenue: d.revenue, commission, net: Math.round((d.revenue - commission)*100)/100, percentage: total > 0 ? Math.round((d.revenue / total) * 100) : 0 };
     }).sort((a, b) => b.revenue - a.revenue);
   }
 

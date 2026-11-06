@@ -1,3 +1,4 @@
+import {LodgingNotice} from "@/components/lodging-notice";
 import { fetchReportJson } from "@/lib/report-request";
 import { ReportQueryError } from "@/components/report-query-error";
 import { formatDisplayDate } from "@shared/date-display";
@@ -162,7 +163,7 @@ function LoadingSkeleton() {
   );
 }
 
-type OccupancyRow = { date: string; available: number; occupied: number; occupancy: number; totalRooms: number };
+type OccupancyRow = { date: string; available: number; occupied: number; occupancy: number; totalRooms: number; forecast?:number };
 type RevenueByTypeRow = { type: string; rooms: number; nightsSold: number; revenue: number; adr: number; percentage: number };
 type ChannelRow = { source: string; reservations: number; nights: number; revenue: number; commission: number; net: number; percentage: number };
 type ReservationRow = { code: string; guest: string; company: string; room: string; type: string; checkIn: string; checkOut: string; nights: number; source: string; status: string; total: number; paid: number; balance: number };
@@ -676,6 +677,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
+      {['occupancy','revenue-type','channel'].includes(activeTab)&&!currentReport?.isError&&<LodgingNotice report={{advertencias:(currentReport?.data as any)?.[0]?.lodgingWarnings}} />}
       <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-reports">
         {activeArea === "hoteleria" && (
           <TabsList className="flex flex-wrap h-auto gap-1">
@@ -819,8 +821,8 @@ export default function ReportsPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Fecha</TableHead>
-                          <TableHead className="text-right">Hab. Disponibles</TableHead>
-                          <TableHead className="text-right">Hab. Ocupadas</TableHead>
+                          <TableHead className="text-right">Sin ocupación realizada</TableHead>
+                          <TableHead className="text-right">Hab. ocupadas (realizado)</TableHead><TableHead className="text-right">Reservadas por venir</TableHead>
                           <TableHead className="text-right">% Ocupación</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -829,7 +831,7 @@ export default function ReportsPage() {
                           <TableRow key={i} data-testid={`row-occupancy-${i}`}>
                             <TableCell>{formatDisplayDate(row.date)}</TableCell>
                             <TableCell className="text-right">{row.available}</TableCell>
-                            <TableCell className="text-right">{row.occupied}</TableCell>
+                            <TableCell className="text-right">{row.occupied}</TableCell><TableCell className="text-right">{row.forecast ?? 0}</TableCell>
                             <TableCell className="text-right">{row.occupancy}%</TableCell>
                           </TableRow>
                         ))}

@@ -1678,27 +1678,15 @@ export async function registerRoutes(
 
   app.get("/api/executive/stats", requireAuth, async (req, res) => {
     try {
-      const today = new Date();
-      let from = req.query.from as string;
-      let to = req.query.to as string;
+      const today = getArgentinaToday();
+      let from = req.query.from as string, to = req.query.to as string;
       const period = req.query.period as string;
-
-      if (period === "today") {
-        from = to = today.toISOString().split("T")[0];
-      } else if (period === "week") {
-        const start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        from = start.toISOString().split("T")[0];
-        to = today.toISOString().split("T")[0];
-      } else if (period === "month") {
-        from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
-        to = today.toISOString().split("T")[0];
-      } else if (period === "year") {
-        from = new Date(today.getFullYear(), 0, 1).toISOString().split("T")[0];
-        to = today.toISOString().split("T")[0];
-      } else if (!from || !to) {
-        from = to = today.toISOString().split("T")[0];
-      }
+      if(period==='today') from=to=today;
+      else if(period==='week'){
+        const day=new Date(today+'T00:00:00Z');day.setUTCDate(day.getUTCDate()-day.getUTCDay());from=day.toISOString().slice(0,10);to=today;
+      }else if(period==='month'){from=today.slice(0,7)+'-01';to=today;}
+      else if(period==='year'){from=today.slice(0,4)+'-01-01';to=today;}
+      else if(!from||!to)from=to=today;
 
       const stats = await storage.getExecutiveStats(from, to);
       res.json(stats);

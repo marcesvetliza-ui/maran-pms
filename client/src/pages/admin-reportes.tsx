@@ -1,3 +1,4 @@
+import {LodgingNotice} from "@/components/lodging-notice";
 import { fetchReportJson } from "@/lib/report-request";
 import { ReportQueryError } from "@/components/report-query-error";
 import { formatDisplayDate } from "@shared/date-display";
@@ -207,6 +208,7 @@ function EstadoResultadosReport() {
 
   return (
     <div className="space-y-5">
+      <LodgingNotice report={data?.alojamiento} />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold">Estado de Resultados</h1>
@@ -325,6 +327,7 @@ function KpisReport() {
 
   return (
     <div className="space-y-5">
+      <LodgingNotice report={data?.alojamiento} />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">KPIs Hoteleros</h1>
         <div className="flex gap-3 items-center">
@@ -342,7 +345,7 @@ function KpisReport() {
         <KpiCard title="ADR (Tarifa Media)" value={data.tarifaMedia ?? 0} delta={data.vsMessAnterior?.tarifaMedia} unit="$" />
         <KpiCard title="RevPAR" value={data.revpar ?? 0} delta={data.vsMessAnterior?.revpar} unit="$" />
         <KpiCard title="Hab. ocupadas (noc.)" value={`${fPeso(data.habitacionesOcupadas)} noc.`} />
-        <KpiCard title="Huéspedes totales" value={fPeso(data.totalHuespedes)} />
+        <KpiCard title="Huéspedes de las estadías incluidas" value={fPeso(data.totalHuespedes)} />
         <KpiCard title="Estadía promedio" value={`${data.estanciaPromedio ?? 0} días`} />
       </div>
 
@@ -426,6 +429,7 @@ function OcupacionReport() {
 
   return (
     <div className="space-y-5">
+      <LodgingNotice report={data?.alojamiento} />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Análisis de Ocupación</h1>
         <div className="flex gap-2 items-center">
@@ -521,6 +525,7 @@ function IngresosReport() {
 
   return (
     <div className="space-y-5">
+      <LodgingNotice report={data?.alojamiento} />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Ingresos por Área</h1>
         <div className="flex gap-3 items-center">
@@ -820,6 +825,7 @@ function ComparativoReport() {
 
   return (
     <div className="space-y-5">
+      <LodgingNotice report={{advertencias:Object.fromEntries(['missingRateNights','estimatedNights','unassignedReservations','invalidStays','overlappingRoomNights','occupiedBlockedNights'].map(key=>[key,(data?.meses??[]).reduce((sum:number,month:any)=>sum+(month.alojamiento?.advertencias?.[key]??0),0)]))}} />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Comparativo Mensual {año}</h1>
         <div className="flex gap-3 items-center">

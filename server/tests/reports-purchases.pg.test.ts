@@ -4,7 +4,7 @@ import {drizzle} from 'drizzle-orm/node-postgres';
 import express from 'express';
 import type {Server} from 'node:http';
 const state=vi.hoisted(()=>({db:null as any}));
-vi.mock('../db',()=>({db:{execute:(q:any)=>state.db.execute(q)}}));
+vi.mock('../db',()=>({db:{execute:(q:any)=>state.db.execute(q),transaction:(fn:any,config:any)=>state.db.transaction(fn,config)}}));
 vi.mock('../auth',()=>({requireAuth:(_q:any,_s:any,n:any)=>n(),requirePermission:()=> (_q:any,_s:any,n:any)=>n()}));
 import {registerReportsRoutes,costosCompras} from '../reports/routes';
 // Only temporary tables on the dedicated, explicitly configured test database.

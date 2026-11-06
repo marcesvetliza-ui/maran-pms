@@ -1,3 +1,4 @@
+import {LodgingNotice} from "@/components/lodging-notice";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useMemo } from "react";
 import { getArgentinaToday, toArgentinaDateStr, getArgentinaFirstOfMonth } from "@/lib/date-utils";
@@ -55,6 +56,7 @@ type PreviousYear = {
 };
 
 type ExecutiveStats = {
+  alojamiento?: { resumen: {roomNights:number;capacityNights:number}; advertencias:Record<string,number>; criterio:string; proyeccion:{revenue:number;roomNights:number} };
   occupancyRate: number;
   occupiedRooms: number;
   availableRooms: number;
@@ -303,6 +305,7 @@ export default function DashboardExecutive() {
           </>
         ) : stats ? (
           <>
+            <LodgingNotice report={stats.alojamiento} />
             <Card data-testid="kpi-occupancy">
               <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -315,7 +318,7 @@ export default function DashboardExecutive() {
                   {stats.occupancyRate?.toFixed(1)}%
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {stats.occupiedRooms} de {stats.totalRooms} habitaciones
+                  {stats.alojamiento?.resumen.roomNights ?? 0} habitaciones-noche del período. Ahora: {stats.occupiedRooms} de {stats.totalRooms} habitaciones ocupadas.
                 </p>
                 <TrendIndicator
                   current={stats.occupancyRate}
