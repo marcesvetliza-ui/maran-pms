@@ -24,6 +24,13 @@ export async function checkErrorAttribution(report:SupportDiagnosis,source:CodeS
   for(const definition of found.definitions)
    if(!reads.some(item=>item.path===definition.path && item.start<=definition.start && item.end>=definition.end))reads.push(definition);
  }
+ // The DB lookup wrapper is a distinct function; inspect it rather than
+ // inferring ownership from the helper's public re-export.
+ const lookupPath='server/inventoryStockEngine.ts';
+ if((await source.files()).includes(lookupPath)){
+  const match=(await source.search('export async function unitFactor(',lookupPath)).matches.find(m=>m.path===lookupPath);
+  if(match)reads.push(await source.read(lookupPath,match.line,match.line+8));
+ }
  const functions=reads.flatMap(read=>{
   const code=read.content.split('\n').map(line=>line.replace(/^\d+: /,'')).join('\n');
   const declarations=[...code.matchAll(/\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)];
@@ -52,6 +59,14 @@ export async function checkErrorAttribution(report:SupportDiagnosis,source:CodeS
    if(!/\b(?:lanza|arroja|origina|produce|detecta|genera|devuelve)\b|no encuentra/.test(text))continue;
    errors.push({field:claim.field,attributedSymbol:mention[0],origin:{path:owner.path,symbol:owner.symbol,start:owner.start,end:owner.end,statement},reason:'La función nombrada no es la que construye el mensaje de equivalencia faltante en este módulo. Corregir la atribución y citar la definición real; no conservar la explicación equivocada con menor certeza.'});
   }
+ }
+ const throwLine=owner.start+owner.body.split('\n').findIndex(line=>/^\s*throw\s+/.test(line)&&/falta equivalencia explicita/.test(normalized(line)));
+ for(const [index,ref] of report.evidence.entries()){
+  const text=normalized(ref.explanation);
+  if(!missingEquivalence(text)||!/(?:fuente|origen) (?:del? |de este )?(?:error|mensaje|detalle)|(?:genera|construye) (?:el |un )?(?:mensaje|error)/.test(text))continue;
+  if(/reexport|propag|no (?:es|demuestra|genera|construye)|llama a/.test(text))continue;
+  if(ref.path===owner.path&&ref.start<=throwLine&&ref.end>=throwLine)continue;
+  errors.push({field:`evidence.${index}.explanation`,attributedSymbol:owner.symbol,origin:{path:owner.path,symbol:owner.symbol,start:throwLine,end:throwLine,statement},reason:'La cita presentada como origen del detalle no contiene el throw real. Una reexportación o un llamador no respalda esa atribución. Citar la implementación o describir únicamente el papel de propagación/reexportación.'});
  }
  return errors.slice(0,6);
 }

@@ -1,10 +1,11 @@
+import {errorReportReviewInstruction} from "./error-report-review";
 import {cashReasoningInstruction} from "./cash-review";
 import {citedScreens} from "../../shared/programming-support-scope";
 import type {SupportDiagnosis} from '../../shared/programming-support';
 import type {CodeSource} from './source';
 import {buildDecisionBrief} from "./decision-brief";
 
-export const coverageReviewInstruction = cashReasoningInstruction+"\n"+`Revisión final obligatoria. El borrador anterior NO es evidencia y puede contener errores. Antes de entregar el JSON definitivo:
+export const coverageReviewInstruction = cashReasoningInstruction+"\n"+errorReportReviewInstruction+"\n"+`Revisión final obligatoria. El borrador anterior NO es evidencia y puede contener errores. Antes de entregar el JSON definitivo:
 1. Contrastá resumen, causa y explicación de cada cita con el código citado. Que un rango haya sido leído sólo valida su procedencia, no la afirmación. Corregí o eliminá afirmaciones que esas líneas no respaldan.
 2. Si se atribuye un error a una función, localizá la instrucción exacta que construye o lanza ese mensaje; distinguí función que consulta/configura, función que valida y función que convierte. Leé la definición con inspect_symbol si falta, sin deducirla por el nombre.
 3. Revisá questions: dejá sólo datos de la operación indispensables que no puedan conocerse del repositorio. No preguntes si existe una pantalla configurable, cómo se manejan errores ni preferencias de UI cuando no impiden el diagnóstico; buscá componentes, usos y helpers o dejá la decisión como opcional en proposal.
