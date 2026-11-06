@@ -1,10 +1,11 @@
 import {beforeAll,afterAll,beforeEach,describe,it,expect,vi} from 'vitest';
 import {Client} from 'pg';
 import {drizzle} from 'drizzle-orm/node-postgres';
+import {sql} from 'drizzle-orm';
 import express from 'express';
 import type {Server} from 'node:http';
-const state=vi.hoisted(()=>({db:null as any}));
-vi.mock('../db',()=>({db:{execute:(q:any)=>state.db.execute(q),transaction:(fn:any,config:any)=>state.db.transaction(fn,config)}}));
+const state=vi.hoisted(()=>({db:null as any,lastReadOnly:null as string|null}));
+vi.mock('../db',()=>({db:{execute:(q:any)=>state.db.execute(q),transaction:(fn:any,config:any)=>state.db.transaction(async(tx:any)=>{const result=await tx.execute(sql`SHOW transaction_read_only`);state.lastReadOnly=result.rows[0].transaction_read_only;return fn(tx);},config)}}));
 vi.mock('../auth',()=>({requirePermission:()=> (_q:any,_s:any,n:any)=>n(),requireAuth:(_q:any,_s:any,n:any)=>n()}));
 import {loadLodging} from '../reports/lodging';
 import {registerReportsRoutes} from '../reports/routes';
@@ -29,7 +30,7 @@ describe.skipIf(!url)('lodging read-only report routes with PostgreSQL',()=>{
  });
  it('loads saved net prices, splits month totals and ignores cancelled/virtual stays',async()=>{
   await client.query("INSERT INTO reservations SELECT 'cancelled',room_id,room_type_id,'cancelled',check_in_date,check_out_date,total_room_amount,pricing_scheme,nightly_pricing,special_rate_reason,source,number_of_guests FROM reservations WHERE id='s';INSERT INTO reservations SELECT 'virtual','v',room_type_id,status,check_in_date,check_out_date,total_room_amount,pricing_scheme,nightly_pricing,special_rate_reason,source,number_of_guests FROM reservations WHERE id='s'");
-  const october=await loadLodging('2026-10-01','2026-10-31'),november=await loadLodging('2026-11-01','2026-11-30');expect(october.summary.revenue).toBe(270);expect(november.summary.revenue).toBe(630);expect(november.summary.roomNights).toBe(2);expect(november.roomCount).toBe(2);
+  const october=await loadLodging('2026-10-01','2026-10-31'),november=await loadLodging('2026-11-01','2026-11-30');expect(october.summary.revenue).toBe(270);expect(november.summary.revenue).toBe(630);expect(november.summary.roomNights).toBe(2);expect(november.roomCount).toBe(2);expect(state.lastReadOnly).toBe('on');
  });
  it('keeps KPI totals, channel income and daily detail reconciled without writes',async()=>{
   const before=(await client.query('SELECT * FROM reservations')).rows;

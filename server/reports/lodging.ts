@@ -1,7 +1,7 @@
 import {sql} from 'drizzle-orm';
 import {db} from '../db';
 import {isOperationalInventoryRoom,ACTIVE_ROOM_RESERVATION_STATUSES} from '@shared/room-availability';
-import {nightlyTotal} from '@shared/nightlyPricing';
+import {nightlyReportPrices} from '@shared/nightlyReportPrices';
 
 type Room={id:string;roomNumber:string;roomTypeId:string;isActive:boolean;isVirtual:boolean};
 type Stay={id:string;roomId:string|null;roomTypeId:string;status:string;checkInDate:string;checkOutDate:string;totalRoomAmount:string|null;pricingScheme:string;nightlyPricing:any;specialRateReason:string|null;source:string;numberOfGuests:number};
@@ -25,22 +25,7 @@ export function calculateLodging(from:string,to:string,asOf:string,rooms:Room[],
   if(!stay.roomId){warnings.unassignedReservations++;continue;}if(!roomMap.has(stay.roomId))continue;
   let stayDates:string[];try{stayDates=dateRange(stay.checkInDate,stay.checkOutDate).slice(0,-1);if(!stayDates.length)throw Error();}catch{warnings.invalidStays++;continue;}
   durations.set(stay.id,stayDates.length);
-  let prices=new Map<string,{amount:number;estimated:boolean}>();
-  // Missing totals must not be silently coerced into free stays. A saved nightly
-  // schedule is accepted only if complete, valid and reconciled with the folio.
-  if(stay.totalRoomAmount!==null&&stay.totalRoomAmount!==undefined&&String(stay.totalRoomAmount).trim()!==''){
-   const total=Number(stay.totalRoomAmount);
-   if(Number.isFinite(total)&&total>=0&&Number.isSafeInteger(Math.round(total*100))){
-    try{
-     const saved=stay.nightlyPricing;
-     if(stay.pricingScheme==='nightly_v1'&&Array.isArray(saved)&&saved.length===stayDates.length&&saved.every((n:any,i:number)=>n.date===stayDates[i])&&nightlyTotal(saved)===Math.round(total*100)){
-      prices=new Map(saved.map((n:any)=>[n.date,{amount:(n.rateCents-n.discountCents)/100,estimated:false}]));
-     }else if(stay.pricingScheme!=='nightly_v1'&&(total>0||String(stay.specialRateReason??'').trim())){
-      const cents=Math.round(total*100);prices=new Map(stayDates.map((date,i)=>[date,{amount:(Math.floor(cents/stayDates.length)+(i<cents%stayDates.length?1:0))/100,estimated:true}]));
-     }
-    }catch{/* Invalid nightly schedules remain visible as missing prices. */}
-   }
-  }
+  const prices=nightlyReportPrices(stay,stayDates);
   for(const date of stayDates){
    if(date<from||date>to)continue;
    const actual=date<=asOf&&['checked_in','checked_out'].includes(stay.status);
@@ -67,7 +52,7 @@ export function calculateLodging(from:string,to:string,asOf:string,rooms:Room[],
  const capacity = physical.map(room=>({roomId:room.id,roomTypeId:room.roomTypeId,availableNights:dates.filter(date=>date<=asOf&&!blocks.some(b=>b.roomId===room.id&&b.blockFrom<=date&&date<b.blockTo)).length}));
  return {from,to,asOf,roomCount:physical.length,capacity,daily,nights,summary,forecast,warnings,methodology:'Producción hasta hoy: checked_in/checked_out; futuro separado. Salida excluida. Tarifas netas guardadas por noche; reservas antiguas distribuidas por centavos. Capacidad: inventario operativo actual menos bloqueos fechados; no reconstruye altas/bajas históricas. ADR usa noches con precio conocido; importes parciales si faltan tarifas. Cortesías guardadas por noche o con motivo: $0. Cupos sin asignar no son ocupación física.'};
 }
-export async function loadLodging(from:string,to:string){
+export async function loadLodging(from:string,to:string):Promise<ReturnType<typeof calculateLodging>>{
  dateRange(from,to);
  return db.transaction(async tx=>{
  const [roomRows,stays,blocks]=await Promise.all([
@@ -77,7 +62,7 @@ export async function loadLodging(from:string,to:string){
  ]);
  const asOf=new Date().toLocaleDateString('en-CA',{timeZone:'America/Argentina/Buenos_Aires'});
  return calculateLodging(from,to,asOf,roomRows.rows as Room[],stays.rows as Stay[],blocks.rows as Block[]);
- },{isolationLevel:'repeatable read',readOnly:true});
+ },{isolationLevel:'repeatable read',accessMode:'read only'});
 }
 export function lodgingChannels(report:Awaited<ReturnType<typeof loadLodging>>){
  const map=new Map<string,{source:string;reservations:Set<string>;nights:number;revenue:number}>();

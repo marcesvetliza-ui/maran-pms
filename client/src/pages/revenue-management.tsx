@@ -1,3 +1,6 @@
+import {RevenuePhaseSummary} from "@/components/revenue-phase-summary";
+import type {SplitRevenueDay} from "@shared/revenueReportSummary";
+import {ReportQueryError} from "@/components/report-query-error";
 import revenueGuideUrl from "@/assets/guias/tutorial-revenue-management.pdf?url";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -26,7 +29,7 @@ function formatCurrency(value: number): string {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value || 0);
 }
 
-type RevenueDayMetrics = {
+type RevenueDayMetrics = SplitRevenueDay & {
   date: string;
   isForecast: boolean;
   roomsAvailable: number;
@@ -42,9 +45,10 @@ type RevenueDayMetrics = {
 };
 
 const RATE_SOURCE_LABELS: Record<string, string> = {
-  final_rate_per_night: "Tarifa directa",
-  total_room_amount_prorated: "Prorrateada (monto total / noches)",
-  group_block_agreed_rate: "Tarifa pactada de grupo (por noche)",
+  final_rate_per_night: "Tarifa plana (referencia histórica)",
+  nightly_pricing: "Tarifa y descuento guardados para esta noche",
+  total_room_amount_prorated: "Distribución estimada del total guardado (centavos exactos)",
+  group_block_agreed_rate: "Estimación de grupo (solo pronóstico)",
   zero_with_reason: "$0 confirmado (cortesía/canje)",
   missing_rate: "Sin tarifa — dato faltante",
 };
@@ -161,27 +165,12 @@ export default function RevenueManagementPage() {
 function BoardTab({ from, to }: { from: string; to: string }) {
   const [detailDate, setDetailDate] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery<{ from: string; to: string; days: RevenueDayMetrics[] }>({
+  const { data, isLoading, isError, refetch } = useQuery<{ from: string; to: string; days: RevenueDayMetrics[] }>({
     queryKey: ["/api/revenue/board", from, to],
     queryFn: async () => (await apiRequest("GET", `/api/revenue/board?from=${from}&to=${to}`)).json(),
   });
 
-  const summary = useMemo(() => {
-    const days = data?.days || [];
-    if (days.length === 0) return null;
-    const totalRevenue = days.reduce((s, d) => s + d.totalRevenue, 0);
-    const totalSold = days.reduce((s, d) => s + d.roomsSold, 0);
-    const totalRated = days.reduce((s, d) => s + d.ratedRoomNights, 0);
-    const totalMissingRate = days.reduce((s, d) => s + d.roomsWithMissingRate, 0);
-    const totalAvailable = days.reduce((s, d) => s + d.roomsAvailable, 0);
-    return {
-      occupancyPct: totalAvailable > 0 ? (totalSold / totalAvailable) * 100 : 0,
-      totalRevenue,
-      adr: totalRated > 0 ? totalRevenue / totalRated : 0,
-      revpar: totalAvailable > 0 ? totalRevenue / totalAvailable : 0,
-      totalMissingRate,
-    };
-  }, [data]);
+  if(isError)return <ReportQueryError retry={refetch} />;
 
   return (
     <div className="space-y-4 mt-4">
@@ -189,36 +178,7 @@ function BoardTab({ from, to }: { from: string; to: string }) {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-28" />)}
         </div>
-      ) : summary ? (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Ocupación promedio</CardTitle></CardHeader>
-            <CardContent><div className="text-3xl font-bold">{summary.occupancyPct.toFixed(1)}%</div></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">Ingreso total del período</CardTitle></CardHeader>
-            <CardContent><div className="text-3xl font-bold">{formatCurrency(summary.totalRevenue)}</div></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">ADR promedio</CardTitle></CardHeader>
-            <CardContent><div className="text-3xl font-bold">{formatCurrency(summary.adr)}</div></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">RevPAR promedio</CardTitle></CardHeader>
-            <CardContent><div className="text-3xl font-bold">{formatCurrency(summary.revpar)}</div></CardContent>
-          </Card>
-        </div>
-      ) : null}
-
-      {summary && summary.totalMissingRate > 0 && (
-        <Card className="border-amber-300">
-          <CardContent className="pt-4 text-sm text-muted-foreground">
-            {summary.totalMissingRate} habitación-noche(s) en este rango no tienen tarifa determinable (ni tarifa directa, ni monto
-            total, ni tarifa pactada de grupo, ni motivo de $0) — cuentan para ocupación pero se excluyen del cálculo de ADR para no
-            diluirlo con un dato desconocido. Revisá el detalle de cada día para identificarlas.
-          </CardContent>
-        </Card>
-      )}
+      ) : data ? <RevenuePhaseSummary days={data.days} /> : null}
 
       <Card>
         <CardContent className="pt-6">
@@ -239,7 +199,7 @@ function BoardTab({ from, to }: { from: string; to: string }) {
                 <TableRow key={day.date} data-testid={`row-board-${day.date}`}>
                   <TableCell>
                     {formatDisplayDate(day.date)}
-                    {day.isForecast && <Badge variant="outline" className="ml-2">forecast</Badge>}
+                    {day.isForecast && <Badge variant="outline" className="ml-2">hoy / previsto</Badge>}
                   </TableCell>
                   <TableCell>
                     {day.occupancyPct.toFixed(0)}%
@@ -376,6 +336,7 @@ function PaceTab({ defaultDate }: { defaultDate: string }) {
 
   return (
     <div className="space-y-4 mt-4">
+      <p className="text-sm text-muted-foreground">Las capturas anteriores a la corrección de tarifas por noche conservan su cálculo original. Las diferencias con capturas nuevas pueden reflejar ese cambio de criterio.</p>
       <div>
         <Label htmlFor="rm-pace-date">Fecha de estadía a analizar</Label>
         <Input id="rm-pace-date" type="date" value={stayDate} onChange={e => setStayDate(e.target.value)} className="w-40" />
