@@ -37,6 +37,24 @@ it.each([{approved:true,issues:rejection.issues},{approved:false,issues:[]}])('d
  const source=await setup();const client={chat:{completions:{create:async()=>response(verdict)}}};
  await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({code:'evidence_audit_invalid'});
 });
+it.each([{issues:[]},{issues:rejection.issues}])('derives the result from validated observations in the new provider schema',async({issues})=>{
+ const source=await setup();
+ const client={chat:{completions:{create:async(request:any)=>{
+  const schema=request.response_format.json_schema.schema;
+  expect(schema.properties).not.toHaveProperty('approved');expect(schema.required).toEqual(['issues']);
+  return response({issues});
+ }}}};
+ const result=await auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000});
+ expect(result.approved).toBe(issues.length===0);expect(result.issues).toHaveLength(issues.length);
+});
+it('does not silently discard an invalid legacy boolean',async()=>{
+ const client={chat:{completions:{create:async()=>response({approved:'false',issues:[]})}}};
+ await expect(auditDiagnosis(ticket,report(),await setup(),client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:90000})).rejects.toMatchObject({auditReason:'invalid_schema',auditSchemaIssues:[{path:'approved',code:'invalid_type'}]});
+});
+it('retains the exact failed audit reason and one attempted review through the diagnosis boundary',async()=>{
+ const client={chat:{completions:{create:async(request:any)=>request.response_format.json_schema.name==='maran_diagnosis_audit'?response({approved:false,issues:[]}):response(report())}}};
+ await expect(diagnose(ticket,await setup(),{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:'inconsistent_verdict',semanticAudits:1});
+});
 it('reserves cost before requesting an audit, rather than exceeding the case budget blindly',async()=>{
  const source=await setup();let calls=0;const client={chat:{completions:{create:async()=>{calls++;return response({approved:true,issues:[]});}}}};
  await expect(auditDiagnosis(ticket,report(),source,client as any,{model:'mock',signal:AbortSignal.timeout(10000),remainingTokens:100})).rejects.toMatchObject({code:'audit_budget'});

@@ -76,6 +76,19 @@ it('shows a recorded budget block with actual counts without treating it as an a
  expect(screen.getByText(/No alcanzó el presupuesto reservado/)).toBeInTheDocument();expect(screen.getByText(/Tokens consumidos: 65000/)).toBeInTheDocument();expect(screen.getByText(/Detenida por un límite/)).toBeInTheDocument();expect(screen.queryByText('Revisión completada.')).not.toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
 });
 
+it('shows an invalid audit reason without confusing it with a rejection or another paid attempt',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'audit-case',title:'Auditoría inválida',status:'failed',version:'a'.repeat(40),report:null,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-11-06T23:00:00Z',messages:[],execution:{revision:'a'.repeat(40),finishedAt:'2026-11-06T23:00:00Z',outcome:'failed',failureCode:'diagnosis_audit',auditReason:'invalid_schema',auditSchemaIssues:[{path:'issues.item.problem',code:'too_big'}],semanticAudits:1,tokens:56841,calls:6,stages:[]}}];
+ render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Auditoría inválida/}));await user.click(screen.getByText('Detalle de ejecución'));
+ expect(screen.getByText(/La respuesta del auditor no cumplió el formato requerido/)).toBeInTheDocument();expect(screen.getByText(/Campo: issues.item.problem/)).toBeInTheDocument();expect(screen.getByText(/Revisiones independientes: 1/)).toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
+});
+it('does not guess the audit reason for attempts that did not persist it',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'old-audit',title:'Auditoría anterior',status:'failed',version:'a'.repeat(40),report:null,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-11-06T23:00:00Z',messages:[],execution:{revision:'a'.repeat(40),finishedAt:'2026-11-06T23:00:00Z',outcome:'failed',failureCode:'diagnosis_audit',tokens:56841,stages:[]}}];
+ render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Auditoría anterior/}));await user.click(screen.getByText('Detalle de ejecución'));
+ expect(screen.getByText(/Este intento no guardó el motivo específico/)).toBeInTheDocument();expect(screen.queryByText(/invalid_schema/)).not.toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
+});
+
 it('presents an operational question without a diagnosis and requires a saved reply before continuing',async()=>{
  const user=userEvent.setup();
  state.cases=[{id:'case-one',title:'NC con error',status:'needs_info',version:'a'.repeat(40),report:null,clarification:{facts:['exact_error'],questions:['¿Qué mensaje exacto aparece?'],requestedAfterMessageCount:0},actual:'Apareció un error al emitir NC',expected:'Anular factura',updatedAt:'2026-10-22T12:00:00Z',messages:[]}];

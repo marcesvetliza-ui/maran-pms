@@ -1,3 +1,4 @@
+import {safeAuditReason,safeAuditSchemaIssues} from '../../shared/programming-support-execution';
 /** Map failures to fixed messages; never expose provider messages or request bodies. */
 export function diagnosisFailure(error: unknown) {
   const e =
@@ -108,15 +109,12 @@ export function investigationMetrics(error: unknown) {
 /** Fixed reason labels only: never log the reviewer text or source payload. */
 export function auditFailureReason(error: unknown) {
   const reason = (error as {auditReason?:unknown} | null)?.auditReason;
-  return typeof reason === "string" && ["semantic_rejected", "output_limit", "refusal", "invalid_json", "invalid_schema", "inconsistent_verdict", "quote_mismatch", "invalid_reference", "incomplete_checks", "invalid_check_reference", "inconsistent_checks"].includes(reason) ? reason : undefined;
+  return safeAuditReason(reason);
 }
 
 export function auditSchemaFailureDetails(error: unknown) {
   const issues=(error as {auditSchemaIssues?:unknown} | null)?.auditSchemaIssues;
-  if(!Array.isArray(issues))return undefined;
-  const allowedPaths=/^(approved|issues)(\.item)?(\.(field|quote|statementId|problem|correction))?$/;
-  const allowedCodes=["too_small","too_big","invalid_type","invalid_value","invalid_enum_value","unrecognized_keys"];
-  return issues.slice(0,4).filter(issue=>issue && typeof issue.path==='string' && allowedPaths.test(issue.path) && allowedCodes.includes(issue.code)).map(({path,code})=>({path,code}));
+  return safeAuditSchemaIssues(issues);
 }
 
 /** No quotes, diagnosis text, correction prose, case contents or source text. */

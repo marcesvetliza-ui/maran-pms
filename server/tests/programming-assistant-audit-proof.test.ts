@@ -35,6 +35,9 @@ it('requires three explicit proof checks in the fiscal review schema, within the
 it('rejects the old blanket approval without independent checks',async()=>{
  await expect(run(()=>({approved:true,issues:[]}))).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:'incomplete_checks'});
 });
+it('cannot derive approval from empty observations when a mandatory proof check is negative',async()=>{
+ await expect(run(payload=>{const proof=checks(payload);proof[0].supported=false;return {issues:[],checks:proof};})).rejects.toMatchObject({code:'evidence_audit_invalid',auditReason:'inconsistent_checks'});
+});
 it.each(['duplicate','wrong_statement','false_quote','null_quote','missing_basis','ignored_rejection','unrelated_issue'] as const)('fails closed on malformed or inconsistent proof: %s',async mode=>{
  await expect(run(payload=>{
   const proof=checks(payload);let approved=true;let issues:any[]=[];

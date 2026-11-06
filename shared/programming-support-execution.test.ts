@@ -12,3 +12,8 @@ it('strips arbitrary text, raw provider errors, source and unrecognized reasons 
   expect(JSON.stringify(run)).not.toContain('PRIVATE');expect(run.tokens).toBeUndefined();expect(run.stages).toHaveLength(1);
   expect(safeSupportExecution({...base,revision:'PRIVATE'})).toBeUndefined();
 });
+it('keeps the exact safe audit failure category and schema paths, including checks',()=>{
+ const run=safeSupportExecution({...base,outcome:'failed',partialReason:undefined,failureCode:'diagnosis_audit',semanticAudits:1,auditReason:'invalid_schema',auditSchemaIssues:[{path:'issues.item.problem',code:'too_big',message:'PRIVATE'},{path:'checks.item.codeQuote',code:'too_big'},{path:'PRIVATE',code:'too_big'},{path:'approved',code:'PRIVATE'}]})!;
+ expect(run.auditReason).toBe('invalid_schema');expect(run.semanticAudits).toBe(1);expect(run.auditSchemaIssues).toEqual([{path:'issues.item.problem',code:'too_big'},{path:'checks.item.codeQuote',code:'too_big'}]);expect(JSON.stringify(run)).not.toContain('PRIVATE');
+ expect(safeSupportExecution({...base,auditReason:'PRIVATE',auditSchemaIssues:'PRIVATE'})?.auditReason).toBeUndefined();
+});

@@ -480,6 +480,7 @@ export async function diagnose(
     telemetry.record(stage,"failed",telemetry.start(),0,tokens);
     if (error && typeof error === "object") Object.assign(error, {
       investigation: { rounds, calls, tokens, phase: coverageReviewed ? "coverage_review" : researchClosed ? "closing" : "research" },
+      semanticAudits,
       stages:telemetry.events,
     });
     throw error;

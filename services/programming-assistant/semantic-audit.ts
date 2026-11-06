@@ -13,11 +13,11 @@ const fields=['summary','cause','proposal','certainty','limitations','proposedTe
 type AuditField=typeof fields[number];
 const reviewTopics=['causal_inference','repair_and_action','test_preconditions'] as const;
 const checkSchema=z.object({topic:z.enum(reviewTopics),statementId:z.string().min(1),supported:z.boolean(),reason:z.string().min(1).max(300),counterexample:z.string().min(1).max(240),evidenceIndex:z.number().int().nonnegative().nullable(),codeQuote:z.string().max(240)}).strict();
-const verdictSchema=z.object({approved:z.boolean(),issues:z.array(z.object({statementId:z.string().min(1),problem:z.string().min(1).max(600),correction:z.string().min(1).max(600)}).strict()).max(4),checks:z.array(checkSchema).length(3).optional()}).strict();
+const verdictSchema=z.object({issues:z.array(z.object({statementId:z.string().min(1),problem:z.string().min(1).max(600),correction:z.string().min(1).max(600)}).strict()).max(4),checks:z.array(checkSchema).length(3).optional()}).strict();
 function auditOutputSchema(statementIds:string[],requireChecks:boolean){
  const issue={type:'object',additionalProperties:false,properties:{statementId:{type:'string',enum:statementIds},problem:{type:'string',minLength:1,maxLength:600},correction:{type:'string',minLength:1,maxLength:600}},required:['statementId','problem','correction']};
  const check={type:'object',additionalProperties:false,properties:{topic:{type:'string',enum:reviewTopics},statementId:{type:'string',enum:statementIds},supported:{type:'boolean'},reason:{type:'string',minLength:1,maxLength:300},counterexample:{type:'string',minLength:1,maxLength:240},evidenceIndex:{type:['integer','null'],minimum:0},codeQuote:{type:'string',maxLength:240}},required:['topic','statementId','supported','reason','counterexample','evidenceIndex','codeQuote']};
- return {type:'object',additionalProperties:false,properties:{approved:{type:'boolean'},issues:{type:'array',maxItems:4,items:issue},...(requireChecks?{checks:{type:'array',minItems:3,maxItems:3,items:check}}:{})},required:['approved','issues',...(requireChecks?['checks']:[])]};
+ return {type:'object',additionalProperties:false,properties:{issues:{type:'array',maxItems:4,items:issue},...(requireChecks?{checks:{type:'array',minItems:3,maxItems:3,items:check}}:{})},required:['issues',...(requireChecks?['checks']:[])]};
 }
 
 /** Assign server-owned references without asking the reviewer to copy text.
@@ -56,7 +56,7 @@ export const auditInstruction=cashReasoningInstruction+"\n"+errorReportReviewIns
 2. Contrastá todos los campos entre sí. Verificá las condiciones del mecanismo que se afirma; consultar estados y recuperar la misma operación incierta no exige explicar descarte interno ni autoriza otra emisión.
 3. Buscá datos declarados ausentes en case, interfaceScope, decisionBrief.interfaceScope y código. Corregí preguntas técnicas investigables; aceptá datos operativos indispensables para la conclusión principal. Comprobaciones futuras no la bloquean.
 4. Buscá una interpretación válida: respetá negaciones, condiciones y alcance. No atribuyas una conclusión inexistente. Aceptá respuestas breves sustentadas sin exigir plantilla, ejecución o datos reales para explicar código. Para certificar el incidente sí hacen falta registros.
-Rechazá sólo problemas materiales presentes: approved=false con issues y statementId del texto cuestionado; si hay contradicción, identificá ambos pasajes. Una limitación no subsana una falsedad. Si es coherente y sustentado, approved=true, issues=[].
+Registrá sólo problemas materiales presentes en issues con statementId del texto cuestionado; si hay contradicción, identificá ambos pasajes. Una limitación no subsana una falsedad. Si es coherente y sustentado, issues=[]. No devuelvas approved ni otro veredicto separado: el servidor deriva la aprobación únicamente de las observaciones validadas.
 En diagnosis.statements, CADA text contiene UN campo/elemento COMPLETO, sin cortes. statementIds son posiciones, no truncamiento. evidenceReferences vincula citas. Usá sólo IDs existentes; problem/correction: 1 a 600 caracteres. No inventes hechos.`;
 
 const recoveryAuditInstruction="En este caso hay una NC pendiente informada. Verificá que cada cita respalde su explicación y corresponda a esa operación. Un guard de borrar pagos o reemplazar facturas no demuestra la causa de una conciliación fallida; una asociación documental no demuestra recuperación. Contrastá la propuesta con las ramas de recuperación y la pantalla leídas. No presupongas que falta crear otro comprobante ni que pendiente significa autorizado o rechazado. Si el error exacto falta, no afirmes que coincide con un guard concreto de otra operación.";
@@ -65,7 +65,7 @@ const fiscalDatesAuditInstruction="Compará cada causa, reparación y supuesto d
 
 const proofReviewInstruction=`Antes del veredicto, completá checks: una revisión causal_inference, una repair_and_action y una test_preconditions. Son comprobaciones independientes del resumen del autor. Identificá un statementId real del campo revisado y justificá supported contra el código. evidenceIndex es el índice cero de evidence.proofReferences, que remite a una lectura de citedCode, decisionBrief.readings (collection decisionBriefReadings) u operationalTestsConsulted. codeQuote debe ser un fragmento literal contiguo de su content, sin marcadores de deduplicación. Las lecturas compartidas no deben confundirse con ausencia de evidencia. Si no hay lectura pertinente, evidenceIndex=null, codeQuote="" y supported=false: explicar la limitación, nunca inventar respaldo. Una causa histórica no determinada puede ser una conclusión válida si el código leído respalda ese alcance; no exige obtener registros operativos para explicar el código.
 En counterexample, intentá refutar la implicación: ¿puede darse la condición observada sin la conclusión afirmada? Para causa, verificá si un estado pendiente o un rechazo identifica realmente una entrada específica o si admite otros caminos. Para reparación/acción, verificá si presupone un defecto demostrado o una operación autorizada. Para pruebas, verificá si la preparación propuesta basta para producir el resultado esperado, o si confunde una condición necesaria con una suficiente. No presentar un escenario contrafáctico como hecho del incidente. Si no hay reparación o prueba propuesta, usá proposal/cause para explicar su ausencia, sin inventar una observación.
-Si cualquier check no respalda el informe, supported=false, approved=false y al menos una issue debe citar ese mismo statementId. Una cita textual por sí sola no prueba la inferencia. Si todos los checks son supported=true, eso aún no obliga a aprobar: revisar las restantes afirmaciones. No aprobar por compartir vocabulario con el código. No exigir una causa alternativa si el informe declara honestamente que no se determinó.`;
+Si cualquier check no respalda el informe, supported=false y al menos una issue debe citar ese mismo statementId. Una cita textual por sí sola no prueba la inferencia. Si todos los checks son supported=true, eso aún no obliga a dejar issues vacío: revisar las restantes afirmaciones. No aprobar por compartir vocabulario con el código. No exigir una causa alternativa si el informe declara honestamente que no se determinó.`;
 
 export async function prepareAudit(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,coverage:readonly string[] = []) {
   const {citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief,messageContract}=await buildCoverageReview(report,source,coverage);
@@ -92,7 +92,20 @@ export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosi
    options.observe?.({...request,model:options.model},response.usage?.prompt_tokens);
   if(response.choices[0]?.finish_reason==='length'){auditReason='output_limit';throw new Error('Auditoría incompleta');}
   if(response.choices[0]?.message?.refusal){auditReason='refusal';throw new Error('Auditoría rechazada');}
-  const parsed=JSON.parse(response.choices[0]?.message?.content || '{}');
+  let parsed=JSON.parse(response.choices[0]?.message?.content || '{}');
+  // New provider output has only observations. Accept a consistent legacy
+  // envelope, but NEVER repair a contradictory boolean by choosing one side.
+  if(parsed && typeof parsed==='object' && !Array.isArray(parsed) && 'approved' in parsed){
+   auditReason='invalid_schema';
+   if(typeof parsed.approved!=='boolean'){
+    auditSchemaIssues=[{path:'approved',code:'invalid_type'}];
+    throw new Error('Formato de auditoría inválido');
+   }
+   if(Array.isArray(parsed.issues) && parsed.approved!==(parsed.issues.length===0)){
+    auditReason='inconsistent_verdict';throw new Error('Veredicto contradictorio');
+   }
+   const {approved:_,...observations}=parsed;parsed=observations;
+  }
   auditReason='invalid_schema';
   const validation=verdictSchema.safeParse(parsed);
   if(!validation.success){
@@ -104,6 +117,7 @@ export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosi
    throw new Error('Formato de auditoría inválido');
   }
   const verdict=validation.data;
+  const approved=verdict.issues.length===0;
   if(requireChecks){
    auditReason='incomplete_checks';
    if(!verdict.checks || new Set(verdict.checks.map(check=>check.topic)).size!==reviewTopics.length)throw new Error('Falta una revisión independiente');
@@ -121,18 +135,16 @@ export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosi
      if(!original.content.includes(check.codeQuote))throw new Error('Un marcador de contexto no es código fuente');
     }
     auditReason='inconsistent_checks';
-    if(!check.supported && (verdict.approved || !verdict.issues.some(issue=>issue.statementId===check.statementId)))throw new Error('El veredicto ignora una comprobación rechazada');
+    if(!check.supported && (approved || !verdict.issues.some(issue=>issue.statementId===check.statementId)))throw new Error('El veredicto ignora una comprobación rechazada');
    }
   }
-  auditReason='inconsistent_verdict';
-  if(verdict.approved!== (verdict.issues.length===0))throw new Error('Veredicto contradictorio');
   auditReason='invalid_reference';
   const issues=verdict.issues.map(({statementId,problem,correction})=>{
    const statement=statementById.get(statementId);
    if(!statement)throw new Error('La observación no identifica un fragmento del informe');
    return {statementId,field:statement.field,quote:statement.text,problem,correction};
   });
-  return {approved:verdict.approved,issues,tokens};
+  return {approved,issues,tokens};
  }catch(error){
   // Provider failures remain provider failures; do not turn them into approval.
   if(error && typeof error==='object' && ('status' in error || ['APIConnectionError','APIConnectionTimeoutError','AbortError','TimeoutError'].includes((error as Error).name)))throw Object.assign(error,{auditTokens:tokens});

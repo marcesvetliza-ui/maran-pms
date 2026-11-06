@@ -339,6 +339,8 @@ export async function createService(
           ticket.execution=safeSupportExecution({
             revision:config.version,finishedAt:new Date().toISOString(),outcome:'failed',
             tokens:metrics?.tokens,calls:metrics?.calls,failureCode:failure.code,
+            semanticAudits:(error as {semanticAudits?:unknown})?.semanticAudits,
+            auditReason:auditFailureReason(error),auditSchemaIssues:auditSchemaFailureDetails(error),
             stages:(error as {stages?:unknown})?.stages,
           });
           console.warn("Investigación del asistente fallida", {
