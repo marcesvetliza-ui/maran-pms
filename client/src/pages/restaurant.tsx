@@ -4559,9 +4559,9 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           setIsSplitMode(false);
         }
       }}>
-        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] flex flex-col">
+        <DialogContent className="operational-dialog restaurant-workspace-dialog">
           <DialogHeader>
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <DialogTitle>
                   {getUpdatedOrder()?.orderLabel || getUpdatedOrder()?.orderNumber} - {getUpdatedOrder()?.tableId ? `Mesa ${getUpdatedOrder()?.table?.tableNumber || selectedTable?.tableNumber}` : (areas.find(a => a.id === getUpdatedOrder()?.areaId)?.name || "")}
@@ -4642,7 +4642,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           </DialogHeader>
 
           {orderView === "folio" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-lg">Resumen de Consumos</h3>
                 {!isTransferMode && getOrderItems().length > 0 && (
@@ -4812,7 +4812,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           )}
 
           {orderView === "comanda" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <h3 className="font-semibold text-lg">Comanda</h3>
               {getOrderItems().length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No hay items en este pedido</p>
@@ -4886,7 +4886,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           )}
 
           {orderView === "review" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <div className="flex items-center gap-2">
                 <ClipboardList className="h-5 w-5 text-primary" />
                 <h3 className="font-semibold text-lg">Confirmar Comanda</h3>
@@ -4940,7 +4940,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           )}
 
           {orderView === "delete" && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <h3 className="font-semibold text-lg">Eliminar Items</h3>
               {getOrderItems().length === 0 ? (
                 <p className="text-muted-foreground text-center py-8">No hay items para eliminar</p>
@@ -4981,7 +4981,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           )}
 
           {orderView === "menu" && !pendingItem && (
-            <div className="flex-1 overflow-y-auto space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               {/* Buscador */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -5129,7 +5129,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           )}
 
           {orderView === "menu" && pendingItem && (
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <div className="p-4 border rounded-md bg-muted/30">
                 <h3 className="font-semibold text-lg mb-1">{pendingItem.name}</h3>
                 <p className="text-muted-foreground">
@@ -5431,14 +5431,14 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
 
       {/* Close Order Dialog with Receipt Type, Payment Method, and Split */}
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => { setIsCloseDialogOpen(open); if (!open) { setIsSplitMode(false); setSplitDialogMode("equal_parts"); setMoveItemQuantities({}); setMoveItemTargetOrderId(""); setPayItemQuantities({}); setPayItemDiscount(""); setPayItemRoomId(""); setPayItemRoomSearch(""); setPayItemBillingName(""); setPayItemBillingCuit(""); setPayItemFbIsExento(false); setRoomSearchFilter(""); setCloseDiscount(""); setCloseDiscountType("percent"); setBillingSearch(""); setFbIsExento(false); setCloseBillingName(""); setCloseBillingCuit(""); setCloseBillingCompanyId(""); setCloseBillingGuestId(""); setCloseSalesCondition("contado"); setCloseCfIdentificado(false); setCloseCfNombre(""); setCloseCfDni(""); setCloseCfSearch(""); setCloseCfSearchOpen(false); setInvoiceDescriptionOverrides({}); } }}>
-        <DialogContent className="operational-dialog restaurant-checkout">
+        <DialogContent className="operational-dialog restaurant-workspace-dialog restaurant-checkout">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Receipt className="h-5 w-5" />
               Cerrar - {getUpdatedOrder()?.orderLabel || currentOrder?.orderNumber}
             </DialogTitle>
           </DialogHeader>
-          <div className="restaurant-close-grid operational-body"><section className="min-w-0 space-y-4" aria-label="Consumos y total de la mesa">
+          <div className="operational-body space-y-4"><div className="restaurant-close-grid"><section className="min-w-0 space-y-4" aria-label="Consumos y total de la mesa">
             {getOrderItems().some(i => i.status === "waiting_course") && (
               <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md p-3">
                 <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
@@ -6544,6 +6544,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             <Label htmlFor="restaurant-close-comments">Notas / comentarios</Label>
             <Textarea id="restaurant-close-comments" value={closeComments} onChange={e => setCloseComments(e.target.value)}
               maxLength={2000} rows={3} placeholder="Se imprimirán en el ticket no fiscal" data-testid="input-close-comments" />
+          </div>
           </div>
           <DialogFooter className="operational-footer flex-col sm:flex-row gap-2">
             <div className="mr-auto min-w-0 text-sm" aria-label="Total a cobrar de la mesa"><span className="block text-muted-foreground">A cobrar</span><strong className="text-xl">${Math.max(0, parseFloat(getUpdatedOrder()?.total || "0") - (closeDiscountType === "percent" ? parseFloat(getUpdatedOrder()?.total || "0") * parseFloat(closeDiscount || "0") / 100 : parseFloat(closeDiscount || "0")) - totalAdvanceCredit).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong></div>
