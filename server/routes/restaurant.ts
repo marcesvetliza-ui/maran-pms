@@ -1,3 +1,4 @@
+import {registerRestaurantLayoutRoutes} from './restaurantLayout';
 import {copyDishRecipe} from "../copyDishRecipe";
 import {selectRestaurantItemQuantities} from "../restaurantItemQuantities";
 import { restaurantCashPosting } from "@shared/restaurant-settlement";
@@ -110,6 +111,7 @@ function queueRestaurantInvoice(data: Parameters<typeof emitirFactura>[0]): void
 }
 
 export function registerRestaurantRoutes(app: Express) {
+  registerRestaurantLayoutRoutes(app);
   // Restaurant Areas
   app.get("/api/restaurant/areas", async (req, res) => {
     try {
