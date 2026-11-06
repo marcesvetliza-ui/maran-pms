@@ -6,7 +6,7 @@ import { requireAuth } from "../auth";
 import { emitirFactura } from "../billing/invoiceService";
 import { restaurantPaymentTransaction, afterRestaurantPaymentCommit } from "../restaurantPaymentTransaction";
 import { db, pool, withDatabaseTransaction } from "../db";
-import { restaurantOrders, orderItems, orderSplits, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
+import { restaurantTables, restaurantAreas, restaurantOrders, orderItems, orderSplits, menuItems, menuCategories, recipes, recipeIngredients, inventoryItems, stockMovements } from "@shared/schema";
 import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf } from "../restaurantPdfs";
@@ -1515,11 +1515,27 @@ export function registerRestaurantRoutes(app: Express) {
       let finalTargetOrderId = targetOrderId;
 
       // If "new", create a new order first
-      if (targetOrderId === "new") {
+      const newTableId=typeof targetOrderId==='string'&&targetOrderId.startsWith('table:')?targetOrderId.slice(6):null;
+      if (targetOrderId === "new" || newTableId!==null) {
+        if(typeof newOrderData?.waiterName!=='string'||!newOrderData.waiterName.trim())return res.status(400).json({error:'Seleccioná el mozo de la mesa destino'});
+        let tableDestination:any=null;
+        const tableId=newTableId||newOrderData?.tableId;
+        if(newTableId!==null&&!newTableId)return res.status(400).json({error:'Elegí una mesa disponible'});
+        if(tableId){
+          // Same key as normal table opening, held until this transfer commits.
+          await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`restaurant-table-open:${tableId}`}))`);
+          const [table]=await db.select().from(restaurantTables).where(eq(restaurantTables.id,tableId)).for('update');
+          if(!table||table.isActive!=='true'||table.status!=='available')return res.status(409).json({error:'La mesa ya no está disponible. Actualizá y elegí otra.'});
+          const [area]=await db.select().from(restaurantAreas).where(eq(restaurantAreas.id,table.areaId));
+          if(!area||area.isActive!=='true')return res.status(409).json({error:'El área de la mesa no está activa'});
+          const occupied=await db.select({id:restaurantOrders.id}).from(restaurantOrders).where(and(eq(restaurantOrders.tableId,tableId),not(inArray(restaurantOrders.status,['closed','cancelled'])))).limit(1);
+          if(occupied.length)return res.status(409).json({error:'La mesa ya tiene una comanda abierta. Actualizá y seleccioná esa comanda.'});
+          tableDestination=table;
+        }
         if (!newOrderData?.waiterName) return res.status(400).json({ error: "Mozo requerido para nuevo ticket" });
         const orderNumber = storage.generateOrderNumber();
         const newOrder = await storage.createRestaurantOrder({
-          ...newOrderData,
+          ...(tableDestination?{tableId:tableDestination.id,areaId:tableDestination.areaId,orderType:'dine_in',orderLabel:null,covers:1,waiterName:newOrderData.waiterName.trim()}:newOrderData),
           orderNumber,
           openedAt: new Date(),
           status: "open",
@@ -1571,7 +1587,7 @@ export function registerRestaurantRoutes(app: Express) {
       console.error("Error transferring items:", error);
       res.status((error as any)?.statusCode || 500).json({ error: (error as Error).message || "Error al transferir ítems" });
     }
-  }, req=>[req.params.id,...(typeof req.body.targetOrderId==='string' && req.body.targetOrderId!=='new'?[req.body.targetOrderId]:[])]));
+  }, req=>[req.params.id,...(typeof req.body.targetOrderId==='string' && req.body.targetOrderId!=='new'&&!req.body.targetOrderId.startsWith('table:')?[req.body.targetOrderId]:[])]));
 
   // Recipes
   app.get("/api/restaurant/recipes", async (req, res) => {
