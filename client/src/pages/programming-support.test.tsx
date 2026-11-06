@@ -62,6 +62,20 @@ it('shows internal incomplete validation without asking the operator for missing
  expect(state.request).not.toHaveBeenCalled();
 });
 
+it('opens a historical execution without inventing the reason or requesting a paid retry',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'historical-case',title:'Intento anterior',status:'validation_incomplete',version:'a'.repeat(40),report:null,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-11-06T23:00:00Z',messages:[]}];
+ render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Intento anterior/}));await user.click(screen.getByText('Detalle de ejecución'));
+ expect(screen.getByText('Consulta: historical-case')).toBeInTheDocument();expect(screen.getByText(/Este intento no tiene un registro de ejecución guardado/)).toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
+});
+
+it('shows a recorded budget block with actual counts without treating it as an approved review',async()=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'new-case',title:'Intento con registro',status:'validation_incomplete',version:'a'.repeat(40),report:null,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-11-06T23:00:00Z',messages:[],execution:{revision:'a'.repeat(40),finishedAt:'2026-11-06T23:00:00Z',outcome:'incomplete',partialReason:'correction_reserve',tokens:65000,calls:4,semanticAudits:0,stages:[{stage:'audit',outcome:'blocked',tokens:0,totalTokens:65000,elapsedMs:0,reason:'budget',availableTokens:35000,reservedTokens:40000}]}}];
+ render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Intento con registro/}));await user.click(screen.getByText('Detalle de ejecución'));
+ expect(screen.getByText(/No alcanzó el presupuesto reservado/)).toBeInTheDocument();expect(screen.getByText(/Tokens consumidos: 65000/)).toBeInTheDocument();expect(screen.getByText(/Detenida por un límite/)).toBeInTheDocument();expect(screen.queryByText('Revisión completada.')).not.toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
+});
+
 it('presents an operational question without a diagnosis and requires a saved reply before continuing',async()=>{
  const user=userEvent.setup();
  state.cases=[{id:'case-one',title:'NC con error',status:'needs_info',version:'a'.repeat(40),report:null,clarification:{facts:['exact_error'],questions:['¿Qué mensaje exacto aparece?'],requestedAfterMessageCount:0},actual:'Apareció un error al emitir NC',expected:'Anular factura',updatedAt:'2026-10-22T12:00:00Z',messages:[]}];

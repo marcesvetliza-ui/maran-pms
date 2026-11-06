@@ -114,6 +114,7 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
         const updated = await (await request("/cases")).json();
         expect(updated[0].status).toBe("proposal_ready");
         expect(updated[0].version).toBe(version);
+        expect(updated[0].execution).toMatchObject({revision:version,outcome:'complete',tokens:0,calls:0,stages:[]});
         const feedback={requestId:randomUUID(),reportId:updated[0].reportId,outcome:"unresolved"};
         expect((await request(`/cases/${ticket.id}/feedback`,feedback,"owner2")).status).toBe(404);
         const evaluations=await Promise.all([request(`/cases/${ticket.id}/feedback`,feedback),request(`/cases/${ticket.id}/feedback`,feedback)]);
@@ -158,3 +159,33 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
     });
   },
 );
+
+(process.env.DATABASE_URL ? it : it.skip)('persists safe partial and failed run details across reloads without another investigation',async()=>{
+ const admin=new pg.Client({connectionString:process.env.DATABASE_URL});await admin.connect();
+ const schema='assistant_execution_'+randomUUID().replaceAll('-','');await admin.query(`CREATE SCHEMA "${schema}"`);
+ const url=new URL(process.env.DATABASE_URL!);url.searchParams.set('options',`-c search_path=${schema}`);
+ const version='a'.repeat(40),secret='test-execution-secret-'.repeat(3);let attempts=0;
+ const service=await createService({databaseUrl:url.toString(),secret,version,sourceRoot:process.cwd(),apiKey:'mock-only',model:'mock'},async()=>{
+   attempts++;
+   if(attempts===2)throw Object.assign(new Error('PRIVATE PROVIDER MESSAGE'),{code:'evidence_semantic_rejected',stages:[{stage:'reaudit',outcome:'rejected',tokens:400,totalTokens:42000,elapsedMs:0,issueCount:1,privateText:'PRIVATE'}]});
+   return {report:{summary:'Parcial',validationStatus:'incomplete',certainty:'hipotesis',cause:'',proposal:'Completar revisión',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]},tokens:65000,calls:4,semanticAudits:0,readFiles:[],searches:[],partialReason:'correction_reserve',stages:[{stage:'audit',outcome:'blocked',tokens:0,totalTokens:65000,elapsedMs:0,reason:'budget',availableTokens:35000,reservedTokens:40000}]};
+ });
+ const server=service.app.listen(0,'127.0.0.1');await new Promise<void>(resolve=>server.on('listening',resolve));
+ const base=`http://127.0.0.1:${(server.address() as any).port}`;
+ const request=(path:string,body?:unknown,owner='owner1')=>fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json','X-Support-User':owner,'X-Support-Version':version},body:body?JSON.stringify(body):undefined});
+ try{
+   const ticket=await(await request('/cases',{requestId:randomUUID(),title:'Caso de ejecución sintético',module:'inventario',actual:'Error genérico de receta',expected:'Revisar el mensaje'})).json();
+   await request(`/cases/${ticket.id}/analyze`,{requestId:randomUUID()});await service.tick();
+   const first=(await(await request('/cases')).json())[0];
+   expect(first.status).toBe('validation_incomplete');expect(first.execution).toMatchObject({outcome:'incomplete',partialReason:'correction_reserve',tokens:65000,semanticAudits:0});
+   expect(first.execution.stages[0]).toMatchObject({availableTokens:35000,reservedTokens:40000});
+   expect((await(await request('/cases')).json())[0].execution).toEqual(first.execution);expect(attempts).toBe(1);
+   expect(await(await request('/cases',undefined,'other-owner')).json()).toEqual([]);
+   const queued=await(await request(`/cases/${ticket.id}/analyze`,{requestId:randomUUID()})).json();expect(queued.execution).toBeUndefined();
+   await service.tick();const failed=(await(await request('/cases')).json())[0];
+   expect(failed.status).toBe('failed');expect(failed.execution).toMatchObject({outcome:'failed',failureCode:'diagnosis_coherence',stages:[{stage:'reaudit',outcome:'rejected',issueCount:1}]});
+   expect(JSON.stringify(failed)).not.toContain('PRIVATE');expect(failed.execution.partialReason).toBeUndefined();expect(attempts).toBe(2);
+ }finally{
+   await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await service.stop();await admin.query(`DROP SCHEMA "${schema}" CASCADE`);await admin.end();
+ }
+});

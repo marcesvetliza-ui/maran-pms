@@ -1,4 +1,5 @@
 import {citedScreens} from "@shared/programming-support-scope";
+import {SupportExecutionDetails} from '@/components/support-execution-details';
 import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -365,6 +366,7 @@ export default function ProgrammingSupport() {
                   </details>
                 </div>
               )}
+              <SupportExecutionDetails ticket={ticket}/>
               <section className="space-y-3">
                 <h2 className="font-medium">Seguimiento</h2>
                 {ticket.messages?.map((m) => (

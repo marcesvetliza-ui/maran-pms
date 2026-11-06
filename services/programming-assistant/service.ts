@@ -1,5 +1,6 @@
 import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails, semanticFailureDetails } from "./errors";
 import {safeStageEvents} from "./lifecycle";
+import {safeSupportExecution} from '../../shared/programming-support-execution';
 import {dailyInvestigationLimit} from "./budget";
 import express from "express";
 import pg from "pg";
@@ -217,6 +218,7 @@ export async function createService(
         ticket.report = null;
         ticket.status = "queued";
         ticket.lastError = null;
+        delete ticket.execution;
       } else if (action === "feedback") {
         const feedback=supportFeedbackSchema.parse(req.body);
         if(!ticket.report || feedback.reportId!==(ticket.reportId || ticket.version) || (ticket.feedback?.length || 0)>=30) {
@@ -305,6 +307,12 @@ export async function createService(
             new CodeSource(config.sourceRoot, config.version),
             { apiKey: config.apiKey!, model: config.model },
           );
+          ticket.execution=safeSupportExecution({
+            revision:config.version,finishedAt:new Date().toISOString(),
+            outcome:result.clarification?'clarification':result.report.validationStatus==='incomplete'?'incomplete':'complete',
+            tokens:result.tokens,calls:result.calls,semanticAudits:result.semanticAudits,
+            partialReason:result.partialReason,stages:result.stages,
+          });
           console.info("Investigación del asistente completada", {
             caseId:ticket.id, model:config.model, revision:config.version, resultKind:result.clarification?"clarification":"diagnosis",
             tokens:result.tokens, calls:result.calls, semanticAudits:result.semanticAudits || 0,
@@ -327,6 +335,12 @@ export async function createService(
           ticket.lastError = null;
         } catch (error) {
           const failure = diagnosisFailure(error);
+          const metrics=investigationMetrics(error);
+          ticket.execution=safeSupportExecution({
+            revision:config.version,finishedAt:new Date().toISOString(),outcome:'failed',
+            tokens:metrics?.tokens,calls:metrics?.calls,failureCode:failure.code,
+            stages:(error as {stages?:unknown})?.stages,
+          });
           console.warn("Investigación del asistente fallida", {
             caseId: ticket.id,
             code: failure.code,
