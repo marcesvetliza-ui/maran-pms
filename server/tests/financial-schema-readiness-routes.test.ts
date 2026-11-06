@@ -38,7 +38,7 @@ vi.mock("../auth", () => ({
 }));
 vi.mock("../db", () => ({
   withDatabaseTransaction: async (action: () => Promise<unknown>) => action(),
-  db: { execute: vi.fn(), select: vi.fn(() => ({ from: () => ({ where: () => ({ for: async () => [] }) }) })), update: vi.fn(), insert: vi.fn() },
+  db: { execute: vi.fn(), select: vi.fn(() => ({ from: () => ({ where: () => ({ orderBy: () => ({ for: async () => [] }) }) }) })), update: vi.fn(), insert: vi.fn() },
   pool: { query: vi.fn(), connect: vi.fn() },
 }));
 vi.mock("../billing/invoiceService", () => ({
