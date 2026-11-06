@@ -1,4 +1,5 @@
 import {errorReportReviewInstruction,errorProposalCoverageIssues} from "./error-report-review";
+import {recipeErrorContract,recipeMessageIdentityIssues} from './recipe-error-contract';
 import {cashReasoningInstruction,cashReasoningIssues} from "./cash-review";
 import {inferenceLimitIssues} from "./inference-limits";
 import { operationalQuestions, type OperationalFact } from "../../shared/programming-support-clarification";
@@ -388,7 +389,7 @@ export async function diagnose(
         messages.push({role:"user",content:JSON.stringify({validationError:"Atribución incompatible con el origen del mensaje leído en el código.",attributionErrors})});
         continue;
       }
-      const consistencyErrors=[...financialConsistencyIssues(report),...inferenceLimitIssues(report),...cashReasoningIssues(report),...errorProposalCoverageIssues(report,ticket)];
+      const consistencyErrors=[...financialConsistencyIssues(report),...inferenceLimitIssues(report),...cashReasoningIssues(report),...errorProposalCoverageIssues(report,ticket),...recipeMessageIdentityIssues(report,await recipeErrorContract(source))];
       if(consistencyErrors.length) {
         telemetry.record("validation","invalid",validating,0,tokens,{reason:"consistency",issueCount:consistencyErrors.length});
         if(consistencyCorrections++>=2 || round===13)throw Object.assign(new Error("No se pudo verificar la evidencia: la conclusión o la reparación propuesta contradicen el alcance de la investigación."),{code:"evidence_inconsistent"});

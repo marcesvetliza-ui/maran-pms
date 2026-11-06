@@ -15,3 +15,11 @@ La respuesta recibida en 6aec6c31 identificó correctamente la pérdida del deta
 No se cambia Inventario, sus conversiones, mensajes, movimientos ni stock. No se invoca al proveedor real ni se cambia el modelo o presupuesto. Los controles se verifican con respuestas simuladas, no acreditan la calidad del próximo diagnóstico.
 
 Se ejecutan las pruebas de este caso y regresiones de atribución, Caja, afirmaciones, consistencia y auditoría. Los 11 fallos preexistentes de navegación/citas identificados en el trabajo anterior no se dan por corregidos aquí. El próximo paso es repetir el caso con una consulta nueva y revisar citas, alcance y recomendaciones en la respuesta real de la nueva revisión.
+
+## Respuesta real en 65aa4f60
+
+La ejecución completó una auditoría y consumió 28.486 tokens. Aprobó incorrectamente que mostrar el error permitiría identificar el ingrediente. El requisito de identidad podía darse por cubierto por un verbo genérico próximo a “identifica”, o por una negación distante sin relación con la ausencia de nombre/id. El auditor recibía las citas elegidas por el autor, sin el constructor real omitido por ese informe.
+
+Se conserva esa respuesta en recipe-error-65aa-received.json, fuera del catálogo del investigador. La cobertura ahora requiere una limitación explícita sobre la identidad o una propuesta explícita de añadir nombre/id. Un control acotado contrasta las afirmaciones positivas con las expresiones actuales del constructor, su llamador y el catch; sólo activa la conclusión de “unidades sin identidad” cuando coinciden esas expresiones. Si cambia el código para enriquecer el error, esa conclusión no se hereda. La auditoría y su corrección reciben esas lecturas independientes aunque el autor no las cite. Se prueban también negaciones, propuestas condicionales y contradicciones entre campos.
+
+No se cambia Inventario ni se eleva el presupuesto. Los proveedores de prueba son simulados: que estas regresiones pasen no acredita una nueva respuesta real ni convierte el control acotado en un verificador semántico general.

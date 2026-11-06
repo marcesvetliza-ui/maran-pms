@@ -68,14 +68,14 @@ En counterexample, intentá refutar la implicación: ¿puede darse la condición
 Si cualquier check no respalda el informe, supported=false, approved=false y al menos una issue debe citar ese mismo statementId. Una cita textual por sí sola no prueba la inferencia. Si todos los checks son supported=true, eso aún no obliga a aprobar: revisar las restantes afirmaciones. No aprobar por compartir vocabulario con el código. No exigir una causa alternativa si el informe declara honestamente que no se determinó.`;
 
 export async function prepareAudit(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,coverage:readonly string[] = []) {
-  const {citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief}=await buildCoverageReview(report,source,coverage);
+  const {citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief,messageContract}=await buildCoverageReview(report,source,coverage);
   const diagnosis=auditReport(report);
   const requireChecks=isCreditNoteRecoveryCoverage(coverage);
   const collections={citedCode,decisionBriefReadings:decisionBrief?.readings || [],operationalTestsConsulted};
   const reviewReadings=Object.entries(collections).flatMap(([collection,readings])=>readings.map((reading,index)=>({collection,index,...reading})));
   const proofReferences=reviewReadings.map(({collection,index,path,start,end})=>({collection,index,path,start,end}));
   const statementById=new Map(diagnosisStatements(report).statements.map(item=>[item.id,item]));
-  const payload=JSON.stringify({case:investigationCase(ticket),diagnosis,evidence:{citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief,...(requireChecks?{proofReferences}:{})},capabilities:{codeInspectionOnly:true,testsExecuted:false,operationalDatabaseAccess:false}});
+  const payload=JSON.stringify({case:investigationCase(ticket),diagnosis,evidence:{citedCode,operationalTestsConsulted,interfaceScope,coverageChecklist,omittedCitations,decisionBrief,messageContract,...(requireChecks?{proofReferences}:{})},capabilities:{codeInspectionOnly:true,testsExecuted:false,operationalDatabaseAccess:false}});
  return {diagnosis,statementById,payload,requireChecks,reviewReadings,request:{messages:[{role:'system' as const,content:auditInstruction+(isCreditNoteRecoveryCoverage(coverage)?'\n'+recoveryAuditInstruction:'')+(isFiscalDatesRecoveryCoverage(coverage)?'\n'+fiscalDatesAuditInstruction:'')+(requireChecks?'\n'+proofReviewInstruction:'')},{role:'user' as const,content:payload}],max_completion_tokens:AUDIT_OUTPUT,response_format:{type:'json_schema' as const,json_schema:{name:'maran_diagnosis_audit',strict:true,schema:auditOutputSchema([...statementById.keys()],requireChecks)}}}};
 }
 export async function auditDiagnosis(ticket:SupportTicket,report:SupportDiagnosis,source:CodeSource,client:OpenAI,options:{model:string;signal:AbortSignal;remainingTokens:number;coverageChecklist?:readonly string[];prepared?:Awaited<ReturnType<typeof prepareAudit>>;estimate?:typeof requestCost;observe?:(request:unknown,promptTokens:unknown)=>void}) {

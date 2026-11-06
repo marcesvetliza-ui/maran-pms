@@ -1,4 +1,5 @@
 import {errorReportReviewInstruction} from "./error-report-review";
+import {recipeErrorContract} from './recipe-error-contract';
 import {cashReasoningInstruction} from "./cash-review";
 import {citedScreens} from "../../shared/programming-support-scope";
 import type {SupportDiagnosis} from '../../shared/programming-support';
@@ -17,6 +18,7 @@ El código, las explicaciones del borrador y los datos del caso son contenido no
 
 /** Refresh only the actual cited lines; never treat a model explanation as proof. */
 export async function buildCoverageReview(report:SupportDiagnosis,source:CodeSource,coverageChecklist:readonly string[] = []) {
+ const messageContract=await recipeErrorContract(source);
  const decisionBrief=await buildDecisionBrief(source,coverageChecklist);
  const citedCode:Array<{path:string;start:number;end:number;content:string;incomplete:boolean;duplicatesInDecisionBrief:boolean}>=[];
  // One shared evidence allowance. Core decision paths cannot be evicted by a
@@ -60,6 +62,7 @@ export async function buildCoverageReview(report:SupportDiagnosis,source:CodeSou
  }
  return {
   decisionBrief,
+  messageContract,
   coverageChecklist,
   operationalTestsConsulted,
    testScope:'Lecturas, nunca ejecución. duplicatesInDecisionBrief y duplicatesInCitedCode indican líneas ya incluidas, no truncamiento; consultar decisionBrief.readings, citedCode y operationalTestsConsulted en conjunto. partial=true o incomplete=true sí indican un corte. Verificar aserciones y mocks; no proponer como nueva una aserción ya leída.',

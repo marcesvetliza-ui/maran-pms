@@ -63,8 +63,8 @@ export async function checkErrorAttribution(report:SupportDiagnosis,source:CodeS
  const throwLine=owner.start+owner.body.split('\n').findIndex(line=>/^\s*throw\s+/.test(line)&&/falta equivalencia explicita/.test(normalized(line)));
  for(const [index,ref] of report.evidence.entries()){
   const text=normalized(ref.explanation);
-  if(!missingEquivalence(text)||!/(?:fuente|origen) (?:del? |de este )?(?:error|mensaje|detalle)|(?:genera|construye) (?:el |un )?(?:mensaje|error)/.test(text))continue;
-  if(/reexport|propag|no (?:es|demuestra|genera|construye)|llama a/.test(text))continue;
+  if(!missingEquivalence(text)||!/(?:fuente|origen) (?:del? |de este )?(?:error|mensaje|detalle)|(?:genera|construye|lanza|arroja) (?:el |un )?(?:mensaje|error)/.test(text))continue;
+  if(/reexport|propag|captura|no (?:es|demuestra|genera|construye|lanza|arroja)|llama a/.test(text))continue;
   if(ref.path===owner.path&&ref.start<=throwLine&&ref.end>=throwLine)continue;
   errors.push({field:`evidence.${index}.explanation`,attributedSymbol:owner.symbol,origin:{path:owner.path,symbol:owner.symbol,start:throwLine,end:throwLine,statement},reason:'La cita presentada como origen del detalle no contiene el throw real. Una reexportación o un llamador no respalda esa atribución. Citar la implementación o describir únicamente el papel de propagación/reexportación.'});
  }
