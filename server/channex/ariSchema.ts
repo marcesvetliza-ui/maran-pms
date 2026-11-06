@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS channex_ari_outbox (
  attempts integer NOT NULL DEFAULT 0, run_after timestamptz NOT NULL DEFAULT now(),
  task_ids jsonb, last_error text, created_at timestamptz NOT NULL DEFAULT now(), delivered_at timestamptz
 );
+ALTER TABLE channex_ari_outbox ADD COLUMN IF NOT EXISTS changed_fields text[];
 ALTER TABLE channex_ari_outbox ADD COLUMN IF NOT EXISTS batch_id bigint NOT NULL DEFAULT txid_current();
 CREATE INDEX IF NOT EXISTS channex_ari_outbox_pending ON channex_ari_outbox(connection_id,kind,run_after,id) WHERE status='pending';
 CREATE TABLE IF NOT EXISTS channex_ari_published (
@@ -31,7 +32,7 @@ CREATE TABLE IF NOT EXISTS channex_ari_dispatch (
 );
 INSERT INTO channex_ari_dispatch(id) VALUES(1) ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION channex_capture_ari() RETURNS trigger LANGUAGE plpgsql AS $body$
-DECLARE item jsonb; side integer; first_day date; last_day date; room_type varchar; rate_plan varchar; kind text;
+DECLARE item jsonb; side integer; first_day date; last_day date; room_type varchar; rate_plan varchar; kind text; fields text[];
  today date := (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
 BEGIN
  -- No capture until explicitly enabled once. Paused connections keep recording durable deltas.
@@ -49,7 +50,7 @@ BEGIN
  FOR side IN 1..2 LOOP
   IF side=1 AND TG_OP='INSERT' OR side=2 AND TG_OP='DELETE' THEN CONTINUE; END IF;
   item := CASE WHEN side=1 THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END;
-  first_day:=today; last_day:=today+499; room_type:=NULL; rate_plan:=NULL; kind:='availability';
+  first_day:=today; last_day:=today+499; room_type:=NULL; rate_plan:=NULL; kind:='availability'; fields:=NULL;
   IF TG_TABLE_NAME='reservations' THEN
    IF NOT (item->>'status'=ANY(ARRAY['tentative','pending','reserved','confirmed','web_checkin','checked_in'])) THEN CONTINUE; END IF;
    first_day:=(item->>'check_in_date')::date; last_day:=(item->>'check_out_date')::date-1;
@@ -61,6 +62,8 @@ BEGIN
   ELSIF TG_TABLE_NAME='rooms' THEN room_type:=item->>'room_type_id';
   ELSIF TG_TABLE_NAME='rate_plans' THEN
    kind:='restrictions'; room_type:=item->>'room_type_id'; rate_plan:=item->>'id';
+   IF TG_OP='UPDATE' AND (to_jsonb(OLD)->'room_type_id',to_jsonb(OLD)->'currency',to_jsonb(OLD)->'valid_from',to_jsonb(OLD)->'valid_to')
+     IS NOT DISTINCT FROM (to_jsonb(NEW)->'room_type_id',to_jsonb(NEW)->'currency',to_jsonb(NEW)->'valid_from',to_jsonb(NEW)->'valid_to') THEN fields:=ARRAY['rate']; END IF;
   ELSIF TG_TABLE_NAME='group_reservation_links' THEN
    SELECT check_in_date,check_out_date-1 INTO first_day,last_day FROM reservations WHERE id=item->>'reservation_id';
   ELSIF TG_TABLE_NAME='groups' THEN
@@ -73,8 +76,8 @@ BEGIN
   END IF;
   first_day:=GREATEST(first_day,today); last_day:=LEAST(last_day,today+499);
   IF first_day IS NULL OR last_day IS NULL OR last_day<first_day THEN CONTINUE; END IF;
-  INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,room_type_id,rate_plan_id,reason)
-   SELECT s.connection_id,kind,first_day,last_day,room_type,rate_plan,TG_TABLE_NAME||':'||lower(TG_OP)
+  INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,room_type_id,rate_plan_id,reason,changed_fields)
+   SELECT s.connection_id,kind,first_day,last_day,room_type,rate_plan,TG_TABLE_NAME||':'||lower(TG_OP),fields
    FROM channex_ari_settings s JOIN channex_connections c ON c.id=s.connection_id
    WHERE s.capture_started_at IS NOT NULL AND c.is_active;
  END LOOP;
@@ -95,27 +98,28 @@ DECLARE payload jsonb; today date:=(now() AT TIME ZONE 'America/Argentina/Buenos
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM channex_ari_settings WHERE capture_started_at IS NOT NULL) THEN RETURN NULL; END IF;
  IF TG_OP='INSERT' THEN
-  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload FROM calendar_new;
+  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date,'before','{}'::jsonb,'after',to_jsonb(n))) INTO payload FROM calendar_new n;
  ELSIF TG_OP='DELETE' THEN
-  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload FROM calendar_old;
+  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date,'before',to_jsonb(o),'after','{}'::jsonb)) INTO payload FROM calendar_old o;
  ELSE
-  SELECT jsonb_agg(jsonb_build_object('plan',rate_plan_id,'day',stay_date)) INTO payload
-   FROM(SELECT rate_plan_id,stay_date FROM calendar_old UNION ALL SELECT rate_plan_id,stay_date FROM calendar_new) changed;
+  SELECT jsonb_agg(jsonb_build_object('plan',COALESCE(n.rate_plan_id,o.rate_plan_id),'day',COALESCE(n.stay_date,o.stay_date),'before',COALESCE(to_jsonb(o),'{}'::jsonb),'after',COALESCE(to_jsonb(n),'{}'::jsonb))) INTO payload
+   FROM calendar_old o FULL JOIN calendar_new n USING(rate_plan_id,stay_date);
  END IF;
- -- Capture only the edited civil dates, including explicit future periods.
- -- Separate gaps and cap each event at 500 days; do not fill untouched years.
- INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,room_type_id,rate_plan_id,reason)
-  WITH dates AS (
-   SELECT DISTINCT x.plan,x.day FROM jsonb_to_recordset(COALESCE(payload,'[]'::jsonb)) AS x(plan varchar,day date)
-   WHERE x.day>=today
+ INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,room_type_id,rate_plan_id,reason,changed_fields)
+  WITH source AS (
+   SELECT x.plan,x.day,x.before,x.after FROM jsonb_to_recordset(COALESCE(payload,'[]'::jsonb)) AS x(plan varchar,day date,before jsonb,after jsonb) WHERE x.day>=today
+  ), dates AS (
+   SELECT plan,day,ARRAY(SELECT field FROM unnest(ARRAY['rate','min_stay_arrival','min_stay_through','max_stay','stop_sell','closed_to_arrival','closed_to_departure']) field
+    WHERE COALESCE(before->field,CASE WHEN field='rate' THEN 'null'::jsonb WHEN field IN ('min_stay_arrival','min_stay_through') THEN '1'::jsonb WHEN field='max_stay' THEN '0'::jsonb ELSE 'false'::jsonb END)
+     IS DISTINCT FROM COALESCE(after->field,CASE WHEN field='rate' THEN 'null'::jsonb WHEN field IN ('min_stay_arrival','min_stay_through') THEN '1'::jsonb WHEN field='max_stay' THEN '0'::jsonb ELSE 'false'::jsonb END)) AS fields FROM source
   ), runs AS (
-   SELECT plan,day,day-(row_number() OVER(PARTITION BY plan ORDER BY day))::integer AS contiguous_run FROM dates
+   SELECT plan,day,fields,day-(row_number() OVER(PARTITION BY plan,fields ORDER BY day))::integer AS contiguous_run FROM dates WHERE cardinality(fields)>0
   )
-  SELECT s.connection_id,'restrictions',min(x.day),max(x.day),p.room_type_id,x.plan,'rate_calendar:'||lower(TG_OP)
+  SELECT s.connection_id,'restrictions',min(x.day),max(x.day),p.room_type_id,x.plan,'rate_calendar:'||lower(TG_OP),x.fields
   FROM runs x LEFT JOIN rate_plans p ON p.id=x.plan CROSS JOIN channex_ari_settings s
   JOIN channex_connections c ON c.id=s.connection_id
   WHERE s.capture_started_at IS NOT NULL AND c.is_active
-  GROUP BY s.connection_id,p.room_type_id,x.plan,x.contiguous_run,((x.day-today)/500);
+  GROUP BY s.connection_id,p.room_type_id,x.plan,x.fields,x.contiguous_run,((x.day-today)/500);
  RETURN NULL;
 END $body$;
 `;

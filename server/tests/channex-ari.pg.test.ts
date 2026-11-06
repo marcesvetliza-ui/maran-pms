@@ -107,6 +107,7 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     const send = vi.fn(async () => ['00000000-0000-4000-8000-000000000001']);
     expect((await dispatchChannexAri(pool, send, true)).state).toBe('delivered'); expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2]).toEqual([expect.objectContaining({ rate: '333.00', rate_plan_id: 'remote-bar' })]);
+    expect(Object.keys(send.mock.calls[0][2][0]).sort()).toEqual(['date_from','date_to','property_id','rate','rate_plan_id']);
     expect((await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE status='delivered' AND task_ids IS NOT NULL")).rows[0].n).toBe(4);
   });
   it('retries 429 without dropping events, globally honors cooldown and serializes replicas', async () => {
@@ -191,7 +192,7 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     expect(events).toEqual([{ kind: 'restrictions', rate_plan_id: 'bar', span: 1 }, { kind: 'restrictions', rate_plan_id: 'breakfast', span: 1 }]);
     const send = vi.fn(async () => ['calendar-task']); expect((await dispatchChannexAri(pool, send, true)).state).toBe('delivered'); expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2]).toEqual([
-      expect.objectContaining({ rate_plan_id: 'remote-bar', date_from: day, date_to: addDays(day, 1), rate: '179.90', min_stay_arrival: 3, min_stay_through: 1, closed_to_arrival: true }),
+      expect.objectContaining({ rate_plan_id: 'remote-bar', date_from: day, date_to: addDays(day, 1), rate: '179.90', min_stay_arrival: 3, min_stay_through: 3, closed_to_arrival: true }),
       expect.objectContaining({ rate_plan_id: 'remote-breakfast', date_from: addDays(day, 2), date_to: addDays(day, 3), rate: '219.25', min_stay_through: 2, stop_sell: true })]);
   });
   it('sends the complete certification case 8 from the normal calendar API in one call beyond today+499', async () => {
@@ -217,7 +218,7 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2]).toEqual([
-      expect.objectContaining({rate_plan_id:'remote-bar',date_from:from,date_to:to,rate:'432.00',min_stay_arrival:2,closed_to_arrival:false,closed_to_departure:false}),
+      expect.objectContaining({rate_plan_id:'remote-bar',date_from:from,date_to:to,rate:'432.00',min_stay_arrival:2}),
       expect.objectContaining({rate_plan_id:'remote-double-bar',date_from:from,date_to:to,rate:'342.00',min_stay_arrival:3}),
     ]);
     const published=(await pool.query("SELECT target_id,min(day)::text AS first,max(day)::text AS last,count(*)::int AS days FROM channex_ari_published GROUP BY target_id ORDER BY target_id")).rows;
@@ -295,6 +296,82 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
     expect(values).toEqual([]);
     const full=await buildAriValues(pool as any,connection,[{...event('restrictions'),date_from:today,date_to:addDays(today,600),reason:'full_sync'}],today);
     expect(full[0].date_from).toBe(today);expect(full.at(-1)!.date_to).toBe(addDays(today,499));
+  });
+
+  it('publishes field deltas without a prior snapshot, links minima in preview, and preserves retry state', async () => {
+    await enable();
+    const send = vi.fn(async () => ['field-task']);
+    async function edit(values: any) {
+      const body={changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:addDays(day,2),values}]};
+      const preview=await calendarRequest('preview',body);expect(preview.status,JSON.stringify(preview.body)).toBe(200);
+      expect((await calendarRequest('apply',{...body,previewToken:preview.body.previewToken})).status).toBe(200);
+      await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");
+      return preview.body;
+    }
+    await edit({rate:'200'});
+    const masks=(await pool.query('SELECT changed_fields FROM channex_ari_outbox')).rows;
+    expect(masks).toEqual([{changed_fields:['rate']}]);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send.mock.calls[0][2]).toEqual([{property_id:'property',rate_plan_id:'remote-bar',date_from:day,date_to:addDays(day,2),rate:'200.00'}]);
+    const preview=await edit({minStayThrough:3});
+    expect(preview.segments[0].after).toMatchObject({minStayArrival:3,minStayThrough:3});
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send.mock.calls[1][2]).toEqual([{property_id:'property',rate_plan_id:'remote-bar',date_from:day,date_to:addDays(day,2),min_stay_arrival:3,min_stay_through:3}]);
+    await edit({stopSell:true});
+    const publishedBefore=(await pool.query('SELECT day,value FROM channex_ari_published ORDER BY day')).rows;
+    expect((await dispatchChannexAri(pool,async()=>{throw new AriTransportError(503)},true)).state).toBe('retry');
+    expect((await pool.query('SELECT day,value FROM channex_ari_published ORDER BY day')).rows).toEqual(publishedBefore);
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'; UPDATE channex_ari_outbox SET run_after=now()");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send.mock.calls[2][2]).toEqual([{property_id:'property',rate_plan_id:'remote-bar',date_from:day,date_to:addDays(day,2),stop_sell:true}]);
+    expect((await pool.query('SELECT value FROM channex_ari_published LIMIT 1')).rows[0].value).toMatchObject({rate:'200.00',min_stay_arrival:3,min_stay_through:3,stop_sell:true});
+    await edit({stopSell:false});await dispatchChannexAri(pool,send,true);
+    expect(send.mock.calls[3][2]).toEqual([{property_id:'property',rate_plan_id:'remote-bar',date_from:day,date_to:addDays(day,2),stop_sell:false}]);
+    const conflict=await calendarRequest('preview',{changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:day,values:{minStayArrival:2,minStayThrough:3}}]});
+    expect(conflict.status).toBe(400);
+  });
+  it('keeps masks separate for multiple plans and merges equal adjacent restriction sequences', async () => {
+    await pool.query("INSERT INTO rate_plans VALUES('other','twin',120,'USD',NULL,NULL); INSERT INTO channex_rate_plan_mappings VALUES('connection','remote-twin','remote-other','other')");
+    await enable();
+    const body={changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:addDays(day,4),values:{closedToArrival:true}}, {ratePlanIds:['other'],dateFrom:day,dateTo:addDays(day,4),values:{rate:'250'}}]};
+    const preview=await calendarRequest('preview',body);expect((await calendarRequest('apply',{...body,previewToken:preview.body.previewToken})).status).toBe(200);
+    const send=vi.fn(async()=>['multi']);await dispatchChannexAri(pool,send,true);
+    expect(send.mock.calls[0][2]).toEqual([
+      {property_id:'property',rate_plan_id:'remote-bar',date_from:day,date_to:addDays(day,4),closed_to_arrival:true},
+      {property_id:'property',rate_plan_id:'remote-other',date_from:day,date_to:addDays(day,4),rate:'250.00'}]);
+  });
+  it('keeps independent minima for unmapped plans and normalizes historical mapped minima only on the wire', async () => {
+    await pool.query("INSERT INTO rate_plans VALUES('local-only','twin',100,'USD',NULL,NULL)");
+    const request={changes:[{ratePlanIds:['local-only'],dateFrom:day,dateTo:day,values:{minStayArrival:2,minStayThrough:4}}]};
+    const preview=await calendarRequest('preview',request);expect(preview.status).toBe(200);
+    expect(preview.body.segments[0].after).toMatchObject({minStayArrival:2,minStayThrough:4});
+    expect((await calendarRequest('apply',{...request,previewToken:preview.body.previewToken})).status).toBe(200);
+    await pool.query("INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,min_stay_arrival,min_stay_through) VALUES('bar',$1,3,1)",[day]);
+    const values=await buildAriValues(pool as any,connection,[event('restrictions')],day);
+    expect(values[0]).toMatchObject({min_stay_arrival:3,min_stay_through:3});
+    expect((await pool.query("SELECT min_stay_through FROM rate_calendar_entries WHERE rate_plan_id='bar'")).rows[0].min_stay_through).toBe(1);
+  });
+  it('records live-test booking dates only and full sync uses exactly two calls for all 500 days', async () => {
+    await enable();
+    const send=vi.fn(async()=>['live-test']);
+    await pool.query('INSERT INTO reservations VALUES($1,$2,$3,$4,$5)',['live','201',day,addDays(day,1),'confirmed']);
+    await dispatchChannexAri(pool,send,true);
+    expect(send.mock.calls[0][1]).toBe('availability');
+    expect(send.mock.calls[0][2]).toEqual([{property_id:'property',room_type_id:'remote-twin',date_from:day,date_to:day,availability:1}]);
+    await pool.query('UPDATE reservations SET check_in_date=$1,check_out_date=$2 WHERE id=$3',[addDays(day,7),addDays(day,8),'live']);
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");
+    await dispatchChannexAri(pool,send,true);
+    expect(send.mock.calls[1][2]).toEqual([
+      {property_id:'property',room_type_id:'remote-twin',date_from:day,date_to:day,availability:2},
+      {property_id:'property',room_type_id:'remote-twin',date_from:addDays(day,7),date_to:addDays(day,7),availability:1}]);
+    expect((await fetch(`${origin}/api/channex/connections/connection/ari/full-sync`,{method:'POST'})).status).toBe(202);
+    for(let i=0;i<2;i++) {await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');}
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(send.mock.calls.slice(2).map(call=>call[1]).sort()).toEqual(['availability','restrictions']);
+    for(const call of send.mock.calls.slice(2)) expect(call[2].reduce((sum:number,v:any)=>sum+(Date.parse(v.date_to)-Date.parse(v.date_from))/86400000+1,0)).toBe(500);
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 second'");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('idle');
+    expect((await fetch(`${origin}/api/channex/connections/connection/ari/full-sync`,{method:'POST'})).status).toBe(409);
   });
 
   it('rejects an outdated calendar review without overwriting another operator', async () => {

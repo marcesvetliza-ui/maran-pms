@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { ARI_CALL_INTERVAL_MS, STAGING_URL, buildAriValues, retryDelay, addDays, daysBetween, compressValues, AriConfigurationError, type AriEvent, type AriValue } from './ari';
+import { ARI_CALL_INTERVAL_MS, STAGING_URL, buildAriValues, retryDelay, addDays, daysBetween, compressValues, ariDelta, AriConfigurationError, type AriEvent, type AriValue } from './ari';
 import { decryptChannexApiKey } from './credentials';
 
 export class AriTransportError extends Error {
@@ -48,7 +48,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
     FROM channex_connections c JOIN channex_ari_settings s ON s.connection_id=c.id WHERE c.id=$1 AND s.enabled AND c.is_active`, [job.connection_id])).rows[0];
     // One committed PMS operation per request. Keep every row of that batch
     // together instead of merging independent cases or splitting a large save.
-    const events: AriEvent[] = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,room_type_id,rate_plan_id,attempts,reason
+    const events: AriEvent[] = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,room_type_id,rate_plan_id,attempts,reason,changed_fields
     FROM channex_ari_outbox WHERE connection_id=$1 AND kind=$2 AND status='pending' AND run_after<=now()
     AND batch_id=$3::bigint ORDER BY id`, [job.connection_id, job.kind, job.batch_id])).rows;
     if (!connection || !events.length) return { state: 'idle' };
@@ -58,10 +58,18 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
       const current = await buildAriValues(c, connection, events, clock.today);
       const daily: AriValue[] = current.flatMap(v => daysBetween(v.date_from, v.date_to).map(day => ({ ...v, date_from: day, date_to: day })));
       const published = (await c.query('SELECT target_id,day::text,value FROM channex_ari_published WHERE connection_id=$1 AND kind=$2', [connection.id, job.kind])).rows;
-      const canonical = (value: any) => JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key]) => !['date_from', 'date_to'].includes(key)).sort(([a], [b]) => a.localeCompare(b))));
-      const previous = new Map(published.map(p => [`${p.target_id}:${p.day}`, canonical(p.value)]));
-      const full = events.some((e: any) => e.reason === 'full_sync');
-      const changed = daily.filter(v => full || previous.get(`${v.room_type_id ?? v.rate_plan_id}:${v.date_from}`) !== canonical(v));
+      const previous = new Map<string, AriValue>(published.map(p => [`${p.target_id}:${p.day}`, p.value]));
+      const full = events.some(e => e.reason === 'full_sync');
+      const planTargets = job.kind === 'restrictions'
+        ? (await c.query('SELECT rate_plan_id,channex_rate_plan_id FROM channex_rate_plan_mappings WHERE connection_id=$1', [connection.id])).rows : [];
+      const changed: AriValue[] = [];
+      for (const value of daily) {
+        const matching = events.filter(e => e.date_from <= value.date_from && e.date_to >= value.date_from &&
+          (!e.rate_plan_id || planTargets.some(p => p.rate_plan_id === e.rate_plan_id && p.channex_rate_plan_id === value.rate_plan_id)));
+        const fields = matching.some(e => e.changed_fields == null) ? null : [...new Set(matching.flatMap(e => e.changed_fields ?? []))];
+        const delta = ariDelta(value, previous.get(`${value.room_type_id ?? value.rate_plan_id}:${value.date_from}`), fields, full);
+        if (delta) changed.push(delta);
+      }
       const values = compressValues(changed);
       let taskIds: string[] = [];
       if (values.length) {
@@ -73,7 +81,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
       try {
         if (changed.length) await c.query(`INSERT INTO channex_ari_published(connection_id,kind,target_id,day,value)
      SELECT $1,$2,v.target,v.day::date,v.value FROM jsonb_to_recordset($3::jsonb) AS v(target text,day text,value jsonb)
-     ON CONFLICT(connection_id,kind,target_id,day) DO UPDATE SET value=EXCLUDED.value`, [connection.id, job.kind, JSON.stringify(changed.map(v => ({ target: v.room_type_id ?? v.rate_plan_id, day: v.date_from, value: v })))]);
+     ON CONFLICT(connection_id,kind,target_id,day) DO UPDATE SET value=channex_ari_published.value || EXCLUDED.value`, [connection.id, job.kind, JSON.stringify(changed.map(v => ({ target: v.room_type_id ?? v.rate_plan_id, day: v.date_from, value: v })))]);
         await c.query(`UPDATE channex_ari_outbox SET status='delivered',attempts=attempts+1,task_ids=$2,delivered_at=now(),last_error=NULL WHERE id=ANY($1::bigint[])`, [ids, JSON.stringify(taskIds)]);
         await c.query('COMMIT');
       } catch (error) { await c.query('ROLLBACK'); throw error; }

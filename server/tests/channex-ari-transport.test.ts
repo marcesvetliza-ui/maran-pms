@@ -14,6 +14,14 @@ describe('Channex ARI transport', () => {
     expect(url).toBe('https://staging.channex.io/api/v1/availability');
     expect(JSON.parse(options.body)).toEqual({ values }); expect(options.headers['user-api-key']).toBe('synthetic-test-key');
   });
+  it('serializes a merged restrictions range without adding unrelated fields', async () => {
+    const rows=[{property_id:'property',rate_plan_id:'bar',date_from:'2026-12-04',date_to:'2026-12-10',stop_sell:false}];
+    const fetcher=vi.fn(async()=>new Response(JSON.stringify({data:[{type:'task',id:'00000000-0000-4000-8000-000000000001'}]}),{status:200}));vi.stubGlobal('fetch',fetcher);
+    await sendAri(connection,'restrictions',rows);
+    const [url,options]=fetcher.mock.calls[0] as any;
+    expect(url).toBe('https://staging.channex.io/api/v1/restrictions');
+    expect(JSON.parse(options.body)).toEqual({values:rows});expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it('rejects production and custom hosts before transmitting credentials', async () => {
     const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
     await expect(sendAri({ ...connection, environment: 'real' }, 'availability', values)).rejects.toThrow('solo admiten Channex staging');

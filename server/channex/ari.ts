@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
 import { calendarEffective, MAX_CALENDAR_CELLS } from "@shared/rate-calendar";
 
-export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number; reason?: string };
+export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number; reason?: string; changed_fields?: string[] | null };
 export type AriValue = { property_id: string; date_from: string; date_to: string;[key: string]: string | number | boolean };
 export class AriConfigurationError extends Error { }
 export const STAGING_URL = 'https://staging.channex.io/api/v1';
@@ -103,11 +103,31 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
         if ((p.valid_from && day < p.valid_from) || (p.valid_to && day > p.valid_to) || !/^\d+(\.\d{1,2})?$/.test(calendar.rate) || Number(calendar.rate) <= 0) throw new AriConfigurationError('Falta una tarifa vigente y positiva para las fechas a publicar');
         values.push({
           property_id: connection.channex_property_id, rate_plan_id: p.channex_rate_plan_id, date_from: day, date_to: day, rate: calendar.rate,
-          min_stay_arrival: calendar.minStayArrival, min_stay_through: calendar.minStayThrough, max_stay: calendar.maxStay,
+          min_stay_arrival: calendar.minStayArrival, min_stay_through: calendar.minStayArrival, max_stay: calendar.maxStay,
           stop_sell: calendar.stopSell, closed_to_arrival: calendar.closedToArrival, closed_to_departure: calendar.closedToDeparture
         });
       }
     }
   }
   return compressValues(values);
+}
+
+/** Absolute values for changed fields only. Unknown fields are never marked as published. */
+export function ariDelta(current: AriValue, previous: AriValue | undefined, fields?: string[] | null, full = false): AriValue | null {
+  const identity = new Set(['property_id', 'room_type_id', 'rate_plan_id', 'date_from', 'date_to']);
+  const delta: AriValue = { property_id: current.property_id, date_from: current.date_from, date_to: current.date_to };
+  if (current.room_type_id !== undefined) delta.room_type_id = current.room_type_id;
+  if (current.rate_plan_id !== undefined) delta.rate_plan_id = current.rate_plan_id;
+  let changed = false;
+  const selected = fields == null ? null : new Set(fields);
+  if (selected?.has('min_stay_arrival') || selected?.has('min_stay_through')) {
+    selected.add('min_stay_arrival'); selected.add('min_stay_through');
+  }
+  const minChanged = current.min_stay_arrival !== previous?.min_stay_arrival || current.min_stay_through !== previous?.min_stay_through;
+  for (const [key, value] of Object.entries(current)) {
+    if (identity.has(key) || (!full && selected && !selected.has(key))) continue;
+    const isMin = key === 'min_stay_arrival' || key === 'min_stay_through';
+    if (full || (isMin ? minChanged : value !== previous?.[key])) { delta[key] = value; changed = true; }
+  }
+  return changed ? delta : null;
 }

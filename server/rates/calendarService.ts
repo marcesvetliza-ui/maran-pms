@@ -31,6 +31,16 @@ export async function editCalendar(pool: Pool, request: CalendarRequest, actorId
     await c.query(previewToken ? 'BEGIN' : 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     await c.query("SET LOCAL lock_timeout='3s'"); await c.query("SET LOCAL statement_timeout='15s'");
     const { plans, entries } = await load(c, ids, dates[0], dates[dates.length - 1], !!previewToken);
+    const hasMappings = (await c.query("SELECT to_regclass('channex_rate_plan_mappings') IS NOT NULL AS present")).rows[0].present;
+    const linkedPlans = new Set<string>(hasMappings ? (await c.query('SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings WHERE rate_plan_id=ANY($1::varchar[])', [ids])).rows.map(p => p.rate_plan_id) : []);
+    for (const intent of intents) {
+      const values = intent.values;
+      if (!linkedPlans.has(intent.ratePlanId) || (values.minStayArrival === undefined && values.minStayThrough === undefined)) continue;
+      if (values.minStayArrival !== undefined && values.minStayThrough !== undefined && values.minStayArrival !== values.minStayThrough)
+        throw new CalendarInputError('Para los planes vinculados a Channex, ambas estadías mínimas deben tener el mismo valor');
+      const minimum = values.minStayArrival ?? values.minStayThrough!;
+      intent.values = { ...values, minStayArrival: minimum, minStayThrough: minimum };
+    }
     const byPlan = new Map(plans.map(p => [p.id, p])), byDay = new Map(entries.map(e => [key(e.rate_plan_id, e.date), e]));
     const changes = intents.map(intent => {
       const plan = byPlan.get(intent.ratePlanId)!;
