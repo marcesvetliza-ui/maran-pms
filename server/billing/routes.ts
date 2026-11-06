@@ -1,3 +1,4 @@
+import { chargeUnits, expandChargeUnitCoverage, groupedChargeCoverage, unitParent } from '@shared/chargeUnits';
 import { accommodationNights, expandAccommodationCoverage, accommodationCoverageTotal, isAccommodationSource } from '@shared/accommodationNights';
 import { assertReservationInvoiceRecoverable } from "./reservationRecoveryState";
 import { giftVoucherItemsExpiryError } from "@shared/gift-voucher-expiry";
@@ -1724,6 +1725,7 @@ export function registerBillingRoutes(app: Express) {
         const nights = accommodationNights({ ...reservation, roomTotal: accommodationTotal });
         const requestsNights = normalizedSourceChargeIds.some(id=>id.startsWith('accommodation:'));
         if (requestsNights && (!nights.length || normalizedSourceChargeIds.includes('accommodation'))) throw new FolioInvoiceValidationError('No mezcles alojamiento agrupado con noches individuales; actualizá la prefactura',409);
+        const requestsUnits = normalizedSourceChargeIds.some(id=>!!unitParent(id));
         const originalAmounts: Record<string, number> = requestsNights ? Object.fromEntries(nights.map(n=>[n.id,n.amount])) : { accommodation: accommodationTotal };
         if (paymentId && existingPaymentAmount !== null) {
           originalAmounts[`payment:${paymentId}`] = existingPaymentAmount;
@@ -1732,7 +1734,10 @@ export function registerBillingRoutes(app: Express) {
           // A normal positive adjustment is billable. A tagged NC adjustment
           // is audit-only: the credit restores fiscal capacity on its source.
           if (isInvoiceableReservationCharge(charge)) {
-            originalAmounts[String(charge.id)] = parseFloat(charge.amount) || 0;
+            const units=chargeUnits(charge);
+            const selectedUnits=normalizedSourceChargeIds.some(id=>unitParent(id)===String(charge.id));
+            if(selectedUnits && normalizedSourceChargeIds.includes(String(charge.id))) throw new FolioInvoiceValidationError('No mezcles un cargo agrupado con sus unidades; actualizá la prefactura',409);
+            for(const source of selectedUnits ? units : [charge]) originalAmounts[String(source.id)] = Number(source.amount) || 0;
           }
         }
 
@@ -1773,13 +1778,22 @@ export function registerBillingRoutes(app: Express) {
         let alreadyInvoiced: Record<string, number> = {};
         for (const invoice of priorInvoices.rows) {
           const coverage = parseInvoiceSourceAmounts(invoice);
-          if (requestsNights && !Object.keys(coverage).length && Number((invoice as any).monto_total||0)>Number((invoice as any).monto_acreditado||0)) throw new FolioInvoiceValidationError('Hay comprobantes anteriores sin detalle de cargos. Revisá la cobertura antes de facturar por noche.',409);
+          if ((requestsNights || requestsUnits) && !Object.keys(coverage).length && Number((invoice as any).monto_total||0)>Number((invoice as any).monto_acreditado||0)) throw new FolioInvoiceValidationError('Hay comprobantes anteriores sin detalle de cargos. Revisá la cobertura antes de facturar por noche o unidad.',409);
           for (const [id, amount] of Object.entries(coverage)) {
             alreadyInvoiced[id] = (alreadyInvoiced[id] || 0) + amount;
           }
         }
 
         alreadyInvoiced = requestsNights ? expandAccommodationCoverage(alreadyInvoiced,nights) : { ...alreadyInvoiced, accommodation: accommodationCoverageTotal(alreadyInvoiced) };
+
+        const projectedUnits=charges.filter(isInvoiceableReservationCharge).flatMap(chargeUnits);
+        const expandedUnitCoverage=expandChargeUnitCoverage(alreadyInvoiced,projectedUnits);
+        for(const charge of charges){
+          if(normalizedSourceChargeIds.some(id=>unitParent(id)===String(charge.id))){
+            delete alreadyInvoiced[String(charge.id)];
+            for(const unit of chargeUnits(charge)) alreadyInvoiced[unit.id]=expandedUnitCoverage[unit.id]||0;
+          } else alreadyInvoiced[String(charge.id)]=groupedChargeCoverage(alreadyInvoiced,String(charge.id));
+        }
 
         if (checkoutDiscount) {
           const pendingTotal = Object.entries(originalAmounts).reduce((sum, [id, amount]) => sum + Math.max(0, amount - (alreadyInvoiced[id] || 0)), 0);

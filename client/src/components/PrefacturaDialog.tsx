@@ -1,3 +1,4 @@
+import { chargeUnits, expandChargeUnitCoverage, unitParent } from '@shared/chargeUnits';
 import { expandAccommodationCoverage, isAccommodationSource, type AccommodationNight } from '@shared/accommodationNights';
 import { PrefacturaNightEdit } from './prefactura-night-edit';
 import { billingPointOptions, billingPointError } from "@shared/billing-point-of-sale";
@@ -195,7 +196,7 @@ export function getRemainingChargeAmounts(
   allOriginalItems: SelectedFolioItem[],
   invoicedAmounts: Record<string, number>,
 ): Record<string, number> {
-  invoicedAmounts = expandAccommodationCoverage(invoicedAmounts, allOriginalItems.filter(item=>item.id.startsWith("accommodation:")));
+  invoicedAmounts = expandChargeUnitCoverage(expandAccommodationCoverage(invoicedAmounts, allOriginalItems.filter(item=>item.id.startsWith("accommodation:"))), allOriginalItems);
   return Object.fromEntries(allOriginalItems.map((item) => [
     item.id,
     Math.max(0, item.amount - (invoicedAmounts[item.id] || 0)),
@@ -211,7 +212,7 @@ export function getEffectiveFolioItemAmounts(
   folio: Pick<PrefacturaFolioData, "roomTotal" | "charges" | "accommodationNights">,
 ): Record<string, number> {
   const amounts: Record<string, number> = folio.accommodationNights?.length ? Object.fromEntries(folio.accommodationNights.map(n=>[n.id,n.amount])) : { accommodation: folio.roomTotal };
-  for (const charge of folio.charges || []) {
+  for (const charge of (folio.charges || []).flatMap(chargeUnits)) {
     const id = String(charge.id);
     const amount = parseFloat(String(charge.amount)) || 0;
     // Ordinary positive adjustments (e.g. a surcharge) are real folio charges.
@@ -243,12 +244,12 @@ export function getSelectedFolioItems(
     if(selectedIds.has(night.id) && amount>0.01)items.push({id:night.id,amount,originalAmount:night.amount,description:itemDescriptions[night.id] || (night.date ? `Alojamiento Hab. ${folio.roomNumber} · noche ${night.date.split('-').reverse().join('/')}` : `Alojamiento Hab. ${folio.roomNumber} (${folio.nights} noche${folio.nights!==1?'s':''})`)});
   }
 
-  for (const charge of folio.charges || []) {
+  for (const charge of (folio.charges || []).flatMap(chargeUnits)) {
     if (charge.category === "transfer_out" || charge.category === "transfer_in" || isReservationCreditNoteAdjustment(charge)) continue;
     const originalAmount = parseFloat(charge.amount);
     const id = String(charge.id);
     const amount = remainingAmounts?.[id] ?? effectiveAmounts[id] ?? originalAmount;
-    if (selectedIds.has(id) && Number.isFinite(amount) && amount > 0.01) {
+    if (selectedIds.has(id) && Number.isFinite(amount) && amount > 0.005) {
       items.push({
         id,
         amount,
@@ -269,7 +270,7 @@ export function getAllBillableFolioItems(
   const allIds = new Set<string>();
   const effectiveAmounts = getEffectiveFolioItemAmounts(folio);
   for(const [id,amount] of Object.entries(effectiveAmounts)) if(isAccommodationSource(id)&&amount>0)allIds.add(id);
-  for (const charge of folio.charges || []) {
+  for (const charge of (folio.charges || []).flatMap(chargeUnits)) {
     if (charge.category !== "transfer_out" && charge.category !== "transfer_in" && !isReservationCreditNoteAdjustment(charge) &&
       (effectiveAmounts[String(charge.id)] ?? 0) > 0) {
       allIds.add(String(charge.id));
@@ -1141,7 +1142,7 @@ export function PrefacturaDialog({
   const originalBillableItems = folio
     ? getAllBillableFolioItems(folio, itemDescriptions)
     : [];
-  const invoicedAmountsByCharge = expandAccommodationCoverage(getInvoicedAmountsByCharge(safeEmittedInvoices),folio?.accommodationNights||[]);
+  const invoicedAmountsByCharge = expandChargeUnitCoverage(expandAccommodationCoverage(getInvoicedAmountsByCharge(safeEmittedInvoices),folio?.accommodationNights||[]), (folio?.charges||[]).flatMap(chargeUnits));
   const remainingAmountsByCharge = getRemainingChargeAmounts(
     originalBillableItems,
     invoicedAmountsByCharge,
@@ -2277,6 +2278,7 @@ export function PrefacturaDialog({
                         onTransfer={() => { setTransferCharge({ id: "accommodation", description: `Alojamiento Hab. ${folio.roomNumber}`, maxAmount: transferRemaining?.accommodation ?? folio.roomTotal, originalAmount: folio.roomTotal }); setTransferDialogOpen(true); }}
                       />
                     )}
+                    {(folio.charges || []).some((charge:any)=>chargeUnits(charge).length>1 && (getInvoicedAmountsByCharge(safeEmittedInvoices)[String(charge.id)]||0)>0.005) && <TableRow><TableCell colSpan={6} className="text-sm text-muted-foreground">Los importes facturados antes de separar unidades se distribuyen sobre las unidades disponibles, conservando el saldo pendiente del cargo original.</TableCell></TableRow>}
                     {/* Extra charges */}
                     {(() => {
                       // Build set of already-reversed charge IDs by scanning [rev:X] tags
@@ -2285,20 +2287,21 @@ export function PrefacturaDialog({
                         const m = c.description?.match(/\[rev:([^\]]+)\]/);
                         if (m) reversedIds.add(m[1]);
                       });
-                      return (folio.charges || []).filter((charge: any) => !isReservationCreditNoteAdjustment(charge)).map((charge: any) => {
+                      return (folio.charges || []).filter((charge: any) => !isReservationCreditNoteAdjustment(charge)).flatMap(chargeUnits).map((charge: any) => {
+                        const isUnit = !!unitParent(String(charge.id));
                         const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
                         const isReversal = charge.description?.includes("[rev:") ?? false;
                         const alreadyReversed = reversedIds.has(String(charge.id));
                         return (
                           <ChargeRow
                             key={charge.id}
-                            editAction={!isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onEditDescription={charge.category === "restaurant" ? () => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description) : undefined} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
-                            voidAction={!isSubmitting && !hasPendingSubmission && !isTransfer && charge.status !== "anulado" && !(invoicedAmountsByCharge[String(charge.id)] > 0.005) ? <ReservationChargeVoid reservationId={String(reservationId)} charge={{id:String(charge.id),description:charge.description,amount:String(charge.amount),category:charge.category}} role={user?.role} onSaved={()=>{setItemDescriptions(prev=>{const next={...prev};delete next[String(charge.id)];return next;});}}/> : undefined}
+                            editAction={!isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onEditDescription={charge.category === "restaurant" ? () => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description) : undefined} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
+                            voidAction={!isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && charge.status !== "anulado" && !(invoicedAmountsByCharge[String(charge.id)] > 0.005) ? <ReservationChargeVoid reservationId={String(reservationId)} charge={{id:String(charge.id),description:charge.description,amount:String(charge.amount),category:charge.category}} role={user?.role} onSaved={()=>{setItemDescriptions(prev=>{const next={...prev};delete next[String(charge.id)];return next;});}}/> : undefined}
                             id={String(charge.id)}
-                            amount={parseFloat(charge.amount)}
+                            amount={Number(charge.amount)}
                             description={itemDescriptions[String(charge.id)] || charge.description}
                             date={charge.date}
-                            alreadyPaid={Math.max(0, parseFloat(charge.amount) - (remainingAmountsByCharge[String(charge.id)] ?? parseFloat(charge.amount)))}
+                            alreadyPaid={Math.max(0, Number(charge.amount) - (remainingAmountsByCharge[String(charge.id)] ?? Number(charge.amount)))}
                             alreadyInvoiced={!isTransfer && fullyInvoicedChargeIds.has(String(charge.id))}
                             selected={!isTransfer && selectedIds.has(String(charge.id))}
                             onToggle={() => { if (isTransfer || fullyInvoicedChargeIds.has(String(charge.id))) return; setSelectedIds(prev => { const n = new Set(prev); const k = String(charge.id); n.has(k) ? n.delete(k) : n.add(k); return n; }); }}
@@ -2308,7 +2311,7 @@ export function PrefacturaDialog({
                             onEditChange={setEditingValue}
                             onSaveEdit={saveEdit}
                             onCancelEdit={() => setEditingId(null)}
-                            onTransfer={isTransfer ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
+                            onTransfer={isTransfer || isUnit ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
                             onRevert={(isTransfer && !isReversal && !alreadyReversed) ? () => { setRevertCharge({ id: String(charge.id), description: charge.description, amount: Math.abs(parseFloat(charge.amount)), category: charge.category }); setRevertDialogOpen(true); } : undefined}
                             alreadyReversed={alreadyReversed}
                             category={charge.category}
@@ -2798,7 +2801,7 @@ export function PrefacturaDialog({
         reservationId={reservationId}
         folio={folio ?? null}
         transferRemaining={transferRemaining}
-        selectedChargeIds={selectedSourceIds.filter(id => !isAccommodationSource(id))}
+        selectedChargeIds={selectedSourceIds.filter(id => !isAccommodationSource(id) && !unitParent(id))}
         includeAccommodation={!!folio && (folio.accommodationNights?.length ? folio.accommodationNights.every(n=>n.amount<=0||selectedSourceIds.includes(n.id)) : selectedSourceIds.includes("accommodation"))}
         onSuccess={() => {
           setShowBulkTransfer(false);

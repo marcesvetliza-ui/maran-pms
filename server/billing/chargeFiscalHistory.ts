@@ -1,3 +1,4 @@
+import { unitParent } from '@shared/chargeUnits';
 import type { PoolClient } from "pg";
 
 /** Shared provenance check for edits and cancellations of reservation charges. */
@@ -84,7 +85,7 @@ export async function invoiceSourceConflict(client: PoolClient, reservationId: s
       return `La factura ${invoice.id} no conserva el detalle de cargos de origen; no se puede modificar con seguridad.`;
     }
     const referencias = typeof invoice.observaciones === "string" && invoice.observaciones.includes(chargeId);
-    if (mapping.sourceIds.has(chargeId) || referencias) {
+    if (mapping.sourceIds.has(chargeId) || [...mapping.sourceIds].some(id=>unitParent(id)===chargeId) || referencias) {
       return `El cargo ya tiene historial fiscal asociado (comprobante ${invoice.id}, estado ${invoice.estado ?? "desconocido"}).`;
     }
   }

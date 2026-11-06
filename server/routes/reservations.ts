@@ -706,8 +706,13 @@ export function registerReservationsRoutes(app: Express) {
       const newNights = Number(reservation.nights);
       if (newNights > 0 && newNights !== oldNights) {
         try {
+          await withReservationFinancialLock(req.params.id, async () => {
+          // Unit identities already used by a document must retain their amount and count.
           const recurringRows = await db.execute(
-            sql`SELECT id, description, unit_amount FROM charges WHERE reservation_id = ${req.params.id} AND is_recurring = true AND status = 'active' AND unit_amount IS NOT NULL`
+            sql`SELECT c.id, c.description, c.unit_amount FROM charges c WHERE c.reservation_id = ${req.params.id} AND c.is_recurring = true AND c.status = 'active' AND c.unit_amount IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM sales_invoices si WHERE si.reserva_id = c.reservation_id
+                AND (COALESCE(si.source_charge_ids::text,'') LIKE ('%charge-unit:' || c.id || ':%')
+                  OR COALESCE(si.source_charge_amounts::text,'') LIKE ('%charge-unit:' || c.id || ':%')))`
           );
           for (const rc of recurringRows.rows as any[]) {
             const newAmount = (parseFloat(rc.unit_amount) * newNights).toFixed(2);
@@ -715,6 +720,7 @@ export function registerReservationsRoutes(app: Express) {
             const newDesc = `${baseDesc} (x${newNights})`;
             await db.execute(sql`UPDATE charges SET amount = ${newAmount}, description = ${newDesc} WHERE id = ${rc.id}`);
           }
+          });
         } catch (rcErr: any) {
           console.warn("[recurring-charges] recalculate failed (non-fatal):", rcErr?.message);
         }
