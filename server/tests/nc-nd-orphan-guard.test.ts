@@ -121,7 +121,7 @@ describe("guard contra Notas de Crédito/Débito huérfanas en POST /api/billing
         });
         expect(response.status).toBe(400);
         const body = await response.json();
-        expect(body.error).toMatch(/deben emitirse desde la factura original/i);
+        expect(body.error).toMatch(/deben? emitirse desde (?:su|la) factura (?:fiscal )?original/i);
       });
     });
   }
@@ -134,7 +134,7 @@ describe("guard contra Notas de Crédito/Débito huérfanas en POST /api/billing
         body: JSON.stringify(invoiceBody({ tipoComprobante: "FB" })),
       });
       const body = await response.json();
-      expect(body.error ?? "").not.toMatch(/deben emitirse desde la factura original/i);
+      expect(body.error ?? "").not.toMatch(/deben? emitirse desde (?:su|la) factura (?:fiscal )?original/i);
     });
   });
 });
