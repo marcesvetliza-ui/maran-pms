@@ -9,6 +9,10 @@ it("keeps follow-up requirements without resending the previous diagnosis or lif
   expect(result).not.toHaveProperty("lastError");
   expect(result).not.toHaveProperty("createdBy");
 });
+it('does not resend rejected drafts or audit findings as evidence on another attempt',()=>{
+ const result=investigationCase({title:'Caso',actual:'Error',expected:'Revisar',rejectedReviews:[{draft:{summary:'REJECTED_ONLY'},issues:[{problem:'EVALUATOR_ONLY'}]}]} as unknown as SupportTicket);
+ expect(JSON.stringify(result)).not.toMatch(/REJECTED_ONLY|EVALUATOR_ONLY/);expect(result).not.toHaveProperty('rejectedReviews');
+});
 
 it("retains the first full reading, range metadata and tool protocol while replacing identical code", () => {
   const content = "function checkAvailability() { return false; }\n".repeat(100);

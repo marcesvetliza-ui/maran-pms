@@ -1,0 +1,11 @@
+# Evaluación de dos rechazos semánticos
+
+El intento real 382f27de del caso 665e5496-f898-47a5-9f8e-6a1f68dea508 consumió 48.090 tokens. Ambas auditorías terminaron con cuatro observaciones; entre ellas hubo una corrección que no pasó dos controles de consistencia. El estado final fue diagnosis_coherence / semantic_rejected. Los contadores no permiten determinar si las afirmaciones del autor eran incorrectas o si las observaciones del auditor estaban justificadas. No se conservó el contenido de ese intento y no se reconstruye por suposición.
+
+Se encontró un defecto independiente verificable: el contexto de corrección reemplazaba las instrucciones completas del autor por una instrucción abreviada. Se restauran las instrucciones originales también en la corrección. El presupuesto se calcula sobre esa solicitud real, con los mismos topes; esto no prueba que esa pérdida explique las cuatro observaciones anteriores.
+
+Para evaluar los próximos fallos se capturan hasta dos borradores y hasta cuatro observaciones validadas por revisión. Cada observación identifica un fragmento que realmente existe en el borrador, con el problema y la corrección solicitada. Es material privado del caso, separado del diagnóstico y de la telemetría de metadatos. Se fuerza validationStatus=incomplete y se eliminan los fragmentos de código fuente de los snapshots. No se guardan respuestas crudas del proveedor, prompts ni su razonamiento interno; tampoco se registran estos textos en los logs.
+
+El servicio conserva el material en su base propia bajo el mismo aislamiento por propietario. El panel lo muestra contraído y marcado como rechazado, sin botones de aplicación ni evaluación de resolución. Abrirlo sólo lee datos. Los intentos antiguos no se rellenan con textos inferidos. Una nueva investigación limpia el material anterior, como ya limpia el informe anterior; no se crea un historial nuevo de procesos. Los snapshots no se incorporan al próximo investigationCase.
+
+Las pruebas usan proveedores simulados y PostgreSQL local. No se cambian el modelo, los topes, las reglas de Inventario ni la exigencia de revisión independiente. Queda pendiente una ejecución real que permita aprobar el diagnóstico o revisar el material rechazado; no se pide repetir el caso ciegamente para considerar resuelto este fallo.

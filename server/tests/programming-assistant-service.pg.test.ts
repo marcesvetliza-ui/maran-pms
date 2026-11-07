@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect,vi } from "vitest";
 import { createService } from "../../services/programming-assistant/service";
 import type {SupportDiagnosis} from "../../shared/programming-support";
 
@@ -165,14 +165,16 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
  const schema='assistant_execution_'+randomUUID().replaceAll('-','');await admin.query(`CREATE SCHEMA "${schema}"`);
  const url=new URL(process.env.DATABASE_URL!);url.searchParams.set('options',`-c search_path=${schema}`);
  const version='a'.repeat(40),secret='test-execution-secret-'.repeat(3);let attempts=0;
+ const privateDraft:SupportDiagnosis={summary:'UNAPPROVED_ONLY',cause:'Causa propuesta',proposal:'Propuesta sin validar',certainty:'hipotesis',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]};
  const service=await createService({databaseUrl:url.toString(),secret,version,sourceRoot:process.cwd(),apiKey:'mock-only',model:'mock'},async()=>{
    attempts++;
-   if(attempts===2)throw Object.assign(new Error('PRIVATE PROVIDER MESSAGE'),{code:'evidence_semantic_rejected',stages:[{stage:'reaudit',outcome:'rejected',tokens:400,totalTokens:42000,elapsedMs:0,issueCount:1,privateText:'PRIVATE'}]});
+   if(attempts===2)throw Object.assign(new Error('PRIVATE PROVIDER MESSAGE'),{code:'evidence_semantic_rejected',rejectedReviews:[{audit:1,draft:privateDraft,issues:[{statementId:'proposal_1_1',problem:'Revisar la inferencia',correction:'Acotar la conclusión'}]},{audit:2,draft:{...privateDraft,proposal:'Corrección insuficiente'},issues:[{statementId:'proposal_1_1',problem:'Todavía sin respaldo',correction:'Verificar la evidencia'}]}],stages:[{stage:'reaudit',outcome:'rejected',tokens:400,totalTokens:42000,elapsedMs:0,issueCount:1,privateText:'PRIVATE'}]});
    if(attempts===3)throw Object.assign(new Error('PRIVATE PROVIDER MESSAGE'),{code:'evidence_audit_invalid',semanticAudits:1,auditReason:'invalid_schema',auditSchemaIssues:[{path:'checks.item.codeQuote',code:'too_big',message:'PRIVATE'}],stages:[{stage:'audit',outcome:'invalid',tokens:400,totalTokens:56841,elapsedMs:0},{stage:'audit',outcome:'failed',tokens:0,totalTokens:56841,elapsedMs:0}]});
    return {report:{summary:'Parcial',validationStatus:'incomplete',certainty:'hipotesis',cause:'',proposal:'Completar revisión',proposedTests:[],questions:[],dataRepair:'',limitations:[],evidence:[]},tokens:65000,calls:4,semanticAudits:0,readFiles:[],searches:[],partialReason:'correction_reserve',stages:[{stage:'audit',outcome:'blocked',tokens:0,totalTokens:65000,elapsedMs:0,reason:'budget',availableTokens:35000,reservedTokens:40000}]};
  });
  const server=service.app.listen(0,'127.0.0.1');await new Promise<void>(resolve=>server.on('listening',resolve));
  const base=`http://127.0.0.1:${(server.address() as any).port}`;
+ const warning=vi.spyOn(console,'warn').mockImplementation(()=>{});
  const request=(path:string,body?:unknown,owner='owner1')=>fetch(base+path,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json','X-Support-User':owner,'X-Support-Version':version},body:body?JSON.stringify(body):undefined});
  try{
    const ticket=await(await request('/cases',{requestId:randomUUID(),title:'Caso de ejecución sintético',module:'inventario',actual:'Error genérico de receta',expected:'Revisar el mensaje'})).json();
@@ -186,10 +188,14 @@ import type {SupportDiagnosis} from "../../shared/programming-support";
    await service.tick();const failed=(await(await request('/cases')).json())[0];
    expect(failed.status).toBe('failed');expect(failed.execution).toMatchObject({outcome:'failed',failureCode:'diagnosis_coherence',stages:[{stage:'reaudit',outcome:'rejected',issueCount:1}]});
    expect(JSON.stringify(failed)).not.toContain('PRIVATE');expect(failed.execution.partialReason).toBeUndefined();expect(attempts).toBe(2);
-   await request(`/cases/${ticket.id}/analyze`,{requestId:randomUUID()});await service.tick();
+   expect(failed.report).toBeNull();expect(failed.rejectedReviews).toHaveLength(2);expect(failed.rejectedReviews[0].draft).toMatchObject({summary:'UNAPPROVED_ONLY',validationStatus:'incomplete'});
+   expect((await(await request('/cases')).json())[0].rejectedReviews).toEqual(failed.rejectedReviews);expect(attempts).toBe(2);
+   expect(await(await request('/cases',undefined,'other-owner')).json()).toEqual([]);expect(JSON.stringify(warning.mock.calls)).not.toContain('UNAPPROVED_ONLY');
+   const thirdQueued=await(await request(`/cases/${ticket.id}/analyze`,{requestId:randomUUID()})).json();expect(thirdQueued.rejectedReviews).toBeUndefined();await service.tick();
    const auditFailed=(await(await request('/cases')).json())[0];expect(auditFailed.execution).toMatchObject({outcome:'failed',failureCode:'diagnosis_audit',semanticAudits:1,auditReason:'invalid_schema',auditSchemaIssues:[{path:'checks.item.codeQuote',code:'too_big'}]});
    expect(JSON.stringify(auditFailed)).not.toContain('PRIVATE');expect(attempts).toBe(3);
  }finally{
+   warning.mockRestore();
    await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await service.stop();await admin.query(`DROP SCHEMA "${schema}" CASCADE`);await admin.end();
  }
 });

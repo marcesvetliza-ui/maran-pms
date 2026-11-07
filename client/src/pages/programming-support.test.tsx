@@ -88,6 +88,13 @@ it('does not guess the audit reason for attempts that did not persist it',async(
  render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Auditoría anterior/}));await user.click(screen.getByText('Detalle de ejecución'));
  expect(screen.getByText(/Este intento no guardó el motivo específico/)).toBeInTheDocument();expect(screen.queryByText(/invalid_schema/)).not.toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
 });
+it('shows rejected drafts and audit findings only as private evaluation material without actions',async()=>{
+ const user=userEvent.setup();
+ const draft={summary:'Primer borrador',cause:'Hipótesis',proposal:'Propuesta cuestionada',certainty:'hipotesis',questions:[],proposedTests:[],dataRepair:'',limitations:[],evidence:[]};
+ state.cases=[{id:'rejected-case',title:'Rechazo con material',status:'failed',version:'a'.repeat(40),report:null,actual:'Caso sintético',expected:'Revisar',updatedAt:'2026-11-07T00:00:00Z',messages:[],rejectedReviews:[{audit:1,draft,issues:[{statementId:'proposal_1_1',problem:'Observación del primer auditor',correction:'Corrección solicitada'}]},{audit:2,draft:{...draft,proposal:'Segunda propuesta'},issues:[{statementId:'proposal_1_1',problem:'Observación del segundo auditor',correction:'Revisar el código'}]}]}];
+ render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Rechazo con material/}));await user.click(screen.getByText('Borradores y observaciones de la revisión'));
+ expect(screen.getByText(/No es un diagnóstico aprobado/)).toBeInTheDocument();expect(screen.getByText(/Observación del primer auditor/)).toBeInTheDocument();expect(screen.getByText(/Observación del segundo auditor/)).toBeInTheDocument();expect(screen.queryByText('Diagnóstico y propuesta')).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'Resolvió mi consulta'})).not.toBeInTheDocument();expect(state.request).not.toHaveBeenCalled();
+});
 
 it('presents an operational question without a diagnosis and requires a saved reply before continuing',async()=>{
  const user=userEvent.setup();

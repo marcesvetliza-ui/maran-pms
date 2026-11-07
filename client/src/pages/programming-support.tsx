@@ -1,5 +1,6 @@
 import {citedScreens} from "@shared/programming-support-scope";
 import {SupportExecutionDetails} from '@/components/support-execution-details';
+import {SupportRejectedReviews} from '@/components/support-rejected-reviews';
 import { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -367,6 +368,7 @@ export default function ProgrammingSupport() {
                 </div>
               )}
               <SupportExecutionDetails ticket={ticket}/>
+              <SupportRejectedReviews ticket={ticket}/>
               <section className="space-y-3">
                 <h2 className="font-medium">Seguimiento</h2>
                 {ticket.messages?.map((m) => (

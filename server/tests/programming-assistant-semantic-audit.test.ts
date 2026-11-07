@@ -2,7 +2,7 @@ import {sourceRange} from "./helpers/assistantSourceEvidence";
 import {it,expect} from 'vitest';
 import {CodeSource} from '../../services/programming-assistant/source';
 import {auditDiagnosis,diagnosisStatements,auditReport} from '../../services/programming-assistant/semantic-audit';
-import {diagnose} from '../../services/programming-assistant/diagnose';
+import {diagnose,instruction} from '../../services/programming-assistant/diagnose';
 import {financialConsistencyIssues} from '../../services/programming-assistant/consistency';
 import type {SupportDiagnosis,SupportTicket} from '../../shared/programming-support';
 const version='a'.repeat(40);
@@ -67,7 +67,8 @@ it('does not bypass an independent rejection even when the old phrase rules miss
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response(rejection);}
   writer++;return response(report(),1000);
  }}}};
- await expect(diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any)).rejects.toMatchObject({code:'evidence_semantic_rejected'});
+ const error=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any).catch(error=>error);
+ expect(error).toMatchObject({code:'evidence_semantic_rejected',rejectedReviews:[{audit:1,draft:{proposal:unsafe,validationStatus:'incomplete'},issues:rejection.issues},{audit:2,draft:{proposal:unsafe,validationStatus:'incomplete'},issues:rejection.issues}]});
  expect(audits).toBe(2);expect(writer).toBe(2);
 });
 it('requires a corrected full report and a new passing audit, counting both calls in the token budget',async()=>{
@@ -77,6 +78,7 @@ it('requires a corrected full report and a new passing audit, counting both call
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response(audits===1?rejection:{approved:true,issues:[]});}
   writer++;
   if(writer===2){
+   expect(request.messages[0].content).toContain(instruction);
    const payload=JSON.parse(request.messages.find((m:any)=>m.role==='user').content);
    expect(payload.semanticIssues[0].statementId).toBe("proposal_1_1");
    expect(payload.diagnosis.statements.find((s:any)=>s.id==="proposal_1_1").text).toBe(unsafe);
@@ -84,7 +86,7 @@ it('requires a corrected full report and a new passing audit, counting both call
   return response(writer<2?report():corrected,1000);
  }}}};
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
- expect(result.report.proposal).toBe(corrected.proposal);expect(result.tokens).toBe(3000);expect(result.semanticAudits).toBe(2);
+ expect(result.report.proposal).toBe(corrected.proposal);expect(result.tokens).toBe(3000);expect(result.semanticAudits).toBe(2);expect(result.rejectedReviews).toBeUndefined();
 });
 it('does not publish the unaudited recommendation when the audit response exceeds budget',async()=>{
  const source=await setup();

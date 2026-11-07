@@ -71,6 +71,29 @@ export const diagnosisSchema = z
   })
   .strict();
 export type SupportDiagnosis = z.infer<typeof diagnosisSchema>;
+const reviewIssueSchema=z.object({
+  statementId:z.string().regex(/^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/),
+  problem:z.string().min(1).max(600),correction:z.string().min(1).max(600),
+}).strict();
+const rejectedReviewSchema=z.object({audit:z.number().int().min(1).max(2),draft:diagnosisSchema,issues:z.array(reviewIssueSchema).min(1).max(4)}).strict();
+export type RejectedReview=z.infer<typeof rejectedReviewSchema>;
+export function rejectedStatementText(draft:SupportDiagnosis,statementId:string):string|undefined {
+  const match=statementId.match(/^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_([1-9]\d{0,2})_([1-9]\d{0,2})$/);
+  if(!match)return undefined;
+  const value=match[1]==='evidence'?draft.evidence.map(ref=>ref.explanation):draft[match[1] as keyof SupportDiagnosis];
+  const text=Array.isArray(value)?value[Number(match[2])-1]:Number(match[2])===1?value:undefined;
+  return typeof text==='string'&&Number(match[3])<=Math.ceil(Array.from(text).length/800)?text:undefined;
+}
+/** Private evaluation material, separate from a published diagnosis and from
+ * metadata logs. Never include raw provider responses, prompts or source code. */
+export function safeRejectedReviews(value:unknown):RejectedReview[] {
+  if(!Array.isArray(value))return [];
+  return value.slice(0,2).flatMap(entry=>{
+    const parsed=rejectedReviewSchema.safeParse(entry);
+    if(!parsed.success||parsed.data.issues.some(issue=>rejectedStatementText(parsed.data.draft,issue.statementId)===undefined))return [];
+    return [{...parsed.data,draft:{...parsed.data.draft,validationStatus:'incomplete' as const,evidence:parsed.data.draft.evidence.map(({assertionFragments:_,...ref})=>ref)}}];
+  });
+}
 export type SupportState =
   | "received"
   | "queued"
@@ -111,6 +134,7 @@ export type SupportTicket = {
   feedback?: Array<{requestId:string;reportId:string;outcome:"resolved"|"unresolved";createdAt:string}>;
   lastError: string | null;
   execution?: SupportExecution;
+  rejectedReviews?: RejectedReview[];
   clarification?: {facts:OperationalFact[];questions:string[];requestedAfterMessageCount?:number};
   messages?: SupportMessage[];
 };

@@ -12,6 +12,7 @@ import {
   supportMessageSchema,
   supportRunSchema,
   type SupportTicket,
+  safeRejectedReviews,
 } from "../../shared/programming-support";
 import { CodeSource } from "./source";
 import { diagnose } from "./diagnose";
@@ -219,6 +220,7 @@ export async function createService(
         ticket.status = "queued";
         ticket.lastError = null;
         delete ticket.execution;
+        delete ticket.rejectedReviews;
       } else if (action === "feedback") {
         const feedback=supportFeedbackSchema.parse(req.body);
         if(!ticket.report || feedback.reportId!==(ticket.reportId || ticket.version) || (ticket.feedback?.length || 0)>=30) {
@@ -313,6 +315,7 @@ export async function createService(
             tokens:result.tokens,calls:result.calls,semanticAudits:result.semanticAudits,
             partialReason:result.partialReason,stages:result.stages,
           });
+          ticket.rejectedReviews=safeRejectedReviews(result.rejectedReviews);
           console.info("Investigación del asistente completada", {
             caseId:ticket.id, model:config.model, revision:config.version, resultKind:result.clarification?"clarification":"diagnosis",
             tokens:result.tokens, calls:result.calls, semanticAudits:result.semanticAudits || 0,
@@ -336,6 +339,7 @@ export async function createService(
         } catch (error) {
           const failure = diagnosisFailure(error);
           const metrics=investigationMetrics(error);
+          ticket.rejectedReviews=safeRejectedReviews((error as {rejectedReviews?:unknown})?.rejectedReviews);
           ticket.execution=safeSupportExecution({
             revision:config.version,finishedAt:new Date().toISOString(),outcome:'failed',
             tokens:metrics?.tokens,calls:metrics?.calls,failureCode:failure.code,
