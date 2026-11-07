@@ -5,6 +5,8 @@ import { rateCalendarSchemaSql } from "../rates/calendarSchema";
 export const ariSchemaSql = `
 ALTER TABLE channex_room_type_mappings ADD COLUMN IF NOT EXISTS room_ids text[];
 ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS sell_mode text;
+ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS rate_mode text;
+ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS occupancies integer[];
 CREATE TABLE IF NOT EXISTS channex_ari_settings (
  connection_id varchar PRIMARY KEY REFERENCES channex_connections(id) ON DELETE CASCADE,
  floor integer NOT NULL DEFAULT 2, currency text NOT NULL DEFAULT 'ARS' CHECK(currency ~ '^[A-Z]{3}$'),
@@ -120,9 +122,9 @@ BEGIN
   WITH source AS (
    SELECT x.plan,x.day,x.before,x.after FROM jsonb_to_recordset(COALESCE(payload,'[]'::jsonb)) AS x(plan varchar,day date,before jsonb,after jsonb) WHERE x.day>=today
   ), dates AS (
-   SELECT plan,day,ARRAY(SELECT field FROM unnest(ARRAY['rate','min_stay_arrival','min_stay_through','max_stay','stop_sell','closed_to_arrival','closed_to_departure']) field
-    WHERE COALESCE(before->field,CASE WHEN field='rate' THEN 'null'::jsonb WHEN field IN ('min_stay_arrival','min_stay_through') THEN '1'::jsonb WHEN field='max_stay' THEN '0'::jsonb ELSE 'false'::jsonb END)
-     IS DISTINCT FROM COALESCE(after->field,CASE WHEN field='rate' THEN 'null'::jsonb WHEN field IN ('min_stay_arrival','min_stay_through') THEN '1'::jsonb WHEN field='max_stay' THEN '0'::jsonb ELSE 'false'::jsonb END)) AS fields FROM source
+   SELECT plan,day,ARRAY(SELECT field FROM unnest(ARRAY['rate','occupancy_rates','min_stay_arrival','min_stay_through','max_stay','stop_sell','closed_to_arrival','closed_to_departure']) field
+    WHERE COALESCE(before->field,CASE WHEN field='occupancy_rates' THEN '{}'::jsonb WHEN field='rate' THEN 'null'::jsonb WHEN field IN ('min_stay_arrival','min_stay_through') THEN '1'::jsonb WHEN field='max_stay' THEN '0'::jsonb ELSE 'false'::jsonb END)
+     IS DISTINCT FROM COALESCE(after->field,CASE WHEN field='occupancy_rates' THEN '{}'::jsonb WHEN field='rate' THEN 'null'::jsonb WHEN field IN ('min_stay_arrival','min_stay_through') THEN '1'::jsonb WHEN field='max_stay' THEN '0'::jsonb ELSE 'false'::jsonb END)) AS fields FROM source
   ), runs AS (
    SELECT plan,day,fields,day-(row_number() OVER(PARTITION BY plan,fields ORDER BY day))::integer AS contiguous_run FROM dates WHERE cardinality(fields)>0
   )
@@ -151,7 +153,9 @@ export async function ensureChannexAriSchema(pool: Pool) {
     await client.query("SELECT pg_advisory_xact_lock(1296126535, 902)");
     await client.query(rateCalendarSchemaSql);
     await client.query(ariSchemaSql);
-    for (const [table, columns] of Object.entries(triggerColumns)) {
+    for (const [table, baseColumns] of Object.entries(triggerColumns)) {
+      const tierColumns = table === 'rate_plans' ? (await client.query(`SELECT attname FROM pg_attribute WHERE attrelid='rate_plans'::regclass AND attname=ANY($1::text[]) AND NOT attisdropped ORDER BY attname`, [['rate_1pax','rate_2pax','rate_3pax','rate_4pax']])).rows.map(row=>row.attname) : [];
+      const columns = [baseColumns,...tierColumns].join(',');
       // Only recreate this integration's triggers, never any hotel/pricing triggers.
       await client.query(`DROP TRIGGER IF EXISTS channex_ari_change ON ${table}`);
       await client.query(`CREATE TRIGGER channex_ari_change AFTER INSERT OR DELETE OR UPDATE OF ${columns} ON ${table} FOR EACH ROW EXECUTE FUNCTION channex_capture_ari()`);
@@ -159,7 +163,7 @@ export async function ensureChannexAriSchema(pool: Pool) {
     for (const [table, events] of Object.entries({
       channex_connections: 'DELETE OR UPDATE OF environment,base_url,channex_property_id',
       channex_room_type_mappings: 'INSERT OR DELETE OR UPDATE OF room_type_id,room_ids,channex_room_type_id,connection_id',
-      channex_rate_plan_mappings: 'INSERT OR DELETE OR UPDATE OF rate_plan_id,channex_rate_plan_id,channex_room_type_id,sell_mode,connection_id',
+      channex_rate_plan_mappings: 'INSERT OR DELETE OR UPDATE OF rate_plan_id,channex_rate_plan_id,channex_room_type_id,sell_mode,rate_mode,occupancies,connection_id',
     })) {
       await client.query(`DROP TRIGGER IF EXISTS channex_ari_mapping_guard ON ${table}`);
       await client.query(`CREATE TRIGGER channex_ari_mapping_guard BEFORE ${events} ON ${table} FOR EACH ROW EXECUTE FUNCTION channex_guard_ari_mapping()`);

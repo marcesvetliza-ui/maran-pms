@@ -27,6 +27,20 @@ beforeEach(() => {
 afterEach(() => { cleanup(); queryClient.clear(); vi.unstubAllGlobals(); });
 function mount(canEdit = true) { return render(<QueryClientProvider client={queryClient}><RateCalendar plans={plans} canEdit={canEdit} /></QueryClientProvider>); }
 function price(id: number, value: string) { fireEvent.change(screen.getByLabelText(`Acción de precio período ${id}`), { target: { value: 'set' } }); fireEvent.change(screen.getByLabelText(`Precio período ${id}`), { target: { value } }); }
+it('reviews and confirms independent occupancy totals without a scalar price',async()=>{
+ mount();
+ fireEvent.change(screen.getByLabelText('Acción de precios por ocupación período 1'),{target:{value:'set'}});
+ fireEvent.change(screen.getByLabelText('Precio 1 personas período 1'),{target:{value:'169000'}});
+ fireEvent.change(screen.getByLabelText('Precio 2 personas período 1'),{target:{value:'190000'}});
+ fireEvent.click(screen.getByRole('button',{name:'Revisar cambios'}));
+ await screen.findByRole('region',{name:'Revisión de cambios'});
+ const preview=requests.find(r=>r.url.endsWith('/preview'))!;
+ expect(preview.body.changes[0].values).toEqual({occupancyRates:{'1':'169000','2':'190000'}});
+ expect(screen.getByText(/1 persona\(s\): sin precio → 169000.00 USD/)).toBeInTheDocument();
+ expect(requests.some(r=>r.url.endsWith('/apply'))).toBe(false);
+ fireEvent.click(screen.getByRole('button',{name:'Confirmar cambios'}));
+ await waitFor(()=>expect(requests.find(r=>r.url.endsWith('/apply'))?.body).toEqual({...preview.body,previewToken:'a'.repeat(64)}));
+});
 it('reviews changes without writing and confirms the same reviewed request explicitly', async () => {
   mount(); price(1, '179.90'); fireEvent.change(screen.getByLabelText('Cerrar ventas período 1'), { target: { value: 'yes' } });
   expect(screen.queryByRole('button', { name: 'Confirmar cambios' })).toBeNull();

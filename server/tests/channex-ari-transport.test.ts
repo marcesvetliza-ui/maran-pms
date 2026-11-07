@@ -5,6 +5,10 @@ const connection = { environment: 'demo', base_url: 'https://staging.channex.io/
 const values = [{ property_id: 'property', room_type_id: 'twin', date_from: '2026-11-21', date_to: '2026-11-22', availability: 7 }];
 afterEach(() => vi.unstubAllGlobals());
 describe('Channex ARI transport', () => {
+  it('does not accept partial success warnings even when task IDs are returned',async()=>{
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({data:[{type:'task',id:'00000000-0000-4000-8000-000000000001'}],meta:{warnings:[{warning:{rates:['invalid']}}]}}),{status:200})));
+    await expect(sendAri(connection,'restrictions',values)).rejects.toThrow(/advertencias de validación/);
+  });
   it('sends one batched absolute payload to staging and returns provider task IDs', async () => {
     const id = '00000000-0000-4000-8000-000000000001';
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ data: [{ id, type: 'task' }] }), { status: 200 })); vi.stubGlobal('fetch', fetcher);

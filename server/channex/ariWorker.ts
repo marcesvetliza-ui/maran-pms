@@ -15,6 +15,7 @@ export const sendAri: AriTransport = async (connection, kind, values) => {
   const response = await fetch(`${connectionUrl(connection)}/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'user-api-key': key }, body: JSON.stringify({ values }), signal: AbortSignal.timeout(15000), redirect:'error' });
   if (!response.ok) throw new AriTransportError(response.status, response.headers.get('retry-after'));
   let body: any; try { body = await response.json(); } catch { throw new AriTransportError(502); }
+  if (body?.meta?.warnings && (!Array.isArray(body.meta.warnings) || body.meta.warnings.length)) throw new AriConfigurationError('Channex devolvió advertencias de validación; revisá los valores antes de reintentar. El lote no se marca como publicado.');
   const tasks = Array.isArray(body?.data) ? body.data : [];
   if (!tasks.length || tasks.some((t: any) => t.type !== 'task' || typeof t.id !== 'string' || !/^[a-f\d-]{36}$/i.test(t.id))) throw new AriTransportError(502);
   return tasks.map((t: any) => t.id);

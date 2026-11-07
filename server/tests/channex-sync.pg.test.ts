@@ -185,7 +185,7 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1)", ()
       (client.fetchChannexRatePlans as any).mockResolvedValue([
         {
           id: channexRatePlanId,
-          attributes: { title: "Demo Rate" },
+          attributes: { title: "Demo Rate",sell_mode:"per_person",rate_mode:"manual",options:[{occupancy:2,is_primary:true},{occupancy:1,is_primary:false}] },
           relationships: { room_type: { data: { id: channexRoomTypeId } } },
         },
       ]);
@@ -198,6 +198,7 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1)", ()
       const roomTypeMappingId = roomTypeMappingsBefore.body[0].id;
       const ratePlanMappingsBefore = await request("GET", `/api/channex/connections/${connectionId}/rate-plan-mappings`);
       const ratePlanMappingId = ratePlanMappingsBefore.body[0].id;
+      expect(ratePlanMappingsBefore.body[0]).toMatchObject({sellMode:"per_person",rateMode:"manual",occupancies:[1,2]});
 
       // --- Previsualizar (sync-bookings) ANTES de mapear: trae y guarda la
       // reserva, pero NUNCA confirma nada a Channex ---
