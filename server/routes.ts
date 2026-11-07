@@ -1,4 +1,5 @@
 import {productionEnabled} from './channex/connectionPolicy';
+import {saveBackupConfig} from './backup-config';
 import {isChannexPrepared} from './channex/runtimeState';
 import { registerChannexInboundWebhook } from './channex/inboundRoutes';
 import { registerRateCalendarRoutes } from './rates/calendarRoutes';
@@ -2612,16 +2613,7 @@ export async function registerRoutes(
 
   app.put("/api/admin/backup/config", requirePermission("api:admin:backup"), async (req, res) => {
     try {
-      const { enabled, email } = req.body;
-      const { systemSettings } = await import("@shared/schema");
-      const upsert = async (key: string, value: string) => {
-        await db.execute(sql`
-          INSERT INTO system_settings (key, value) VALUES (${key}, ${value})
-          ON CONFLICT (key) DO UPDATE SET value = ${value}
-        `);
-      };
-      if (typeof enabled === "boolean") await upsert("backup_auto_enabled", enabled ? "true" : "false");
-      if (typeof email === "string") await upsert("backup_email", email);
+      await saveBackupConfig(db,req.body,req.user!.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
