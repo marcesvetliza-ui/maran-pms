@@ -20,11 +20,13 @@ export function documentReference(document: CashDocument): string {
   return `${name} ${String(document.pointOfSale).padStart(4,"0")}-${String(document.number).padStart(8,"0")}`;
 }
 export function classifyCashDocument(input: {sourceType?: string; receiptType?: string | null; receiptNumber?: string | null}, documents: CashDocument[], knownPayment = false): CashDocumentEvidence {
-  const valid = documents.filter(d => ["emitida", "autorizada", "parcialmente_acreditada", "acreditada", "anulada"].includes(d.status || "") && Number(d.number) > 0);
+  if (input.sourceType === "non_fiscal_void") return { documentClass: "other", documentReference: "Comprobante no fiscal eliminado · sin movimiento de dinero" };
+  const valid = documents.filter(d => !(isNonFiscalDocument(d.type) && d.status === "anulada") && ["emitida", "autorizada", "parcialmente_acreditada", "acreditada", "anulada"].includes(d.status || "") && Number(d.number) > 0);
   const classes = new Set(valid.map(d => isNonFiscalDocument(d.type) ? "non_fiscal" : FISCAL.has(normalizedDocumentType(d.type)) ? "fiscal" : "unclassified"));
   // More than one document must never multiply the money or guess an allocation.
   if (classes.size > 1 || valid.length > 1) return {documentClass:"unclassified", documentReference:valid.map(documentReference).join(" · "), documents:valid};
   if (valid.length === 1) return {documentClass:[...classes][0] as CashDocumentClass, documentReference:documentReference(valid[0]), documents:valid};
+  if (documents.some(d => isNonFiscalDocument(d.type) && d.status === "anulada")) return {documentClass:"pending", documentReference:"Comprobante no fiscal eliminado · cobro conservado como anticipo", documents};
   if (documents.length) return {documentClass:"pending", documentReference:"Comprobante pendiente de autorización", documents};
   if (input.sourceType === "manual") return {documentClass:"other", documentReference:receiptTypeLabel(input.receiptType || "Movimiento manual")};
   if (isNonFiscalDocument(input.receiptType)) return {documentClass:"non_fiscal", documentReference:`${receiptTypeLabel(input.receiptType!)}${input.receiptNumber ? ` · recibo de caja #${input.receiptNumber}` : " · sin número vinculado"}`};

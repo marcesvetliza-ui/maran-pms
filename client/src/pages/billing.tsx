@@ -288,6 +288,18 @@ export default function BillingPage() {
     onError: (error: Error) => toast({ title: parseApiError(error), variant: "destructive" }),
   });
 
+  const [annulTarget, setAnnulTarget] = useState<any>(null);
+  const [annulReason, setAnnulReason] = useState("");
+  const annulNonFiscal = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/billing/invoices/${annulTarget.id}/annul-non-fiscal`, { reason: annulReason.trim() }),
+    onSuccess: async () => {
+      setAnnulTarget(null); setAnnulReason("");
+      toast({ title: "Comprobante eliminado", description: "Quedó registrado en Caja con el motivo. El cobro se conserva; no se devolvió dinero." });
+      await queryClient.invalidateQueries();
+    },
+    onError: (error: Error) => toast({ title: "No se pudo eliminar el comprobante", description: parseApiError(error), variant: "destructive" }),
+  });
+
   const discardInvalidCreditDraftMutation = useMutation({
     mutationFn: (id: number) => apiRequest("POST", `/api/billing/credit-notes/${id}/discard-invalid-draft`),
     onSuccess: async () => {
@@ -561,7 +573,12 @@ export default function BillingPage() {
                               <td className="sticky right-0 z-10 bg-inherit px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
                                 <div className="flex items-center gap-3">
                                 <div className="min-w-0">
-                                {f.center_settlement_status === "pending" ? (
+                                {f.non_fiscal_annulment && f.estado === "anulada" ? (
+                                  <div><Badge variant="destructive" className="text-xs">Eliminado</Badge>
+                                    <div className="text-xs text-muted-foreground">{f.non_fiscal_annulment.reason}</div>
+                                    <div className="text-[10px] text-muted-foreground">{f.non_fiscal_annulment.actor}</div>
+                                  </div>
+                                ) : f.center_settlement_status === "pending" ? (
                                   <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
                                 ) : isInvoiceReconciliationPending(f) ? (
                                   <div>
@@ -599,6 +616,12 @@ export default function BillingPage() {
                                       disabled={reconcileCreditNoteMutation.isPending}
                                       onClick={() => {if(window.confirm("¿Revisar el descuento de esta NC en cuenta corriente? Solo se registrará si falta; no se emite otro comprobante.")) reconcileCreditNoteMutation.mutate(Number(f.id));}}>
                                       <RefreshCw className="w-3.5 h-3.5 mr-1"/>Revisar CC
+                                    </Button>
+                                  )}
+                                  {f.canAnnulNonFiscal && NON_FISCAL_TIPOS_SET.has(f.tipo_comprobante) && f.estado !== "anulada" && (
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Eliminar comprobante no fiscal" aria-label="Eliminar comprobante no fiscal"
+                                      data-testid={`btn-annul-non-fiscal-${f.id}`} onClick={() => { setAnnulTarget(f); setAnnulReason(""); }}>
+                                      <Trash2 className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
                                   {(f.estado === "emitida" || f.estado === "parcial") && !!creditTypeForInvoice(f.tipo_comprobante) && (
@@ -699,6 +722,25 @@ export default function BillingPage() {
           mode="billing"
         />
       )}
+
+      <Dialog open={!!annulTarget} onOpenChange={open => { if (!open && !annulNonFiscal.isPending) { setAnnulTarget(null); setAnnulReason(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Eliminar comprobante no fiscal</DialogTitle>
+            <DialogDescription>El comprobante quedará eliminado como documento vigente y conservará su historial. El cobro se conservará; en reservas quedará disponible como anticipo. No se devolverá dinero ni se emitirá una Nota de Crédito.</DialogDescription>
+          </DialogHeader>
+          {annulTarget && <p className="text-sm font-medium">{TIPO_LABELS[annulTarget.tipo_comprobante]?.nombre || annulTarget.tipo_comprobante} {padNum(annulTarget.punto_venta,4)}-{padNum(annulTarget.numero,8)} · ${fPeso(annulTarget.monto_total)}</p>}
+          <div className="space-y-2"><Label htmlFor="non-fiscal-annul-reason">Motivo de eliminación (obligatorio)</Label>
+            <Textarea id="non-fiscal-annul-reason" value={annulReason} onChange={event=>setAnnulReason(event.target.value)} minLength={3} maxLength={500} required disabled={annulNonFiscal.isPending}
+              placeholder="Ej.: comprobante duplicado o error de carga" data-testid="non-fiscal-annul-reason" />
+          </div>
+          <p className="text-sm text-muted-foreground">En Caja se registrarán el comprobante eliminado, el motivo y quién lo eliminó, sin alterar el efectivo. Si tiene un descuento propio de prefactura, también se retirará ese descuento.</p>
+          <DialogFooter><Button variant="outline" disabled={annulNonFiscal.isPending} onClick={()=>{setAnnulTarget(null);setAnnulReason("");}}>Cancelar</Button>
+            <Button variant="destructive" disabled={annulNonFiscal.isPending || annulReason.trim().length<3 || annulReason.trim().length>500} onClick={()=>annulNonFiscal.mutate()} data-testid="confirm-annul-non-fiscal">
+              {annulNonFiscal.isPending ? "Eliminando…" : "Eliminar y conservar cobro"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {showNC !== null && <NotaCreditoDialog invoiceId={showNC} onClose={() => setShowNC(null)} />}
       {showEdit !== null && <EditarComprobanteDialog invoiceId={showEdit} onClose={() => setShowEdit(null)} />}
@@ -3775,96 +3817,7 @@ function BillingConfigPanel({ config }: { config: any }) {
 }
 
 function DeleteNonFiscalSection() {
-  const { toast } = useToast();
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [lastResult, setLastResult] = useState<{ deleted: number } | null>(null);
-
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      const res = await apiRequest("DELETE", `/api/billing/invoices/non-fiscal?startDate=${startDate}&endDate=${endDate}`);
-      const data = await res.json();
-      setLastResult(data);
-      setConfirmOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
-      toast({
-        title: data.deleted === 0 ? "Sin comprobantes para borrar" : `${data.deleted} comprobante(s) eliminado(s)`,
-        description: data.deleted > 0 ? `Período: ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}` : undefined,
-      });
-    } catch (e: any) {
-      toast({ title: "Error al borrar", description: parseApiError(e), variant: "destructive" });
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  const canDelete = !!startDate && !!endDate && startDate <= endDate;
-
-  return (
-    <>
-      <Card className="border-destructive/40">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2 text-destructive">
-            <Trash2 className="h-4 w-4" />
-            Borrar comprobantes no fiscales
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Elimina permanentemente todos los <strong>Tickets, Vouchers y Cierres</strong> (comprobantes no fiscales)
-            emitidos en el rango de fechas indicado. Esta acción no puede deshacerse.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="del-start">Desde</Label>
-              <Input id="del-start" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="del-end">Hasta</Label>
-              <Input id="del-end" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            </div>
-          </div>
-          {lastResult && (
-            <p className="text-xs text-muted-foreground">
-              Último borrado: <strong>{lastResult.deleted}</strong> comprobante(s) eliminado(s).
-            </p>
-          )}
-          <Button
-            variant="destructive"
-            disabled={!canDelete}
-            onClick={() => setConfirmOpen(true)}
-            data-testid="btn-delete-non-fiscal"
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Borrar comprobantes del período
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Confirmar eliminación
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-sm">
-            Se eliminarán <strong>todos los comprobantes no fiscales</strong> (Tickets, Vouchers, Cierres) emitidos
-            entre el <strong>{formatDisplayDate(startDate)}</strong> y el <strong>{formatDisplayDate(endDate)}</strong>.
-          </p>
-          <p className="text-sm text-destructive font-medium">Esta acción es irreversible.</p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting} data-testid="btn-confirm-delete-non-fiscal">
-              {deleting ? "Borrando..." : "Sí, borrar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+  return <Card><CardHeader><CardTitle className="text-base">Eliminar comprobantes no fiscales</CardTitle></CardHeader>
+    <CardContent><p className="text-sm text-muted-foreground">Desde la pestaña Comprobantes, usá el botón Eliminar comprobante no fiscal de cada voucher. Se solicita un motivo obligatorio, se conserva el cobro y queda el registro en Caja. El permiso se administra por rol.</p></CardContent>
+  </Card>;
 }

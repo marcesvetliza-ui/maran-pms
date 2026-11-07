@@ -174,6 +174,7 @@ const expenseCategoryLabels: Record<string, string> = {
 };
 
 const PAYMENT_METHOD_MAP: Record<string, string> = {
+  sin_movimiento: "Sin movimiento de dinero",
   cash: "Efectivo",
   debit_card: "Débito",
   credit_card: "Crédito",
@@ -374,7 +375,7 @@ function normalizePaymentMethod(method: string): string {
 function buildSummaryFromMovements(movements: CashMovement[]) {
   const summary: Record<string, { count: number; total: number; items: CashMovement[] }> = {};
   for (const m of movements) {
-    if (m.anulado) continue;
+    if (m.anulado || m.sourceType === "non_fiscal_void") continue;
     const key = normalizePaymentMethod(m.paymentMethod);
     if (!summary[key]) {
       summary[key] = { count: 0, total: 0, items: [] };
@@ -1099,6 +1100,8 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                         <TableCell>
                           {m.anulado ? (
                             <span />
+                          ) : m.sourceType === "non_fiscal_void" ? (
+                            <Badge variant="outline">Comprobante eliminado</Badge>
                           ) : m.movementType === "informational" ? (
                             <Badge className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Liquidación informativa</Badge>
                           ) : m.sourceType === "cobro_cc" ? (

@@ -53,3 +53,13 @@ describe("cash document provenance",()=>{
   expect(nonFiscalCollectionError("FB",["cash","credit_card","transferencia","cuenta_corriente"])).toBeNull();
  });
 });
+
+it("una baja de comprobante conserva el cobro como anticipo y no agrega un egreso",()=>{
+ const preserved=classifyCashDocument({receiptType:"cierre_habitacion"},[doc("cierre_habitacion","anulada")]);
+ expect(preserved).toMatchObject({documentClass:"pending"});expect(preserved.documentReference).toContain("cobro conservado");
+ const notice=classifyCashDocument({sourceType:"non_fiscal_void",receiptType:"cierre_habitacion"},[]);
+ const totals=cashDocumentSummary([movement(80,preserved.documentClass),movement(0,notice.documentClass,{movementType:"informational",paymentMethod:"sin_movimiento"})]);
+ expect(totals.reduce((sum,row)=>sum+row.total,0)).toBe(80);
+ expect(totals.find(row=>row.key==="pending")?.total).toBe(80);
+ expect(totals.find(row=>row.key==="non_fiscal")?.total).toBe(0);
+});

@@ -1,3 +1,4 @@
+import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { discardInvalidCreditDraft, isInvalidOriginalDraft } from './discardInvalidCreditDraft';
@@ -851,6 +852,7 @@ export function registerBillingRoutes(app: Express) {
       const rows = await db.execute(sql`
         SELECT si.*,
                ${directInvoiceOperationProof} AS _direct_invoice_operation,
+               ${nonFiscalAnnulmentProof} AS non_fiscal_annulment,
                CASE
                  WHEN si.reserva_id IS NOT NULL THEN 'recepcion'
                  ELSE pc.area
@@ -889,7 +891,7 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY si.created_at DESC
         LIMIT 200
       `);
-      res.json(rows.rows.map((row: any) => exposeInvoiceReconciliation(row)));
+      res.json(rows.rows.map((row: any) => ({ ...exposeInvoiceReconciliation(row), canAnnulNonFiscal: canAnnulNonFiscalInvoice(row) && hasPermission(String(req.user?.role || ""), NON_FISCAL_VOID_PERMISSION) })));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1054,24 +1056,30 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
-  // DELETE /api/billing/invoices/non-fiscal?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "resp_administracion"]), async (req, res) => {
+  // Financial documents require an individual reason and an atomic Caja audit.
+  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "resp_administracion"]), (_req, res) => {
+    res.status(409).json({ error: "El borrado masivo fue reemplazado por la eliminación individual con motivo y registro en Caja. Usá Eliminar comprobante desde Facturación." });
+  });
+
+  app.post("/api/billing/invoices/:id/annul-non-fiscal", requireAuth, requirePermission(NON_FISCAL_VOID_PERMISSION), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Comprobante inválido" });
     try {
-      const { startDate, endDate } = req.query as Record<string, string>;
-      if (!startDate || !endDate) {
-        return res.status(400).json({ error: "startDate y endDate son requeridos" });
-      }
-      const result = await db.execute(sql`
-        DELETE FROM sales_invoices
-        WHERE ${activeSalesRecord('invoice',sql`id`)} AND tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
-          AND fecha_emision >= ${startDate}
-          AND fecha_emision <= ${endDate}
-        RETURNING id
-      `);
-      res.json({ deleted: result.rows.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
+      const reason = validateNonFiscalAnnulmentReason(req.body?.reason);
+      assertFinancialSchemaReady();
+      const invoice = (await db.execute(sql`SELECT * FROM sales_invoices WHERE id=${id}`)).rows[0] as any;
+      if (!invoice) return res.status(404).json({ error: "Comprobante no encontrado" });
+      if (!isNonFiscalTipo(invoice.tipo_comprobante)) return res.status(400).json({ error: "Solo se pueden eliminar comprobantes no fiscales por esta opción." });
+      const run = async () => {
+        const area = await nonFiscalAnnulmentArea(pool, invoice);
+        const shift = await storage.getOrCreateActiveTurno(area);
+        return annulNonFiscalInvoice(pool, id, reason, { id: req.user?.id || null, name: req.user?.fullName || req.user?.username || "Usuario" }, area, shift.id, invoice);
+      };
+      const owned = () => invoice.reserva_id ? withReservationInvoiceLock(String(invoice.reserva_id), run)
+        : invoice.group_id ? withGroupInvoiceLock(String(invoice.group_id), run)
+        : invoice.spa_account_id ? withSpaInvoiceLock(String(invoice.spa_account_id), run) : run();
+      res.json(await withFinancialScopeLock(`non-fiscal-void:${id}`, owned));
+    } catch (error: any) { res.status(error?.statusCode || 409).json({ error: error?.message || "No se pudo eliminar el comprobante. Se conservaron los datos." }); }
   });
 
   // GET /api/billing/invoices/:id
@@ -1081,6 +1089,7 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`
         SELECT si.*,
                ${directInvoiceOperationProof} AS _direct_invoice_operation,
+               ${nonFiscalAnnulmentProof} AS non_fiscal_annulment,
                COALESCE((
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
@@ -2997,6 +3006,7 @@ export function registerBillingRoutes(app: Express) {
           const grandTotal = roomTotal + allCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
           const totalPayments = paymentsList.filter(p => p.status === "active").reduce((s, p) => s + parseFloat(p.amount), 0);
           const voucherData: VoucherHabitacionData = {
+            eliminated: factura.estado === "anulada",
             numero: Number(factura.numero),
             puntoVenta: Number(factura.punto_venta),
             fechaEmision: factura.fecha_emision,

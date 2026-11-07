@@ -198,6 +198,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   // server/billing/routes.ts — antes FINANCE_RECONCILIATION_ROLES, 3
   // endpoints de conciliación de Notas de Crédito pendientes.
+  "api:billing:non-fiscal-void": ["admin", "manager", "resp_administracion", "jefe_recepcion", "reception"],
   "api:billing:nc-reconciliation": ["admin", "manager", "resp_administracion", "jefe_recepcion", "reception"],
 
   // server/routes/spa.ts (7 endpoints) + server/billing/routes.ts (1 chequeo
@@ -411,6 +412,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   // permisos que controlan el sidebar.
   "api:manuals:restricted": { label: "Consultar y descargar manuales de Configuración y Técnica", section: "Manuales y ayuda" },
   "api:channex:config": { label: "Configurar conexiones y mapeos", section: "API — Channex" },
+  "api:billing:non-fiscal-void": { label: "Eliminar comprobantes no fiscales conservando el cobro", section: "API — Facturación" },
   "api:billing:nc-reconciliation": { label: "Conciliar Notas de Crédito pendientes", section: "API — Facturación" },
   "api:spa:write": { label: "Turnos, cuentas y pagos de Spa", section: "API — Spa" },
   "api:spa:fiscal-review": { label: "Revisión de borradores fiscales de Spa", section: "API — Spa" },
