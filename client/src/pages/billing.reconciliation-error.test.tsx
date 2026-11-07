@@ -138,3 +138,28 @@ it("recupera únicamente el registro de Caja y permite reintentar un fallo", asy
   const posts=fetchMock.mock.calls.filter(([,init])=>init?.method==='POST');
   expect(posts.map(([url])=>url)).toEqual(['/api/billing/invoices/703/complete-cash-information','/api/billing/invoices/703/complete-cash-information']);
 });
+
+describe("descarte verificado de NC inválida", () => {
+  it.each([true, false])("no emite ni concilia; solo muestra acción concedida por servidor (admin=%s)", async allowed => {
+    queryClient.clear();toastMock.mockReset();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url=String(input);
+      if(url.startsWith('/api/billing/invoices?'))return jsonResponse([]);
+      if(url==='/api/billing/config')return jsonResponse({arcaAmbiente:'homologacion'});
+      if(url==='/api/billing/credit-note-reconciliations/pending')return jsonResponse([{id:90,tipo_comprobante:'NCB',punto_venta:5,numero:3,reserva_id:'synthetic',monto_total:'184000',original_tipo_comprobante:'cierre_habitacion',original_punto_venta:5,original_numero:14,reconciliation_status:'pendiente',canDiscardInvalidOriginalDraft:allowed}]);
+      if(url==='/api/billing/credit-notes/90/discard-invalid-draft' && init?.method==='POST') return jsonResponse({error:'ARCA no respondió; se conserva el intento'},502);
+      return jsonResponse([]);
+    });
+    vi.stubGlobal('fetch',fetchMock);render(<QueryClientProvider client={queryClient}><BillingPage/></QueryClientProvider>);
+    await screen.findByText(/El original es un comprobante interno/);
+    expect(fetchMock.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+    if(allowed) {
+      await userEvent.setup().click(screen.getByTestId('btn-discard-invalid-credit-draft-90'));
+      await waitFor(()=>expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({title:'No se descartó el intento'})));
+      expect(screen.getByText(/El original es un comprobante interno/)).toBeInTheDocument();
+      expect(fetchMock.mock.calls.filter(([,init])=>init?.method==='POST').map(([url])=>String(url))).toEqual(['/api/billing/credit-notes/90/discard-invalid-draft']);
+    } else expect(screen.queryByTestId('btn-discard-invalid-credit-draft-90')).not.toBeInTheDocument();
+    confirm.mockRestore();
+  });
+});

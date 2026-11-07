@@ -288,6 +288,18 @@ export default function BillingPage() {
     onError: (error: Error) => toast({ title: parseApiError(error), variant: "destructive" }),
   });
 
+  const discardInvalidCreditDraftMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/billing/credit-notes/${id}/discard-invalid-draft`),
+    onSuccess: async () => {
+      toast({ title: "Intento descartado", description: "ARCA confirmó que no está autorizado. Se conservó la auditoría; no se emitió ni cobró nada." });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
+      ]);
+    },
+    onError: (error: Error) => toast({ title: "No se descartó el intento", description: parseApiError(error), variant: "destructive" }),
+  });
+
   const reconcileCreditNoteMutation = useMutation({
     mutationFn: (creditNoteId: number) => apiRequest("POST", `/api/billing/credit-notes/${creditNoteId}/reconcile`),
     onSuccess: async (response: Response) => {
@@ -457,6 +469,11 @@ export default function BillingPage() {
                           <div className="text-amber-800 dark:text-amber-200 mt-1">{getReconciliationError(nc)}</div>
                         )}
                       </div>
+                      {nc.canDiscardInvalidOriginalDraft && <Button size="sm" variant="outline" disabled={discardInvalidCreditDraftMutation.isPending}
+                        data-testid={`btn-discard-invalid-credit-draft-${nc.id}`}
+                        onClick={() => { if (window.confirm(`¿Consultar en ARCA la NC ${padNum(nc.punto_venta,4)}-${padNum(nc.numero,8)} y descartar el intento solo si no está autorizado y no tiene movimientos? Se conservará la auditoría. No se emite ni cobra nada.`)) discardInvalidCreditDraftMutation.mutate(Number(nc.id)); }}>
+                        Verificar y descartar intento
+                      </Button>}
                       <Button
                         size="sm"
                         variant="outline"

@@ -1,3 +1,4 @@
+import { isCompletedBareDirectInvoice } from "./directInvoiceReconciliation";
 function invoiceValue(invoice: any, snakeCase: string, camelCase: string) {
   return invoice?.[snakeCase] ?? invoice?.[camelCase];
 }
@@ -25,13 +26,15 @@ export function exposeInvoiceReconciliation(invoice: any) {
   // This flag is produced only from a group_invoices row matching BOTH the
   // invoice and its owner group. A CAE or group_id alone proves no link.
   const directLinkCompleted = invoiceValue(invoice, "direct_group_reconciliation_linked", "directGroupReconciliationLinked") === true;
-  const status = storedStatus === "pendiente" && ((hasGroupIntent && groupLinkCompleted) || (isDirectGroupInvoice && directLinkCompleted))
+  const { _direct_invoice_operation: directProof, ...publicInvoice } = invoice;
+  const directCompleted = isCompletedBareDirectInvoice(invoice, directProof);
+  const status = storedStatus === "pendiente" && (directCompleted || (hasGroupIntent && groupLinkCompleted) || (isDirectGroupInvoice && directLinkCompleted))
     ? "conciliada"
     : storedStatus;
   const visibleError = status === "pendiente" ? reconciliationError : null;
 
   return {
-    ...invoice,
+    ...publicInvoice,
     reconciliation_status: status,
     reconciliationStatus: status,
     reconciliation_error: visibleError,

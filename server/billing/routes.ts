@@ -1,3 +1,6 @@
+import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
+import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { discardInvalidCreditDraft, isInvalidOriginalDraft } from './discardInvalidCreditDraft';
 import { chargeUnits, expandChargeUnitCoverage, groupedChargeCoverage, unitParent } from '@shared/chargeUnits';
 import { accommodationNights, expandAccommodationCoverage, accommodationCoverageTotal, isAccommodationSource } from '@shared/accommodationNights';
 import { assertReservationInvoiceRecoverable } from "./reservationRecoveryState";
@@ -847,6 +850,7 @@ export function registerBillingRoutes(app: Express) {
 
       const rows = await db.execute(sql`
         SELECT si.*,
+               ${directInvoiceOperationProof} AS _direct_invoice_operation,
                CASE
                  WHEN si.reserva_id IS NOT NULL THEN 'recepcion'
                  ELSE pc.area
@@ -913,10 +917,32 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
         LIMIT 100
       `);
-      res.json(rows.rows.map((row: any) => exposeInvoiceReconciliation(row)));
+      res.json(rows.rows.map((row: any) => ({ ...exposeInvoiceReconciliation(row), canDiscardInvalidOriginalDraft: _req.user?.role === "admin" && isInvalidOriginalDraft(row, row.original_tipo_comprobante) })));
     } catch (error: any) {
       res.status(500).json({ error: error.message || "No se pudieron cargar las conciliaciones pendientes" });
     }
+  });
+
+  // Admin cleanup consults ARCA only; it must never authorize or apply the NC.
+  app.post("/api/billing/credit-notes/:id/discard-invalid-draft", requireAuth, requireRole(["admin"]), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "NC inválida" });
+    try {
+      assertFinancialSchemaReady();
+      const candidate = (await db.execute(sql`SELECT reserva_id FROM sales_invoices WHERE id=${id}`)).rows[0] as any;
+      const config = await getBillingConfig();
+      const identity = { environment: String(config.arcaAmbiente), issuer: String(config.arcaCuit || config.cuit).replace(/\D/g, "") };
+      const discard = () => discardInvalidCreditDraft(pool, id, String(candidate?.reserva_id || ""), req.user?.id || null, identity, async nc => {
+        if (!config.arcaCert || !config.arcaKey) throw new Error("Faltan credenciales para consultar ARCA. Se conserva el intento.");
+        const { getTokenAuth } = await import("./wsaaClient");
+        const { feCompConsultar } = await import("./wsfevClient");
+        const { token, sign } = await getTokenAuth(config.arcaCert, config.arcaKey, identity.environment as "homologacion" | "produccion");
+        const document = resolveFiscalRecipientDocument({ cuit: nc.cliente_cuit, dni: nc.cliente_dni, documentType: nc.cliente_document_type });
+        return feCompConsultar({ tipo: nc.tipo_comprobante, puntoVenta: Number(nc.punto_venta), numero: Number(nc.numero), cuitEmisor: identity.issuer, token, sign },
+          identity.environment as "homologacion" | "produccion", { total: Number(nc.monto_total), fecha: String(nc.fecha_emision).replaceAll("-", ""), docTipo: document.tipo, docNro: document.numero });
+      });
+      res.json(candidate?.reserva_id ? await withReservationInvoiceLock(String(candidate.reserva_id), discard) : await discard());
+    } catch (error: any) { res.status(error?.statusCode || 502).json({ error: error?.message || "No se pudo verificar ARCA. Se conserva el intento." }); }
   });
 
   // Explicit recovery action for a pending reservation NC. It never creates a
@@ -1054,6 +1080,7 @@ export function registerBillingRoutes(app: Express) {
       const id = parseInt(req.params.id);
       const row = await db.execute(sql`
         SELECT si.*,
+               ${directInvoiceOperationProof} AS _direct_invoice_operation,
                COALESCE((
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
