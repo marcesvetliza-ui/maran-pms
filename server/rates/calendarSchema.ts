@@ -13,6 +13,7 @@ export const rateCalendarSchemaSql = `
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), actor_id varchar, changes jsonb NOT NULL, summary jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
  );
+ ALTER TABLE rate_calendar_entries ADD COLUMN IF NOT EXISTS occupancy_rates jsonb NOT NULL DEFAULT '{}'::jsonb CHECK(jsonb_typeof(occupancy_rates)='object');
 `;
 export async function ensureRateCalendarSchema(pool: Pool) {
   const c = await pool.connect(); try {

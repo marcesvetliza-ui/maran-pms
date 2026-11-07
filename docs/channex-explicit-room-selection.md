@@ -10,9 +10,9 @@ Las columnas nuevas son aditivas y los mapeos anteriores conservan modo de categ
 
 ## Precios: pendiente antes de producción
 
-La revisión encontró que el emisor ARI actual publica un precio escalar por plan. No implementa todavía precios por ocupación ni su calendario. El catálogo ahora conserva `sellMode` de Channex. Un plan `per_person` bloquea la transformación/publicación con explicación explícita; no se envía el precio escalar al plan ni se recomienda convertirlo a `per_room`. En producción, si la modalidad no está verificada, también se exige actualizar el catálogo. Obtener nuevamente el catálogo después de desplegar para registrar esta modalidad en los planes ya existentes.
+La limitación inicial del precio escalar se resolvió con la adaptación documentada en [Precios por ocupación](channex-occupancy-prices.md). Obtener nuevamente el catálogo para registrar modalidad y opciones remotas. Se usan los importes por pax del plan de Maran y del calendario, con validación de positivos y de las ocupaciones requeridas; no se copian automáticamente los precios de Channex ni se extrapola un precio único.
 
-La conexión real de Maran y el servidor permanecen desactivados. No se han cambiado los precios cargados en Channex. Falta implementar y verificar el contrato de precios por ocupación, su relación con los precios por pax del PMS, las reglas de niños/bebés y el calendario. También falta continuidad del plan Ejecutiva que actualmente termina el 11/11/2026 y las verificaciones de activación, impuestos y cancelación. No declarar lista la venta por completar únicamente los mapeos de habitaciones.
+La conexión real y los envíos siguen desactivados hasta completar la revisión de importes, continuidad de vigencias y puesta en marcha. Las pruebas con proveedores simulados no sustituyen la verificación remota.
 
 ## Verificación
 

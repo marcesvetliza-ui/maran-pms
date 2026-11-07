@@ -6,7 +6,9 @@ export class CalendarInputError extends Error { }
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
 const key = (id: string, date: string) => `${id}:${date}`;
 async function load(c: PoolClient, ids: string[], from: string, to: string, lock = false) {
-  const plans = (await c.query(`SELECT id,room_type_id,base_rate,currency,valid_from::text,valid_to::text FROM rate_plans WHERE id=ANY($1::varchar[]) ORDER BY id ${lock ? 'FOR UPDATE' : ''}`, [ids])).rows;
+  const plans = (await c.query(`SELECT id,room_type_id,base_rate,currency,valid_from::text,valid_to::text,
+    to_jsonb(rate_plans)->>'rate_1pax' AS rate_1pax,to_jsonb(rate_plans)->>'rate_2pax' AS rate_2pax,
+    to_jsonb(rate_plans)->>'rate_3pax' AS rate_3pax,to_jsonb(rate_plans)->>'rate_4pax' AS rate_4pax FROM rate_plans WHERE id=ANY($1::varchar[]) ORDER BY id ${lock ? 'FOR UPDATE' : ''}`, [ids])).rows;
   if (plans.length !== ids.length) throw new CalendarInputError('Uno de los planes ya no existe; actualizá la selección');
   const entries = (await c.query('SELECT *,stay_date::text AS date FROM rate_calendar_entries WHERE rate_plan_id=ANY($1::varchar[]) AND stay_date BETWEEN $2::date AND $3::date ORDER BY rate_plan_id,stay_date', [ids, from, to])).rows;
   return { plans, entries };
@@ -33,8 +35,10 @@ export async function editCalendar(pool: Pool, request: CalendarRequest, actorId
     const { plans, entries } = await load(c, ids, dates[0], dates[dates.length - 1], !!previewToken);
     const hasMappings = (await c.query("SELECT to_regclass('channex_rate_plan_mappings') IS NOT NULL AS present")).rows[0].present;
     const linkedPlans = new Set<string>(hasMappings ? (await c.query('SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings WHERE rate_plan_id=ANY($1::varchar[])', [ids])).rows.map(p => p.rate_plan_id) : []);
+    const occupancyPlans = new Set<string>(hasMappings ? (await c.query(`SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings m WHERE rate_plan_id=ANY($1::varchar[]) AND to_jsonb(m)->>'sell_mode'='per_person'`, [ids])).rows.map(p=>p.rate_plan_id) : []);
     for (const intent of intents) {
       const values = intent.values;
+      if (occupancyPlans.has(intent.ratePlanId) && values.rate != null) throw new CalendarInputError('Este plan usa precios por ocupación: ingresá los importes por cantidad de personas, no un precio único');
       if (!linkedPlans.has(intent.ratePlanId) || (values.minStayArrival === undefined && values.minStayThrough === undefined)) continue;
       if (values.minStayArrival !== undefined && values.minStayThrough !== undefined && values.minStayArrival !== values.minStayThrough)
         throw new CalendarInputError('Para los planes vinculados a Channex, ambas estadías mínimas deben tener el mismo valor');
@@ -62,11 +66,11 @@ export async function editCalendar(pool: Pool, request: CalendarRequest, actorId
     if (previewToken) {
       if (previewToken !== token) throw new CalendarConflict('El calendario cambió desde la revisión. Revisá la propuesta nuevamente antes de guardar');
       if (changes.length) {
-        await c.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate,min_stay_arrival,min_stay_through,max_stay,stop_sell,closed_to_arrival,closed_to_departure,updated_by)
-     SELECT x."ratePlanId",x.date::date,x."rateOverride",x."minStayArrival",x."minStayThrough",x."maxStay",x."stopSell",x."closedToArrival",x."closedToDeparture",$2
-     FROM jsonb_to_recordset($1::jsonb) AS x("ratePlanId" varchar,date text,"rateOverride" numeric,"minStayArrival" int,"minStayThrough" int,"maxStay" int,"stopSell" boolean,"closedToArrival" boolean,"closedToDeparture" boolean)
+        await c.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate,min_stay_arrival,min_stay_through,max_stay,stop_sell,closed_to_arrival,closed_to_departure,occupancy_rates,updated_by)
+     SELECT x."ratePlanId",x.date::date,x."rateOverride",x."minStayArrival",x."minStayThrough",x."maxStay",x."stopSell",x."closedToArrival",x."closedToDeparture",COALESCE(x."occupancyOverrides",'{}'::jsonb),$2
+     FROM jsonb_to_recordset($1::jsonb) AS x("ratePlanId" varchar,date text,"rateOverride" numeric,"minStayArrival" int,"minStayThrough" int,"maxStay" int,"stopSell" boolean,"closedToArrival" boolean,"closedToDeparture" boolean,"occupancyOverrides" jsonb)
      ON CONFLICT(rate_plan_id,stay_date) DO UPDATE SET rate=EXCLUDED.rate,min_stay_arrival=EXCLUDED.min_stay_arrival,min_stay_through=EXCLUDED.min_stay_through,max_stay=EXCLUDED.max_stay,
-       stop_sell=EXCLUDED.stop_sell,closed_to_arrival=EXCLUDED.closed_to_arrival,closed_to_departure=EXCLUDED.closed_to_departure,updated_at=now(),updated_by=EXCLUDED.updated_by`, [JSON.stringify(changes.map(c => c.after)), actorId]);
+       occupancy_rates=EXCLUDED.occupancy_rates,stop_sell=EXCLUDED.stop_sell,closed_to_arrival=EXCLUDED.closed_to_arrival,closed_to_departure=EXCLUDED.closed_to_departure,updated_at=now(),updated_by=EXCLUDED.updated_by`, [JSON.stringify(changes.map(c => c.after)), actorId]);
         await c.query('INSERT INTO rate_calendar_edits(actor_id,changes,summary) VALUES($1,$2,$3)', [actorId, JSON.stringify(request), JSON.stringify({ selectedCells: intents.length, changedCells: changes.length, segments })]);
       }
     }

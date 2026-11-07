@@ -680,6 +680,8 @@ export const channexRatePlanMappings = pgTable("channex_rate_plan_mappings", {
   channexRatePlanId: text("channex_rate_plan_id").notNull(),
   channexRatePlanTitle: text("channex_rate_plan_title").notNull(),
   sellMode: text("sell_mode"),
+  rateMode: text("rate_mode"),
+  occupancies: integer("occupancies").array(),
   channexRoomTypeId: text("channex_room_type_id").notNull(),
   ratePlanId: varchar("rate_plan_id"),
   createdAt: timestamp("created_at").notNull(),

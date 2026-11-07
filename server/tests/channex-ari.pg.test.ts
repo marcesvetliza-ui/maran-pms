@@ -29,7 +29,7 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
    CREATE TABLE room_types(id varchar PRIMARY KEY,name text);
    CREATE TABLE rooms(id varchar PRIMARY KEY,room_number text,room_type_id varchar,floor int,status text,is_active boolean,is_virtual boolean);
    CREATE TABLE reservations(id varchar PRIMARY KEY,room_id varchar,check_in_date date,check_out_date date,status text,room_type_id varchar);
-   CREATE TABLE rate_plans(id varchar PRIMARY KEY,room_type_id varchar,base_rate numeric(10,2),currency text,valid_from date,valid_to date);
+   CREATE TABLE rate_plans(id varchar PRIMARY KEY,room_type_id varchar,base_rate numeric(10,2),currency text,valid_from date,valid_to date,rate_1pax numeric(10,2),rate_2pax numeric(10,2),rate_3pax numeric(10,2),rate_4pax numeric(10,2));
    CREATE TABLE maintenance_blocks(id varchar PRIMARY KEY,room_id varchar,block_from date,block_to date);
    CREATE TABLE groups(id varchar PRIMARY KEY,check_in_date date,check_out_date date,status text);
    CREATE TABLE group_room_blocks(id varchar PRIMARY KEY,group_id varchar,room_type_id varchar,quantity int,block_check_in_date date,block_check_out_date date);
@@ -57,6 +57,54 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
   `);
   });
   async function enable() { await pool.query(`INSERT INTO channex_ari_settings(connection_id,enabled,floor,currency,last_horizon_date,capture_started_at) VALUES('connection',true,2,'USD',(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,now())`); }
+  it('keeps the 500-day full sync at two API calls with multi-occupancy prices',async()=>{
+    await pool.query(`UPDATE rate_plans SET rate_1pax=169000,rate_2pax=190000;
+      UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies=ARRAY[1,2]`);
+    const response=await fetch(`${origin}/api/channex/connections/connection/ari`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({floor:2,currency:'USD',enabled:true})});
+    expect(response.status).toBe(200);
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(2);
+    const send=vi.fn(async()=>['full-occupancy-task']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    await pool.query("UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 minute'");
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send).toHaveBeenCalledTimes(2);
+    const restrictions=send.mock.calls.find((args:any)=>args[1]==='restrictions') as any;
+    expect(restrictions[2]).toHaveLength(1);
+    expect(restrictions[2][0].rates).toEqual([{occupancy:1,rate:'169000.00'},{occupancy:2,rate:'190000.00'}]);
+    expect(restrictions[2][0]).not.toHaveProperty('rate');
+  });
+  it('publishes occupancy totals from the PMS calendar in one plural-rates delta and preserves restrictions',async()=>{
+    await pool.query(`UPDATE rate_plans SET rate_1pax=169000,rate_2pax=190000,currency='ARS';
+      UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies=ARRAY[1,2]`);
+    await enable();await pool.query("UPDATE channex_ari_settings SET currency='ARS'");
+    const values=await buildAriValues(pool as any,{...connection,currency:'ARS'},[event('restrictions')],day);
+    expect(values[0].rates).toEqual([{occupancy:1,rate:'169000.00'},{occupancy:2,rate:'190000.00'}]);
+    expect(values[0]).not.toHaveProperty('rate');
+    const changes={changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:addDays(day,1),values:{occupancyRates:{'1':'171000','2':'195000'}}}]};
+    const preview=await calendarRequest('preview',changes);expect(preview.status).toBe(200);
+    expect(preview.body.segments[0].before.occupancyRates).toEqual({'1':'169000.00','2':'190000.00'});
+    expect((await calendarRequest('apply',{...changes,previewToken:preview.body.previewToken})).status).toBe(200);
+    const send=vi.fn(async()=>['occupancy-task']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][2]).toEqual([{property_id:'property',rate_plan_id:'remote-bar',date_from:day,date_to:addDays(day,1),rates:[{occupancy:1,rate:'171000.00'},{occupancy:2,rate:'195000.00'}]}]);
+    const reset={changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:day,values:{occupancyRates:{'1':null},stopSell:true}}]};
+    const proposed=await calendarRequest('preview',reset);expect(proposed.status).toBe(200);
+    expect((await calendarRequest('apply',{...reset,previewToken:proposed.body.previewToken})).status).toBe(200);
+    expect((await pool.query('SELECT rate,occupancy_rates,stop_sell FROM rate_calendar_entries WHERE stay_date=$1',[day])).rows[0]).toMatchObject({rate:null,occupancy_rates:{'2':'195000.00'},stop_sell:true});
+    expect((await calendarRequest('preview',{changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:day,values:{rate:'1'}}]})).status).toBe(400);
+  });
+  it('captures edits of plan occupancy tiers and invalidates a calendar preview on concurrent tier edits',async()=>{
+    await pool.query(`UPDATE rate_plans SET rate_1pax=169000,rate_2pax=190000;
+      UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies=ARRAY[1,2]`);
+    await enable();
+    const changes={changes:[{ratePlanIds:['bar'],dateFrom:day,dateTo:day,values:{occupancyRates:{'2':'195000'}}}]};
+    const preview=await calendarRequest('preview',changes);expect(preview.status).toBe(200);
+    await pool.query('UPDATE rate_plans SET rate_1pax=170000');
+    expect((await pool.query("SELECT changed_fields FROM channex_ari_outbox WHERE reason='rate_plans:update'")).rows[0].changed_fields).toEqual(['rate']);
+    expect((await calendarRequest('apply',{...changes,previewToken:preview.body.previewToken})).status).toBe(409);
+    expect((await pool.query('SELECT count(*)::int AS n FROM rate_calendar_entries')).rows[0].n).toBe(0);
+  });
   it('splits one PMS category into disjoint physical rooms without counting another floor', async () => {
     await pool.query(`UPDATE channex_room_type_mappings SET room_ids=ARRAY['201'];
       INSERT INTO channex_room_type_mappings(connection_id,channex_room_type_id,room_type_id,room_ids) VALUES('connection','remote-second','twin',ARRAY['202'])`);
@@ -79,7 +127,7 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
   });
   it('blocks scalar rates for per-person plans and for unverified production pricing modes', async () => {
     await pool.query(`UPDATE channex_rate_plan_mappings SET sell_mode='per_person'`);
-    await expect(buildAriValues(pool as any,connection,[event('restrictions')],day)).rejects.toThrow(/precios por ocupación/);
+    await expect(buildAriValues(pool as any,connection,[event('restrictions')],day)).rejects.toThrow(/Manual/);
     await pool.query(`UPDATE channex_rate_plan_mappings SET sell_mode=NULL`);
     await expect(buildAriValues(pool as any,{...connection,environment:'real'},[event('restrictions')],day)).rejects.toThrow(/Actualizá el catálogo/);
   });

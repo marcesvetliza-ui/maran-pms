@@ -1,9 +1,10 @@
 import type { PoolClient } from "pg";
 import { validateRoomSelections, RoomSelectionError } from "./roomSelection";
-import { calendarEffective, MAX_CALENDAR_CELLS } from "@shared/rate-calendar";
+import { calendarEffective, MAX_CALENDAR_CELLS, type CalendarCell } from "@shared/rate-calendar";
 
 export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number; reason?: string; changed_fields?: string[] | null };
-export type AriValue = { property_id: string; date_from: string; date_to: string;[key: string]: string | number | boolean };
+export type OccupancyPrice = { occupancy: number; rate: string };
+export type AriValue = { property_id: string; date_from: string; date_to: string;[key: string]: string | number | boolean | OccupancyPrice[] };
 export class AriConfigurationError extends Error { }
 export const STAGING_URL = 'https://staging.channex.io/api/v1';
 export const ARI_CALL_INTERVAL_MS = 6100; // Conservative global spacing: <=10 ARI calls/minute, hence <=10 per endpoint/property.
@@ -91,22 +92,22 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
    WHERE m.connection_id=$1 ORDER BY m.channex_room_type_id,d.day`, [connection.id, connection.floor, dates])).rows;
     for (const r of rows) if (affected(r.room_type_id, r.day)) values.push({ property_id: connection.channex_property_id, room_type_id: r.channex_room_type_id, date_from: r.day, date_to: r.day, availability: r.availability });
   } else {
-    const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,m.sell_mode,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text
+    const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,m.sell_mode,m.rate_mode,m.occupancies,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text,
+    to_jsonb(p)->>'rate_1pax' AS rate_1pax,to_jsonb(p)->>'rate_2pax' AS rate_2pax,to_jsonb(p)->>'rate_3pax' AS rate_3pax,to_jsonb(p)->>'rate_4pax' AS rate_4pax
     FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 ORDER BY m.channex_rate_plan_id`, [connection.id])).rows;
     if (!plans.length) throw new AriConfigurationError('Falta mapear los planes tarifarios');
     const overrides = (await c.query('SELECT *,stay_date::text AS day FROM rate_calendar_entries WHERE rate_plan_id=ANY($1::varchar[]) AND stay_date=ANY($2::date[])', [plans.map(p => p.rate_plan_id).filter(Boolean), dates])).rows;
     const byDay = new Map(overrides.map(o => [`${o.rate_plan_id}:${o.day}`, o]));
     for (const p of plans) {
-      if (p.sell_mode === 'per_person') throw new AriConfigurationError('El plan de Channex usa precios por ocupación. Falta configurar y verificar su envío desde Maran; no se enviará una tarifa única por habitación.');
-      if (connection.environment === 'real' && p.sell_mode !== 'per_room') throw new AriConfigurationError('Actualizá el catálogo y verificá la modalidad de precio del plan antes de publicar en producción');
+      if (connection.environment === 'real' && !['per_room','per_person'].includes(p.sell_mode)) throw new AriConfigurationError('Actualizá el catálogo y verificá la modalidad de precio del plan antes de publicar en producción');
       const room = mappings.find(m => m.channex_room_type_id === p.channex_room_type_id);
       if (!room || p.room_type_id !== room.room_type_id || !p.rate_plan_id) throw new AriConfigurationError('El plan tarifario no coincide con su categoría mapeada');
       for (const day of dates) if (affected(p.room_type_id, day, p.rate_plan_id)) {
         if (p.currency !== connection.currency) throw new AriConfigurationError('La moneda del plan debe coincidir con la moneda configurada para Channex');
-        const calendar = calendarEffective({ id: p.rate_plan_id, base_rate: p.base_rate, currency: p.currency }, day, byDay.get(`${p.rate_plan_id}:${day}`));
-        if ((p.valid_from && day < p.valid_from) || (p.valid_to && day > p.valid_to) || !/^\d+(\.\d{1,2})?$/.test(calendar.rate) || Number(calendar.rate) <= 0) throw new AriConfigurationError('Falta una tarifa vigente y positiva para las fechas a publicar');
+        const calendar = calendarEffective({ ...p, id: p.rate_plan_id }, day, byDay.get(`${p.rate_plan_id}:${day}`));
+        if ((p.valid_from && day < p.valid_from) || (p.valid_to && day > p.valid_to) || (p.sell_mode !== 'per_person' && (!/^\d+(\.\d{1,2})?$/.test(calendar.rate) || Number(calendar.rate) <= 0))) throw new AriConfigurationError('Falta una tarifa vigente y positiva para las fechas a publicar');
         values.push({
-          property_id: connection.channex_property_id, rate_plan_id: p.channex_rate_plan_id, date_from: day, date_to: day, rate: calendar.rate,
+          property_id: connection.channex_property_id, rate_plan_id: p.channex_rate_plan_id, date_from: day, date_to: day, ...(p.sell_mode === 'per_person' ? { rates: occupancyPriceRows(p,calendar) } : {rate:calendar.rate}),
           min_stay_arrival: calendar.minStayArrival, min_stay_through: calendar.minStayArrival, max_stay: calendar.maxStay,
           stop_sell: calendar.stopSell, closed_to_arrival: calendar.closedToArrival, closed_to_departure: calendar.closedToDeparture
         });
@@ -114,6 +115,21 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
     }
   }
   return compressValues(values);
+}
+
+/** The API's multi-occupancy contract uses plural `rates`, decimal strings and totals per room/night. */
+export function occupancyPriceRows(plan: any, calendar: CalendarCell): OccupancyPrice[] {
+  if (plan.rate_mode !== 'manual') throw new AriConfigurationError('El plan por ocupación debe ser Manual; actualizá el catálogo y revisá la modalidad en Channex');
+  const occupancies = plan.occupancies;
+  if (!Array.isArray(occupancies) || !occupancies.length || new Set(occupancies).size !== occupancies.length || occupancies.some(n => !Number.isInteger(n) || n < 1 || n > 4))
+    throw new AriConfigurationError('Actualizá el catálogo: se necesitan las ocupaciones configuradas en Channex (de 1 a 4 personas)');
+  if (calendar.rateOverride !== null) throw new AriConfigurationError('El calendario tiene un precio único en un plan por ocupación. Volvé el precio único a tarifa base y cargá los importes por cantidad de personas');
+  return [...occupancies].sort((a,b)=>a-b).map(occupancy => {
+    const rate = calendar.occupancyRates?.[String(occupancy)];
+    if (typeof rate !== 'string' || !/^\d{1,8}(\.\d{1,2})?$/.test(rate) || Number(rate) <= 0)
+      throw new AriConfigurationError(`Falta una tarifa positiva para ${occupancy} persona(s) en el plan ${plan.rate_plan_id}`);
+    return {occupancy,rate:Number(rate).toFixed(2)};
+  });
 }
 
 /** Absolute values for changed fields only. Unknown fields are never marked as published. */
@@ -124,6 +140,7 @@ export function ariDelta(current: AriValue, previous: AriValue | undefined, fiel
   if (current.rate_plan_id !== undefined) delta.rate_plan_id = current.rate_plan_id;
   let changed = false;
   const selected = fields == null ? null : new Set(fields);
+  if (selected?.has('rate') || selected?.has('rates') || selected?.has('occupancy_rates')) { selected.add('rate'); selected.add('rates'); }
   if (selected?.has('min_stay_arrival') || selected?.has('min_stay_through')) {
     selected.add('min_stay_arrival'); selected.add('min_stay_through');
   }
@@ -131,7 +148,7 @@ export function ariDelta(current: AriValue, previous: AriValue | undefined, fiel
   for (const [key, value] of Object.entries(current)) {
     if (identity.has(key) || (!full && selected && !selected.has(key))) continue;
     const isMin = key === 'min_stay_arrival' || key === 'min_stay_through';
-    if (full || (isMin ? minChanged : value !== previous?.[key])) { delta[key] = value; changed = true; }
+    if (full || (isMin ? minChanged : JSON.stringify(value) !== JSON.stringify(previous?.[key]))) { delta[key] = value; changed = true; }
   }
   return changed ? delta : null;
 }
