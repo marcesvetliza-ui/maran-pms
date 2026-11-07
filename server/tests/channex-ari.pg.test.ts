@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, afterAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import { ensureChannexAriSchema } from '../channex/ariSchema';
 import { buildAriValues, addDays, type AriEvent } from '../channex/ari';
+import { validateRoomSelections } from '../channex/roomSelection';
 import { dispatchChannexAri, AriTransportError } from '../channex/ariWorker';
 vi.mock('../auth', () => ({ requireAuth: (_r: any, _s: any, next: any) => next(), requirePermission: () => (_r: any, _s: any, next: any) => next() }));
 const url = process.env.CHANNEX_TEST_DATABASE_URL;
@@ -56,6 +57,32 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
   `);
   });
   async function enable() { await pool.query(`INSERT INTO channex_ari_settings(connection_id,enabled,floor,currency,last_horizon_date,capture_started_at) VALUES('connection',true,2,'USD',(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,now())`); }
+  it('splits one PMS category into disjoint physical rooms without counting another floor', async () => {
+    await pool.query(`UPDATE channex_room_type_mappings SET room_ids=ARRAY['201'];
+      INSERT INTO channex_room_type_mappings(connection_id,channex_room_type_id,room_type_id,room_ids) VALUES('connection','remote-second','twin',ARRAY['202'])`);
+    await pool.query(`INSERT INTO reservations VALUES('occupied-201','201',$1::date,$1::date+1,'confirmed','twin')`, [day]);
+    const values=await buildAriValues(pool as any,connection,[event()],day);
+    expect(values.map(v=>[v.room_type_id,v.availability])).toEqual([['remote-second',1],['remote-twin',0]]);
+    const {inventoryPreview}=await import('../channex/ari');
+    expect((await inventoryPreview(pool as any,'connection',2)).map(r=>r.roomNumber)).toEqual(['201','202']);
+  });
+  it('rejects overlaps, empty selections, rooms from another floor and category-wide duplicates', async () => {
+    await pool.query(`UPDATE channex_room_type_mappings SET room_ids=ARRAY['201'];
+      INSERT INTO channex_room_type_mappings(connection_id,channex_room_type_id,room_type_id,room_ids) VALUES('connection','remote-second','twin',ARRAY['201'])`);
+    await expect(validateRoomSelections(pool as any,'connection',2)).rejects.toThrow(/dos categorías/);
+    await pool.query(`UPDATE channex_room_type_mappings SET room_ids=ARRAY[]::text[] WHERE channex_room_type_id='remote-second'`);
+    await expect(validateRoomSelections(pool as any,'connection',2)).rejects.toThrow(/al menos una/);
+    await pool.query(`UPDATE channex_room_type_mappings SET room_ids=ARRAY['301'] WHERE channex_room_type_id='remote-second'`);
+    await expect(validateRoomSelections(pool as any,'connection',2)).rejects.toThrow(/piso configurados/);
+    await pool.query(`UPDATE channex_room_type_mappings SET room_ids=NULL WHERE channex_room_type_id='remote-second'`);
+    await expect(validateRoomSelections(pool as any,'connection',2)).rejects.toThrow(/mapeo único/);
+  });
+  it('blocks scalar rates for per-person plans and for unverified production pricing modes', async () => {
+    await pool.query(`UPDATE channex_rate_plan_mappings SET sell_mode='per_person'`);
+    await expect(buildAriValues(pool as any,connection,[event('restrictions')],day)).rejects.toThrow(/precios por ocupación/);
+    await pool.query(`UPDATE channex_rate_plan_mappings SET sell_mode=NULL`);
+    await expect(buildAriValues(pool as any,{...connection,environment:'real'},[event('restrictions')],day)).rejects.toThrow(/Actualizá el catálogo/);
+  });
   it('previews only physical active rooms on floor 2 and captures nothing by default', async () => {
     const response = await fetch(`${origin}/api/channex/connections/connection/ari`); const data = await response.json();
     expect(data.rooms.map((r: any) => r.roomNumber)).toEqual(['201', '202']); expect(data.settings.enabled).toBe(false);

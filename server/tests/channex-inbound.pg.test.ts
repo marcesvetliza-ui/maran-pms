@@ -43,6 +43,18 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   for(const type of types){await pool.query("DELETE FROM rooms WHERE room_type_id=$1",[type]);await pool.query("DELETE FROM rate_plans WHERE room_type_id=$1",[type]);await pool.query("DELETE FROM room_types WHERE id=$1",[type]);}
   await pool?.end();
  });
+ it('assigns a split category only to its selected physical room and reviews when it is unavailable',async()=>{
+  const f=await fixture(2);
+  await pool.query('UPDATE channex_ari_settings SET enabled=false WHERE connection_id=$1',[f.id]);
+  await pool.query('UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1',[f.id]);
+  await pool.query('UPDATE channex_room_type_mappings SET room_ids=$2::text[] WHERE connection_id=$1',[f.id,[`${f.id}-1`]]);
+  await pool.query('UPDATE channex_ari_settings SET enabled=true WHERE connection_id=$1',[f.id]);
+  await pool.query('UPDATE channex_inbound_settings SET enabled=true WHERE connection_id=$1',[f.id]);
+  expect((await apply(f,revision(f.id,`split-${f.id}`,`first-${f.id}`))).status).toBe('applied');
+  expect((await linked(f))[0].room_id).toBe(`${f.id}-1`);
+  expect((await apply(f,revision(f.id,`other-${f.id}`,`second-${f.id}`))).review_code).toBe('NO_PILOT_ROOM_AVAILABLE');
+  expect(await linked(f)).toHaveLength(1);
+ });
  it("creates two rooms atomically with exact nightly prices and no cash or invoice",async()=>{
   const f=await fixture();expect((await apply(f,revision(f.id,"booking-multi","new-multi","new",undefined,2))).status).toBe("applied");
   const rows=await linked(f);expect(rows).toHaveLength(2);expect(new Set(rows.map(r=>r.room_id)).size).toBe(2);

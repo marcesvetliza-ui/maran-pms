@@ -43,8 +43,7 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
         if (!operationAllowed(connection,'ari') || !connection.is_active || (connection.environment==='real' && settings.floor===99)) throw Error('Revisá la conexión y la habilitación del entorno antes de activar el inventario');
         const rooms = await inventoryPreview(c, req.params.id, settings.floor);
         if (!rooms.length || rooms.some(r => !r.channexRoomTypeId)) throw Error('El piso debe tener habitaciones físicas activas y todas sus categorías mapeadas');
-        const maps = (await c.query('SELECT room_type_id FROM channex_room_type_mappings WHERE connection_id=$1', [req.params.id])).rows;
-        if (maps.some(m => !m.room_type_id) || new Set(maps.map(m => m.room_type_id)).size !== maps.length) throw Error('Cada categoría debe tener un mapeo completo y único');
+
       }
       const today = (await c.query(`SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS today`)).rows[0].today;
       if(settings.enabled&&!previous?.enabled){

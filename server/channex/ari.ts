@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { validateRoomSelections, RoomSelectionError } from "./roomSelection";
 import { calendarEffective, MAX_CALENDAR_CELLS } from "@shared/rate-calendar";
 
 export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number; reason?: string; changed_fields?: string[] | null };
@@ -34,7 +35,7 @@ export async function inventoryPreview(c: Pick<PoolClient, 'query'>, connectionI
   const { rows } = await c.query(`SELECT r.id,r.room_number AS "roomNumber",r.floor,r.room_type_id AS "roomTypeId",rt.name AS "roomTypeName",r.status,
    m.channex_room_type_id AS "channexRoomTypeId"
    FROM rooms r LEFT JOIN room_types rt ON rt.id=r.room_type_id
-   LEFT JOIN channex_room_type_mappings m ON m.connection_id=$1 AND m.room_type_id=r.room_type_id
+   LEFT JOIN channex_room_type_mappings m ON m.connection_id=$1 AND m.room_type_id=r.room_type_id AND (m.room_ids IS NULL OR r.id=ANY(m.room_ids))
    WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB'
    ORDER BY r.room_number::text`, [connectionId, floor]);
   return rows;
@@ -57,8 +58,9 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
   }
   const dates = [...dateSet].sort();
   if (!dates.length) return [];
-  const mappings = (await c.query(`SELECT channex_room_type_id,room_type_id FROM channex_room_type_mappings WHERE connection_id=$1`, [connection.id])).rows;
-  if (!mappings.length || mappings.some(m => !m.room_type_id) || new Set(mappings.map(m => m.room_type_id)).size !== mappings.length) throw new AriConfigurationError('Completá un mapeo único para cada categoría antes de sincronizar');
+  let mappings: any[];
+  try { mappings = await validateRoomSelections(c, connection.id, connection.floor); }
+  catch (error) { if (error instanceof RoomSelectionError) throw new AriConfigurationError(error.message); throw error; }
   const affected = (typeId: string, day: string, planId?: string) => events.some(e => e.date_from <= day && e.date_to >= day && (!e.room_type_id || e.room_type_id === typeId) && (!e.rate_plan_id || !planId || e.rate_plan_id === planId));
   const values: AriValue[] = [];
   if (events[0].kind === 'availability') {
@@ -79,7 +81,7 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
     FROM blocked_groups b GROUP BY b.room_type_id,b.day
    )
    SELECT m.room_type_id,m.channex_room_type_id,d.day::text,
-    GREATEST(0,(SELECT count(*) FROM rooms r WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.room_type_id=m.room_type_id
+    GREATEST(0,(SELECT count(*) FROM rooms r WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.room_type_id=m.room_type_id AND (m.room_ids IS NULL OR r.id=ANY(m.room_ids))
       AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos')
       AND NOT EXISTS(SELECT 1 FROM reservations b WHERE b.room_id=r.id AND b.status IN ('tentative','pending','reserved','confirmed','web_checkin','checked_in') AND b.check_in_date<=d.day AND b.check_out_date>d.day)
       AND NOT EXISTS(SELECT 1 FROM maintenance_blocks b WHERE b.room_id=r.id AND b.block_from<=d.day AND b.block_to>=d.day)
@@ -89,12 +91,14 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
    WHERE m.connection_id=$1 ORDER BY m.channex_room_type_id,d.day`, [connection.id, connection.floor, dates])).rows;
     for (const r of rows) if (affected(r.room_type_id, r.day)) values.push({ property_id: connection.channex_property_id, room_type_id: r.channex_room_type_id, date_from: r.day, date_to: r.day, availability: r.availability });
   } else {
-    const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text
+    const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,m.sell_mode,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text
     FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 ORDER BY m.channex_rate_plan_id`, [connection.id])).rows;
     if (!plans.length) throw new AriConfigurationError('Falta mapear los planes tarifarios');
     const overrides = (await c.query('SELECT *,stay_date::text AS day FROM rate_calendar_entries WHERE rate_plan_id=ANY($1::varchar[]) AND stay_date=ANY($2::date[])', [plans.map(p => p.rate_plan_id).filter(Boolean), dates])).rows;
     const byDay = new Map(overrides.map(o => [`${o.rate_plan_id}:${o.day}`, o]));
     for (const p of plans) {
+      if (p.sell_mode === 'per_person') throw new AriConfigurationError('El plan de Channex usa precios por ocupación. Falta configurar y verificar su envío desde Maran; no se enviará una tarifa única por habitación.');
+      if (connection.environment === 'real' && p.sell_mode !== 'per_room') throw new AriConfigurationError('Actualizá el catálogo y verificá la modalidad de precio del plan antes de publicar en producción');
       const room = mappings.find(m => m.channex_room_type_id === p.channex_room_type_id);
       if (!room || p.room_type_id !== room.room_type_id || !p.rate_plan_id) throw new AriConfigurationError('El plan tarifario no coincide con su categoría mapeada');
       for (const day of dates) if (affected(p.room_type_id, day, p.rate_plan_id)) {

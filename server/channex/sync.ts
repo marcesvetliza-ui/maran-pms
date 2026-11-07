@@ -91,6 +91,7 @@ export async function syncCatalog(connectionId: string) {
     const channexRatePlanId = item.id as string;
     const title = item.attributes?.title ?? channexRatePlanId;
     const channexRoomTypeId = item.relationships?.room_type?.data?.id ?? null;
+    const sellMode = item.attributes?.sell_mode ?? null;
     if (!channexRoomTypeId) continue; // no podemos mapear una tarifa sin saber a qué habitación pertenece
     const [existing] = await db
       .select()
@@ -99,13 +100,14 @@ export async function syncCatalog(connectionId: string) {
     if (existing) {
       await db
         .update(channexRatePlanMappings)
-        .set({ channexRatePlanTitle: title, channexRoomTypeId })
+        .set({ channexRatePlanTitle: title, channexRoomTypeId, sellMode })
         .where(eq(channexRatePlanMappings.id, existing.id));
     } else {
       await db.insert(channexRatePlanMappings).values({
         connectionId,
         channexRatePlanId,
         channexRatePlanTitle: title,
+        sellMode,
         channexRoomTypeId,
         ratePlanId: null,
         createdAt: new Date(),
