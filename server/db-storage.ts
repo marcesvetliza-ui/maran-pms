@@ -2958,6 +2958,8 @@ export class DatabaseStorage implements IStorage {
             groupId: groupByReservation.get(row.id),
           })) as any,
           contextGroupId: id,
+          // This validates the group's existing commitments, not a new reservation.
+          candidateUnits: 0,
         });
         if (conflict && (!conflict.canOverride || !override)) {
           const detailedConflict = { ...conflict, roomTypeName: roomTypeNameById.get(roomTypeId) || roomTypeId };
