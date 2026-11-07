@@ -1,3 +1,4 @@
+import { updateRoomSelection } from "../channex/roomSelection";
 import { requireChannex, registerChannexAccessRoutes } from '../channex/access';
 import { connectionUrl, PRODUCTION_URL, DEMO_URL, productionEnabled } from '../channex/connectionPolicy';
 import { registerChannexInboundRoutes } from "../channex/inboundRoutes";
@@ -60,6 +61,16 @@ export function registerChannexRoutes(app: Express) {
   // Lectura de conexiones: cualquier usuario autenticado (la bandeja necesita
   // saber qué conexiones existen para elegir una). apiKey nunca se expone
   // (ver toPublicConnection). Crear/editar/borrar sigue restringido abajo.
+  app.get('/api/channex/connections/:id/room-options', requireChannex('config'), async (req,res) => {
+    try {
+      const rows = await pool.query(`SELECT r.id,r.room_number AS "roomNumber",r.room_type_id AS "roomTypeId",r.floor
+        FROM rooms r JOIN channex_ari_settings s ON s.connection_id=$1
+        WHERE r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB'
+          AND ((s.floor IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=s.floor)
+        ORDER BY r.room_number::text`, [req.params.id]);
+      res.json(rows.rows);
+    } catch(error) { handleError(res,error,'No se pudieron consultar las habitaciones del alcance'); }
+  });
   app.get("/api/channex/connections", requireChannex('read'), async (_req, res) => {
     try {
       const rows = await db.select().from(channexConnections).orderBy(desc(channexConnections.createdAt));
@@ -173,12 +184,8 @@ export function registerChannexRoutes(app: Express) {
 
   app.patch("/api/channex/room-type-mappings/:id", requireChannex('config'), async (req, res) => {
     try {
-      const { roomTypeId } = z.object({ roomTypeId: z.string().nullable() }).parse(req.body);
-      const [updated] = await db
-        .update(channexRoomTypeMappings)
-        .set({ roomTypeId })
-        .where(eq(channexRoomTypeMappings.id, req.params.id))
-        .returning();
+      const input = z.object({ roomTypeId: z.string().min(1).nullable(), roomIds: z.array(z.string().min(1)).min(1).max(1000).nullable().optional() }).strict().parse(req.body);
+      const updated = await updateRoomSelection(pool, req.params.id, input);
       if (!updated) return res.status(404).json({ error: "Mapeo no encontrado" });
       // Sin esto, una reserva ya previsualizada queda marcada "falta mapeo"
       // hasta la próxima previsualización aunque el mapeo ya esté completo.

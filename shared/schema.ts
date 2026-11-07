@@ -663,6 +663,7 @@ export const channexRoomTypeMappings = pgTable("channex_room_type_mappings", {
   channexRoomTypeId: text("channex_room_type_id").notNull(),
   channexRoomTypeTitle: text("channex_room_type_title").notNull(),
   roomTypeId: varchar("room_type_id"),
+  roomIds: text("room_ids").array(),
   createdAt: timestamp("created_at").notNull(),
 }, (table) => ({
   connectionChannexRoomTypeUnique: uniqueIndex("channex_room_type_mappings_connection_channex_id_idx")
@@ -678,6 +679,7 @@ export const channexRatePlanMappings = pgTable("channex_rate_plan_mappings", {
   connectionId: varchar("connection_id").notNull(),
   channexRatePlanId: text("channex_rate_plan_id").notNull(),
   channexRatePlanTitle: text("channex_rate_plan_title").notNull(),
+  sellMode: text("sell_mode"),
   channexRoomTypeId: text("channex_room_type_id").notNull(),
   ratePlanId: varchar("rate_plan_id"),
   createdAt: timestamp("created_at").notNull(),

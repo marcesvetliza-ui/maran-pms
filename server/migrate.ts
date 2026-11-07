@@ -4196,6 +4196,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
       )
     `)))
   );
+  await withTimeout("channex_room_type_mappings.room_ids", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("channex_room_type_mappings", "room_ids", "text[]")))
+  );
   await withTimeout("channex_room_type_mappings_connection_channex_id_idx", T, () =>
     db.execute(sql.raw(createIndexWithoutRerunNotice(
       "channex_room_type_mappings_connection_channex_id_idx",
@@ -4215,6 +4218,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
         created_at timestamp NOT NULL DEFAULT now()
       )
     `)))
+  );
+  await withTimeout("channex_rate_plan_mappings.sell_mode", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("channex_rate_plan_mappings", "sell_mode", "text")))
   );
   await withTimeout("channex_rate_plan_mappings_connection_channex_id_idx", T, () =>
     db.execute(sql.raw(createIndexWithoutRerunNotice(

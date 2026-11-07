@@ -179,14 +179,15 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
           }
           guestHash = guestFingerprint(profile);
           for (const room of settledRooms) {
-            const maps = (await db.execute(sql`SELECT rm.room_type_id,rp.rate_plan_id,rt.max_occupancy,p.currency,p.room_type_id AS plan_room_type
+            const maps = (await db.execute(sql`SELECT rm.room_type_id,rm.room_ids,rp.rate_plan_id,rt.max_occupancy,p.currency,p.room_type_id AS plan_room_type
               FROM channex_room_type_mappings rm JOIN channex_rate_plan_mappings rp ON rp.connection_id=rm.connection_id AND rp.channex_room_type_id=rm.channex_room_type_id
               JOIN room_types rt ON rt.id=rm.room_type_id JOIN rate_plans p ON p.id=rp.rate_plan_id
               WHERE rm.connection_id=${connectionId} AND rm.channex_room_type_id=${room.remoteType} AND rp.channex_rate_plan_id=${room.remotePlan} FOR SHARE OF rm,rp,rt,p`)).rows as any[];
             if (maps.length !== 1 || maps[0].room_type_id !== maps[0].plan_room_type || maps[0].currency !== booking.currency) return review("INVALID_ROOM_MAPPING");
             const map = maps[0], old = existing.get(room.key);
-            if (room.occupancy > map.max_occupancy) return review("OCCUPANCY_EXCEEDS_CAPACITY");
+            if (map.room_ids === null && room.occupancy > map.max_occupancy) return review("OCCUPANCY_EXCEEDS_CAPACITY");
             const candidates = (await db.execute(sql`SELECT r.id FROM rooms r WHERE ((${config.floor}::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=${config.floor}) AND r.room_type_id=${map.room_type_id}
+              AND (${sql.param(map.room_ids)}::text[] IS NULL OR r.id=ANY(${sql.param(map.room_ids)}::text[]))
               AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos') AND COALESCE(r.max_occupancy,${map.max_occupancy})>=${room.occupancy}
               AND NOT EXISTS(SELECT 1 FROM maintenance_blocks m WHERE m.room_id=r.id AND m.block_from<${booking.departure}::date AND m.block_to>=${booking.arrival}::date)
               AND NOT EXISTS(SELECT 1 FROM reservations x WHERE x.room_id=r.id AND x.id<>${old?.id || ""} AND x.status NOT IN ('cancelled','checked_out','no_show')
