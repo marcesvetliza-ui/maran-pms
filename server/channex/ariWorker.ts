@@ -1,3 +1,4 @@
+import {connectionUrl,operationAllowed,workerEnvironment} from './connectionPolicy';
 import type { Pool } from 'pg';
 import { ARI_CALL_INTERVAL_MS, STAGING_URL, buildAriValues, retryDelay, addDays, daysBetween, compressValues, ariDelta, AriConfigurationError, type AriEvent, type AriValue } from './ari';
 import { decryptChannexApiKey } from './credentials';
@@ -9,9 +10,9 @@ export type AriTransport = (connection: any, kind: string, values: AriValue[]) =
 export const sendAri: AriTransport = async (connection, kind, values) => {
   if (!['availability', 'restrictions'].includes(kind)) throw new AriConfigurationError('Operación ARI inválida');
   // Certification is staged only. A future production release must introduce an explicit production gate.
-  if (connection.environment !== 'demo' || connection.base_url.replace(/\/$/, '') !== STAGING_URL) throw new AriConfigurationError('Los envíos ARI de esta etapa solo admiten Channex staging');
+  if (!operationAllowed(connection,'ari')) throw new AriConfigurationError('Los envíos de este entorno de Channex no están habilitados');
   let key: string; try { key = decryptChannexApiKey(connection.api_key_encrypted); } catch { throw new AriConfigurationError('La credencial de Channex debe configurarse nuevamente'); }
-  const response = await fetch(`${STAGING_URL}/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'user-api-key': key }, body: JSON.stringify({ values }), signal: AbortSignal.timeout(15000) });
+  const response = await fetch(`${connectionUrl(connection)}/${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'user-api-key': key }, body: JSON.stringify({ values }), signal: AbortSignal.timeout(15000), redirect:'error' });
   if (!response.ok) throw new AriTransportError(response.status, response.headers.get('retry-after'));
   let body: any; try { body = await response.json(); } catch { throw new AriTransportError(502); }
   const tasks = Array.isArray(body?.data) ? body.data : [];
@@ -20,8 +21,9 @@ export const sendAri: AriTransport = async (connection, kind, values) => {
 };
 
 /** Drains committed outbox entries. The timer never polls reservations or detects DB changes. */
-export async function dispatchChannexAri(pool: Pool, transport: AriTransport = sendAri, enabled = process.env.CHANNEX_ARI_STAGING_ENABLED === 'true') {
+export async function dispatchChannexAri(pool: Pool, transport: AriTransport = sendAri, enabled = !!workerEnvironment('ari')) {
   if (!enabled) return { state: 'disabled' };
+  const environment=workerEnvironment('ari')??'demo';
   const c = await pool.connect(); let locked = false;
   try {
     locked = (await c.query('SELECT pg_try_advisory_lock(1296126535,903) AS locked')).rows[0].locked;
@@ -31,7 +33,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
     // Advance only the newly opened edge of the 500-day window, never a timer-based full sync.
     await c.query(`WITH advancing AS MATERIALIZED (
     SELECT s.connection_id,s.last_horizon_date FROM channex_ari_settings s JOIN channex_connections c ON c.id=s.connection_id
-    WHERE s.enabled AND c.is_active AND c.environment='demo' AND s.last_horizon_date<$1::date FOR UPDATE OF s
+    WHERE s.enabled AND c.is_active AND c.environment='${environment}' AND s.last_horizon_date<$1::date FOR UPDATE OF s
    ), updated AS (
     UPDATE channex_ari_settings s SET last_horizon_date=$1 FROM advancing a WHERE s.connection_id=a.connection_id RETURNING s.connection_id
    ) INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,reason)
@@ -39,7 +41,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
    FROM advancing a JOIN updated u USING(connection_id) CROSS JOIN (VALUES('availability'),('restrictions')) k(kind)`, [clock.today, addDays(clock.today, 499)]);
     const job = (await c.query(`SELECT o.connection_id,o.kind,o.batch_id::text FROM channex_ari_outbox o
    JOIN channex_ari_settings s ON s.connection_id=o.connection_id JOIN channex_connections c ON c.id=o.connection_id
-   WHERE o.status='pending' AND s.enabled AND c.is_active AND o.run_after<=now() AND c.environment='demo'
+   WHERE o.status='pending' AND s.enabled AND c.is_active AND o.run_after<=now() AND c.environment='${environment}'
     AND NOT EXISTS(SELECT 1 FROM channex_ari_outbox waiting WHERE waiting.connection_id=o.connection_id
      AND waiting.kind=o.kind AND waiting.batch_id=o.batch_id AND waiting.status='pending' AND waiting.run_after>now())
    ORDER BY o.run_after,o.id LIMIT 1`)).rows[0];
@@ -54,7 +56,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
     if (!connection || !events.length) return { state: 'idle' };
     const ids = events.map(e => e.id);
     try {
-      if (connection.environment !== 'demo' || connection.base_url.replace(/\/$/, '') !== STAGING_URL) throw new AriConfigurationError('Los envíos ARI de esta etapa solo admiten Channex staging');
+      if (!operationAllowed(connection,'ari')) throw new AriConfigurationError('Los envíos de este entorno de Channex no están habilitados');
       const current = await buildAriValues(c, connection, events, clock.today);
       const daily: AriValue[] = current.flatMap(v => daysBetween(v.date_from, v.date_to).map(day => ({ ...v, date_from: day, date_to: day })));
       const published = (await c.query('SELECT target_id,day::text,value FROM channex_ari_published WHERE connection_id=$1 AND kind=$2', [connection.id, job.kind])).rows;
@@ -99,7 +101,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
   } finally { try { if (locked) await c.query('SELECT pg_advisory_unlock(1296126535,903)'); } finally { c.release(); } }
 }
 export function startChannexAriWorker(pool: Pool) {
-  if (process.env.CHANNEX_ARI_STAGING_ENABLED !== 'true') return () => { };
+  if (!workerEnvironment('ari')) return () => { };
   let running = false;
   const tick = async () => { if (running) return; running = true; try { await dispatchChannexAri(pool); } catch { console.error('[channex-ari] No se pudo procesar la cola; los cambios permanecen guardados'); } finally { running = false; } };
   const timer = setInterval(tick, 1000); timer.unref();

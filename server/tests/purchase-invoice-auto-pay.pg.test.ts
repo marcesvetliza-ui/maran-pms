@@ -27,6 +27,7 @@ const suite = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.env.DATABASE_URL }) : null;
 let server: http.Server;
 let baseUrl: string;
+let createdVatAccountId: number | undefined;
 
 async function request(method: string, path: string, body?: unknown) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -73,6 +74,9 @@ async function cleanupInvoice(invoiceId?: number) {
 
 suite("PostgreSQL real: pago automático al cargar la factura de Compras", () => {
   beforeAll(async () => {
+    // A blank CI schema seeds only base accounts; this fixture also exercises VAT.
+    const vat=await pool!.query<{id:number}>("INSERT INTO accounting_accounts(codigo,nombre,tipo,activo) VALUES('1.1.4.07.01','IVA compras 21% (fixture)','activo',true) ON CONFLICT(codigo) DO NOTHING RETURNING id");
+    createdVatAccountId=vat.rows[0]?.id;
     const { registerRoutes } = await import("../routes");
     const app = express();
     app.use(express.json());
@@ -86,6 +90,7 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+    if(createdVatAccountId)await pool!.query("DELETE FROM accounting_accounts WHERE id=$1",[createdVatAccountId]);
     await pool?.end();
   });
 
@@ -133,6 +138,37 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
       await cleanupInvoice(invoiceId);
       await pool.query("DELETE FROM accounting_suppliers WHERE id = $1", [supplierId]);
     }
+  });
+
+  it.each(['21','no_gravado'])('persiste envío %s, total y OP saldados con asiento balanceado', async (rate) => {
+    const supplierId=await makeSupplier(randomUUID());let invoiceId:number|undefined;
+    const total=rate==='21'?'133.10':'131.00';
+    try {
+      const account=(await pool!.query("SELECT id FROM accounting_accounts WHERE codigo='4.2.1.08.05.02'")).rows[0];
+      expect(account).toBeTruthy();
+      const created=await request('POST','/api/purchase-invoices',{tipoComprobante:'FACT-A',supplierId,numeroComprobante:`SHIPPING-${randomUUID()}`,fechaEmision:'2026-11-04',montoNeto:'100',montoIva21:'21',envioImporte:'10',envioAlicuota:rate,cuentaContableId:account.id,formasPago:[{formaPago:'efectivo',monto:total}]});
+      expect(created.status,JSON.stringify(created.body)).toBe(201);invoiceId=Number(created.body.id);
+      const invoice=(await pool!.query('SELECT * FROM purchase_invoices WHERE id=$1',[invoiceId])).rows[0];
+      expect(invoice).toMatchObject({monto_total:total,saldo_pendiente:'0.00',estado:'pagado',envio:{importe:'10.00'}});
+      const entry=(await pool!.query('SELECT SUM(debe)::text AS debe,SUM(haber)::text AS haber FROM accounting_entry_lines WHERE entry_id=$1',[invoice.asiento_id])).rows[0];
+      expect(Number(entry.debe)).toBe(Number(total));expect(entry.debe).toBe(entry.haber);
+    } finally {await cleanupInvoice(invoiceId);await pool!.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplierId]);}
+  });
+
+  it.each(["9450.00", "9372.54"])("incluye la percepción en la cancelación y conserva pagos parciales reales: %s", async (paid) => {
+    if(!pool)return;
+    const supplierId=await makeSupplier(randomUUID());let invoiceId:number|undefined;
+    try {
+      const created=await request("POST","/api/purchase-invoices",{
+        tipoComprobante:"FACT-A",supplierId,numeroComprobante:`PERCEPTION-${randomUUID()}`,fechaEmision:"2026-10-28",
+        montoNeto:"7745.90",montoIva21:"1626.64",percepcionIibb:"77.46",formasPago:[{formaPago:"efectivo",monto:paid}],
+      });
+      expect(created.status,JSON.stringify(created.body)).toBe(201);invoiceId=Number(created.body.id);
+      const invoice=(await pool.query("SELECT monto_total,saldo_pendiente,estado FROM purchase_invoices WHERE id=$1",[invoiceId])).rows[0];
+      expect(invoice).toEqual({monto_total:"9450.00",saldo_pendiente:paid==="9450.00"?"0.00":"77.46",estado:paid==="9450.00"?"pagado":"parcial"});
+      const op=(await pool.query("SELECT po.efectivo,po.total_abonado FROM payment_orders po JOIN payment_order_items i ON i.payment_order_id=po.id WHERE i.invoice_id=$1",[invoiceId])).rows[0];
+      expect(op).toEqual({efectivo:paid,total_abonado:paid});
+    }finally{await cleanupInvoice(invoiceId);await pool.query("DELETE FROM accounting_suppliers WHERE id=$1",[supplierId]);}
   });
 
   it("sin formaPago (o cuenta_corriente) la factura queda pendiente, como hoy", async () => {

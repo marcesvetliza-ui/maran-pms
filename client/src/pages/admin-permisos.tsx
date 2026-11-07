@@ -1,3 +1,4 @@
+import {ChannexAccessManagement} from '@/components/channex-access-management';
 import { Fragment, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -83,6 +84,7 @@ export default function AdminPermisosPage() {
 
   return (
     <div className="p-6 max-w-full mx-auto space-y-6">
+      <ChannexAccessManagement/>
       <div className="flex items-center gap-3">
         <ShieldCheck className="h-7 w-7 text-primary" />
         <div>

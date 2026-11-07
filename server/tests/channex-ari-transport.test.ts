@@ -24,8 +24,8 @@ describe('Channex ARI transport', () => {
   });
   it('rejects production and custom hosts before transmitting credentials', async () => {
     const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
-    await expect(sendAri({ ...connection, environment: 'real' }, 'availability', values)).rejects.toThrow('solo admiten Channex staging');
-    await expect(sendAri({ ...connection, base_url: 'https://other.example/api/v1' }, 'availability', values)).rejects.toThrow('solo admiten Channex staging');
+    await expect(sendAri({ ...connection, environment: 'real' }, 'availability', values)).rejects.toThrow('no están habilitados');
+    await expect(sendAri({ ...connection, base_url: 'https://other.example/api/v1' }, 'availability', values)).rejects.toThrow('no están habilitados');
     expect(fetcher).not.toHaveBeenCalled();
   });
   it('preserves rate-limit metadata without exposing response bodies', async () => {

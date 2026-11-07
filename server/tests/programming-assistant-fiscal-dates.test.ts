@@ -1,13 +1,14 @@
 import {simulatedFiscalAudit} from "./helpers/simulatedFiscalAudit";
 import {it,expect} from "vitest";
-import wrong from "./fixtures/assistant-nc-date-unsupported-report.json";
-import {sourceRange} from "./helpers/assistantSourceEvidence";
+import historicalWrong from "./fixtures/assistant-nc-date-unsupported-report.json";
+import {sourceRange,bindFiscalRecoveryEvidence} from "./helpers/assistantSourceEvidence";
 import {CodeSource} from "../../services/programming-assistant/source";
 import {orientInvestigation} from "../../services/programming-assistant/navigation";
 import {validateReportClaims} from "../../services/programming-assistant/claim-validation";
 import {creditNoteRecoveryChecklist,fiscalDatesRecoveryRequirement} from "../../services/programming-assistant/credit-note-recovery";
 import {diagnose} from "../../services/programming-assistant/diagnose";
 import type {SupportTicket,SupportDiagnosis} from "../../shared/programming-support";
+const wrong=bindFiscalRecoveryEvidence(historicalWrong);
 const version="a".repeat(40);
 const ticket={version,module:"grupos",title:"Error al conciliar una NC pendiente de grupo",actual:"Al intentar conciliar aparece 10049: Los campos FchServDesde, FchServHasta y FchVtoPago contienen errores o no fueron ingresados. Son obligatorios cuando Concepto es 2 o 3.",expected:"Investigar cómo se completan las fechas durante la recuperación; no emitir otro comprobante.",messages:[]} as SupportTicket;
 const coverage=[...creditNoteRecoveryChecklist,fiscalDatesRecoveryRequirement];

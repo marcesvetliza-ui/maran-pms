@@ -9,10 +9,7 @@ import {sourceRange,bindFiscalRecoveryEvidence} from "./helpers/assistantSourceE
 import type {SupportTicket,SupportDiagnosis} from "../../shared/programming-support";
 // Keep the received report verbatim; bind only its citations to the same live
 // instructions so unrelated source edits cannot hide the causal-limit check.
-const wrong = { ...historicalWrong, evidence: historicalWrong.evidence.map(ref => ref.path === "server/billing/invoiceService.ts"
-  ? { ...ref, ...sourceRange(ref.path, "const fecha = String(pendingInvoice", 0, 51) }
-  : ref.path === "server/billing/routes.ts"
-    ? { ...ref, ...sourceRange(ref.path, 'app.post("/api/billing/credit-notes/:id/reconcile"', 0, 58) } : ref) };
+const wrong = bindFiscalRecoveryEvidence(historicalWrong);
 const version="a".repeat(40);
 const ticket={version,module:"grupos",title:"Error 10049 en NC pendiente de grupo",actual:"Al conciliar la NC de un grupo se informó históricamente error 10049 sobre FchServDesde, FchServHasta y FchVtoPago.",expected:"Investigar la causa sin emitir otro comprobante.",messages:[]} as SupportTicket;
 const source=()=>new CodeSource(process.cwd(),version);

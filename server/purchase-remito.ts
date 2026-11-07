@@ -78,6 +78,7 @@ export async function updatePurchaseRemito(tx: Executor, id: number, input: any,
       monto_total=${total},saldo_pendiente=${balance.saldo},estado=${balance.estado},condicion_pago='cuenta_corriente',
       cuenta_contable_id=${body.cuentaContableId || existing.cuenta_contable_id || null},
       centro_costo=${body.centroCosto ?? existing.centro_costo},observaciones=${body.observaciones ?? existing.observaciones},
+      envio=${invoiceMode && body.envio ? JSON.stringify(body.envio) : null}::jsonb,
       descuento=${invoiceMode && body.descuento ? JSON.stringify(body.descuento) : null}::jsonb,asiento_id=NULL,
       special_details=${JSON.stringify({ ...existing.special_details, remitoHistory: history })}::jsonb,updated_at=now()
     WHERE id=${id} RETURNING *

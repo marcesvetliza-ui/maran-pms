@@ -167,8 +167,10 @@ suite("PostgreSQL real: edición de forma de pago de facturas de Recepción (res
       expect(noCash.rows).toHaveLength(0);
 
       const edited = await request("PATCH", `/api/billing/invoices/${invoiceId}`, { cashFormaPago: "efectivo" });
-      expect(edited.status).toBe(400);
-      expect(edited.body.error).toMatch(/cobro real de Caja/);
+      expect(edited.status).toBe(409);
+      expect(edited.body.error).toMatch(/Requiere revisar.*folio/i);
+      expect((await pool.query("SELECT cash_forma_pago FROM sales_invoices WHERE id=$1",[invoiceId])).rows[0].cash_forma_pago).toBe("cuenta_corriente");
+      expect((await pool.query("SELECT id FROM cash_movements WHERE source_type = 'comprobante' AND source_id = $1",[String(invoiceId)])).rows).toHaveLength(0);
 
       await pool.query("DELETE FROM guests WHERE id = $1", [guestId]);
     } finally {

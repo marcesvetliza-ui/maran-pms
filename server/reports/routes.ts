@@ -1,3 +1,5 @@
+import { loadLodging, lodgingChannels, lodgingByRoomType, capacityFor } from "./lodging";
+import {activeSalesRecord} from "../salesArchive";
 import type { Express } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -31,7 +33,6 @@ const REPORT_FORECAST_KEY = "api:reports:forecast";
 const REPORT_EXPORT_PDF_KEY = "api:reports:export-pdf";
 const REPORT_EXPORT_EXCEL_KEY = "api:reports:export-excel";
 
-const TOTAL_ROOMS = 66;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,13 +75,7 @@ function pct(a: number, b: number): number {
 // restaurant/spa/events consumption charged to the room, which is already booked
 // as revenue by those areas independently, so counting it again here would double it.
 async function ingresosAlojamiento(desde: string, hasta: string): Promise<number> {
-  const r = await db.execute(sql`
-    SELECT COALESCE(SUM(total_room_amount::numeric), 0) AS total
-    FROM reservations
-    WHERE status IN ('checked_in','checked_out')
-      AND check_out_date > ${desde} AND check_in_date < ${hasta}
-  `);
-  return $n((r.rows[0] as any)?.total);
+  return (await loadLodging(desde, hasta)).summary.revenue;
 }
 
 async function ingresosRestaurant(desde: string, hasta: string): Promise<number> {
@@ -160,7 +155,7 @@ async function ingresosPorCuentas(desde: string, hasta: string): Promise<{ accou
   })));
 }
 
-async function costosCompras(desde: string, hasta: string): Promise<any[]> {
+export async function costosCompras(desde: string, hasta: string): Promise<any[]> {
   const r = await db.execute(sql`
     SELECT
       aa.codigo,
@@ -171,7 +166,7 @@ async function costosCompras(desde: string, hasta: string): Promise<any[]> {
     FROM purchase_invoices pi
     LEFT JOIN accounting_accounts aa ON aa.id = pi.cuenta_contable_id
     WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
-      AND (pi.estado != 'anulado' OR pi.tipo_comprobante NOT IN ('RESUMEN-BANCO', 'RETENCION', 'LIQ-TARJETA'))
+      AND COALESCE(pi.estado, '') <> 'anulado'
     GROUP BY aa.codigo, aa.nombre
     ORDER BY aa.codigo
   `);
@@ -192,6 +187,10 @@ async function gastosAdminCash(desde: string, hasta: string): Promise<number> {
 // ─── Route registration ───────────────────────────────────────────────────────
 
 export function registerReportsRoutes(app: Express) {
+  app.get("/api/reports/lodging-detail", requirePermission(REPORT_KPIS_KEY), async (req,res) => {
+    try { res.setHeader('Cache-Control','private, no-store'); res.json(await loadLodging(String(req.query.from??''), String(req.query.to??''))); }
+    catch(error:any){res.status(error.statusCode||500).json({error:error.statusCode?error.message:'No se pudo consultar el detalle de alojamiento.'});}
+  });
 
   // ── Estado de Resultados ──────────────────────────────────────────────────
   app.get("/api/reports/estado-resultados", requirePermission(REPORT_ESTADO_RESULTADOS_KEY), async (req, res) => {
@@ -199,6 +198,7 @@ export function registerReportsRoutes(app: Express) {
       const periodo = (req.query.periodo as string) || `${String(new Date().getMonth() + 1).padStart(2, "0")}/${new Date().getFullYear()}`;
       const { desde, hasta } = periodoToRange(periodo);
 
+      const lodging = await loadLodging(desde,hasta);
       const ingresosCuentas = await ingresosPorCuentas(desde, hasta);
       const porArea = Object.fromEntries(ingresosCuentas.map(({ account, total }) => [account.area, total]));
       const aloj = porArea.recepcion ?? 0;
@@ -259,6 +259,7 @@ export function registerReportsRoutes(app: Express) {
       const desgloseAdministrativo={registros:specialRows.rows,iva:sumSpecial('monto_iva21')+sumSpecial('monto_iva105'),percepcionIva:sumSpecial('percepcion_iva'),ley25413:sumSpecial('ley25413'),retencionIibbTarjetas:sumSpecial('retencion_iibb'),retencionesRecibidas:specialRows.rows.filter((r:any)=>r.tipo_comprobante==='RETENCION').reduce((sum,r:any)=>sum+Number(r.monto_total),0)};
       res.json({
         desgloseAdministrativo,
+        alojamiento: {advertencias:lodging.warnings,criterio:lodging.methodology,proyeccion:lodging.forecast},
         periodo,
         desde,
         hasta,
@@ -292,108 +293,30 @@ export function registerReportsRoutes(app: Express) {
       const prevP = prevPeriodo(periodo);
       const { desde: prevDesde, hasta: prevHasta } = periodoToRange(prevP);
 
-      // Occupied room-nights: count reservation overlap with period
-      const ocup = await db.execute(sql`
-        SELECT COUNT(*) AS noches_ocupadas,
-               SUM(number_of_guests) AS total_huespedes
-        FROM (
-          SELECT r.id, r.number_of_guests,
-                 LEAST(r.check_out_date::date, ${hasta}::date) - GREATEST(r.check_in_date::date, ${desde}::date) AS noches
-          FROM reservations r
-          WHERE r.status IN ('checked_in','checked_out')
-            AND r.check_out_date > ${desde}
-            AND r.check_in_date < ${hasta}
-        ) sub
-        WHERE noches > 0
-      `);
-
-      const nochesOcupadas = $n((ocup.rows[0] as any)?.noches_ocupadas);
-      const totalHuespedes = $n((ocup.rows[0] as any)?.total_huespedes);
-
-      const habitacionesDisponibles = TOTAL_ROOMS * dias;
-      const ocupacionPct = pct(nochesOcupadas, habitacionesDisponibles);
-
-      const ingrAloj = await ingresosAlojamiento(desde, hasta);
-      const adr = nochesOcupadas > 0 ? ingrAloj / nochesOcupadas : 0;
-      const revpar = habitacionesDisponibles > 0 ? ingrAloj / habitacionesDisponibles : 0;
-
-      // Previous period comparison
-      const prevOcup = await db.execute(sql`
-        SELECT COUNT(*) AS noches_ocupadas FROM (
-          SELECT LEAST(r.check_out_date::date, ${prevHasta}::date) - GREATEST(r.check_in_date::date, ${prevDesde}::date) AS noches
-          FROM reservations r
-          WHERE r.status IN ('checked_in','checked_out')
-            AND r.check_out_date > ${prevDesde}
-            AND r.check_in_date < ${prevHasta}
-        ) sub WHERE noches > 0
-      `);
-      const prevNochesOcupadas = $n((prevOcup.rows[0] as any)?.noches_ocupadas);
-      const prevDias = periodoToRange(prevP).dias;
-      const prevDisp = TOTAL_ROOMS * prevDias;
-      const prevOcupPct = pct(prevNochesOcupadas, prevDisp);
-      const prevIngrAloj = await ingresosAlojamiento(prevDesde, prevHasta);
-      const prevAdr = prevNochesOcupadas > 0 ? prevIngrAloj / prevNochesOcupadas : 0;
-      const prevRevpar = prevDisp > 0 ? prevIngrAloj / prevDisp : 0;
-
-      // Avg stay
-      const estanciaRes = await db.execute(sql`
-        SELECT AVG(nights::numeric) AS avg_stay FROM reservations
-        WHERE status IN ('checked_in','checked_out')
-          AND check_out_date > ${desde} AND check_in_date < ${hasta}
-      `);
-      const estanciaPromedio = Math.round($n((estanciaRes.rows[0] as any)?.avg_stay) * 10) / 10;
-
-      // Canal distribution — room-only revenue (see ingresosAlojamiento), not raw payments
-      const canales = await db.execute(sql`
-        SELECT
-          COALESCE(NULLIF(r.source,''), 'Directo') AS canal,
-          COUNT(*) AS reservas,
-          COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos
-        FROM reservations r
-        WHERE r.status IN ('checked_in','checked_out')
-          AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
-        GROUP BY COALESCE(NULLIF(r.source,''), 'Directo')
-        ORDER BY ingresos DESC
-        LIMIT 8
-      `);
-
-      const totalReservas = (canales.rows as any[]).reduce((s, c) => s + $n(c.reservas), 0);
-      const distribucionCanal = (canales.rows as any[]).map(c => ({
-        canal: c.canal,
-        reservas: $n(c.reservas),
-        porcentaje: pct($n(c.reservas), totalReservas),
-        ingresos: $n(c.ingresos),
-      }));
-
-      // Ocupación por día del mes (for sparkline)
-      const porDia: any[] = [];
-      const d0 = new Date(desde + "T12:00:00");
-      const d1 = new Date(hasta + "T12:00:00");
-      for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
-        const dStr = d.toISOString().split("T")[0];
-        const dayOcup = await db.execute(sql`
-          SELECT COUNT(*) AS ocupadas FROM reservations
-          WHERE status IN ('checked_in','checked_out')
-            AND check_in_date <= ${dStr} AND check_out_date > ${dStr}
-        `);
-        porDia.push({
-          fecha: dStr,
-          ocupadas: $n((dayOcup.rows[0] as any)?.ocupadas),
-          pct: pct($n((dayOcup.rows[0] as any)?.ocupadas), TOTAL_ROOMS),
-        });
-      }
+      const [lodging, previous] = await Promise.all([loadLodging(desde, hasta), loadLodging(prevDesde, prevHasta)]);
+      const current = lodging.summary, before = previous.summary;
+      const nochesOcupadas = current.roomNights, totalHuespedes = current.guests;
+      const habitacionesDisponibles = current.capacityNights, ocupacionPct = current.occupancy;
+      const adr = current.adr, revpar = current.revpar;
+      const prevOcupPct = before.occupancy, prevAdr = before.adr, prevRevpar = before.revpar;
+      const estanciaPromedio = Math.round(current.averageStay * 10) / 10;
+      const channels = lodgingChannels(lodging);
+      const totalReservas = channels.reduce((sum, row) => sum + row.reservations, 0);
+      const distribucionCanal = channels.map(row => ({canal: row.source, reservas: row.reservations, ingresos: row.revenue, porcentaje: pct(row.reservations,totalReservas)}));
+      const porDia = lodging.daily.map(day => ({fecha:day.date,ocupadas:day.actualNights,disponibles:day.capacity,pct:pct(day.actualNights,day.capacity),proyectadas:day.forecastNights}));
 
       res.json({
         periodo,
+        alojamiento: { resumen:current, proyeccion:lodging.forecast, advertencias:lodging.warnings, criterio:lodging.methodology },
         diasEnPeriodo: dias,
-        habitacionesTotal: TOTAL_ROOMS,
+        habitacionesTotal: lodging.roomCount,
         habitacionesDisponibles,
         habitacionesOcupadas: nochesOcupadas,
         ocupacion: ocupacionPct,
         tarifaMedia: Math.round(adr),
         revpar: Math.round(revpar),
         totalHuespedes,
-        promedioHuespedesPorNoche: Math.round(totalHuespedes / dias * 10) / 10,
+        promedioHuespedesPorNoche: Math.round(current.guestNights / Math.max(1,lodging.daily.filter(d=>d.date<=lodging.asOf).length) * 10) / 10,
         estanciaPromedio,
         distribucionCanal,
         porDia,
@@ -414,76 +337,17 @@ export function registerReportsRoutes(app: Express) {
       const desde = (req.query.desde as string) || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
       const hasta = (req.query.hasta as string) || new Date().toISOString().split("T")[0];
 
-      // Por día — ingresos de alojamiento prorrateados por noche ocupada ese día
-      // (misma ventana que "ocupadas"), no pagos crudos del día
-      const dayRows = await db.execute(sql`
-        SELECT
-          day_series::date AS fecha,
-          (SELECT COUNT(*) FROM reservations r
-           WHERE r.status IN ('checked_in','checked_out')
-             AND r.check_in_date <= day_series::date
-             AND r.check_out_date > day_series::date) AS ocupadas,
-          (SELECT COALESCE(SUM(COALESCE(
-             NULLIF(r.final_rate_per_night::numeric, 0),
-             CASE WHEN r.nights > 0 THEN r.total_room_amount::numeric / r.nights ELSE 0 END
-           )), 0) FROM reservations r
-           WHERE r.status IN ('checked_in','checked_out')
-             AND r.check_in_date <= day_series::date
-             AND r.check_out_date > day_series::date) AS ingresos
-        FROM generate_series(${desde}::date, ${hasta}::date, '1 day'::interval) AS day_series
-        ORDER BY day_series
-      `);
-
-      const porDia = (dayRows.rows as any[]).map(r => ({
-        fecha: r.fecha,
-        ocupadas: $n(r.ocupadas),
-        disponibles: TOTAL_ROOMS,
-        porcentaje: pct($n(r.ocupadas), TOTAL_ROOMS),
-        ingresos: $n(r.ingresos),
-      }));
-
-      // Por tipo habitación
-      const porTipo = await db.execute(sql`
-        SELECT
-          rt.name AS tipo,
-          COUNT(DISTINCT rt.id) AS total_habitaciones,
-          SUM(GREATEST(
-            LEAST(r.check_out_date::date, ${hasta}::date) - GREATEST(r.check_in_date::date, ${desde}::date),
-            0
-          )) AS noches_ocupadas,
-          COALESCE(AVG(r.final_rate_per_night::numeric), 0) AS tarifa_media
-        FROM reservations r
-        JOIN room_types rt ON rt.id = r.room_type_id
-        WHERE r.status IN ('checked_in','checked_out')
-          AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
-        GROUP BY rt.name
-        ORDER BY noches_ocupadas DESC
-      `);
-
-      const totalRooms = await db.execute(sql`SELECT COUNT(*) AS c FROM rooms`);
-      const totalR = $n((totalRooms.rows[0] as any)?.c) || TOTAL_ROOMS;
-      const totalDays = Math.round((new Date(hasta).getTime() - new Date(desde).getTime()) / 86400000) + 1;
-
-      const porTipoHabitacion = (porTipo.rows as any[]).map(r => ({
-        tipo: r.tipo,
-        nochesOcupadas: $n(r.noches_ocupadas),
-        ocupacion: pct($n(r.noches_ocupadas), totalDays * totalR),
-        tarifaMedia: Math.round($n(r.tarifa_media)),
-      }));
-
-      // Por piso
-      const porPiso = await db.execute(sql`
-        SELECT
-          rm.floor AS piso,
-          COUNT(DISTINCT rm.id) AS habitaciones,
-          COUNT(DISTINCT CASE WHEN r.status IN ('checked_in','checked_out')
-            AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
-            THEN r.id END) AS reservas
-        FROM rooms rm
-        LEFT JOIN reservations r ON r.room_id = rm.id
-        GROUP BY rm.floor
-        ORDER BY rm.floor
-      `);
+      const lodging = await loadLodging(desde,hasta);
+      const porDia = lodging.daily.map(day=>({fecha:day.date,ocupadas:day.actualNights,disponibles:day.capacity,porcentaje:pct(day.actualNights,day.capacity),ingresos:day.actualRevenue}));
+      const porTipoHabitacion = await lodgingByRoomType(lodging);
+      const porPiso = await db.execute(sql`SELECT id,floor FROM rooms WHERE is_active IS DISTINCT FROM false AND is_virtual IS DISTINCT FROM true AND room_number <> 'REUB'`);
+      const floorMap = new Map<number,{piso:number;habitaciones:number;ocupacion:number}>();
+      for(const room of porPiso.rows as any[]){if(!floorMap.has(room.floor))floorMap.set(room.floor,{piso:room.floor,habitaciones:0,ocupacion:0});floorMap.get(room.floor)!.habitaciones++;}
+      for(const floor of floorMap.values()){
+        const ids=new Set((porPiso.rows as any[]).filter(r=>r.floor===floor.piso).map(r=>r.id));
+        const nights=lodging.nights.filter(n=>n.phase==='actual'&&ids.has(n.roomId)).length;
+        floor.ocupacion=pct(nights,capacityFor(lodging,ids));
+      }
 
       const topDias = [...porDia].sort((a, b) => b.porcentaje - a.porcentaje).slice(0, 5);
       const bottomDias = [...porDia].sort((a, b) => a.porcentaje - b.porcentaje).slice(0, 5);
@@ -493,11 +357,8 @@ export function registerReportsRoutes(app: Express) {
         hasta,
         porDia,
         porTipoHabitacion,
-        porPiso: (porPiso.rows as any[]).map(r => ({
-          piso: r.piso,
-          habitaciones: $n(r.habitaciones),
-          ocupacion: pct($n(r.reservas), $n(r.habitaciones) * totalDays),
-        })),
+        alojamiento: { advertencias:lodging.warnings, criterio:lodging.methodology, proyeccion:lodging.forecast },
+        porPiso: [...floorMap.values()].sort((a,b)=>a.piso-b.piso),
         topDias: topDias.map(d => ({ fecha: d.fecha, ocupacion: d.porcentaje })),
         bottomDias: bottomDias.map(d => ({ fecha: d.fecha, ocupacion: d.porcentaje })),
       });
@@ -524,19 +385,8 @@ export function registerReportsRoutes(app: Express) {
       const total = ingresosCuentas.reduce((s, { total: t }) => s + t, 0);
       const prevTotal = prevIngresosCuentas.reduce((s, { total: t }) => s + t, 0);
 
-      // Alojamiento por tipo de habitación — room-only revenue, not raw payments
-      const alojTipo = await db.execute(sql`
-        SELECT rt.name AS tipo,
-               COUNT(*) AS noches,
-               COALESCE(SUM(r.total_room_amount::numeric), 0) AS ingresos,
-               COALESCE(AVG(r.final_rate_per_night::numeric), 0) AS tarifa_media
-        FROM reservations r
-        JOIN room_types rt ON rt.id = r.room_type_id
-        WHERE r.status IN ('checked_in','checked_out')
-          AND r.check_out_date > ${desde} AND r.check_in_date < ${hasta}
-        GROUP BY rt.name
-        ORDER BY ingresos DESC
-      `);
+      const lodging = await loadLodging(desde,hasta);
+      const alojTipo = await lodgingByRoomType(lodging);
 
       // Top 10 empresas facturadas (FA)
       const topEmpresas = await db.execute(sql`
@@ -544,7 +394,7 @@ export function registerReportsRoutes(app: Express) {
                SUM(monto_total::numeric) AS total_facturado,
                COUNT(*) AS cantidad_facturas
         FROM sales_invoices
-        WHERE tipo_comprobante = 'FA'
+        WHERE ${activeSalesRecord('invoice',sql`id`)} AND tipo_comprobante = 'FA'
           AND fecha_emision BETWEEN ${desde} AND ${hasta}
           AND estado = 'emitida'
         GROUP BY cliente_razon_social, cliente_cuit
@@ -555,14 +405,8 @@ export function registerReportsRoutes(app: Express) {
       // Por día — alojamiento prorrateado por noche ocupada ese día, no pagos crudos
       const porDia = await db.execute(sql`
         SELECT
-          day_series::date AS fecha,
-          COALESCE((SELECT SUM(COALESCE(
-             NULLIF(r.final_rate_per_night::numeric, 0),
-             CASE WHEN r.nights > 0 THEN r.total_room_amount::numeric / r.nights ELSE 0 END
-           )) FROM reservations r
-           WHERE r.status IN ('checked_in','checked_out')
-             AND r.check_in_date <= day_series::date
-             AND r.check_out_date > day_series::date), 0) AS alojamiento,
+          day_series::date::text AS fecha,
+          0::numeric AS alojamiento,
           COALESCE((SELECT SUM(ro.total::numeric) FROM restaurant_orders ro WHERE ro.status='closed' AND DATE(ro.closed_at) = day_series::date), 0) AS restaurant,
           COALESCE((SELECT SUM(sp.amount::numeric) FROM spa_payments sp WHERE sp.status = 'active' AND DATE(sp.created_at) = day_series::date), 0) AS spa,
           COALESCE((SELECT SUM(ep.amount::numeric) FROM event_payments ep WHERE DATE(ep.created_at) = day_series::date), 0) AS eventos,
@@ -590,12 +434,8 @@ export function registerReportsRoutes(app: Express) {
         })),
         totalIngresos: total,
         variacionTotal: varPct(total, prevTotal),
-        alojamientoPorTipo: (alojTipo.rows as any[]).map(r => ({
-          tipo: r.tipo,
-          noches: $n(r.noches),
-          ingresos: $n(r.ingresos),
-          tarifaMedia: Math.round($n(r.tarifa_media)),
-        })),
+        alojamiento: { advertencias:lodging.warnings, criterio:lodging.methodology, proyeccion:lodging.forecast },
+        alojamientoPorTipo: alojTipo.map(r=>({tipo:r.tipo,noches:r.nochesOcupadas,ingresos:r.ingresos,tarifaMedia:r.tarifaMedia})),
         topEmpresas: (topEmpresas.rows as any[]).map(r => ({
           razonSocial: r.razon_social,
           cuit: r.cuit,
@@ -604,12 +444,12 @@ export function registerReportsRoutes(app: Express) {
         })),
         porDia: (porDia.rows as any[]).map(r => ({
           fecha: r.fecha,
-          alojamiento: $n(r.alojamiento),
+          alojamiento: lodging.daily.find(day=>day.date===r.fecha)?.actualRevenue ?? 0,
           restaurant: $n(r.restaurant),
           spa: $n(r.spa),
           eventos: $n(r.eventos),
           otros: $n(r.otros),
-          total: $n(r.alojamiento) + $n(r.restaurant) + $n(r.spa) + $n(r.eventos) + $n(r.otros),
+          total: (lodging.daily.find(day=>day.date===r.fecha)?.actualRevenue ?? 0) + $n(r.restaurant) + $n(r.spa) + $n(r.eventos) + $n(r.otros),
         })),
       });
     } catch (e: any) {
@@ -711,41 +551,41 @@ export function registerReportsRoutes(app: Express) {
       const prevP = prevPeriodo(periodo);
       const { desde: prevDesde, hasta: prevHasta } = periodoToRange(prevP);
 
+      // Window totals are evaluated before LIMIT: the headline and percentages
+      // cover every current purchase, not just the displayed suppliers.
       const ranking = await db.execute(sql`
-        SELECT
-          s.razon_social AS proveedor,
-          s.cuit AS cuit,
-          COUNT(pi.id) AS cantidad_facturas,
-          COALESCE(SUM(pi.monto_total::numeric), 0) AS total_comprado
-        FROM purchase_invoices pi
-        JOIN accounting_suppliers s ON s.id = pi.supplier_id
-        WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
-        GROUP BY s.razon_social, s.cuit
-        ORDER BY total_comprado DESC
-        LIMIT ${top}
+        WITH por_proveedor AS (
+          SELECT pi.supplier_id, COALESCE(s.razon_social, 'Sin proveedor') AS proveedor,
+                 s.cuit, COUNT(pi.id) AS cantidad_facturas,
+                 COALESCE(SUM(pi.monto_total::numeric), 0) AS total_comprado
+          FROM purchase_invoices pi
+          LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
+          WHERE pi.fecha_emision BETWEEN ${desde} AND ${hasta}
+            AND COALESCE(pi.estado, '') <> 'anulado'
+          GROUP BY pi.supplier_id, s.razon_social, s.cuit
+        )
+        SELECT *, SUM(total_comprado) OVER() AS total_periodo,
+               COUNT(supplier_id) OVER() AS proveedores_periodo
+        FROM por_proveedor
+        ORDER BY total_comprado DESC, supplier_id
+        LIMIT ${Math.max(1, Math.min(100, top))}
       `);
-
-      const totalCompras = (ranking.rows as any[]).reduce((s, r) => s + $n(r.total_comprado), 0);
-
+      const totalCompras = $n((ranking.rows[0] as any)?.total_periodo);
+      const totalRanking = (ranking.rows as any[]).reduce((sum, row) => sum + $n(row.total_comprado), 0);
       const prevCompras = await db.execute(sql`
-        SELECT s.razon_social AS proveedor,
-               COALESCE(SUM(pi.monto_total::numeric), 0) AS total
-        FROM purchase_invoices pi JOIN accounting_suppliers s ON s.id = pi.supplier_id
-        WHERE pi.fecha_emision BETWEEN ${prevDesde} AND ${prevHasta}
-        GROUP BY s.razon_social
+        SELECT supplier_id, COALESCE(SUM(monto_total::numeric), 0) AS total
+        FROM purchase_invoices
+        WHERE fecha_emision BETWEEN ${prevDesde} AND ${prevHasta}
+          AND COALESCE(estado, '') <> 'anulado'
+        GROUP BY supplier_id
       `);
       const prevMap: Record<string, number> = {};
-      (prevCompras.rows as any[]).forEach(r => { prevMap[r.proveedor] = $n(r.total); });
-
-      const cantProveedoresActivos = (await db.execute(sql`
-        SELECT COUNT(DISTINCT supplier_id) AS c FROM purchase_invoices
-        WHERE fecha_emision BETWEEN ${desde} AND ${hasta}
-      `)).rows[0] as any;
+      (prevCompras.rows as any[]).forEach(r => { prevMap[r.supplier_id] = $n(r.total); });
 
       const varByProv = (ranking.rows as any[]).map(r => ({
         proveedor: r.proveedor,
-        variacion: prevMap[r.proveedor]
-          ? Math.round(($n(r.total_comprado) - prevMap[r.proveedor]) / prevMap[r.proveedor] * 1000) / 10
+        variacion: prevMap[r.supplier_id]
+          ? Math.round(($n(r.total_comprado) - prevMap[r.supplier_id]) / prevMap[r.supplier_id] * 1000) / 10
           : 0,
       }));
 
@@ -760,7 +600,8 @@ export function registerReportsRoutes(app: Express) {
           porcentajeDelTotal: pct($n(r.total_comprado), totalCompras),
         })),
         totalComprasDelPeriodo: totalCompras,
-        cantidadProveedoresActivos: $n(cantProveedoresActivos?.c),
+        totalComprasDelRanking: totalRanking,
+        cantidadProveedoresActivos: $n((ranking.rows[0] as any)?.proveedores_periodo),
         mayorAlza: varByProv.filter(v => v.variacion > 0).sort((a, b) => b.variacion - a.variacion).slice(0, 3),
         mayorBaja: varByProv.filter(v => v.variacion < 0).sort((a, b) => a.variacion - b.variacion).slice(0, 3),
       });
@@ -797,19 +638,15 @@ export function registerReportsRoutes(app: Express) {
           const costoTotal = costos.reduce((s, c) => s + $n(c.total), 0) + await gastosAdminCash(desde, hasta);
           const ebitda = ingresoTotal - costoTotal;
 
-          const ocupRes = await db.execute(sql`
-            SELECT COUNT(*) AS noches FROM (
-              SELECT LEAST(check_out_date::date, ${hasta}::date) - GREATEST(check_in_date::date, ${desde}::date) AS noches
-              FROM reservations WHERE status IN ('checked_in','checked_out')
-              AND check_out_date > ${desde} AND check_in_date < ${hasta}
-            ) sub WHERE noches > 0
-          `);
-          const noches = $n((ocupRes.rows[0] as any)?.noches);
-          const ocupacion = pct(noches, TOTAL_ROOMS * dias);
-          const revpar = TOTAL_ROOMS * dias > 0 ? Math.round(aloj / (TOTAL_ROOMS * dias)) : 0;
+          const lodging = await loadLodging(desde,hasta);
+          const ocupacion = lodging.summary.occupancy;
+          const revpar = Math.round(lodging.summary.revpar);
 
           return {
             mes: mesesNombre[m],
+            nochesOcupadas: lodging.summary.roomNights,
+            capacidadNoches: lodging.summary.capacityNights,
+            alojamiento: { advertencias:lodging.warnings, criterio:lodging.methodology, proyeccion:lodging.forecast },
             ocupacion,
             revpar,
             ingresoTotal,
@@ -823,7 +660,7 @@ export function registerReportsRoutes(app: Express) {
       const validMeses = meses.filter(m => m.ingresoTotal !== null);
       const acumulado = {
         ocupacionPromedio: validMeses.length
-          ? Math.round(validMeses.reduce((s, m) => s + (m.ocupacion ?? 0), 0) / validMeses.length * 10) / 10
+          ? pct(validMeses.reduce((s,m)=>s+(m.nochesOcupadas??0),0), validMeses.reduce((s,m)=>s+(m.capacidadNoches??0),0))
           : 0,
         ingresoTotal: validMeses.reduce((s, m) => s + (m.ingresoTotal ?? 0), 0),
         costoTotal: validMeses.reduce((s, m) => s + (m.costoTotal ?? 0), 0),
@@ -1388,7 +1225,9 @@ export function registerReportsRoutes(app: Express) {
       const dataRes = await fetch(`http://localhost:5000/api/reports/${tipo}?${queryStr}`, {
         headers: { cookie: req.headers.cookie || "" },
       });
+      if (!dataRes.ok) return res.status(dataRes.status).json({ error: 'No se pudo consultar el reporte. No se generó la descarga.' });
       const data = await dataRes.json() as any;
+      if (!data || typeof data !== 'object' || 'error' in data) return res.status(502).json({ error: 'Respuesta de reporte inválida. No se generó la descarga.' });
 
       const pdfBuf = await new Promise<Buffer>((resolve, reject) => {
         const doc = new PDFDocument({ margin: 40, size: "A4" });
@@ -1461,7 +1300,9 @@ export function registerReportsRoutes(app: Express) {
       const dataRes = await fetch(`http://localhost:5000/api/reports/${tipo}?${queryStr}`, {
         headers: { cookie: req.headers.cookie || "" },
       });
+      if (!dataRes.ok) return res.status(dataRes.status).json({ error: 'No se pudo consultar el reporte. No se generó la descarga.' });
       const data = await dataRes.json() as any;
+      if (!data || typeof data !== 'object' || 'error' in data) return res.status(502).json({ error: 'Respuesta de reporte inválida. No se generó la descarga.' });
 
       const wb = new ExcelJS.Workbook();
       wb.creator = "Xenia PMS";

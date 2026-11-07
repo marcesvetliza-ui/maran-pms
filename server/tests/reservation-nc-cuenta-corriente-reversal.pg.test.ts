@@ -19,6 +19,7 @@ import { initAppEnv, resetAppEnvForTests } from "../app-env";
  */
 
 const mocks = vi.hoisted(() => ({
+  puntoVentaHomolog: 99,
   getTokenAuth: vi.fn(),
   feCAESolicitar: vi.fn(),
   feCompConsultar: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock("../billing/billingConfig", () => ({
   getBillingConfig: vi.fn(async () => ({
     arcaAmbiente: "homologacion",
     puntoVenta: 1,
-    puntoVentaHomolog: 99,
+    puntoVentaHomolog: mocks.puntoVentaHomolog,
     arcaCuit: "30-12345678-9",
   })),
 }));
@@ -140,6 +141,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
     const companyId = `nc-cc-company-${suffix}`;
     const reservationId = `nc-cc-reservation-${suffix}`;
     const puntoVenta = 8500 + (parseInt(suffix.slice(0, 4), 16) % 400);
+    mocks.puntoVentaHomolog = puntoVenta;
     const originalNumero = 500000 + (parseInt(suffix.slice(4, 10), 16) % 100000);
     let originalInvoiceId: number | null = null;
     const ncInvoiceIds: number[] = [];
@@ -281,6 +283,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de una factura de reserva a cu
     const suffix = randomUUID();
     const reservationId = `nc-cash-reservation-${suffix}`;
     const puntoVenta = 8900 + (parseInt(suffix.slice(0, 4), 16) % 400);
+    mocks.puntoVentaHomolog = puntoVenta;
     const originalNumero = 600000 + (parseInt(suffix.slice(4, 10), 16) % 100000);
     let originalInvoiceId: number | null = null;
     const ncInvoiceIds: number[] = [];

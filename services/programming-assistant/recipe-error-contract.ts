@@ -18,7 +18,7 @@ export async function recipeErrorContract(source:CodeSource) {
   const definition=files.includes(originPath)?(await source.search('export function inventoryUnitFactor(',originPath)).matches.find(m=>m.path===originPath):undefined;
   const origin=definition?await source.read(originPath,definition.line,definition.line+24):undefined;
   if(!origin)return {readings:[handler,wrapper],unitOnlyMessage:false};
-  const message=origin.content.match(/throw\s+fail\((`Falta equivalencia explícita[^`]+`)\)/)?.[1];
+  const message=origin.content.match(/throw\s+(?:Object\.assign\(\s*)?fail\((`Falta equivalencia explícita[^`]+`)\)/)?.[1];
   // Only assert this narrow fact when all three current expressions match.
   // Changes to enrichment/transport invalidate the fact instead of retaining
   // an old expectation about what the server must return.

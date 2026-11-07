@@ -1,5 +1,12 @@
+import {productionEnabled} from './channex/connectionPolicy';
+import {saveBackupConfig} from './backup-config';
+import {isChannexPrepared} from './channex/runtimeState';
+import { registerChannexInboundWebhook } from './channex/inboundRoutes';
+import { registerRateCalendarRoutes } from './rates/calendarRoutes';
+import { requireChannex } from './channex/access';
 import { getFinancialSchemaStatus } from "./migrate";
 import { BUILD_REVISION } from "./buildRevision";
+import { activeSalesRecord } from "./salesArchive";
 import { getCashDayReport } from "./cash-day-report";
 import { enrichCashDocumentEvidence } from "./cash-document-evidence";
 import { assertPurchaseInvoiceNotDuplicate } from "./purchase-invoice-duplicates";
@@ -8,7 +15,7 @@ import { requireCashView, cashShiftAccess } from "./cash-user-access";
 import { canViewCash, canOperateCash } from "@shared/cash-user-access";
 import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
 import {createSpecialPurchase} from './specialPurchase';
-import {applyPurchaseDiscount} from "@shared/purchaseInvoiceDiscount";
+import {applyPurchaseAdjustments} from "@shared/purchaseInvoiceDiscount";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import path from "path";
@@ -35,7 +42,6 @@ import { registerMaraRoutes, sendMaraStatusUpdate } from "./mara";
 import { getAppEnv, isPilotEnv } from "./app-env";
 import { authorizePilotExternalRole } from "./pilot-external-role";
 import { registerProgrammingSupport } from "./routes/programming-support";
-import { registerChannexInboundWebhook } from "./channex/inboundRoutes";
 import { registerAuthBootstrapRoute } from "./auth-bootstrap";
 import { registerDebugAssetsApiRoute } from "./debug-assets-routes";
 import { registerTwoFactorRoutes } from "./routes/twoFactor";
@@ -63,7 +69,6 @@ import { registerPackagesRoutes } from "./routes/packages";
 import { registerManualLibraryRoutes } from "./routes/manual-library";
 import { registerDepartureRoutes } from "./routes/departures";
 import { registerRoomsRoutes } from "./routes/rooms";
-import { registerRateCalendarRoutes } from "./rates/calendarRoutes";
 import { registerRevenueRoutes } from "./routes/revenue";
 import { generateHojaFuncionPdf, generateConfirmacionEventoPdf } from "./eventPdfs";
 import { audit } from "./audit";
@@ -317,6 +322,8 @@ export async function registerRoutes(
       version: "1.0.0",
       revision: BUILD_REVISION,
       financialReady,
+      otaIntegrationPrepared:isChannexPrepared(),
+      otaProductionEnabled:productionEnabled('ari')||productionEnabled('inbound'),
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
     });
@@ -366,13 +373,14 @@ export async function registerRoutes(
     res.status(401).json({ message: "No autenticado" });
   });
 
+  registerChannexInboundWebhook(app,pool);
+  app.use(['/api/ota-channels','/api/ota-reservations'],(req,res,next)=>requireChannex(req.method==='GET'?'read':'config')(req,res,next));
   registerAuthBootstrapRoute(app);
   // Registrado antes del gate: /2fa/verify-login necesita ser alcanzable con
   // una sesión "pending2FA" (que requireAuth del gate rechazaría), y las
   // demás rutas de 2FA ya traen su propio requireAuth.
   registerTwoFactorRoutes(app);
 
-  registerChannexInboundWebhook(app, pool);
 
   app.use("/api", (req, res, next) => {
     const publicPaths = [
@@ -1571,27 +1579,15 @@ export async function registerRoutes(
 
   app.get("/api/executive/stats", requireAuth, async (req, res) => {
     try {
-      const today = new Date();
-      let from = req.query.from as string;
-      let to = req.query.to as string;
+      const today = getArgentinaToday();
+      let from = req.query.from as string, to = req.query.to as string;
       const period = req.query.period as string;
-
-      if (period === "today") {
-        from = to = today.toISOString().split("T")[0];
-      } else if (period === "week") {
-        const start = new Date(today);
-        start.setDate(start.getDate() - start.getDay());
-        from = start.toISOString().split("T")[0];
-        to = today.toISOString().split("T")[0];
-      } else if (period === "month") {
-        from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
-        to = today.toISOString().split("T")[0];
-      } else if (period === "year") {
-        from = new Date(today.getFullYear(), 0, 1).toISOString().split("T")[0];
-        to = today.toISOString().split("T")[0];
-      } else if (!from || !to) {
-        from = to = today.toISOString().split("T")[0];
-      }
+      if(period==='today') from=to=today;
+      else if(period==='week'){
+        const day=new Date(today+'T00:00:00Z');day.setUTCDate(day.getUTCDate()-day.getUTCDay());from=day.toISOString().slice(0,10);to=today;
+      }else if(period==='month'){from=today.slice(0,7)+'-01';to=today;}
+      else if(period==='year'){from=today.slice(0,4)+'-01-01';to=today;}
+      else if(!from||!to)from=to=today;
 
       const stats = await storage.getExecutiveStats(from, to);
       res.json(stats);
@@ -1681,7 +1677,7 @@ export async function registerRoutes(
   app.get("/api/reports/caja-unificada", requireAuth, async (req, res) => {
     try {
       const fecha = (req.query.fecha as string) || getArgentinaToday();
-      res.json(await getCashDayReport(fecha));
+      res.json(await getCashDayReport(fecha, undefined, activeSalesRecord("cash_movement", sql`cm.id`)));
     } catch (e: any) {
       res.status(e.statusCode || 500).json({ error: e.message });
     }
@@ -2517,16 +2513,7 @@ export async function registerRoutes(
 
   app.put("/api/admin/backup/config", requirePermission("api:admin:backup"), async (req, res) => {
     try {
-      const { enabled, email } = req.body;
-      const { systemSettings } = await import("@shared/schema");
-      const upsert = async (key: string, value: string) => {
-        await db.execute(sql`
-          INSERT INTO system_settings (key, value) VALUES (${key}, ${value})
-          ON CONFLICT (key) DO UPDATE SET value = ${value}
-        `);
-      };
-      if (typeof enabled === "boolean") await upsert("backup_auto_enabled", enabled ? "true" : "false");
-      if (typeof email === "string") await upsert("backup_email", email);
+      await saveBackupConfig(db,req.body,req.user!.id);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -3020,7 +3007,7 @@ export async function registerRoutes(
         });
         return res.status(201).json(result.rows[0]);
       }
-      const body = normalizeNonFiscalPurchase(applyPurchaseDiscount(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante)));
+      const body = normalizeNonFiscalPurchase(applyPurchaseAdjustments(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante)));
       if (body.sourceRemitoId != null) {
         const sourceId = Number(body.sourceRemitoId);
         if (!Number.isSafeInteger(sourceId) || sourceId <= 0) return res.status(400).json({ error: "Remito de origen inválido." });
@@ -3126,7 +3113,7 @@ export async function registerRoutes(
           impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
           percepcion_ganancias, retencion_iibb, retencion_ganancias, retencion_iva,
           retencion_suss, retencion_municipal, monotributo_comp_bc,
-          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion, saldo_pendiente, descuento
+          monto_total, cuenta_contable_id, centro_costo, estado, observaciones, subtipo_retencion, saldo_pendiente, descuento, envio
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
@@ -3137,7 +3124,7 @@ export async function registerRoutes(
           ${n("percepcionGanancias")}, ${n("retencionIibb")}, ${n("retencionGanancias")}, ${n("retencionIva")},
           ${n("retencionSuss")}, ${n("retencionMunicipal")}, ${n("monotributoCompBC")},
           ${montoTotal}, ${body.cuentaContableId||null}, ${centroCosto}, ${estado}, ${body.observaciones||null}, ${body.subtipoRetencion||null},
-          ${estado === "pendiente" ? montoTotal : 0}, ${body.descuento?JSON.stringify(body.descuento):null}::jsonb
+          ${estado === "pendiente" ? montoTotal : 0}, ${body.descuento?JSON.stringify(body.descuento):null}::jsonb, ${body.envio?JSON.stringify(body.envio):null}::jsonb
         )
         RETURNING *
       `);
@@ -3210,6 +3197,11 @@ export async function registerRoutes(
       }
       await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
         `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`,req.user?.id);
+      if(stockRows.length)rawInvoice.inventoryWarnings=(await tx.execute(sql`
+        SELECT id,name,unit_correction_note AS note FROM inventory_items
+        WHERE id IN (${sql.join([...new Set(stockRows.map(row=>row.itemId))].map(id=>sql`${id}`),sql`,`)})
+          AND unit_correction_pending=true`)).rows;
+
 
       // Si se eligió una forma de pago real (no Cuenta Corriente), generar
       // de una la Orden de Pago de esta factura para que quede pagada (total
@@ -3250,7 +3242,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const existing = await db.execute(sql`
-        SELECT estado, tipo_comprobante, descuento, retencion_iibb AS "retencionIibb",
+        SELECT estado, tipo_comprobante, envio, descuento, retencion_iibb AS "retencionIibb",
           retencion_ganancias AS "retencionGanancias", retencion_iva AS "retencionIva",
           retencion_suss AS "retencionSuss", retencion_municipal AS "retencionMunicipal"
         FROM purchase_invoices WHERE id = ${id}
@@ -3266,7 +3258,8 @@ export async function registerRoutes(
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
       if((existing.rows[0] as any).descuento && req.body.descuentoTipo===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar o modificar el descuento de este comprobante.'});
-      const body = normalizeNonFiscalPurchase(applyPurchaseDiscount({...normalizeReceivedRetentionAmounts(req.body, tipoComprobante),tipoComprobante}));
+      if((existing.rows[0] as any).envio && req.body.envioImporte===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar el envío del comprobante.'});
+      const body = normalizeNonFiscalPurchase(applyPurchaseAdjustments({...normalizeReceivedRetentionAmounts(req.body, tipoComprobante),tipoComprobante}));
       // Las correcciones de comprobantes históricos conservan sus retenciones;
       // uno que nunca las tuvo no puede incorporarlas desde este formulario.
       if (isSupplierPayableDocument(tipoComprobante) &&
@@ -3291,9 +3284,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
       }
       const updatedInvoice = await db.transaction(async (tx) => {
-        const locked=(await tx.execute(sql`SELECT estado,descuento,monto_total,saldo_pendiente,condicion_pago,tipo_comprobante FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
+        const locked=(await tx.execute(sql`SELECT estado,envio,descuento,monto_total,saldo_pendiente,condicion_pago,tipo_comprobante FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
         if(!locked||!canEditPurchaseInvoice(req.user?.role, locked.estado))throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
         if(locked.descuento&&req.body.descuentoTipo===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el descuento del comprobante'),{statusCode:409});
+        if(locked.envio&&req.body.envioImporte===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el envío'),{statusCode:409});
         const balance = purchaseInvoiceBalanceAfterEdit(locked, montoTotal, isSupplierPayableDocument(tipoComprobante));
         const result = await tx.execute(sql`
           UPDATE purchase_invoices SET
@@ -3311,6 +3305,7 @@ export async function registerRoutes(
             saldo_pendiente = ${balance.saldo}, estado = ${balance.estado},
             cuenta_contable_id = ${body.cuentaContableId||null},
             centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
+            envio = ${body.envio?JSON.stringify(body.envio):null}::jsonb,
             descuento = ${body.descuento?JSON.stringify(body.descuento):null}::jsonb,
             subtipo_retencion = ${body.subtipoRetencion||null},
             updated_at = NOW()
@@ -3898,11 +3893,11 @@ export async function registerRoutes(
   registerEventsRoutes(app);
   registerPresupuestosRoutes(app);
   registerRoomsRoutes(app);
-  registerRateCalendarRoutes(app);
   registerManualLibraryRoutes(app);
   registerRevenueRoutes(app);
   registerHospitalityRoutes(app);
   registerOtaRoutes(app);
+  registerRateCalendarRoutes(app);
   registerChannexRoutes(app);
   registerPlanningRoutes(app);
   registerPackagesRoutes(app);

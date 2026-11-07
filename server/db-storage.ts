@@ -1,7 +1,11 @@
-import { withLodgingInventoryMutationLock } from "./inventoryMutationLock";
+import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
+import {withLodgingInventoryMutationLock} from './inventoryMutationLock';
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
-
+import { activeSalesRecord } from "./salesArchive";
+import { inventoryUnitCorrectionWindow } from './inventoryUnitCorrection';
+import { validateInventoryConversions } from './inventoryConversionValidation';
+import { INVENTORY_UNITS } from '@shared/inventoryUnits';
 import {breakfastEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
@@ -5643,8 +5647,9 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null }): Promise<InventoryItem | undefined> {
-    const { accountingSupplierIds, preferredAccountingSupplierId, ...itemValues } = item;
+  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null; conversions?:unknown }, options?:{allowUnitCorrection?:boolean}): Promise<InventoryItem | undefined> {
+    if ('unitCorrectionPending' in item || 'unitCorrectionNote' in item) throw Object.assign(new Error('El estado de revisión de recetas lo administra el sistema'),{statusCode:400});
+    const { accountingSupplierIds, preferredAccountingSupplierId, conversions, ...itemValues } = item;
     if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
       throw new Error("La lista de proveedores contables es inválida");
     }
@@ -5652,16 +5657,42 @@ export class DatabaseStorage implements IStorage {
     if(itemValues.currentStock!==undefined)throw Object.assign(new Error('El stock se modifica mediante movimientos por depósito'),{statusCode:409});
     const [updated] = await db.transaction(async (tx) => {
       const current=await tx.execute(sql`SELECT unit, is_active FROM inventory_items WHERE id=${id} FOR UPDATE`);
+      const unitChanged=itemValues.unit!==undefined && current.rows.length>0 && itemValues.unit!==current.rows[0].unit;
       if (itemValues.isActive === "false" && current.rows[0]?.is_active !== "false") await protectInventoryItemDeactivation(tx, id);
-      if(itemValues.unit!==undefined && current.rows.length && itemValues.unit!==current.rows[0].unit){
+      const correction=unitChanged && inventoryUnitCorrectionWindow.enabled && options?.allowUnitCorrection===true;
+      if(unitChanged){
+        if(!INVENTORY_UNITS.includes(itemValues.unit as any))throw Object.assign(new Error('Unidad de inventario inválida'),{statusCode:400});
         const references=await tx.execute(sql`SELECT 1 WHERE EXISTS(SELECT 1 FROM stock_movements WHERE item_id=${id}) OR EXISTS(SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0) OR EXISTS(SELECT 1 FROM recipe_ingredients WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM recipes WHERE output_inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM treatment_supplies WHERE inventory_item_id=${id}) OR EXISTS(SELECT 1 FROM inventory_consumption_jobs WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb)`);
-        if(references.rows.length)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
+        if(references.rows.length&&!correction)throw Object.assign(new Error('El artículo tiene stock o historial: conservá su unidad y configurá equivalencias.'),{statusCode:409});
+        if(correction){
+          // Keep the original quantities/units, but require deliberate review before
+          // a queued consumption can use the corrected catalogue basis.
+          await tx.execute(sql`UPDATE inventory_consumption_jobs j SET
+            lines=(SELECT jsonb_agg(CASE WHEN line->>'itemId'=${id} THEN
+              line || jsonb_build_object('unitCorrectionReview',true,'originalBaseUnit',COALESCE(line->>'originalBaseUnit',${String(current.rows[0].unit)}))
+              ELSE line END ORDER BY ordinal)
+              FROM jsonb_array_elements(j.lines) WITH ORDINALITY AS entries(line,ordinal)),
+            error='Unidad base corregida: revisá la receta y actualizá el consumo pendiente antes de reintentar.'
+            WHERE status='pending' AND lines @> ${JSON.stringify([{itemId:id}])}::jsonb`);
+        }
+        validateInventoryConversions(conversions??[],String(itemValues.unit));
         await tx.execute(sql`DELETE FROM inventory_unit_conversions WHERE item_id=${id}`);
+        for(const line of (conversions??[]) as Array<{fromUnit:string;factor:string}>)await tx.execute(sql`INSERT INTO inventory_unit_conversions(item_id,from_unit,factor) VALUES(${id},${line.fromUnit},${line.factor})`);
       }
       const [result] = await tx.update(inventoryItems).set(itemValues as any).where(eq(inventoryItems.id, id)).returning();
       if (!result) return [];
-      if (itemValues.costPrice !== undefined) {
-        await cascadeRecipeCostsFromInventoryItem(tx, id, parseFloat(String(result.costPrice ?? 0)));
+      if (itemValues.costPrice !== undefined || unitChanged) {
+        try {
+          // A savepoint rolls back the ENTIRE cost cascade, including recipes
+          // visited before the incompatible legacy ingredient was encountered.
+          await tx.transaction(inner=>cascadeRecipeCostsFromInventoryItem(inner, id, parseFloat(String(result.costPrice ?? 0))));
+          result.unitCorrectionPending=false; result.unitCorrectionNote=null;
+        } catch(error:any) {
+          if(!inventoryUnitCorrectionWindow.enabled || error?.code!=="INVENTORY_UNIT_EQUIVALENCE_REQUIRED") throw error;
+          const note=String(error.message);
+          await tx.update(inventoryItems).set({unitCorrectionPending:true,unitCorrectionNote:note}).where(eq(inventoryItems.id,id));
+          result.unitCorrectionPending=true;result.unitCorrectionNote=note;
+        }
       }
       if (accountingSupplierIds !== undefined) {
         const uniqueIds = [...new Set(accountingSupplierIds.map(Number))].filter(Number.isInteger);
@@ -7237,9 +7268,6 @@ export class DatabaseStorage implements IStorage {
   async getExecutiveStats(from: string, to: string): Promise<any> {
     const allRooms = await db.select().from(rooms);
     const realRooms = allRooms.filter(isOperationalInventoryRoom);
-    const nonOperationalRoomIds = new Set(
-      allRooms.filter(room => !isOperationalInventoryRoom(room)).map(room => room.id),
-    );
     const totalRooms = realRooms.length;
 
     const roomsByStatus: Record<string, number> = { available: 0, occupied: 0, dirty: 0, cleaning: 0, maintenance: 0, oos: 0 };
@@ -7249,80 +7277,19 @@ export class DatabaseStorage implements IStorage {
       else roomsByStatus[s] = (roomsByStatus[s] || 0) + 1;
     }
 
-    const rawPeriodReservations = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
-    const periodReservations = rawPeriodReservations.filter(
-      reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
-    );
-
-    let totalNightsSold = 0;
-    for (const r of periodReservations) {
-      const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(from).getTime()));
-      const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(to).getTime()));
-      const nights = Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
-      totalNightsSold += nights;
-    }
-
-    // Room revenue on an accrual basis (the reservation's own rate), not raw
-    // payments — a folio payment can include restaurant/spa/minibar consumption
-    // charged to the room, which would otherwise double-count against those
-    // areas' own figures. Extras use the same accrual logic: charges actually
-    // posted in the period, by category, regardless of when/whether collected.
-    const accommodationRevenue = periodReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
-    const periodCharges = await db.select().from(charges)
-      .where(and(gte(charges.date, from), lte(charges.date, to)));
-    const extrasRevenue = periodCharges
-      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
-      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
-    const totalRevenue = accommodationRevenue + extrasRevenue;
-
-    const daysInPeriod = Math.max(1, Math.ceil((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
-    const occupiedRooms = roomsByStatus.occupied || 0;
-    const availableRooms = roomsByStatus.available || 0;
-    const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
-
-    const adr = totalNightsSold > 0 ? Math.round(accommodationRevenue / totalNightsSold) : 0;
-    const revpar = Math.round(adr * occupancyRate / 100);
-
-    const byChannelMap = new Map<string, { reservations: number; revenue: number }>();
-    for (const r of periodReservations) {
-      const src = r.source || "directo";
-      if (!byChannelMap.has(src)) byChannelMap.set(src, { reservations: 0, revenue: 0 });
-      const entry = byChannelMap.get(src)!;
-      entry.reservations++;
-      entry.revenue += parseFloat(r.totalRoomAmount || "0");
-    }
-    const totalChannelRevenue = Array.from(byChannelMap.values()).reduce((s, v) => s + v.revenue, 0);
-    const byChannel = Array.from(byChannelMap.entries()).map(([source, data]) => ({
-      source,
-      reservations: data.reservations,
-      revenue: Math.round(data.revenue),
-      percentage: totalChannelRevenue > 0 ? Math.round((data.revenue / totalChannelRevenue) * 100) : 0,
-    })).sort((a, b) => b.revenue - a.revenue);
-
-    const prevFrom = new Date(new Date(from).getTime() - 365 * 86400000).toISOString().split("T")[0];
-    const prevTo = new Date(new Date(to).getTime() - 365 * 86400000).toISOString().split("T")[0];
-    const rawPrevReservations = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, prevTo), gte(reservations.checkOutDate, prevFrom)));
-    const prevReservations = rawPrevReservations.filter(
-      reservation => !reservation.roomId || !nonOperationalRoomIds.has(reservation.roomId),
-    );
-    const prevAccommodationRevenue = prevReservations.reduce((s, r) => s + parseFloat(r.totalRoomAmount || "0"), 0);
-    const prevCharges = await db.select().from(charges)
-      .where(and(gte(charges.date, prevFrom), lte(charges.date, prevTo)));
-    const prevExtrasRevenue = prevCharges
-      .filter(c => (c.status ?? "active") === "active" && ["restaurant", "spa", "minibar"].includes(c.category ?? ""))
-      .reduce((s, c) => s + parseFloat(c.amount || "0"), 0);
-    const prevTotalRevenue = prevAccommodationRevenue + prevExtrasRevenue;
-    let prevNightsSold = 0;
-    for (const r of prevReservations) {
-      const ci = new Date(Math.max(new Date(r.checkInDate).getTime(), new Date(prevFrom).getTime()));
-      const co = new Date(Math.min(new Date(r.checkOutDate).getTime(), new Date(prevTo).getTime()));
-      prevNightsSold += Math.max(0, Math.ceil((co.getTime() - ci.getTime()) / 86400000));
-    }
-    const prevAdr = prevNightsSold > 0 ? Math.round(prevAccommodationRevenue / prevNightsSold) : 0;
-    const prevOccupancyRate = totalRooms > 0 ? Math.round((prevReservations.length / totalRooms) * 100) : 0;
-    const prevRevpar = Math.round(prevAdr * prevOccupancyRate / 100);
+    const prevFrom = previousYearDate(from), prevTo = previousYearDate(to);
+    const [lodging,previous] = await Promise.all([loadLodging(from,to),loadLodging(prevFrom,prevTo)]);
+    const accommodationRevenue = lodging.summary.revenue;
+    const periodCharges = await db.select().from(charges).where(and(gte(charges.date,from),lte(charges.date,to)));
+    const extrasRevenue = periodCharges.filter(c=>(c.status??'active')==='active'&&['restaurant','spa','minibar'].includes(c.category??'')).reduce((sum,c)=>sum+parseFloat(c.amount||'0'),0);
+    const totalRevenue = accommodationRevenue+extrasRevenue;
+    const occupiedRooms = roomsByStatus.occupied||0,availableRooms=roomsByStatus.available||0;
+    const occupancyRate = lodging.summary.occupancy,adr=lodging.summary.adr,revpar=lodging.summary.revpar;
+    const byChannel = lodgingChannels(lodging).map(row=>({...row,percentage:accommodationRevenue?row.revenue/accommodationRevenue*100:0}));
+    const prevCharges = await db.select().from(charges).where(and(gte(charges.date,prevFrom),lte(charges.date,prevTo)));
+    const prevExtrasRevenue = prevCharges.filter(c=>(c.status??'active')==='active'&&['restaurant','spa','minibar'].includes(c.category??'')).reduce((sum,c)=>sum+parseFloat(c.amount||'0'),0);
+    const prevTotalRevenue = previous.summary.revenue+prevExtrasRevenue;
+    const prevAdr = previous.summary.adr,prevOccupancyRate=previous.summary.occupancy,prevRevpar=previous.summary.revpar;
 
     const today = getArgentinaToday();
     const todayReservations = await db.select().from(reservations)
@@ -7334,83 +7301,36 @@ export class DatabaseStorage implements IStorage {
     const pendingCheckIns = todayReservations.filter(r => r.status === "confirmed").length;
 
     return {
+      alojamiento: {resumen:lodging.summary,proyeccion:lodging.forecast,advertencias:lodging.warnings,criterio:lodging.methodology},
       occupancyRate, occupiedRooms, availableRooms, totalRooms,
-      totalRevenue: Math.round(totalRevenue), accommodationRevenue: Math.round(accommodationRevenue), extrasRevenue: Math.round(extrasRevenue),
+      totalRevenue: Math.round(totalRevenue*100)/100, accommodationRevenue, extrasRevenue: Math.round(extrasRevenue*100)/100,
       adr, revpar, byChannel,
-      previousYear: { occupancyRate: prevOccupancyRate, totalRevenue: Math.round(prevTotalRevenue), adr: prevAdr, revpar: prevRevpar },
+      previousYear: { occupancyRate: prevOccupancyRate, totalRevenue: Math.round(prevTotalRevenue*100)/100, adr: prevAdr, revpar: prevRevpar },
       todayCheckIns, todayCheckOuts, pendingCheckIns,
       roomsByStatus,
     };
   }
 
   async getReportOccupancy(from: string, to: string): Promise<any[]> {
-    const result: any[] = [];
-    const allRooms = await db.select().from(rooms);
-    const operationalRoomIds = new Set(allRooms.filter(isOperationalInventoryRoom).map(room => room.id));
-    const totalRooms = operationalRoomIds.size;
-    const start = new Date(from);
-    const end = new Date(to);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split("T")[0];
-      const dayReservations = await db.select().from(reservations)
-        .where(and(lte(reservations.checkInDate, dateStr), gt(reservations.checkOutDate, dateStr),
-          inArray(reservations.status, ["checked_in", "checked_out", "confirmed"])));
-      const occupied = dayReservations.filter(
-        reservation => !!reservation.roomId && operationalRoomIds.has(reservation.roomId),
-      ).length;
-      const available = totalRooms - occupied;
-      const occupancy = totalRooms > 0 ? Math.round((occupied / totalRooms) * 100) : 0;
-      result.push({ date: dateStr, available, occupied, occupancy, totalRooms });
-    }
-    return result;
+    const lodging=await loadLodging(from,to);
+    return lodging.daily.map(day=>({date:day.date,available:day.capacity-day.actualNights,occupied:day.actualNights,occupancy:day.capacity?day.actualNights/day.capacity*100:0,totalRooms:day.capacity,forecast:day.forecastNights,lodgingWarnings:lodging.warnings}));
   }
 
   async getReportRevenueByRoomType(from: string, to: string): Promise<any[]> {
-    const types = await db.select().from(roomTypes);
-    const periodRes = await db.select({ reservation: reservations }).from(reservations)
-      .leftJoin(guests, eq(reservations.guestId, guests.id))
-      .where(and(
-        lte(reservations.checkInDate, to),
-        gte(reservations.checkOutDate, from),
-        visibleGuestCondition(),
-      )).then(rows => rows.map(row => row.reservation));
-
-    const result: any[] = [];
-    let grandTotal = 0;
-    for (const t of types) {
-      const typeRes = periodRes.filter(r => r.roomTypeId === t.id);
-      let nightsSold = 0;
-      let revenue = 0;
-      for (const r of typeRes) {
-        nightsSold += r.nights || 0;
-        revenue += parseFloat(r.totalRoomAmount || "0");
-      }
-      grandTotal += revenue;
-      const typeRooms = (await db.select().from(rooms).where(eq(rooms.roomTypeId, t.id))).length;
-      result.push({ type: t.name, rooms: typeRooms, nightsSold, revenue: Math.round(revenue), adr: nightsSold > 0 ? Math.round(revenue / nightsSold) : 0 });
-    }
-    return result.map(r => ({ ...r, percentage: grandTotal > 0 ? Math.round((r.revenue / grandTotal) * 100) : 0 }));
+    const lodging=await loadLodging(from,to),types=await lodgingByRoomType(lodging);
+    return types.map(row=>({type:row.tipo,rooms:row.rooms,nightsSold:row.nochesOcupadas,revenue:row.ingresos,adr:row.tarifaMedia,percentage:lodging.summary.revenue?row.ingresos/lodging.summary.revenue*100:0,missingRateNights:lodging.summary.missingRateNights,estimatedNights:lodging.summary.estimatedNights,lodgingWarnings:lodging.warnings}));
   }
 
   async getReportByChannel(from: string, to: string): Promise<any[]> {
-    const periodRes = await db.select().from(reservations)
-      .where(and(lte(reservations.checkInDate, to), gte(reservations.checkOutDate, from)));
-
-    const map = new Map<string, { reservations: number; nights: number; revenue: number }>();
-    for (const r of periodRes) {
-      const src = r.source || "directo";
-      if (!map.has(src)) map.set(src, { reservations: 0, nights: 0, revenue: 0 });
-      const e = map.get(src)!;
-      e.reservations++;
-      e.nights += r.nights || 0;
-      e.revenue += parseFloat(r.totalRoomAmount || "0");
-    }
+    const lodging=await loadLodging(from,to);
+    const channels=lodgingChannels(lodging);
+    const map=new Map(channels.map(row=>[row.source,{reservations:row.reservations,nights:row.nights,revenue:row.revenue}]));
     const total = Array.from(map.values()).reduce((s, v) => s + v.revenue, 0);
     const commissionRates: Record<string, number> = { booking: 15, airbnb: 14, expedia: 18, despegar: 17 };
     return Array.from(map.entries()).map(([source, d]) => {
       const commRate = commissionRates[source] || 0;
-      const commission = Math.round(d.revenue * commRate / 100);
-      return { source, reservations: d.reservations, nights: d.nights, revenue: Math.round(d.revenue), commission, net: Math.round(d.revenue - commission), percentage: total > 0 ? Math.round((d.revenue / total) * 100) : 0 };
+      const commission = Math.round(d.revenue * commRate) / 100;
+      return { lodgingWarnings:lodging.warnings, source, reservations: d.reservations, nights: d.nights, revenue: d.revenue, commission, net: Math.round((d.revenue - commission)*100)/100, percentage: total > 0 ? Math.round((d.revenue / total) * 100) : 0 };
     }).sort((a, b) => b.revenue - a.revenue);
   }
 
@@ -8022,7 +7942,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const movements = await tx.select().from(cashMovements).where(
-      and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false))
+      and(eq(cashMovements.shiftId, shiftId), eq(cashMovements.anulado, false), activeSalesRecord("cash_movement", cashMovements.id))
     );
 
     // Normaliza tanto valores en español como en inglés almacenados históricamente
@@ -8049,7 +7969,7 @@ export class DatabaseStorage implements IStorage {
       const amt = parseFloat(m.amount);
       const method = methodNorm[m.paymentMethod] ?? m.paymentMethod;
       if (m.movementType === "informational") {
-        if (method === "current_account" || method === "voucher") {
+        if (method === "current_account" || method === "voucher" || method === "room_charge") {
           totals[method] += amt;
           nonCashSettlementsTotal += amt;
           nonCashSettlementsCount++;
@@ -8199,17 +8119,17 @@ export class DatabaseStorage implements IStorage {
     const [shift] = await db.select().from(cashShifts).where(eq(cashShifts.id, shiftId));
     if (!shift) throw new Error("Turno no encontrado");
     const movements = await db.select().from(cashMovements)
-      .where(eq(cashMovements.shiftId, shiftId))
+      .where(and(eq(cashMovements.shiftId, shiftId), activeSalesRecord("cash_movement", cashMovements.id)))
       .orderBy(asc(cashMovements.createdAt));
     const [summary] = await db.select().from(cashClosingSummaries)
-      .where(eq(cashClosingSummaries.shiftId, shiftId))
+      .where(and(eq(cashClosingSummaries.shiftId, shiftId), activeSalesRecord("cash_closing", cashClosingSummaries.id)))
       .limit(1);
     return { shift, movements, summary: summary || null };
   }
 
   async getCashMovements(shiftId: string): Promise<CashMovement[]> {
     return db.select().from(cashMovements)
-      .where(eq(cashMovements.shiftId, shiftId))
+      .where(and(eq(cashMovements.shiftId, shiftId), activeSalesRecord("cash_movement", cashMovements.id)))
       .orderBy(desc(cashMovements.createdAt));
   }
 
@@ -8426,7 +8346,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCashSummary(area?: string, from?: string, to?: string): Promise<any[]> {
-    const conditions: any[] = [];
+    const conditions: any[] = [activeSalesRecord("cash_closing", cashClosingSummaries.id)];
     if (area) conditions.push(eq(cashShifts.area, area));
     // The filter and the primary date shown in Historial both refer to
     // the closing day in Argentina, even when the shift opened before midnight.
@@ -8446,6 +8366,7 @@ export class DatabaseStorage implements IStorage {
       .from(accountMovements)
       .where(
         and(
+          activeSalesRecord("account_movement", accountMovements.id),
           eq(accountMovements.entityType, entityType),
           eq(accountMovements.entityId, entityId)
         )
@@ -8484,7 +8405,7 @@ export class DatabaseStorage implements IStorage {
   async getAccountMovementsByReservation(reservationId: string): Promise<AccountMovement[]> {
     return await db.select()
       .from(accountMovements)
-      .where(eq(accountMovements.reservationId, reservationId))
+      .where(and(eq(accountMovements.reservationId, reservationId), activeSalesRecord("account_movement", accountMovements.id)))
       .orderBy(desc(accountMovements.createdAt));
   }
 
@@ -8499,6 +8420,7 @@ export class DatabaseStorage implements IStorage {
       .from(accountMovements)
       .where(
         and(
+          activeSalesRecord("account_movement", accountMovements.id),
           eq(accountMovements.entityType, entityType),
           eq(accountMovements.entityId, entityId),
           eq(accountMovements.type, "cargo")
@@ -8574,6 +8496,7 @@ export class DatabaseStorage implements IStorage {
           SELECT id, amount::numeric AS amount
           FROM account_movements
           WHERE id IN (${idsSql})
+            AND ${activeSalesRecord('account_movement', sql`id`)}
             AND entity_type = ${entityType}
             AND entity_id = ${entityId}
             AND type = 'cargo'
@@ -8648,7 +8571,7 @@ export class DatabaseStorage implements IStorage {
     assertFinancialSchemaReady();
     return await db.transaction(async (tx) => {
       const originalResult = await tx.execute(sql`
-        SELECT * FROM account_movements WHERE id = ${movementId} FOR UPDATE
+        SELECT * FROM account_movements WHERE id = ${movementId} AND ${activeSalesRecord('account_movement',sql`id`)} FOR UPDATE
       `);
       const original = originalResult.rows[0] as any;
       if (!original) throw Object.assign(new Error("Recibo no encontrado"), { statusCode: 404 });
@@ -8769,7 +8692,7 @@ export class DatabaseStorage implements IStorage {
              COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
              MAX(m.date::text)                                        AS last_movement
       FROM companies c
-      LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company'
+      LEFT JOIN account_movements m ON m.entity_id = c.id AND m.entity_type = 'company' AND ${activeSalesRecord('account_movement', sql`m.id`)}
       GROUP BY c.id, c.nombre_fantasia, c.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -8781,7 +8704,7 @@ export class DatabaseStorage implements IStorage {
              COALESCE(SUM(m.amount::numeric), 0)                     AS balance,
              MAX(m.date::text)                                        AS last_movement
       FROM agencies a
-      LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency'
+      LEFT JOIN account_movements m ON m.entity_id = a.id AND m.entity_type = 'agency' AND ${activeSalesRecord('account_movement', sql`m.id`)}
       GROUP BY a.id, a.nombre_fantasia, a.razon_social
       HAVING COALESCE(SUM(m.amount::numeric), 0) <> 0
       ORDER BY balance DESC
@@ -8794,7 +8717,7 @@ export class DatabaseStorage implements IStorage {
              MAX(m.date::text)                   AS last_movement
       FROM account_movements m
       JOIN guests g ON g.id = m.entity_id
-      WHERE m.entity_type = 'guest'
+      WHERE m.entity_type = 'guest' AND ${activeSalesRecord('account_movement', sql`m.id`)}
       GROUP BY g.id, g.last_name, g.first_name
       HAVING SUM(m.amount::numeric) <> 0
       ORDER BY balance DESC
@@ -8851,7 +8774,7 @@ export class DatabaseStorage implements IStorage {
         SELECT DISTINCT e.id, ${nameExpr} AS name
         FROM account_movements m
         JOIN ${sql.raw(table)} e ON e.id = m.entity_id
-        WHERE m.entity_type = ${entityType} AND m.type = 'cargo' AND ${areaCondition}
+        WHERE m.entity_type = ${entityType} AND ${activeSalesRecord('account_movement', sql`m.id`)} AND m.type = 'cargo' AND ${areaCondition}
       `);
       return res.rows as { id: string; name: string }[];
     };

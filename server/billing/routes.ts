@@ -1,9 +1,14 @@
+import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
+import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
+import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { discardInvalidCreditDraft, isInvalidOriginalDraft } from './discardInvalidCreditDraft';
 import { chargeUnits, expandChargeUnitCoverage, groupedChargeCoverage, unitParent } from '@shared/chargeUnits';
 import { accommodationNights, expandAccommodationCoverage, accommodationCoverageTotal, isAccommodationSource } from '@shared/accommodationNights';
 import { assertReservationInvoiceRecoverable } from "./reservationRecoveryState";
 import { giftVoucherItemsExpiryError } from "@shared/gift-voucher-expiry";
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "../reservationAccountTransfer";
 import { registerReceptionOperationRoutes } from "./receptionOperations";
+import { registerCashCardRectificationRoutes } from './cashCardRectificationRoutes';
 import { beginBillingOperation } from "./operationJournal";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { discardRejectedExemptInvoice, findRejectedExemptAttempt } from "./rejectedExemptInvoice";
@@ -12,15 +17,17 @@ import { recoverGroupCreditNote } from "./groupCreditRecovery";
 import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
 import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
-import {creditNoteAccountMovement} from './creditNoteAccountMovement';
+import {creditNoteAccountMovement, originalAccountChargeLinked} from './creditNoteAccountMovement';
 import type { Express } from "express";
 import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
 import { sql, desc, and, gte, lte, eq } from "drizzle-orm";
 import { salesInvoices, invoiceCounters, folioMovements, charges, posConfigs, type InsertGiftVoucher, type AccountMovementArea } from "@shared/schema";
+import { activeSalesRecord } from '../salesArchive';
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, isNonFiscalTipo, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
+import {requireFiscalInvoiceForCredit,creditTypeForInvoice} from '../../shared/fiscal-document-types';
 import { verifySaleCatalog } from "./verifySaleCatalog";
 import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
 import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
@@ -360,6 +367,7 @@ async function resumeReservationCreditNote(
   pendingNc: any,
   user: any,
 ): Promise<any> {
+  requireFiscalInvoiceForCredit(invoiceValue(original,'tipo_comprobante','tipoComprobante'));
   let nc = pendingNc;
   if (invoiceValue(nc, "reconciliation_status", "reconciliationStatus") !== "pendiente") {
     return nc;
@@ -593,6 +601,20 @@ async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise
 }
 
 export function registerBillingRoutes(app: Express) {
+  // Historical references stay readable for vouchers and folios, but an
+  // archived document cannot start a new settlement or fiscal correction.
+  const requireActiveInvoice = async (req: any, res: any, next: any) => {
+    try {
+      const archived = await db.execute(sql`SELECT 1 FROM sales_control_archive WHERE kind='invoice' AND record_id=${String(req.params.id)} LIMIT 1`);
+      if (archived.rows.length) return res.status(409).json({ error: "El comprobante pertenece al archivo histórico de ventas y no admite nuevas operaciones" });
+      next();
+    } catch { res.status(503).json({ error: "No se pudo verificar el archivo de ventas" }); }
+  };
+  app.patch('/api/billing/invoices/:id', requireAuth, requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/settle-center', requireAuth, requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/nota-credito', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/nota-debito', requireAuth, requireActiveInvoice);
+  app.post('/api/billing/credit-notes/:id/reconcile', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
   registerGroupFiscalCashRecoveryRoutes(app);
   registerArcaCredentialDiagnosticRoutes(app);
 
@@ -772,7 +794,7 @@ export function registerBillingRoutes(app: Express) {
   app.get("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
       const { desde, hasta, tipo, clienteCuit, area, cliente, reservaId } = req.query as Record<string, string>;
-      let whereClause = sql`1=1`;
+      let whereClause = activeSalesRecord('invoice', sql`si.id`);
       if (desde) whereClause = sql`${whereClause} AND si.fecha_emision >= ${desde}`;
       if (hasta) whereClause = sql`${whereClause} AND si.fecha_emision <= ${hasta}`;
       if (tipo) whereClause = sql`${whereClause} AND si.tipo_comprobante = ${tipo}`;
@@ -794,6 +816,8 @@ export function registerBillingRoutes(app: Express) {
 
       const rows = await db.execute(sql`
         SELECT si.*,
+               ${directInvoiceOperationProof} AS _direct_invoice_operation,
+               ${nonFiscalAnnulmentProof} AS non_fiscal_annulment,
                CASE
                  WHEN si.reserva_id IS NOT NULL THEN 'recepcion'
                  ELSE pc.area
@@ -809,6 +833,10 @@ export function registerBillingRoutes(app: Express) {
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
+               orig.cash_forma_pago AS original_cash_forma_pago,
+               orig.cash_forma_pago_detalle AS original_cash_forma_pago_detalle,
+               orig.credit_reapplication_intent AS original_credit_reapplication_intent,
+               ${originalAccountChargeLinked} AS original_account_charge_linked,
                EXISTS (
                  SELECT 1 FROM group_invoices gi
                  WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
@@ -828,7 +856,7 @@ export function registerBillingRoutes(app: Express) {
         ORDER BY si.created_at DESC
         LIMIT 200
       `);
-      res.json(rows.rows.map((row: any) => exposeInvoiceReconciliation(row)));
+      res.json(rows.rows.map((row: any) => ({ ...exposeInvoiceReconciliation(row), canAnnulNonFiscal: canAnnulNonFiscalInvoice(row) && hasPermission(String(req.user?.role || ""), NON_FISCAL_VOID_PERMISSION) })));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -850,15 +878,38 @@ export function registerBillingRoutes(app: Express) {
         FROM sales_invoices nc
         JOIN sales_invoices orig ON orig.id = nc.nota_credito_id
         WHERE (nc.reserva_id IS NOT NULL OR nc.group_id IS NOT NULL)
+          AND ${activeSalesRecord('invoice', sql`nc.id`)}
           AND nc.tipo_comprobante IN ('NCA', 'NCB', 'NCC', 'NCT', 'NCM', 'NCMB')
           AND nc.reconciliation_status = 'pendiente'
         ORDER BY nc.reconciliation_updated_at NULLS FIRST, nc.created_at ASC
         LIMIT 100
       `);
-      res.json(rows.rows.map((row: any) => exposeInvoiceReconciliation(row)));
+      res.json(rows.rows.map((row: any) => ({ ...exposeInvoiceReconciliation(row), canDiscardInvalidOriginalDraft: _req.user?.role === "admin" && isInvalidOriginalDraft(row, row.original_tipo_comprobante) })));
     } catch (error: any) {
       res.status(500).json({ error: error.message || "No se pudieron cargar las conciliaciones pendientes" });
     }
+  });
+
+  // Admin cleanup consults ARCA only; it must never authorize or apply the NC.
+  app.post("/api/billing/credit-notes/:id/discard-invalid-draft", requireAuth, requireRole(["admin"]), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "NC inválida" });
+    try {
+      assertFinancialSchemaReady();
+      const candidate = (await db.execute(sql`SELECT reserva_id FROM sales_invoices WHERE id=${id}`)).rows[0] as any;
+      const config = await getBillingConfig();
+      const identity = { environment: String(config.arcaAmbiente), issuer: String(config.arcaCuit || config.cuit).replace(/\D/g, "") };
+      const discard = () => discardInvalidCreditDraft(pool, id, String(candidate?.reserva_id || ""), req.user?.id || null, identity, async nc => {
+        if (!config.arcaCert || !config.arcaKey) throw new Error("Faltan credenciales para consultar ARCA. Se conserva el intento.");
+        const { getTokenAuth } = await import("./wsaaClient");
+        const { feCompConsultar } = await import("./wsfevClient");
+        const { token, sign } = await getTokenAuth(config.arcaCert, config.arcaKey, identity.environment as "homologacion" | "produccion");
+        const document = resolveFiscalRecipientDocument({ cuit: nc.cliente_cuit, dni: nc.cliente_dni, documentType: nc.cliente_document_type });
+        return feCompConsultar({ tipo: nc.tipo_comprobante, puntoVenta: Number(nc.punto_venta), numero: Number(nc.numero), cuitEmisor: identity.issuer, token, sign },
+          identity.environment as "homologacion" | "produccion", { total: Number(nc.monto_total), fecha: String(nc.fecha_emision).replaceAll("-", ""), docTipo: document.tipo, docNro: document.numero });
+      });
+      res.json(candidate?.reserva_id ? await withReservationInvoiceLock(String(candidate.reserva_id), discard) : await discard());
+    } catch (error: any) { res.status(error?.statusCode || 502).json({ error: error?.message || "No se pudo verificar ARCA. Se conserva el intento." }); }
   });
 
   // Explicit recovery action for a pending reservation NC. It never creates a
@@ -893,6 +944,7 @@ export function registerBillingRoutes(app: Express) {
       `);
       const nc = initialNc.rows[0] as any;
       const original = initialOriginal.rows[0] as any;
+      if(original)requireFiscalInvoiceForCredit(original.tipo_comprobante);
       if (nc?.group_id && !nc.reserva_id && original?.group_id === nc.group_id) {
         return res.json(await recoverGroupCreditNote(ncId,(req as any).user));
       }
@@ -959,7 +1011,7 @@ export function registerBillingRoutes(app: Express) {
       const result = await db.execute(sql`
         SELECT COUNT(*)::int AS total
         FROM sales_invoices
-        WHERE tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
+        WHERE ${activeSalesRecord('invoice',sql`id`)} AND tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
           AND fecha_emision >= ${startDate}
           AND fecha_emision <= ${endDate}
       `);
@@ -969,24 +1021,30 @@ export function registerBillingRoutes(app: Express) {
     }
   });
 
-  // DELETE /api/billing/invoices/non-fiscal?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
-  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "resp_administracion"]), async (req, res) => {
+  // Financial documents require an individual reason and an atomic Caja audit.
+  app.delete("/api/billing/invoices/non-fiscal", requireRole(["admin", "resp_administracion"]), (_req, res) => {
+    res.status(409).json({ error: "El borrado masivo fue reemplazado por la eliminación individual con motivo y registro en Caja. Usá Eliminar comprobante desde Facturación." });
+  });
+
+  app.post("/api/billing/invoices/:id/annul-non-fiscal", requireAuth, requirePermission(NON_FISCAL_VOID_PERMISSION), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Comprobante inválido" });
     try {
-      const { startDate, endDate } = req.query as Record<string, string>;
-      if (!startDate || !endDate) {
-        return res.status(400).json({ error: "startDate y endDate son requeridos" });
-      }
-      const result = await db.execute(sql`
-        DELETE FROM sales_invoices
-        WHERE tipo_comprobante IN (${sql.join(NON_FISCAL_TIPOS.map((t) => sql`${t}`), sql`, `)})
-          AND fecha_emision >= ${startDate}
-          AND fecha_emision <= ${endDate}
-        RETURNING id
-      `);
-      res.json({ deleted: result.rows.length });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
+      const reason = validateNonFiscalAnnulmentReason(req.body?.reason);
+      assertFinancialSchemaReady();
+      const invoice = (await db.execute(sql`SELECT * FROM sales_invoices WHERE id=${id}`)).rows[0] as any;
+      if (!invoice) return res.status(404).json({ error: "Comprobante no encontrado" });
+      if (!isNonFiscalTipo(invoice.tipo_comprobante)) return res.status(400).json({ error: "Solo se pueden eliminar comprobantes no fiscales por esta opción." });
+      const run = async () => {
+        const area = await nonFiscalAnnulmentArea(pool, invoice);
+        const shift = await storage.getOrCreateActiveTurno(area);
+        return annulNonFiscalInvoice(pool, id, reason, { id: req.user?.id || null, name: req.user?.fullName || req.user?.username || "Usuario" }, area, shift.id, invoice);
+      };
+      const owned = () => invoice.reserva_id ? withReservationInvoiceLock(String(invoice.reserva_id), run)
+        : invoice.group_id ? withGroupInvoiceLock(String(invoice.group_id), run)
+        : invoice.spa_account_id ? withSpaInvoiceLock(String(invoice.spa_account_id), run) : run();
+      res.json(await withFinancialScopeLock(`non-fiscal-void:${id}`, owned));
+    } catch (error: any) { res.status(error?.statusCode || 409).json({ error: error?.message || "No se pudo eliminar el comprobante. Se conservaron los datos." }); }
   });
 
   // GET /api/billing/invoices/:id
@@ -995,6 +1053,8 @@ export function registerBillingRoutes(app: Express) {
       const id = parseInt(req.params.id);
       const row = await db.execute(sql`
         SELECT si.*,
+               ${directInvoiceOperationProof} AS _direct_invoice_operation,
+               ${nonFiscalAnnulmentProof} AS non_fiscal_annulment,
                COALESCE((
                  SELECT jsonb_agg(nc.source_charge_amounts)
                  FROM sales_invoices nc
@@ -1012,6 +1072,10 @@ export function registerBillingRoutes(app: Express) {
                orig.cae              AS original_cae,
                orig.modo_ficticio    AS original_modo_ficticio,
                orig.estado           AS original_estado,
+               orig.cash_forma_pago AS original_cash_forma_pago,
+               orig.cash_forma_pago_detalle AS original_cash_forma_pago_detalle,
+               orig.credit_reapplication_intent AS original_credit_reapplication_intent,
+               ${originalAccountChargeLinked} AS original_account_charge_linked,
                EXISTS (
                  SELECT 1 FROM group_invoices gi
                  WHERE gi.sales_invoice_id = si.id AND gi.group_id = si.group_id
@@ -1079,9 +1143,11 @@ export function registerBillingRoutes(app: Express) {
 
   // POST /api/billing/invoices
   registerReceptionOperationRoutes(app);
+  registerCashCardRectificationRoutes(app);
 
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
+      if(typeof req.body?.tipoComprobante==='string'&&req.body.tipoComprobante.startsWith('NC'))return res.status(400).json({error:'La Nota de Crédito debe emitirse desde su factura fiscal original, no desde la emisión genérica de comprobantes.'});
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       const giftExpiryError = giftVoucherItemsExpiryError(items);
       if (giftExpiryError) return res.status(400).json({ error: giftExpiryError });
@@ -2905,6 +2971,7 @@ export function registerBillingRoutes(app: Express) {
           const grandTotal = roomTotal + allCharges.reduce((s, c) => s + parseFloat(c.amount), 0);
           const totalPayments = paymentsList.filter(p => p.status === "active").reduce((s, p) => s + parseFloat(p.amount), 0);
           const voucherData: VoucherHabitacionData = {
+            eliminated: factura.estado === "anulada",
             numero: Number(factura.numero),
             puntoVenta: Number(factura.punto_venta),
             fechaEmision: factura.fecha_emision,
@@ -3099,6 +3166,8 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       let original = row.rows[0] as any;
+      const eligibleCreditType=creditTypeForInvoice(original.tipo_comprobante);
+      if(!eligibleCreditType)return res.status(400).json({error:'La Nota de Crédito fiscal debe asociarse a la factura fiscal original. Ningún comprobante no fiscal admite una NC fiscal.'});
       let legacyGroupId: string | null = null;
       if (!original.group_id && !original.reserva_id) {
         legacyGroupId = await findLegacyInvoiceGroupId(id);
@@ -3132,12 +3201,7 @@ export function registerBillingRoutes(app: Express) {
       // (e.g., two separate partial credits weeks apart for the same invoice).
 
       const { motivo, items, monto, paymentIdsToVoid, folioMovementIdsToVoid } = req.body;
-      const tipoNC =
-        original.tipo_comprobante === "FA" ? "NCA" :
-        original.tipo_comprobante === "FT" ? "NCT" :
-        original.tipo_comprobante === "FM" ? "NCM" :
-        original.tipo_comprobante === "FMB" ? "NCMB" :
-        original.tipo_comprobante === "FC" ? "NCC" : "NCB";
+      const tipoNC = eligibleCreditType;
       const user = (req as any).user;
 
       const montoTotal = parseFloat(original.monto_total);

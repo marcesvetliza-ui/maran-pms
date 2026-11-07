@@ -16,7 +16,7 @@ const complete=():SupportDiagnosis=>({...wrong,evidence:[...wrong.evidence.slice
 it('rejects the actual received wrapper citation and does not let reading the true source elsewhere repair the wrong reference',async()=>{
  const s=source();await s.read('shared/inventoryUnits.ts',1,30);const errors=await checkErrorAttribution(wrong,s);
  expect(errors).toEqual(expect.arrayContaining([expect.objectContaining({field:'evidence.3.explanation',origin:expect.objectContaining({path:'shared/inventoryUnits.ts',symbol:'inventoryUnitFactor'})})]));
- const direct=sourceRange('shared/inventoryUnits.ts','throw fail(`Falta equivalencia explícita',0,0);expect(errors.some(error=>error.origin.start===direct.start&&error.origin.end===direct.end)).toBe(true);
+ const direct=sourceRange('shared/inventoryUnits.ts','Falta equivalencia explícita',0,0);expect(errors.some(error=>error.origin.start===direct.start&&error.origin.end===direct.end)).toBe(true);
 });
 it.each(['hipotesis','sustentado_en_codigo','falta_informacion'] as const)('rejects missing requested identity coverage with certainty %s',certainty=>expect(errorProposalCoverageIssues({...wrong,certainty},ticket)).toEqual(expect.arrayContaining([expect.objectContaining({code:'REQUESTED_ITEM_IDENTITY_UNADDRESSED'})])));
 it('accepts a correctly cited partial solution that explicitly preserves the pending item identity',async()=>{const report=complete();expect(await checkErrorAttribution(report,source())).toEqual([]);expect(errorProposalCoverageIssues(report,ticket)).toEqual([]);});

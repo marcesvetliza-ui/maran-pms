@@ -18,15 +18,15 @@ it('shows the included floor and the disabled dispatch state, and saves scope fr
   render(<QueryClientProvider client={queryClient}><ChannexAriSettings connectionId="connection" /></QueryClientProvider>);
   expect(await screen.findByText(/201 · Twin/)).toBeTruthy();
   expect(screen.getByText(/Envíos externos deshabilitados/)).toBeTruthy();
-  expect(screen.getByLabelText('Piso incluido')).toHaveValue(2);
+  expect(screen.getByLabelText('Piso incluido (vacío: todo el hotel)')).toHaveValue(2);
   fireEvent.click(screen.getByRole('button', { name: 'Guardar alcance' }));
   await waitFor(() => expect(requests.some(r => r.method === 'PATCH' && r.url === '/api/channex/connections/connection/ari' && r.body.floor === 2 && r.body.currency === 'USD' && r.body.enabled === false)).toBe(true));
   expect(requests.every(r => r.url.startsWith('/api/channex/'))).toBe(true);
 });
 it('requests a preview for a changed floor without enabling capture', async () => {
   render(<QueryClientProvider client={queryClient}><ChannexAriSettings connectionId="connection" /></QueryClientProvider>);
-  await screen.findByLabelText('Piso incluido');
-  fireEvent.change(screen.getByLabelText('Piso incluido'), { target: { value: '3' } });
+  await screen.findByLabelText('Piso incluido (vacío: todo el hotel)');
+  fireEvent.change(screen.getByLabelText('Piso incluido (vacío: todo el hotel)'), { target: { value: '3' } });
   fireEvent.click(screen.getByRole('button', { name: 'Ver habitaciones' }));
   await waitFor(() => expect(requests.some(r => r.url.endsWith('/ari?floor=3'))).toBe(true));
   expect(requests.some(r => r.method === 'PATCH' || r.method === 'POST')).toBe(false);

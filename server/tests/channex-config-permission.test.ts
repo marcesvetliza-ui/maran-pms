@@ -1,10 +1,11 @@
+vi.mock('../channex/access',()=>({registerChannexAccessRoutes:()=>{},requireChannex:(capability:string)=>(req:any,res:any,next:any)=>{if(!req.isAuthenticated())return res.sendStatus(401);if(capability==='read'||permissionsState.granted.has(`${req.user.role}:api:ota:${capability}`))return next();return res.sendStatus(403);}}));
 import express from "express";
 import * as http from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Etapa 3 del ABM de usuarios: config de conexiones/mapeos de Channex pasa
- * de requireRole(CHANNEX_CONFIG_ROLES) a requirePermission("api:channex:config")
+ * de requireRole(CHANNEX_CONFIG_ROLES) a requirePermission("api:ota:config")
  * — resourceKey propio (no ligado al sidebar), mismo array de roles de antes.
  */
 
@@ -51,11 +52,11 @@ async function startApp(role: string) {
   });
 }
 
-describe("channex config routes — migradas a requirePermission(api:channex:config)", () => {
+describe("channex config routes — migradas a requirePermission(api:ota:config)", () => {
   let app: { baseUrl: string; close: () => Promise<void> };
 
   beforeEach(() => {
-    permissionsState.granted = new Set(["manager:api:channex:config"]);
+    permissionsState.granted = new Set(["manager:api:ota:config"]);
   });
 
   afterEach(async () => {

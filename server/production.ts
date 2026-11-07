@@ -10,7 +10,7 @@ import {
   recipes, recipeIngredients, inventoryItems, stockMovements, productionRuns,
   type UnitType,
 } from "@shared/schema";
-import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
+import { refreshRecipeCostsForInventoryEntry } from "./recipeCostCascade";
 import {
   deductIngredientsWithActualQuantities, grossQuantityFor,
   type DeductedLine, type ShortfallWarning, type SkippedLine, type RecipeLookupFn,
@@ -187,7 +187,7 @@ export type RegisterProductionRunResult = {
  * diferir de la teórica — merma real del día), suma stock al artículo
  * producido y fija su costo unitario (costo total consumido / cantidad real
  * obtenida), propagando ese costo a cualquier receta que ya use ese artículo
- * (cascadeRecipeCostsFromInventoryItem). Si falta stock o configuración,
+ * (refreshRecipeCostsForInventoryEntry). Si falta stock o configuración,
  * se rechaza toda la corrida sin descontar insumos ni ingresar producción.
  */
 export async function registerProductionRun(input: RegisterProductionRunInput): Promise<RegisterProductionRunResult> {
@@ -276,7 +276,7 @@ export async function registerProductionRun(input: RegisterProductionRunInput): 
       createdAt: new Date(),
     } as any);
 
-    await cascadeRecipeCostsFromInventoryItem(tx, outputInventoryItemId, stockUnitCost);
+    await refreshRecipeCostsForInventoryEntry(tx, outputInventoryItemId, stockUnitCost);
 
     const inputsSnapshot = formulaIngredients.map(ing => {
       const actual = actualByIngredientId.get(ing.id)!;

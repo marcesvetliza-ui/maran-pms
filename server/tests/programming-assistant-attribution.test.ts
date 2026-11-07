@@ -24,7 +24,7 @@ it.each([
  const s=source();const errors=await checkErrorAttribution(report(cause),s);
  expect(errors).toHaveLength(1);
  expect(errors[0]).toMatchObject({field:'cause',attributedSymbol:'convertInventoryQuantity',origin:{symbol:'inventoryUnitFactor',path:'shared/inventoryUnits.ts'}});
- expect(errors[0].origin.statement).toContain('throw fail(`Falta equivalencia explícita');
+ expect(errors[0].origin.statement).toMatch(/throw\s+(?:Object\.assign\(\s*)?fail\(`Falta equivalencia explícita/);
  expect(s.validates(errors[0].origin)).toBe(true);
 });
 it('checks explanation fields too, and does not accept a wrong hypothesis as a workaround',async()=>{

@@ -1,10 +1,10 @@
 import { assertExternalCommAllowed } from "../external-comms-policy";
 import { randomUUID } from "node:crypto";
+import {fiscalDocumentCode} from "../../shared/fiscal-document-types";
 import { assertBillingPoint, BillingPreflightError, fiscalRecipientError } from "./preflight";
 import { beginBillingOperation, billingOperationStage, billingOperationNumber, operationForInvoice, payloadHash, type BillingOperation, type FiscalIdentity } from "./operationJournal";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
-
 import { FiscalNumberLookupError, readLastAuthorizedNumber } from "./lastAuthorizedNumber";
 import { db, pool } from "../db";
 import { eq, sql } from "drizzle-orm";
@@ -141,6 +141,7 @@ function invoiceRowValue(doc: any, snakeCase: string, camelCase: string) {
  * (snake_case from a raw query, or camelCase) this NC/ND corrects.
  */
 export function buildComprobanteAsociado(doc: any): NewInvoiceData["comprobanteAsociado"] {
+  fiscalDocumentCode(String(invoiceRowValue(doc, "tipo_comprobante", "tipoComprobante")));
   return {
     tipo: String(invoiceRowValue(doc, "tipo_comprobante", "tipoComprobante")),
     puntoVenta: Number(invoiceRowValue(doc, "punto_venta", "puntoVenta")),
@@ -331,6 +332,7 @@ async function getNextInvoiceNumberFromAfip(
 }
 
 export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesInvoices.$inferSelect> {
+  if(!isNonFiscalTipo(data.tipoComprobante)&&data.comprobanteAsociado)fiscalDocumentCode(data.comprobanteAsociado.tipo);
   const collectionError = nonFiscalCollectionError(data.tipoComprobante, data.cashFormaPagoDetalle?.length ? data.cashFormaPagoDetalle.filter(row=>Number(row.amount)>0).map(row=>row.method) : [data.cashFormaPago]);
   if (collectionError) throw Object.assign(new Error(collectionError), {statusCode:400});
   const config=await getBillingConfig();

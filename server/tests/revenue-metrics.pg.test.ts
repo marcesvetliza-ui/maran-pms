@@ -78,6 +78,22 @@ async function seedGroupCharge(input: { groupId: string; amount: number; date: s
 }
 
 describe("computeRevenueBoard", () => {
+  it("usa el precio neto guardado para cada noche y conserva el contrato original",async()=>{
+    const prefix=randomUUID(),dates=['2001-01-30','2001-01-31','2001-02-01'];
+    await expect(withDatabaseTransaction(async()=>{
+      const roomTypeId=await seedRoomType(prefix),roomId=await seedRoom(prefix,roomTypeId),guestId=await seedGuest(prefix);
+      await seedReservation({id:prefix+'-res',guestId,roomTypeId,roomId,checkIn:dates[0],checkOut:'2001-02-02',status:'checked_out',nights:3,finalRatePerNight:99999,totalRoomAmount:540});
+      const prices=dates.map((date,i)=>({date,rateCents:(i+1)*10000,discountCents:(i+1)*1000}));
+      await db.execute(sql`UPDATE reservations SET pricing_scheme='nightly_v1',nightly_pricing=${JSON.stringify(prices)}::jsonb WHERE id=${prefix+'-res'}`);
+      for(let i=0;i<dates.length;i++){
+        const detail=await getRevenueDayDetail(dates[i]);const line=detail.reservations.find(r=>r.reservationId===prefix+'-res');
+        expect(line).toMatchObject({nightlyRate:(i+1)*90,rateSource:'nightly_pricing',countsForAdr:true});expect(detail.actualRoomRevenue+detail.forecastRoomRevenue).toBe(detail.totalRevenue);
+      }
+      const after=(await db.execute(sql`SELECT nightly_pricing FROM reservations WHERE id=${prefix+'-res'}`)).rows[0] as any;expect(after.nightly_pricing).toEqual(prices);
+      throw rollback();
+    })).rejects.toThrow('rollback');
+  });
+
   it("cuenta una reserva futura confirmada como vendida y calcula ADR/RevPAR sobre su tarifa", async () => {
     const prefix = randomUUID();
     const stayDate = addCalendarDays(today, 10);
@@ -146,7 +162,7 @@ describe("computeRevenueBoard", () => {
       const line = detail.reservations.find(r => r.reservationId === prefix + "-res");
       expect(line).toBeDefined();
       expect(line!.nightlyRate).toBe(20000);
-      expect(line!.rateSource).toBe("final_rate_per_night");
+      expect(line!.rateSource).toBe("total_room_amount_prorated");
       expect(line!.countsForAdr).toBe(true);
 
       throw rollback();

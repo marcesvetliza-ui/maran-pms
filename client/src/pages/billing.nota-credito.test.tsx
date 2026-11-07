@@ -82,6 +82,10 @@ beforeEach(() => {
 });
 
 describe("NotaCreditoDialog de Administración", () => {
+  it('does not offer a fiscal credit confirmation for an internal voucher',async()=>{
+    vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...reservationInvoice,tipo_comprobante:'cierre_habitacion'}),{status:200,headers:{'Content-Type':'application/json'}})));
+    renderDialog();expect(await screen.findByText(/Ningún comprobante no fiscal admite/)).toBeInTheDocument();expect(screen.queryByTestId('btn-nc-confirmar')).not.toBeInTheDocument();expect(apiRequestMock).not.toHaveBeenCalled();
+  });
   it("envía sólo los cargos seleccionados y conserva los datos heredados", async () => {
     const user = userEvent.setup();
     renderDialog();

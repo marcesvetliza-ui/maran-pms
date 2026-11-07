@@ -1,3 +1,4 @@
+import {DEMO_URL,PRODUCTION_URL,productionEnabled} from './connectionPolicy';
 /**
  * Cliente HTTP mínimo para la API de Channex (channel manager).
  *
@@ -41,7 +42,10 @@ async function channexRequest(
   path: string,
   init: { method?: string } = {},
 ): Promise<any> {
-  const url = `${connection.baseUrl.replace(/\/$/, "")}${path}`;
+  const baseUrl=connection.baseUrl.replace(/\/$/,'');
+  if(![DEMO_URL,PRODUCTION_URL].includes(baseUrl))throw new ChannexApiError('Dirección de Channex no permitida',400,null);
+  if(baseUrl===PRODUCTION_URL&&init.method&&init.method!=='GET'&&!productionEnabled('inbound'))throw new ChannexApiError('La recepción de producción aún no está habilitada',409,null);
+  const url = `${baseUrl}${path}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {

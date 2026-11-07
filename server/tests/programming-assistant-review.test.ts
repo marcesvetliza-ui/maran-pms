@@ -11,7 +11,7 @@ it('supplies the cited code instead of treating the erroneous explanation as evi
  await source.read(ref.path,ref.start,ref.end);
  const draft:SupportDiagnosis={summary:'convertInventoryQuantity arroja Falta equivalencia explícita',certainty:'sustentado_en_codigo',cause:'',proposal:'',proposedTests:[],questions:['¿Existe alguna pantalla para configurar equivalencias?'],dataRepair:'',limitations:[],evidence:[{...ref,explanation:'convertInventoryQuantity detecta falta de configuración'}]};
  const review=await buildCoverageReview(draft,source);
- expect(review.citedCode[0].content).toContain('throw fail(`Falta equivalencia explícita');
+ expect(review.citedCode[0].content).toMatch(/throw\s+(?:Object\.assign\(\s*)?fail\(`Falta equivalencia explícita/);
  const conversion=await source.inspectSymbol('convertInventoryQuantity',{maxDefinitions:1,maxTests:0,lines:30});
  expect(conversion.definitions[0].content).toContain('export function convertInventoryQuantity');
  expect(conversion.definitions[0].content).toContain("throw fail('Cantidad o equivalencia inválida')");

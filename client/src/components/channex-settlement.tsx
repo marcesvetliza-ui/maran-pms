@@ -1,3 +1,4 @@
+import {useChannexAccess} from '@/hooks/use-channex-access';
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -25,10 +26,12 @@ export function ChannexSettlementRate({ rate, pending, onSave }: { rate: string 
 
 type Snapshot = { source_currency: string; source_total: string; exchange_rate: string; settlement_currency: string; settlement_total: string };
 export function ReservationChannexSettlement({ reservationId, open }: { reservationId: string; open: boolean }) {
+  const {data:access}=useChannexAccess();
   const query = useQuery<Snapshot | null>({
-    queryKey: ["/api/reservations", reservationId, "channex-settlement"], enabled: open,
+    queryKey: ["/api/reservations", reservationId, "channex-settlement"], enabled: open&&!!access?.read,
     queryFn: async () => (await apiRequest("GET", `/api/reservations/${reservationId}/channex-settlement`)).json(),
   });
+  if(!access?.read)return null;
   if (query.error) return <p role="alert" className="text-sm">No se pudo consultar el importe original de Channex.</p>;
   if (!query.data || query.data.source_currency !== "USD") return null;
   const snapshot = query.data;

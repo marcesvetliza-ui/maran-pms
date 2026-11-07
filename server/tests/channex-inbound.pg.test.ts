@@ -290,9 +290,11 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  });
  it("rejects production connections before storing or applying a revision",async()=>{
   const f=await fixture();await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1",[f.id]);await pool.query("UPDATE channex_ari_settings SET enabled=false WHERE connection_id=$1",[f.id]);
-  await pool.query("UPDATE channex_connections SET environment='real' WHERE id=$1",[f.id]);
-  await expect(service.persistInboundRevision(pool,f.id,revision(f.id,"production-blocked","production"))).rejects.toThrow("STAGING_ONLY");
-  expect((await pool.query("SELECT revision_id FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
+  await expect(pool.query("UPDATE channex_connections SET environment='real' WHERE id=$1",[f.id])).rejects.toThrow("otra conexión");
+  const real=randomUUID();owners.push(real);
+  await pool.query("INSERT INTO channex_connections(id,label,environment,channex_property_id,base_url,is_active,created_at) VALUES($1::text,'Production disabled','real',$1::text,'https://app.channex.io/api/v1',true,now())",[real]);
+  await expect(service.persistInboundRevision(pool,real,revision(real,"production-blocked","production"))).rejects.toThrow("STAGING_ONLY");
+  expect((await pool.query("SELECT revision_id FROM channex_inbound_revisions WHERE connection_id=$1",[real])).rows).toHaveLength(0);
  });
  it("retains immutable revisions and redacts card data before storing them",async()=>{
   const f=await fixture(),r:any=revision(f.id,"booking-hash","hash");r.attributes.guarantee={card_number:"sensitive"};await service.persistInboundRevision(pool,f.id,r);

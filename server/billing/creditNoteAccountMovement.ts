@@ -1,5 +1,15 @@
 import {sql} from 'drizzle-orm';
 import {getArgentinaToday} from '../db-storage';
+import {isCashOnlySettlement} from '@shared/credit-note-account-recovery';
+
+// The alias is internal and fixed in both invoice SELECTs. Same durable links
+// used by recovery; never infer account debt from an invoice/NC merely existing.
+export const originalAccountChargeLinked = sql`EXISTS(SELECT 1 FROM account_movements am
+ WHERE am.type='cargo' AND am.voided=false AND orig.id IS NOT NULL
+ AND am.reservation_id IS NOT DISTINCT FROM orig.reserva_id
+ AND (am.reference=orig.tipo_comprobante || '-' || lpad(orig.numero::text,8,'0')
+   OR (orig.credit_reapplication_intent->>'operationId' IS NOT NULL AND am.reference='credit-operation:' || (orig.credit_reapplication_intent->>'operationId'))
+   OR (orig.payment_id IS NOT NULL AND am.payment_id=orig.payment_id)))`;
 
 // Call inside a transaction. Never emits a fiscal document or changes payments.
 export async function creditNoteAccountMovement(tx:any, original:any, nc:any) {
@@ -17,7 +27,7 @@ export async function creditNoteAccountMovement(tx:any, original:any, nc:any) {
        OR (${paymentId}::varchar IS NOT NULL AND payment_id=${paymentId}))
    ORDER BY id FOR UPDATE`)).rows as any[];
  if(rows.length>1)throw new Error('La factura tiene varios cargos de cuenta corriente posibles; requiere revisión para evitar un descuento incorrecto');
- if(!rows.length)return {status:'no_matching_charge',amount:0};
+ if(!rows.length)return {status:isCashOnlySettlement(original)?'not_applicable':'no_matching_charge',amount:0};
  const cargo=rows[0];
  const marker=`[nc:${ncId}]`;
  const existing=(await tx.execute(sql`SELECT id FROM account_movements WHERE entity_type=${cargo.entity_type}

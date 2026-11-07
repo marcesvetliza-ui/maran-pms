@@ -9,7 +9,7 @@ const NON_FISCAL = new Set(["ticket", "voucher_justo", "voucher_pedidos_ya", "vo
 const FISCAL = new Set(["FA", "FB", "FC", "FT", "FM", "FMB", "NCA", "NCB", "NCC", "NCT", "NCM", "NCMB", "NDA", "NDB", "NDC", "NDT", "NDM", "NDMB"]);
 export function normalizedDocumentType(type: unknown): string {
   const value = String(type ?? "").trim();
-  return ({ factura_a: "FA", factura_b: "FB", factura_c: "FC", factura_t: "FT", "Factura A": "FA", "Factura B": "FB", "Factura C": "FC" } as Record<string,string>)[value] || value;
+  return ({ voucher: "voucher_justo", consumo_interno: "voucher_consumo_interno", factura_a: "FA", factura_b: "FB", factura_c: "FC", factura_t: "FT", "Factura A": "FA", "Factura B": "FB", "Factura C": "FC" } as Record<string,string>)[value] || value;
 }
 export function isNonFiscalDocument(type: unknown): boolean { return NON_FISCAL.has(normalizedDocumentType(type)); }
 export type CashDocument = { id: number; type: string; pointOfSale: number; number: number; status: string | null };
@@ -20,11 +20,13 @@ export function documentReference(document: CashDocument): string {
   return `${name} ${String(document.pointOfSale).padStart(4,"0")}-${String(document.number).padStart(8,"0")}`;
 }
 export function classifyCashDocument(input: {sourceType?: string; receiptType?: string | null; receiptNumber?: string | null}, documents: CashDocument[], knownPayment = false): CashDocumentEvidence {
-  const valid = documents.filter(d => ["emitida", "autorizada", "parcialmente_acreditada", "acreditada", "anulada"].includes(d.status || "") && Number(d.number) > 0);
+  if (input.sourceType === "non_fiscal_void") return { documentClass: "other", documentReference: "Comprobante no fiscal eliminado · sin movimiento de dinero" };
+  const valid = documents.filter(d => !(isNonFiscalDocument(d.type) && d.status === "anulada") && ["emitida", "autorizada", "parcialmente_acreditada", "acreditada", "anulada"].includes(d.status || "") && Number(d.number) > 0);
   const classes = new Set(valid.map(d => isNonFiscalDocument(d.type) ? "non_fiscal" : FISCAL.has(normalizedDocumentType(d.type)) ? "fiscal" : "unclassified"));
   // More than one document must never multiply the money or guess an allocation.
   if (classes.size > 1 || valid.length > 1) return {documentClass:"unclassified", documentReference:valid.map(documentReference).join(" · "), documents:valid};
   if (valid.length === 1) return {documentClass:[...classes][0] as CashDocumentClass, documentReference:documentReference(valid[0]), documents:valid};
+  if (documents.some(d => isNonFiscalDocument(d.type) && d.status === "anulada")) return {documentClass:"pending", documentReference:"Comprobante no fiscal eliminado · cobro conservado como anticipo", documents};
   if (documents.length) return {documentClass:"pending", documentReference:"Comprobante pendiente de autorización", documents};
   if (input.sourceType === "manual") return {documentClass:"other", documentReference:receiptTypeLabel(input.receiptType || "Movimiento manual")};
   if (isNonFiscalDocument(input.receiptType)) return {documentClass:"non_fiscal", documentReference:`${receiptTypeLabel(input.receiptType!)}${input.receiptNumber ? ` · recibo de caja #${input.receiptNumber}` : " · sin número vinculado"}`};
@@ -37,11 +39,16 @@ export function cashDocumentSummary(movements: Array<CashDocumentEvidence & {pay
   return Object.entries(totals).map(([key, cents]) => ({key:key as CashDocumentClass, label:CASH_DOCUMENT_LABELS[key as CashDocumentClass], total:cents / 100}));
 }
 /** Internal imputations/prepaid redemptions are not a fresh collection. */
-export function nonFiscalCollectionError(type: unknown, methods: unknown[]): string | null {
+export function nonFiscalCollectionError(type: unknown, methods: unknown[], options: { restaurant?: boolean } = {}): string | null {
   if (!isNonFiscalDocument(type)) return null;
   const noCollection = new Set(["", "none", "sin_cobro", "sin_pago", "no_charge", "courtesy", "cortesia", "room_charge", "cuenta_habitacion", "cargo_habitacion", "venta_previa", "gift_voucher"]);
-  const permittedSettlement = (method: unknown) => normalizedDocumentType(type) === "cierre_habitacion"
-    && ["cuenta_corriente", "current_account"].includes(String(method ?? "").trim().toLowerCase());
+  const restaurantInternal = new Set(["ticket", "voucher", "voucher_justo", "voucher_room_service", "voucher_pedidos_ya", "voucher_consumo_interno"]);
+  const permittedSettlement = (method: unknown) => {
+    const value = String(method ?? "").trim().toLowerCase();
+    return (normalizedDocumentType(type) === "cierre_habitacion" && ["cuenta_corriente", "current_account"].includes(value))
+      || options.restaurant === true && ((value === "consumo_interno" && restaurantInternal.has(normalizedDocumentType(type)))
+      || (value === "pedidos_ya" && normalizedDocumentType(type) === "voucher_pedidos_ya"));
+  };
   return methods.some(method => !permittedSettlement(method) && !isCashMethod(method) && !noCollection.has(String(method ?? "").trim().toLowerCase()))
     ? normalizedDocumentType(type) === "cierre_habitacion"
       ? "El cierre de habitación admite efectivo, Cuenta Corriente o sin cobro nuevo. Para cobrar con otro medio, elegí un comprobante fiscal."

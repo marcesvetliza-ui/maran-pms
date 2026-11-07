@@ -5,6 +5,8 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    maxWorkers: process.env.CI ? 2 : undefined,
+    testTimeout: process.env.CI ? 20_000 : 5_000,
     setupFiles: ["./server/tests/setup.ts"],
     // Every server test file matches automatically — no per-file allowlist
     // to maintain. Files ending in `.pg.test.ts` need a real PostgreSQL

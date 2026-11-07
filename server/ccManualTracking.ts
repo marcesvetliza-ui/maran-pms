@@ -1,3 +1,4 @@
+import {activeSalesRecord} from "./salesArchive";
 import {z} from 'zod';
 import {sql} from 'drizzle-orm';
 import {db,withDatabaseTransaction} from './db';
@@ -20,7 +21,7 @@ export async function addCcManualTracking(input:unknown,user:string|null){
   const retry=(await db.execute(sql`SELECT id FROM cc_manual_tracking WHERE request_id=${data.requestId}`)).rows[0];if(retry)return retry;
   let name=data.entityName,reference=data.reference,fecha=data.fecha,monto=data.monto,estado=data.estado,observaciones=data.observaciones;
   if(data.salesInvoiceId){
-   const inv=(await db.execute(sql`SELECT * FROM sales_invoices WHERE id=${data.salesInvoiceId} AND estado='emitida' AND tipo_comprobante LIKE 'F%' AND cash_forma_pago='cuenta_corriente' FOR SHARE`)).rows[0] as any;
+   const inv=(await db.execute(sql`SELECT * FROM sales_invoices WHERE id=${data.salesInvoiceId} AND ${activeSalesRecord('invoice',sql`id`)} AND estado='emitida' AND tipo_comprobante LIKE 'F%' AND cash_forma_pago='cuenta_corriente' FOR SHARE`)).rows[0] as any;
    if(!inv)throw new Error('Elegí una factura vigente en cuenta corriente');
    const existing=(await db.execute(sql`SELECT estado,observaciones FROM cc_invoice_tracking WHERE sales_invoice_id=${data.salesInvoiceId}`)).rows[0] as any;
    if(existing){estado=existing.estado;if(!observaciones)observaciones=existing.observaciones;}
@@ -32,6 +33,6 @@ export async function addCcManualTracking(input:unknown,user:string|null){
   return row;
  });
 }
-export async function getCcManualTrackingRows(){const result=await db.execute(sql`SELECT m.*,si.estado invoice_estado,si.recipient_entity_type,si.recipient_entity_id FROM cc_manual_tracking m LEFT JOIN sales_invoices si ON si.id=m.sales_invoice_id WHERE m.sales_invoice_id IS NULL OR si.estado='emitida' ORDER BY m.fecha DESC,m.id DESC`);
+export async function getCcManualTrackingRows(){const result=await db.execute(sql`SELECT m.*,si.estado invoice_estado,si.recipient_entity_type,si.recipient_entity_id FROM cc_manual_tracking m LEFT JOIN sales_invoices si ON si.id=m.sales_invoice_id WHERE ${activeSalesRecord('cc_manual',sql`m.id`)} AND (m.sales_invoice_id IS NULL OR (si.estado='emitida' AND ${activeSalesRecord('invoice',sql`si.id`)})) ORDER BY m.fecha DESC,m.id DESC`);
  return result.rows.map((r:any)=>({manualId:r.id,salesInvoiceId:r.sales_invoice_id??-r.id,numeroFactura:r.reference||'Sin referencia',tipoComprobante:'Seguimiento',fecha:String(r.fecha),entityType:r.recipient_entity_type??'company',entityId:r.recipient_entity_id??'',entityName:r.entity_name,motivo:r.motivo,monto:r.monto===null?0:Number(r.monto),amountPending:r.monto===null || (r.sales_invoice_id!==null&&Number(r.monto)===0),estado:r.estado,observaciones:r.observaciones,updatedAt:String(r.updated_at)}));
 }

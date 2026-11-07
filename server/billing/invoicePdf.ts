@@ -1,3 +1,4 @@
+import { isNonFiscalDocument } from "../../shared/cash-document-classification";
 import { checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
@@ -210,6 +211,15 @@ export interface FacturaRetenciones {
   iva: number;
 }
 
+function stampEliminatedDocument(doc: PDFKit.PDFDocument) {
+  const pages = doc.bufferedPageRange();
+  for (let page = pages.start; page < pages.start + pages.count; page++) {
+    doc.switchToPage(page);
+    doc.save().fillColor("#b91c1c").opacity(0.20).rotate(-32, { origin: [300,420] })
+      .font("Helvetica-Bold").fontSize(36).text("COMPROBANTE ELIMINADO", 35, 400, { width: 535, align: "center", lineBreak: false }).restore();
+  }
+}
+
 export async function generarFacturaPDF(
   factura: any,
   config: any,
@@ -224,7 +234,7 @@ export async function generarFacturaPDF(
     ? await QRCode.toBuffer(qrUrl, { type: "png", width: 180, margin: 1, errorCorrectionLevel: "M" })
     : null;
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 30, size: "A4" });
+    const doc = new PDFDocument({ margin: 30, size: "A4", bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
@@ -860,6 +870,7 @@ export async function generarFacturaPDF(
         .text(`$${fPeso(groupComposition.total)}`, x0 + W - 115, detailY, { width: 108, align: "right" });
     }
 
+    if (factura.estado === "anulada" && isNonFiscalDocument(tipoKey)) stampEliminatedDocument(doc);
     doc.end();
   });
 }
@@ -867,6 +878,7 @@ export async function generarFacturaPDF(
 // ── Voucher y Resumen (sin cambios) ─────────────────────────────────────────
 
 export interface VoucherHabitacionData {
+  eliminated?: boolean;
   numero: number;
   puntoVenta: number;
   fechaEmision: string;
@@ -914,7 +926,7 @@ export async function generarVoucherHabitacionPDF(
   options: VoucherHabitacionPdfOptions = {},
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 30, size: "A4" });
+    const doc = new PDFDocument({ margin: 30, size: "A4", bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on("data", (c: Buffer) => chunks.push(c));
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
@@ -1064,7 +1076,7 @@ export async function generarVoucherHabitacionPDF(
         const credited = $n(invoice.monto_acreditado);
         const detail = !isCredit && credited > 0
           ? `Acreditado $${fPeso(credited)} · Neto $${fPeso(Math.max(0, total - credited))}`
-          : invoice.estado === "anulada" ? "Anulada fiscalmente" : "";
+          : invoice.estado === "anulada" ? (isNonFiscalDocument(invoice.tipo_comprobante) ? "Comprobante eliminado" : "Anulada fiscalmente") : "";
         doc.fillColor(isCredit ? "#c62828" : "#000").font("Helvetica").fontSize(7.5)
            .text(fDate(invoice.fecha_emision), x0 + 4, y, { width: 60 })
            .text(`${invoice.tipo_comprobante} ${padNum(invoice.punto_venta, 4)}-${padNum(invoice.numero, 8)}`, x0 + 68, y, { width: 145 })
@@ -1104,6 +1116,7 @@ export async function generarVoucherHabitacionPDF(
     doc.font("Helvetica").fontSize(6).fillColor("#aaaaaa")
        .text(`Generado el ${_ts} | ${config?.razonSocial ?? "Maran Suites & Towers"}`, x0, y + 8, { align: "center", width: W });
 
+    if (data.eliminated) stampEliminatedDocument(doc);
     doc.end();
   });
 }

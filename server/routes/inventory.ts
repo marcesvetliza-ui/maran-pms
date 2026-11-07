@@ -1,4 +1,5 @@
 import {validateInventoryConversions} from "../inventoryConversionValidation";
+import { canCorrectInventoryUnit } from '../inventoryUnitCorrection';
 import { insertInventoryItemSchema } from "@shared/schema";
 import { protectWarehouseDeactivation } from "../inventoryLifecycle";
 import {registerInventoryHistoryRoutes} from "../inventoryHistory";
@@ -24,6 +25,7 @@ const INVENTORY_WRITE_RESOURCE_KEY = "api:inventory:write";
 
 export function registerInventoryRoutes(app: Express) {
   app.use("/api/inventory", requireAuth, inventoryAccess);
+  app.get('/api/inventory/unit-correction-mode',requireAuth,(req,res)=>res.json({enabled:canCorrectInventoryUnit(req.user?.role)}));
   registerInventoryStage2Routes(app);
   registerInventoryLocationRoutes(app);
   registerInventoryHistoryRoutes(app);
@@ -190,9 +192,12 @@ export function registerInventoryRoutes(app: Express) {
         await catalogLock();
         await db.execute(sql`SELECT id FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
         const before = await storage.getInventoryItem(req.params.id);
+        const unitChanged=!!before && req.body.unit!==undefined && req.body.unit!==before.unit;
+        if(unitChanged&&!canCorrectInventoryUnit(req.user?.role))throw Object.assign(new Error('La corrección temporal de unidades no está habilitada para este usuario o ya fue cerrada.'),{statusCode:403});
+        const previousConversions=unitChanged?(await db.execute(sql`SELECT from_unit,factor FROM inventory_unit_conversions WHERE item_id=${req.params.id} ORDER BY from_unit`)).rows:undefined;
         await validateItemClassification(req.body, req.params.id);
-        const after = await storage.updateInventoryItem(req.params.id, req.body);
-        if(after) await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},'Edición de artículo',${JSON.stringify({before,after})},now())`);
+        const after = await storage.updateInventoryItem(req.params.id, req.body,{allowUnitCorrection:canCorrectInventoryUnit(req.user?.role)});
+        if(after) await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},${unitChanged?'Corrección temporal de unidad base (sin conversión de cantidades)':'Edición de artículo'},${JSON.stringify({before,after,...(unitChanged?{previousConversions,newConversions:req.body.conversions??[],quantitiesConverted:false}:{})})},now())`);
         return after;
       });
       if (!item) return res.status(404).json({ error: "Item not found" });
@@ -231,6 +236,9 @@ export function registerInventoryRoutes(app: Express) {
         await catalogLock();
         await db.execute(sql`SELECT id FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
         const before=await storage.getInventoryItem(req.params.id); if(!before)return null;
+        const unitChanged=req.body.unit!==undefined&&req.body.unit!==before.unit;
+        if(unitChanged&&!canCorrectInventoryUnit(req.user?.role))throw Object.assign(new Error('La corrección temporal de unidades no está habilitada para este usuario o ya fue cerrada.'),{statusCode:403});
+        const previousConversions=unitChanged?(await db.execute(sql`SELECT from_unit,factor FROM inventory_unit_conversions WHERE item_id=${req.params.id} ORDER BY from_unit`)).rows:undefined;
         const fields = ["name","sku","categoryId","brandId","unit","costPrice","minStock","maxStock","criticalStock","itemKind","abcClass","ivaRate","description","location"];
         const input = Object.fromEntries(fields.filter(key=>req.body[key] !== undefined).map(key=>[key, req.body[key]]));
         for (const key of ["costPrice","minStock","maxStock","criticalStock"]) if (input[key] != null) input[key] = String(input[key]);
@@ -239,8 +247,8 @@ export function registerInventoryRoutes(app: Express) {
         for (const key of ["costPrice","minStock","maxStock","criticalStock"]) if (input[key] != null && (!Number.isFinite(Number(input[key])) || Number(input[key]) < 0)) throw Object.assign(new Error("Los importes y límites deben ser números no negativos"),{statusCode:400});
         await validateItemClassification(input, req.params.id);
         if(before.isActive !== "false" && isActive === "false") throw Object.assign(new Error("Usá dar de baja e indicá el motivo"),{statusCode:400});
-        const after=await storage.updateInventoryItem(req.params.id,{...parsed.data,name:name.trim(),...(sku !== undefined ? {sku:typeof sku === "string" ? sku.trim() || null : null} : {}),...(req.body.accountingSupplierIds !== undefined ? {accountingSupplierIds:req.body.accountingSupplierIds,preferredAccountingSupplierId:req.body.preferredAccountingSupplierId} : {}),isActive:isActive === "true" ? "true" : before.isActive});
-        await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},'Edición de artículo',${JSON.stringify({before,after})},now())`);return after;
+        const after=await storage.updateInventoryItem(req.params.id,{...parsed.data,name:name.trim(),...(sku !== undefined ? {sku:typeof sku === "string" ? sku.trim() || null : null} : {}),...(req.body.accountingSupplierIds !== undefined ? {accountingSupplierIds:req.body.accountingSupplierIds,preferredAccountingSupplierId:req.body.preferredAccountingSupplierId} : {}),...(unitChanged?{conversions:req.body.conversions??[]} : {}),isActive:isActive === "true" ? "true" : before.isActive},{allowUnitCorrection:canCorrectInventoryUnit(req.user?.role)});
+        await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},${unitChanged?'Corrección temporal de unidad base (sin conversión de cantidades)':'Edición de artículo'},${JSON.stringify({before,after,...(unitChanged?{previousConversions,newConversions:req.body.conversions??[],quantitiesConverted:false}:{})})},now())`);return after;
       });
       if(!item)return res.status(404).json({error:"Artículo no encontrado"});res.json(item);
     }catch(error:any){if(duplicateArticleError(error))return res.status(409).json({error:"Ya existe un artículo activo con ese nombre. Usá el artículo existente."});res.status(error.statusCode || 500).json({error:error.message || "No se pudo editar el artículo"});}

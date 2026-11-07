@@ -52,7 +52,7 @@ suite('recipe quantities, cost and real stock use the same conversion', () => {
       await pool!.query('DELETE FROM inventory_items WHERE id=$1',[id]);
     }
   });
-  it.each(['unidad','litro'])('resolves legacy L recipes against %s stock without changing its unit or quantities', async previousUnit => {
+  it.each(['unidad','kg'])('corrects milk from %s to litro with a legacy L recipe, preserving stock and quantities', async previousUnit => {
     const id=randomUUID(),recipe=randomUUID(),warehouse=randomUUID();
     try {
       await pool!.query("INSERT INTO inventory_items(id,name,unit,current_stock,cost_price,item_kind) VALUES($1,'Leche prueba',$2,12,1777,'materia_prima')",[id,previousUnit]);
@@ -66,9 +66,8 @@ suite('recipe quantities, cost and real stock use the same conversion', () => {
         expect(await unitFactor(db,id,'L','unidad')).toBe(1);
       }
       const before=(await pool!.query('SELECT * FROM warehouse_stock WHERE item_id=$1',[id])).rows;
-      const {db:costDb}=await import('../db');const {cascadeRecipeCostsFromInventoryItem}=await import('../recipeCostCascade');
-      await costDb.transaction(tx=>cascadeRecipeCostsFromInventoryItem(tx,id,1777));
-      const saved=(await pool!.query('SELECT unit,current_stock,cost_price FROM inventory_items WHERE id=$1',[id])).rows[0];expect(saved.unit).toBe(previousUnit);expect(Number(saved.current_stock)).toBe(12);expect(Number(saved.cost_price)).toBe(1777);
+      await storage.updateInventoryItem(id,{unit:'litro',conversions:[]},{allowUnitCorrection:true});
+      const saved=(await pool!.query('SELECT unit,current_stock,cost_price FROM inventory_items WHERE id=$1',[id])).rows[0];expect(saved.unit).toBe('litro');expect(Number(saved.current_stock)).toBe(12);expect(Number(saved.cost_price)).toBe(1777);
       expect((await pool!.query('SELECT * FROM warehouse_stock WHERE item_id=$1',[id])).rows).toEqual(before);
       const ingredient=(await pool!.query('SELECT quantity,unit,unit_cost FROM recipe_ingredients WHERE id=$1',[id])).rows[0];
       expect(Number(ingredient.quantity)).toBe(.2);expect(ingredient.unit).toBe('L');expect(Number(ingredient.unit_cost)).toBe(1777);
@@ -80,7 +79,7 @@ suite('recipe quantities, cost and real stock use the same conversion', () => {
     }
   });
 
-  it('a real incompatible subrecipe names the affected recipe and rolls the correction back',async()=>{
+  it('temporary correction keeps all previous costs when a downstream subrecipe is incompatible',async()=>{
     const id=randomUUID(),base=randomUUID(),parent=randomUUID(),ing=randomUUID(),dep=randomUUID();
     try {
       await pool!.query("INSERT INTO inventory_items(id,name,unit,current_stock,cost_price) VALUES($1,'Leche prueba','unidad',12,1777)",[id]);
@@ -88,11 +87,11 @@ suite('recipe quantities, cost and real stock use the same conversion', () => {
       await pool!.query("INSERT INTO recipes(id,name,is_base,production_unit,production_yield) VALUES($1,'Base en kilos',true,'kg',1),($2,'Postre afectado',false,NULL,NULL)",[base,parent]);
       await pool!.query("INSERT INTO recipe_ingredients(id,recipe_id,inventory_item_id,ingredient_name,quantity,unit,unit_cost) VALUES($1,$2,$3,'Leche prueba',1,'L',999)",[ing,base,id]);
       await pool!.query("INSERT INTO recipe_ingredients(id,recipe_id,sub_recipe_id,ingredient_name,quantity,unit,unit_cost) VALUES($1,$2,$3,'Base en kilos',1,'L',999)",[dep,parent,base]);
-      const {db}=await import('../db');const {cascadeRecipeCostsFromInventoryItem}=await import('../recipeCostCascade');
-      await expect(db.transaction(tx=>cascadeRecipeCostsFromInventoryItem(tx,id,1777))).rejects.toThrow(/Postre afectado.*Base en kilos.*L.*kg/);
-      expect((await pool!.query('SELECT unit FROM inventory_items WHERE id=$1',[id])).rows[0].unit).toBe('unidad');
+      const saved=await storage.updateInventoryItem(id,{unit:'litro',conversions:[]},{allowUnitCorrection:true});
+      expect(saved?.unitCorrectionPending).toBe(true);expect(saved?.unitCorrectionNote).toMatch(/Postre afectado.*Base en kilos.*L.*kg/);
+      expect((await pool!.query('SELECT unit FROM inventory_items WHERE id=$1',[id])).rows[0].unit).toBe('litro');
       expect(Number((await pool!.query('SELECT unit_cost FROM recipe_ingredients WHERE id=$1',[ing])).rows[0].unit_cost)).toBe(999);
-      expect((await pool!.query('SELECT from_unit FROM inventory_unit_conversions WHERE item_id=$1',[id])).rows).toEqual([{from_unit:'litro'}]);
+      expect((await pool!.query('SELECT from_unit FROM inventory_unit_conversions WHERE item_id=$1',[id])).rows).toEqual([]);
     } finally {
       await pool!.query('DELETE FROM recipe_ingredients WHERE id=ANY($1::text[])',[[ing,dep]]);await pool!.query('DELETE FROM recipes WHERE id=ANY($1::text[])',[[base,parent]]);await pool!.query('DELETE FROM inventory_unit_conversions WHERE item_id=$1',[id]);await pool!.query('DELETE FROM inventory_items WHERE id=$1',[id]);
     }

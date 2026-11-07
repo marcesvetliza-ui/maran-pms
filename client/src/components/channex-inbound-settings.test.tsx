@@ -1,3 +1,4 @@
+vi.mock('@/hooks/use-channex-access',()=>({useChannexAccess:()=>({data:{owner:state.allowed,read:state.allowed,config:state.allowed,bookings:state.allowed,sync:state.allowed}})}));
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 const state=vi.hoisted(()=>({allowed:true}));

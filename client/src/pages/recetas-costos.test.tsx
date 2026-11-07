@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -80,6 +81,24 @@ it('uses the same order and search in base elaborations while excluding itself',
  expect(dialog.getByText('kg',{selector:'div'})).toBeTruthy();
 });
 
+it('permite salir de la categoría de receta con TAB hacia la descripción sin cambiarla', async () => {
+ const user=userEvent.setup(); const dialog=await openDish();
+ await user.click(dialog.getByTestId('button-toggle-basic-data'));
+ await user.click(dialog.getByTestId('select-recipe-item-category'));
+ await user.tab();
+ await waitFor(()=>expect(dialog.getByTestId('input-recipe-item-description')).toHaveFocus());
+ expect(dialog.getByTestId('select-recipe-item-category')).toHaveTextContent('Platos');
+});
+
+it('shows pending unit-correction costs on the recipe page before opening a dialog',async()=>{
+ const key=['/api/inventory/items?itemKind=materia_prima,venta_directa,semielaborado'];
+ queryClient.removeQueries({queryKey:key});
+ queryClient.setDefaultOptions({queries:{retry:false,staleTime:Infinity,queryFn:async({queryKey})=>String(queryKey[0]).startsWith('/api/inventory/items')?[{id:'milk',name:'Leche entera',unit:'litro',unitCorrectionPending:true,unitCorrectionNote:'Revisá Salsa panimal'}]:recipeRows}});
+ render(<QueryClientProvider client={queryClient}><RecetasCostosPage/></QueryClientProvider>);
+ expect(await screen.findByRole('status')).toHaveTextContent('Leche entera');
+ expect(screen.getByRole('status')).toHaveTextContent('costos anteriores');
+ expect(screen.queryByRole('dialog')).toBeNull();
+});
 it('previews a copied recipe and creates a zero-price MP dish only after explicit save',async()=>{
  const menuRows:any[]=[{id:'menu',categoryId:'category',name:'Pollo con salsa',price:'10000',isAvailable:'true',preparationTime:15}];
  queryClient.setDefaultOptions({queries:{retry:false,staleTime:Infinity,queryFn:async({queryKey})=>String(queryKey[0]).includes('/menu/items')?menuRows:String(queryKey[0]).includes('/recipes')?recipeRows:[]},mutations:{retry:false}});

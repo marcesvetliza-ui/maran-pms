@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS channex_ari_settings (
  enabled boolean NOT NULL DEFAULT false, capture_started_at timestamptz, last_horizon_date date,
  updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE channex_ari_settings ALTER COLUMN floor DROP NOT NULL;
 ALTER TABLE channex_ari_settings ADD COLUMN IF NOT EXISTS capture_started_at timestamptz;
 CREATE TABLE IF NOT EXISTS channex_ari_outbox (
  id bigserial PRIMARY KEY, batch_id bigint NOT NULL DEFAULT txid_current(), connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
@@ -87,8 +88,16 @@ CREATE OR REPLACE FUNCTION channex_guard_ari_mapping() RETURNS trigger LANGUAGE 
 DECLARE connection varchar;
 BEGIN
  connection:=CASE WHEN TG_TABLE_NAME='channex_connections' THEN to_jsonb(OLD)->>'id' ELSE COALESCE(to_jsonb(NEW)->>'connection_id',to_jsonb(OLD)->>'connection_id') END;
+
+
  IF EXISTS(SELECT 1 FROM channex_ari_settings WHERE connection_id=connection AND enabled) THEN
   RAISE EXCEPTION 'Pausá la captura de Channex antes de modificar la conexión o sus mapeos';
+ END IF;
+ IF TG_TABLE_NAME='channex_connections' AND TG_OP='UPDATE'
+  AND (to_jsonb(OLD)->'environment',to_jsonb(OLD)->'base_url',to_jsonb(OLD)->'channex_property_id')
+    IS DISTINCT FROM (to_jsonb(NEW)->'environment',to_jsonb(NEW)->'base_url',to_jsonb(NEW)->'channex_property_id')
+  AND EXISTS(SELECT 1 FROM channex_ari_settings WHERE connection_id=connection AND capture_started_at IS NOT NULL) THEN
+   RAISE EXCEPTION 'Creá otra conexión para cambiar de entorno o propiedad sin reutilizar el historial';
  END IF;
  RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
 END $body$;

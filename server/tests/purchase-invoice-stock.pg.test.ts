@@ -298,4 +298,41 @@ suite("PostgreSQL real: factura de compra y stock atómicos", () => {
     }
   });
 
+  it("registra factura, stock y deuda durante corrección de unidades sin alterar recetas incompatibles ni permitir duplicados",async()=>{
+    if(!pool)return;
+    const {inventoryUnitCorrectionWindow}=await import('../inventoryUnitCorrection');
+    const suffix=randomUUID(),recipe=randomUUID();let invoiceId:number|undefined,entryId:number|undefined;
+    const supplier=(await pool.query("INSERT INTO accounting_suppliers(razon_social,cuit,condicion_iva) VALUES('Proveedor unidades',$1,'responsable_inscripto') RETURNING id",[suffix])).rows[0].id;
+    const item=(await pool.query("INSERT INTO inventory_items(name,unit,current_stock,cost_price) VALUES('Leche entera prueba','litro',3,9) RETURNING id")).rows[0].id;
+    const warehouse=(await pool.query("INSERT INTO inventory_warehouses(name) VALUES('Depósito unidades prueba') RETURNING id")).rows[0].id;
+    try {
+      await pool.query("INSERT INTO recipes(id,name,is_base) VALUES($1,'Salsa panna prueba',false)",[recipe]);
+      await pool.query("INSERT INTO recipe_ingredients(id,recipe_id,inventory_item_id,ingredient_name,quantity,unit,unit_cost) VALUES($1,$1,$2,'Leche entera',1,'unidad',9)",[recipe,item]);
+      const account=(await pool.query("SELECT id FROM accounting_accounts WHERE codigo='2.1.1.01'")).rows[0].id;
+      const payload={cuentaContableId:account,tipoComprobante:'FACT-A',supplierId:supplier,numeroComprobante:suffix,fechaEmision:'2026-11-05',periodo:'11/2026',condicionPago:'cuenta_corriente',montoNeto:'30',montoIva21:'6.30',stockItems:[{itemId:item,warehouseId:warehouse,quantity:2,unit:'litro',unitCost:15,vatRate:'21'}]};
+      inventoryUnitCorrectionWindow.enabled=false;
+      const blocked=await request('POST','/api/purchase-invoices',payload);expect(blocked.status).toBe(409);
+      expect((await pool.query('SELECT id FROM purchase_invoices WHERE numero_comprobante=$1',[suffix])).rows).toHaveLength(0);
+      expect(Number((await pool.query('SELECT current_stock FROM inventory_items WHERE id=$1',[item])).rows[0].current_stock)).toBe(3);
+      inventoryUnitCorrectionWindow.enabled=true;
+      const saved=await request('POST','/api/purchase-invoices',payload);expect(saved.status,JSON.stringify(saved.body)).toBe(201);
+      invoiceId=saved.body.id;entryId=saved.body.asiento_id;
+      expect(Number(saved.body.saldo_pendiente)).toBe(36.3);expect(entryId).toBeTruthy();expect(saved.body.inventoryWarnings).toMatchObject([{id:item,name:'Leche entera prueba'}]);
+      const stock=(await pool.query('SELECT current_stock,cost_price,unit_correction_pending FROM inventory_items WHERE id=$1',[item])).rows[0];
+      expect(Number(stock.current_stock)).toBe(5);expect(Number(stock.cost_price)).toBe(15);expect(stock.unit_correction_pending).toBe(true);
+      expect(Number((await pool.query('SELECT current_stock FROM warehouse_stock WHERE item_id=$1',[item])).rows[0].current_stock)).toBe(2);
+      const ingredient=(await pool.query('SELECT quantity,unit,unit_cost FROM recipe_ingredients WHERE id=$1',[recipe])).rows[0];expect(ingredient.unit).toBe('unidad');expect(Number(ingredient.unit_cost)).toBe(9);expect(Number(ingredient.quantity)).toBe(1);
+      const duplicate=await request('POST','/api/purchase-invoices',payload);expect(duplicate.status).toBe(409);expect(duplicate.body.error).toContain('duplicados');
+      expect((await pool.query('SELECT id FROM stock_movements WHERE item_id=$1',[item])).rows).toHaveLength(1);
+      const ledger=(await pool.query('SELECT sum(debe) AS debe,sum(haber) AS haber FROM accounting_entry_lines WHERE entry_id=$1',[entryId])).rows[0];expect(Number(ledger.debe)).toBe(36.3);expect(Number(ledger.haber)).toBe(36.3);
+    } finally {
+      inventoryUnitCorrectionWindow.enabled=true;
+      if(entryId){await pool.query('DELETE FROM accounting_entry_lines WHERE entry_id=$1',[entryId]);await pool.query('DELETE FROM accounting_entries WHERE id=$1',[entryId]);}
+      await pool.query('DELETE FROM stock_movements WHERE item_id=$1',[item]);
+      if(invoiceId)await pool.query('DELETE FROM purchase_invoices WHERE id=$1',[invoiceId]);
+      await pool.query('DELETE FROM recipe_ingredients WHERE recipe_id=$1',[recipe]);await pool.query('DELETE FROM recipes WHERE id=$1',[recipe]);
+      await pool.query('DELETE FROM item_price_history WHERE item_id=$1',[item]);await pool.query('DELETE FROM inventory_item_suppliers WHERE item_id=$1',[item]);await pool.query('DELETE FROM warehouse_stock WHERE item_id=$1',[item]);await pool.query('DELETE FROM inventory_items WHERE id=$1',[item]);await pool.query('DELETE FROM inventory_warehouses WHERE id=$1',[warehouse]);await pool.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplier]);
+    }
+  });
+
 });

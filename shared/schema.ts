@@ -1613,6 +1613,8 @@ export type InsertBrand = z.infer<typeof insertBrandSchema>;
 export type Brand = typeof brands.$inferSelect;
 
 export const inventoryItems = pgTable("inventory_items", {
+  unitCorrectionPending: boolean("unit_correction_pending").notNull().default(false),
+  unitCorrectionNote: text("unit_correction_note"),
   purchaseEnabled: boolean("purchase_enabled").notNull().default(true),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sku: text("sku").unique(),
@@ -1637,7 +1639,7 @@ export const inventoryItems = pgTable("inventory_items", {
   ivaRate: text("iva_rate"),
 });
 
-export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit({ id: true });
+export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit({ id: true, unitCorrectionPending: true, unitCorrectionNote: true });
 export type InsertInventoryItem = z.infer<typeof insertInventoryItemSchema>;
 export type InventoryItem = typeof inventoryItems.$inferSelect;
 
@@ -2829,6 +2831,7 @@ export const purchaseInvoices = pgTable("purchase_invoices", {
   saldoPendiente: numeric("saldo_pendiente", { precision: 14, scale: 2 }).notNull().default("0"),
   asientoId: integer("asiento_id"),
   descuento: jsonb("descuento"),
+  envio: jsonb("envio"),
   observaciones: text("observaciones"),
   subtipoRetencion: text("subtipo_retencion"),
   specialDetails: jsonb("special_details"),

@@ -1,5 +1,7 @@
 import { BILLING_OPERATION_SCHEMA_SQL } from "./billing/operationJournal";
+import { CASH_CARD_RECTIFICATIONS_SQL } from './billing/cashCardRectifications';
 import {ensureCcManualTrackingSchema} from './ccManualTracking';
+import { SALES_ARCHIVE_SCHEMA_SQL } from './salesArchive';
 import {importStockWorkbook} from './inventoryWorkbookImport';
 import initialStockWorkbook from './assets/initial-stock-20261008.json';
 import {ensureInventoryCountWarehouseSchema} from "./inventoryCountSchema";
@@ -1286,7 +1288,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
     payments: ["id", "reservation_id", "amount", "method", "date", "reference", "status", "group_payment_id"],
     billing_operations: ["operation_id", "owner_type", "owner_id", "payload_hash", "request_snapshot", "fiscal_identity", "stage", "invoice_id", "error_code"],
     invoice_counters: [],
-    purchase_invoices: ["subtipo_retencion", "descuento", "special_details"],
+    purchase_invoices: ["subtipo_retencion", "descuento", "envio", "special_details"],
     purchase_invoice_lines: ["id", "invoice_id", "line_number", "item_id", "item_name", "item_sku", "quantity", "unit_price", "vat_rate", "line_total", "warehouse_id"],
   },
   indexes: {
@@ -2530,6 +2532,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   // ── preventive_tasks: registro de demora ─────────────────────────────────
+  await withTimeout("purchase_invoices.envio", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "envio", "jsonb")))
+  );
   await withTimeout("purchase_invoices.descuento", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "descuento", "jsonb")))
   );
@@ -2811,7 +2816,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   );
 
   await withTimeout("restaurant_areas.display_order", T, () =>
-    db.execute(sql`ALTER TABLE restaurant_areas ADD COLUMN IF NOT EXISTS display_order integer DEFAULT 0`)
+    db.execute(sql.raw(addColumnWithoutRerunNotice("restaurant_areas", "display_order", "integer DEFAULT 0")))
   );
 
   // Seed "Evento por Mesa" restaurant area if not present
@@ -5012,6 +5017,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await db.execute(sql.raw(addColumnWithoutRerunNotice("rooms", "bed_config_revision", "integer NOT NULL DEFAULT 0")));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE recipes ADD COLUMN is_active text NOT NULL DEFAULT 'true'`)));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE inventory_items ADD COLUMN purchase_enabled boolean NOT NULL DEFAULT true`)));
+  await db.execute(sql.raw(createTableWithoutRerunNotice('cash_card_rectifications',CASH_CARD_RECTIFICATIONS_SQL.replace('IF NOT EXISTS ',''))));
   for (const statement of BILLING_OPERATION_SCHEMA_SQL.split(';').map(value => value.trim()).filter(Boolean)) {
     if (statement.startsWith('CREATE TABLE')) {
       await db.execute(sql.raw(createTableWithoutRerunNotice('billing_operations', statement.replace('IF NOT EXISTS ', ''))));
@@ -5056,6 +5062,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     logger.info("Carga inicial de inventario verificada", result);
   }
   await ensureCcManualTrackingSchema();
+  await db.execute(sql.raw(SALES_ARCHIVE_SCHEMA_SQL));
   await ensureRevenueManagementSchema();
   const { ensureAccommodationPermissionsSchema } = await import("./accommodationPermissions");
   await ensureAccommodationPermissionsSchema();

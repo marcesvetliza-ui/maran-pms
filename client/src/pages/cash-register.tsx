@@ -1,3 +1,4 @@
+import { CashCardRectificationHistory } from '@/components/cash-card-rectification';
 import { CASH_DOCUMENT_LABELS, cashDocumentSummary, type CashDocumentEvidence } from "@shared/cash-document-classification";
 import { ReservationCancellationHistory } from "@/components/reservation-cancellation-history";
 import { canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
@@ -173,6 +174,7 @@ const expenseCategoryLabels: Record<string, string> = {
 };
 
 const PAYMENT_METHOD_MAP: Record<string, string> = {
+  sin_movimiento: "Sin movimiento de dinero",
   cash: "Efectivo",
   debit_card: "Débito",
   credit_card: "Crédito",
@@ -373,7 +375,7 @@ function normalizePaymentMethod(method: string): string {
 function buildSummaryFromMovements(movements: CashMovement[]) {
   const summary: Record<string, { count: number; total: number; items: CashMovement[] }> = {};
   for (const m of movements) {
-    if (m.anulado) continue;
+    if (m.anulado || m.sourceType === "non_fiscal_void") continue;
     const key = normalizePaymentMethod(m.paymentMethod);
     if (!summary[key]) {
       summary[key] = { count: 0, total: 0, items: [] };
@@ -1098,6 +1100,8 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                         <TableCell>
                           {m.anulado ? (
                             <span />
+                          ) : m.sourceType === "non_fiscal_void" ? (
+                            <Badge variant="outline">Comprobante eliminado</Badge>
                           ) : m.movementType === "informational" ? (
                             <Badge className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Liquidación informativa</Badge>
                           ) : m.sourceType === "cobro_cc" ? (
@@ -2094,6 +2098,7 @@ function HistorialTab() {
           <div data-testid="cash-detail-scroll" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5 [overflow-wrap:anywhere] sm:px-7">
           {shiftDetail?.shift.area === "spa" && detailShiftId && <SpaCancellationHistory shiftId={detailShiftId} />}
           {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <ReservationCancellationHistory shiftId={detailShiftId} />}
+          {shiftDetail && ["reception", "recepcion"].includes(shiftDetail.shift.area) && detailShiftId && <CashCardRectificationHistory shiftId={detailShiftId} />}
           {detailLoading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => (

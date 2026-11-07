@@ -1,0 +1,10 @@
+import {it,expect} from 'vitest';
+import {applyPurchaseAdjustments,restorePurchaseDiscount} from '@shared/purchaseInvoiceDiscount';
+import {calculatePurchaseInvoiceTotal} from '@shared/purchaseInvoiceTotals';
+const input={tipoComprobante:'FACT-A',montoNeto:'100',montoIva21:'21',envioImporte:'10',envioAlicuota:'21',descuentoTipo:'importe',descuentoImporte:'10',descuentoDescripcion:'Bonificación',stockItems:[{quantity:2,unitCost:50}]};
+it('suma envío e IVA después del descuento y conserva stock y costos',()=>{const x=applyPurchaseAdjustments(input);expect(x).toMatchObject({montoNeto:'100.00',montoIva21:'21.00',envio:{importe:'10.00',iva:'2.10',total:'12.10'}});expect(x.stockItems).toBe(input.stockItems);expect(calculatePurchaseInvoiceTotal(x)).toBe(121);});
+it.each(['FACT-B','FACT-C'])('agrega importe final sin IVA extra en %s',tipoComprobante=>{const x=applyPurchaseAdjustments({...input,tipoComprobante,montoIva21:'0'});expect(calculatePurchaseInvoiceTotal(x)).toBe(100);expect(x.envio?.iva).toBe('0.00');});
+it('editar repetidamente no duplica envío ni descuento',()=>{let x=applyPurchaseAdjustments(input);for(let i=0;i<3;i++)x=applyPurchaseAdjustments(restorePurchaseDiscount(x));expect(calculatePurchaseInvoiceTotal(x)).toBe(121);expect(x.envio?.total).toBe('12.10');});
+it('permite retirar envío al editar',()=>{const x=applyPurchaseAdjustments(input);const y=applyPurchaseAdjustments({...restorePurchaseDiscount(x),envioImporte:''});expect(y.envio).toBeNull();expect(calculatePurchaseInvoiceTotal(y)).toBe(108.9);});
+it.each(['exento','no_gravado'])('conserva tratamiento %s',envioAlicuota=>{const x=applyPurchaseAdjustments({...input,envioAlicuota});expect(calculatePurchaseInvoiceTotal(x)).toBe(118.9);expect(x.envio?.iva).toBe('0.00');});
+it.each([{envioImporte:'-1'},{envioImporte:'1.001'},{envioImporte:'NaN'},{envioAlicuota:'99'},{tipoComprobante:'NC-A',descuentoImporte:''}])('rechaza cargo inválido %j',patch=>expect(()=>applyPurchaseAdjustments({...input,...patch})).toThrow());

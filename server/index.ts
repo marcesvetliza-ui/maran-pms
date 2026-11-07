@@ -257,23 +257,22 @@ app.use((req, res, next) => {
     } catch {
       logger.warn("[rate-calendar] Calendario no disponible: no se pudo preparar el esquema");
     }
-    // Optional staging integration: failure must not block hotel operation.
-    try {
-      const { pool } = await import("./db");
-      const { ensureChannexAriSchema } = await import("./channex/ariSchema");
-      const { startChannexAriWorker } = await import("./channex/ariWorker");
-      await ensureChannexAriSchema(pool);
-      const { ensureChannexInboundSchema } = await import("./channex/inboundSchema");
-      const { startInboundWorker } = await import("./channex/inboundWorker");
-      await ensureChannexInboundSchema(pool);
-      const stopInbound = startInboundWorker(pool);
-      httpServer.once("close", stopInbound);
-      const stopChannexAri = startChannexAriWorker(pool);
-      httpServer.once("close", stopChannexAri);
-    } catch {
-      logger.warn("[channex-ari] Integración de pruebas inactiva: no se pudo preparar la cola");
-    }
     startupReady = true;
+    try {
+      const {pool}=await import('./db');
+      const {ensureChannexAccessSchema}=await import('./channex/access');
+      await ensureChannexAccessSchema();
+      const {ensureChannexAriSchema}=await import('./channex/ariSchema');
+      await ensureChannexAriSchema(pool);
+      const {ensureChannexInboundSchema}=await import('./channex/inboundSchema');
+      await ensureChannexInboundSchema(pool);
+      const {startChannexAriWorker}=await import('./channex/ariWorker');
+      const {startInboundWorker}=await import('./channex/inboundWorker');
+      httpServer.once('close',startChannexAriWorker(pool));
+      httpServer.once('close',startInboundWorker(pool));
+      const {setChannexPrepared}=await import('./channex/runtimeState');
+      setChannexPrepared();
+    } catch (error:any) { logger.warn('[channex] Integración inactiva: '+(error?.message||'No se pudo preparar su configuración.')); }
 
     const { warnIfDatabaseIdentityMissing } = await import("./database-identity");
     await mig("database-identity check", warnIfDatabaseIdentityMissing);

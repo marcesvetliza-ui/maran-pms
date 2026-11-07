@@ -1,3 +1,4 @@
+vi.mock('../channex/access',()=>({requireChannex:()=> (_r:any,_s:any,next:any)=>next()}));
 import pg from 'pg';
 import express from 'express';
 import { createServer, type Server } from 'node:http';
@@ -26,7 +27,7 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
    CREATE TABLE channex_connections(id varchar PRIMARY KEY,environment text,base_url text,is_active boolean,channex_property_id text,api_key_encrypted text);
    CREATE TABLE room_types(id varchar PRIMARY KEY,name text);
    CREATE TABLE rooms(id varchar PRIMARY KEY,room_number text,room_type_id varchar,floor int,status text,is_active boolean,is_virtual boolean);
-   CREATE TABLE reservations(id varchar PRIMARY KEY,room_id varchar,check_in_date date,check_out_date date,status text);
+   CREATE TABLE reservations(id varchar PRIMARY KEY,room_id varchar,check_in_date date,check_out_date date,status text,room_type_id varchar);
    CREATE TABLE rate_plans(id varchar PRIMARY KEY,room_type_id varchar,base_rate numeric(10,2),currency text,valid_from date,valid_to date);
    CREATE TABLE maintenance_blocks(id varchar PRIMARY KEY,room_id varchar,block_from date,block_to date);
    CREATE TABLE groups(id varchar PRIMARY KEY,check_in_date date,check_out_date date,status text);
@@ -132,7 +133,8 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
   it('blocks production, missing mappings and currency mismatches without sending', async () => {
     await enable(); await pool.query(`UPDATE rate_plans SET currency='ARS' WHERE id='bar'`); const send = vi.fn();
     expect((await dispatchChannexAri(pool, send, true)).state).toBe('blocked'); expect(send).not.toHaveBeenCalled();
-    await pool.query(`UPDATE channex_ari_settings SET enabled=false; UPDATE channex_connections SET environment='real'; UPDATE channex_ari_settings SET enabled=true; UPDATE channex_ari_outbox SET status='pending'`);
+    await pool.query(`UPDATE channex_ari_settings SET enabled=false`);
+    await expect(pool.query(`UPDATE channex_connections SET environment='real'`)).rejects.toThrow('otra conexión');
     expect((await dispatchChannexAri(pool, send, true)).state).toBe('idle'); expect(send).not.toHaveBeenCalled();
   });
   it('does not send unchanged availability for an update on another floor', async () => {

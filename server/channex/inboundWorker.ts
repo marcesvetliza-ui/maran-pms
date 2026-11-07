@@ -1,18 +1,20 @@
+import {connectionUrl,operationAllowed,workerEnvironment,PRODUCTION_URL} from './connectionPolicy';
 import type { Pool } from "pg";
 import { acknowledgeBookingRevision, ChannexApiError, fetchPendingBookingRevisions } from "./client";
 import { decryptChannexApiKey } from "./credentials";
 import { retryDelay, STAGING_URL } from "./ari";
 export type InboundTransport = { feed(connection: any): Promise<any[]>; ack(connection: any, revisionId: string): Promise<void> };
 function credentials(connection: any) {
-  if (!connection.is_active || connection.environment !== "demo" || connection.base_url.replace(/\/$/, "") !== STAGING_URL) throw Error("STAGING_ONLY");
-  return { apiKey: decryptChannexApiKey(connection.api_key_encrypted), baseUrl: STAGING_URL };
+  if (!connection.is_active || !operationAllowed(connection,"inbound")) throw Error("STAGING_ONLY");
+  return { apiKey: decryptChannexApiKey(connection.api_key_encrypted), baseUrl: connectionUrl(connection) };
 }
 const transport: InboundTransport = {
   feed: c => fetchPendingBookingRevisions(credentials(c), c.channex_property_id),
   ack: (c, id) => acknowledgeBookingRevision(credentials(c), id),
 };
 export async function runInboundOnce(pool: Pool, options: { enabled?: boolean; transport?: InboundTransport; apply?: (connection: string, revision: string) => Promise<unknown> } = {}) {
-  if (!(options.enabled ?? process.env.CHANNEX_INBOUND_STAGING_ENABLED === "true")) return "disabled";
+  if (!(options.enabled ?? !!workerEnvironment("inbound"))) return "disabled";
+  const environment=workerEnvironment("inbound")??"demo",baseUrl=environment==="real"?PRODUCTION_URL:STAGING_URL;
   const c = await pool.connect(); let locked = false;
   try {
     locked = (await c.query("SELECT pg_try_advisory_lock(1296126535,906) AS locked")).rows[0].locked;
@@ -21,16 +23,16 @@ export async function runInboundOnce(pool: Pool, options: { enabled?: boolean; t
     const pending = (await c.query(`SELECT r.connection_id,r.revision_id FROM channex_inbound_revisions r
       JOIN channex_inbound_settings i ON i.connection_id=r.connection_id JOIN channex_ari_settings s ON s.connection_id=i.connection_id
       JOIN channex_connections x ON x.id=i.connection_id
-      WHERE r.status='pending' AND i.enabled AND s.enabled AND x.is_active AND x.environment='demo' AND x.base_url=$1
-      ORDER BY r.inserted_at,r.created_at LIMIT 1`, [STAGING_URL])).rows[0];
+      WHERE r.status='pending' AND i.enabled AND s.enabled AND x.is_active AND x.environment='${environment}' AND x.base_url=$1
+      ORDER BY r.inserted_at,r.created_at LIMIT 1`, [baseUrl])).rows[0];
     if (pending) await (options.apply || applyInboundRevision)(pending.connection_id, pending.revision_id);
     const ack = (await c.query(`SELECT r.*,x.* FROM channex_inbound_revisions r JOIN channex_connections x ON x.id=r.connection_id
-      JOIN channex_inbound_settings i ON i.connection_id=x.id WHERE i.enabled AND x.is_active AND x.environment='demo' AND x.base_url=$1
+      JOIN channex_inbound_settings i ON i.connection_id=x.id WHERE i.enabled AND x.is_active AND x.environment='${environment}' AND x.base_url=$1
       AND r.acked_at IS NULL AND r.next_ack_at<=now() AND (r.review_code IS NULL OR r.review_code NOT IN ('INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION'))
-      ORDER BY r.created_at LIMIT 1`, [STAGING_URL])).rows[0];
+      ORDER BY r.created_at LIMIT 1`, [baseUrl])).rows[0];
     const fetch = !ack && (await c.query(`SELECT x.*,i.notification_version,i.fetch_attempts FROM channex_connections x
       JOIN channex_inbound_settings i ON i.connection_id=x.id WHERE i.enabled AND i.notification_pending AND i.next_fetch_at<=now()
-      AND x.is_active AND x.environment='demo' AND x.base_url=$1 ORDER BY i.next_fetch_at LIMIT 1`, [STAGING_URL])).rows[0];
+      AND x.is_active AND x.environment='${environment}' AND x.base_url=$1 ORDER BY i.next_fetch_at LIMIT 1`, [baseUrl])).rows[0];
     if (!ack && !fetch) return pending ? "applied" : "idle";
     const slot = await c.query(`UPDATE channex_inbound_dispatch SET next_request_at=now()+interval '3100 milliseconds'
       WHERE id=1 AND next_request_at<=now() RETURNING id`);
@@ -64,7 +66,7 @@ export async function runInboundOnce(pool: Pool, options: { enabled?: boolean; t
   } finally { if (locked) await c.query("SELECT pg_advisory_unlock(1296126535,906)").catch(() => undefined); c.release(); }
 }
 export function startInboundWorker(pool: Pool) {
-  if (process.env.CHANNEX_INBOUND_STAGING_ENABLED !== "true") return () => { };
+  if (!workerEnvironment("inbound")) return () => { };
   let running = false, stopped = false;
   const tick = async () => { if (running || stopped) return; running = true; try { await runInboundOnce(pool); } catch { /* retry from durable state, no payload/credential logs */ } finally { running = false; } };
   // Startup catch-up recovers webhook interruptions, without periodic source

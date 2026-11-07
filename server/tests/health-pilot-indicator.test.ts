@@ -10,7 +10,7 @@ vi.mock("../auth", () => ({
   hashPassword: vi.fn(),
 }));
 vi.mock("../audit", () => ({ audit: vi.fn() }));
-vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
+vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn(), getFinancialSchemaStatus: () => ({ ready: true }) }));
 vi.mock("../db-storage", () => ({
   storage: new Proxy({}, { get: () => vi.fn() }),
   getArgentinaToday: () => "2026-09-11",

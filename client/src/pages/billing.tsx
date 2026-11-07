@@ -1,5 +1,8 @@
 import {billingPointOptions} from "@shared/billing-point-of-sale";
 import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
+import { canReviewCreditNoteAccount } from "@shared/credit-note-account-recovery";
+import {creditTypeForInvoice} from '@shared/fiscal-document-types';
+import { CashCardRectification } from '@/components/cash-card-rectification';
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
@@ -285,6 +288,30 @@ export default function BillingPage() {
     onError: (error: Error) => toast({ title: parseApiError(error), variant: "destructive" }),
   });
 
+  const [annulTarget, setAnnulTarget] = useState<any>(null);
+  const [annulReason, setAnnulReason] = useState("");
+  const annulNonFiscal = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/billing/invoices/${annulTarget.id}/annul-non-fiscal`, { reason: annulReason.trim() }),
+    onSuccess: async () => {
+      setAnnulTarget(null); setAnnulReason("");
+      toast({ title: "Comprobante eliminado", description: "Quedó registrado en Caja con el motivo. El cobro se conserva; no se devolvió dinero." });
+      await queryClient.invalidateQueries();
+    },
+    onError: (error: Error) => toast({ title: "No se pudo eliminar el comprobante", description: parseApiError(error), variant: "destructive" }),
+  });
+
+  const discardInvalidCreditDraftMutation = useMutation({
+    mutationFn: (id: number) => apiRequest("POST", `/api/billing/credit-notes/${id}/discard-invalid-draft`),
+    onSuccess: async () => {
+      toast({ title: "Intento descartado", description: "ARCA confirmó que no está autorizado. Se conservó la auditoría; no se emitió ni cobró nada." });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
+      ]);
+    },
+    onError: (error: Error) => toast({ title: "No se descartó el intento", description: parseApiError(error), variant: "destructive" }),
+  });
+
   const reconcileCreditNoteMutation = useMutation({
     mutationFn: (creditNoteId: number) => apiRequest("POST", `/api/billing/credit-notes/${creditNoteId}/reconcile`),
     onSuccess: async (response: Response) => {
@@ -298,8 +325,8 @@ export default function BillingPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
       ]);
       toast({
-        title: data.accountRecovery ? "Cuenta corriente revisada" : "NC conciliada",
-        description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
+        title: data.accountRecovery && data.accountRecovery.status !== "not_applicable" ? "Cuenta corriente revisada" : "NC conciliada",
+        description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "not_applicable" ? "Esta NC corresponde a un cobro de Caja; no tiene un cargo de Cuenta Corriente para compensar." : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)} ya corrigió la factura y el Folio.`,
       });
     },
     onError: async (error: any) => {
@@ -449,20 +476,26 @@ export default function BillingPage() {
                         <div className="text-muted-foreground mt-0.5">
                           Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
                         </div>
+                        {!creditTypeForInvoice(nc.original_tipo_comprobante)&&<p className="mt-1 text-amber-800 dark:text-amber-200">El original es un comprobante interno o no verificable como factura fiscal. Requiere revisión antes de conciliar; no emitir otra NC.</p>}
                         {getReconciliationError(nc) && (
                           <div className="text-amber-800 dark:text-amber-200 mt-1">{getReconciliationError(nc)}</div>
                         )}
                       </div>
+                      {nc.canDiscardInvalidOriginalDraft && <Button size="sm" variant="outline" disabled={discardInvalidCreditDraftMutation.isPending}
+                        data-testid={`btn-discard-invalid-credit-draft-${nc.id}`}
+                        onClick={() => { if (window.confirm(`¿Consultar en ARCA la NC ${padNum(nc.punto_venta,4)}-${padNum(nc.numero,8)} y descartar el intento solo si no está autorizado y no tiene movimientos? Se conservará la auditoría. No se emite ni cobra nada.`)) discardInvalidCreditDraftMutation.mutate(Number(nc.id)); }}>
+                        Verificar y descartar intento
+                      </Button>}
                       <Button
                         size="sm"
                         variant="outline"
                         className="shrink-0 border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-100"
                         onClick={() => reconcileCreditNoteMutation.mutate(Number(nc.id))}
-                        disabled={reconcileCreditNoteMutation.isPending}
+                        disabled={reconcileCreditNoteMutation.isPending||!creditTypeForInvoice(nc.original_tipo_comprobante)}
                         data-testid={`btn-reconcile-credit-note-${nc.id}`}
                       >
                         <RefreshCw className={`w-3.5 h-3.5 mr-1 ${reconcileCreditNoteMutation.isPending ? "animate-spin" : ""}`} />
-                        Reintentar y conciliar
+                        {creditTypeForInvoice(nc.original_tipo_comprobante)?'Reintentar y conciliar':'Revisión requerida'}
                       </Button>
                     </div>
                   ))}
@@ -540,7 +573,12 @@ export default function BillingPage() {
                               <td className="sticky right-0 z-10 bg-inherit px-3 py-2" data-testid={`invoice-actions-${f.id}`}>
                                 <div className="flex items-center gap-3">
                                 <div className="min-w-0">
-                                {f.center_settlement_status === "pending" ? (
+                                {f.non_fiscal_annulment && f.estado === "anulada" ? (
+                                  <div><Badge variant="destructive" className="text-xs">Eliminado</Badge>
+                                    <div className="text-xs text-muted-foreground">{f.non_fiscal_annulment.reason}</div>
+                                    <div className="text-[10px] text-muted-foreground">{f.non_fiscal_annulment.actor}</div>
+                                  </div>
+                                ) : f.center_settlement_status === "pending" ? (
                                   <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
                                 ) : isInvoiceReconciliationPending(f) ? (
                                   <div>
@@ -573,14 +611,20 @@ export default function BillingPage() {
                                       <Pencil className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
-                                  {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && (
+                                  {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && canReviewCreditNoteAccount(f) && (
                                     <Button variant="ghost" size="sm" title="Revisar y recuperar descuento en cuenta corriente"
                                       disabled={reconcileCreditNoteMutation.isPending}
                                       onClick={() => {if(window.confirm("¿Revisar el descuento de esta NC en cuenta corriente? Solo se registrará si falta; no se emite otro comprobante.")) reconcileCreditNoteMutation.mutate(Number(f.id));}}>
                                       <RefreshCw className="w-3.5 h-3.5 mr-1"/>Revisar CC
                                     </Button>
                                   )}
-                                  {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
+                                  {f.canAnnulNonFiscal && NON_FISCAL_TIPOS_SET.has(f.tipo_comprobante) && f.estado !== "anulada" && (
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Eliminar comprobante no fiscal" aria-label="Eliminar comprobante no fiscal"
+                                      data-testid={`btn-annul-non-fiscal-${f.id}`} onClick={() => { setAnnulTarget(f); setAnnulReason(""); }}>
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>
+                                  )}
+                                  {(f.estado === "emitida" || f.estado === "parcial") && !!creditTypeForInvoice(f.tipo_comprobante) && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
@@ -678,6 +722,25 @@ export default function BillingPage() {
           mode="billing"
         />
       )}
+
+      <Dialog open={!!annulTarget} onOpenChange={open => { if (!open && !annulNonFiscal.isPending) { setAnnulTarget(null); setAnnulReason(""); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Eliminar comprobante no fiscal</DialogTitle>
+            <DialogDescription>El comprobante quedará eliminado como documento vigente y conservará su historial. El cobro se conservará; en reservas quedará disponible como anticipo. No se devolverá dinero ni se emitirá una Nota de Crédito.</DialogDescription>
+          </DialogHeader>
+          {annulTarget && <p className="text-sm font-medium">{TIPO_LABELS[annulTarget.tipo_comprobante]?.nombre || annulTarget.tipo_comprobante} {padNum(annulTarget.punto_venta,4)}-{padNum(annulTarget.numero,8)} · ${fPeso(annulTarget.monto_total)}</p>}
+          <div className="space-y-2"><Label htmlFor="non-fiscal-annul-reason">Motivo de eliminación (obligatorio)</Label>
+            <Textarea id="non-fiscal-annul-reason" value={annulReason} onChange={event=>setAnnulReason(event.target.value)} minLength={3} maxLength={500} required disabled={annulNonFiscal.isPending}
+              placeholder="Ej.: comprobante duplicado o error de carga" data-testid="non-fiscal-annul-reason" />
+          </div>
+          <p className="text-sm text-muted-foreground">En Caja se registrarán el comprobante eliminado, el motivo y quién lo eliminó, sin alterar el efectivo. Si tiene un descuento propio de prefactura, también se retirará ese descuento.</p>
+          <DialogFooter><Button variant="outline" disabled={annulNonFiscal.isPending} onClick={()=>{setAnnulTarget(null);setAnnulReason("");}}>Cancelar</Button>
+            <Button variant="destructive" disabled={annulNonFiscal.isPending || annulReason.trim().length<3 || annulReason.trim().length>500} onClick={()=>annulNonFiscal.mutate()} data-testid="confirm-annul-non-fiscal">
+              {annulNonFiscal.isPending ? "Eliminando…" : "Eliminar y conservar cobro"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {showNC !== null && <NotaCreditoDialog invoiceId={showNC} onClose={() => setShowNC(null)} />}
       {showEdit !== null && <EditarComprobanteDialog invoiceId={showEdit} onClose={() => setShowEdit(null)} />}
@@ -2856,7 +2919,7 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
         queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "master-folio"] });
         queryClient.invalidateQueries({ queryKey: ["/api/groups", invoice.group_id, "direct-invoices"] });
       }
-      toast({ title: "Nota de Crédito emitida", description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
+      toast({ title: "Nota de Crédito emitida", description: data.accountRecovery ? (data.accountRecovery.status === "applied" ? `Se registró el descuento faltante de $${Number(data.accountRecovery.amount).toLocaleString("es-AR")}.` : data.accountRecovery.status === "not_applicable" ? "Esta NC corresponde a un cobro de Caja; no tiene un cargo de Cuenta Corriente para compensar." : data.accountRecovery.status === "no_matching_charge" ? "No se encontró un cargo vinculado; requiere revisión." : "El descuento ya estaba registrado o el cargo ya fue compensado.") : `${data.tipo_comprobante} N° ${padNum(data.punto_venta, 4)}-${padNum(data.numero, 8)}` });
       onSuccess?.(data);
       onClose();
       setTimeout(() => window.open(`/api/billing/invoices/${data.id}/pdf`, "_blank"), 200);
@@ -2865,6 +2928,13 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   });
 
   if (!invoice) return null;
+
+  if(!creditTypeForInvoice(invoice.tipo_comprobante))return <Dialog open={!!invoiceId} onOpenChange={o=>!o&&onClose()}>
+    <DialogContent className="max-w-md"><DialogHeader><DialogTitle>Comprobante no elegible para Nota de Crédito</DialogTitle></DialogHeader>
+      <p className="text-sm">Ningún comprobante no fiscal admite una Nota de Crédito fiscal. Esta acción requiere una factura fiscal original.</p>
+      <DialogFooter><Button onClick={onClose}>Cerrar</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
 
   // A partial NC leaves the original invoice in estado=parcial, so it is
   // intentionally possible to open this dialog again for the remaining balance.
@@ -3098,6 +3168,8 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
   const [domicilio, setDomicilio] = useState("");
   const [registradaMethod, setRegistradaMethod] = useState("efectivo");
   const [reservaMethod, setReservaMethod] = useState("efectivo");
+  const [rectifyClosedCard,setRectifyClosedCard] = useState(false);
+  useEffect(()=>{setRectifyClosedCard(false);},[invoiceId]);
   const [restaurantMethod, setRestaurantMethod] = useState("efectivo");
   const [eventMethod, setEventMethod] = useState("efectivo");
   const [spaMethod, setSpaMethod] = useState("efectivo");
@@ -3139,14 +3211,18 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
       toast({ title: "Comprobante actualizado" });
       onClose();
     },
-    onError: (error: Error) => toast({ title: "No se pudo editar", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => {
+      const message=parseApiError(error);
+      if(/turno.*cerrado/i.test(message))setRectifyClosedCard(true);
+      toast({ title: "No se pudo editar", description: message, variant: "destructive" });
+    },
   });
 
   if (!invoice) return null;
 
   return (
     <Dialog open={!!invoiceId} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>Editar comprobante</DialogTitle></DialogHeader>
         <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
           <div className="font-medium">{invoice.tipo_comprobante} {padNum(invoice.punto_venta, 4)}-{padNum(invoice.numero, 8)}</div>
@@ -3203,7 +3279,7 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
           </div>
         ) : isReservaCash ? (
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">Factura de reserva cobrada con un medio real de Caja. Por ahora solo se puede cambiar entre formas de pago reales — todavía no a Cuenta Corriente.</p>
+            <p className="text-xs text-muted-foreground">Corrige el medio del cobro ya registrado, sin cobrar nuevamente. Admite un pago único o su crédito íntegro reaplicado y conciliado. No permite pasar a Cuenta Corriente.</p>
             <div>
               <Label className="text-xs">Forma de pago</Label>
               <Select value={reservaMethod} onValueChange={setReservaMethod}>
@@ -3211,10 +3287,17 @@ export function EditarComprobanteDialog({ invoiceId, onClose }: { invoiceId: num
                 <SelectContent>{EDIT_PAYMENT_METHODS.filter(([method]) => method !== "cuenta_corriente").map(([method, label]) => <SelectItem key={method} value={method}>{label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            {rectifyClosedCard&&['tarjeta_debito','tarjeta_credito'].includes(reservaMethod)&&<CashCardRectification invoiceId={invoiceId} method={reservaMethod} onSaved={()=>{
+              queryClient.invalidateQueries({queryKey:['/api/billing/invoices']});
+              queryClient.invalidateQueries({queryKey:['/api/cash/shifts']});
+              queryClient.invalidateQueries({queryKey:['/api/payments']});
+              queryClient.invalidateQueries({queryKey:['/api/reservations',String(invoice.reserva_id),'folio']});
+              toast({title:'Medio corregido y cierre rectificado',description:'Se conservaron el cierre original, el efectivo contado y el importe del cobro.'});onClose();
+            }}/>}
             <DialogFooter>
               <Button variant="outline" onClick={onClose}>Cancelar</Button>
               <Button
-                disabled={mutation.isPending}
+                disabled={mutation.isPending || rectifyClosedCard}
                 onClick={() => mutation.mutate({ cashFormaPago: reservaMethod })}
                 data-testid="btn-guardar-edicion-fp-reserva"
               >
@@ -3734,96 +3817,7 @@ function BillingConfigPanel({ config }: { config: any }) {
 }
 
 function DeleteNonFiscalSection() {
-  const { toast } = useToast();
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [lastResult, setLastResult] = useState<{ deleted: number } | null>(null);
-
-  async function handleDelete() {
-    setDeleting(true);
-    try {
-      const res = await apiRequest("DELETE", `/api/billing/invoices/non-fiscal?startDate=${startDate}&endDate=${endDate}`);
-      const data = await res.json();
-      setLastResult(data);
-      setConfirmOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
-      toast({
-        title: data.deleted === 0 ? "Sin comprobantes para borrar" : `${data.deleted} comprobante(s) eliminado(s)`,
-        description: data.deleted > 0 ? `Período: ${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}` : undefined,
-      });
-    } catch (e: any) {
-      toast({ title: "Error al borrar", description: parseApiError(e), variant: "destructive" });
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  const canDelete = !!startDate && !!endDate && startDate <= endDate;
-
-  return (
-    <>
-      <Card className="border-destructive/40">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2 text-destructive">
-            <Trash2 className="h-4 w-4" />
-            Borrar comprobantes no fiscales
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Elimina permanentemente todos los <strong>Tickets, Vouchers y Cierres</strong> (comprobantes no fiscales)
-            emitidos en el rango de fechas indicado. Esta acción no puede deshacerse.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="del-start">Desde</Label>
-              <Input id="del-start" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="del-end">Hasta</Label>
-              <Input id="del-end" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-            </div>
-          </div>
-          {lastResult && (
-            <p className="text-xs text-muted-foreground">
-              Último borrado: <strong>{lastResult.deleted}</strong> comprobante(s) eliminado(s).
-            </p>
-          )}
-          <Button
-            variant="destructive"
-            disabled={!canDelete}
-            onClick={() => setConfirmOpen(true)}
-            data-testid="btn-delete-non-fiscal"
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Borrar comprobantes del período
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Confirmar eliminación
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-sm">
-            Se eliminarán <strong>todos los comprobantes no fiscales</strong> (Tickets, Vouchers, Cierres) emitidos
-            entre el <strong>{formatDisplayDate(startDate)}</strong> y el <strong>{formatDisplayDate(endDate)}</strong>.
-          </p>
-          <p className="text-sm text-destructive font-medium">Esta acción es irreversible.</p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deleting}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleDelete} disabled={deleting} data-testid="btn-confirm-delete-non-fiscal">
-              {deleting ? "Borrando..." : "Sí, borrar"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
+  return <Card><CardHeader><CardTitle className="text-base">Eliminar comprobantes no fiscales</CardTitle></CardHeader>
+    <CardContent><p className="text-sm text-muted-foreground">Desde la pestaña Comprobantes, usá el botón Eliminar comprobante no fiscal de cada voucher. Se solicita un motivo obligatorio, se conserva el cobro y queda el registro en Caja. El permiso se administra por rol.</p></CardContent>
+  </Card>;
 }

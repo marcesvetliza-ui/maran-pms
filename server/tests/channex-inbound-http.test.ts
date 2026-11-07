@@ -1,3 +1,4 @@
+vi.mock('../channex/access',()=>({requireChannex:(cap:string)=>(req:any,res:any,next:any)=>{const role=req.headers['x-role'];if(!role)return res.sendStatus(401);if(role!=='admin'&&!(cap==='read'&&role==='reception'))return res.sendStatus(403);return next();}}));
 import express from "express";
 import { createHash } from "node:crypto";
 import type { Server } from "node:http";
@@ -27,7 +28,7 @@ describe("inbound authenticated notifications and configuration",()=>{
  it("requires the Channex configuration permission for enabling, retrying and secret generation",async()=>{
   const query=vi.fn(),base=await start(query);
   for(const [path,method] of [["","PATCH"],["/retry","POST"],["/webhook-token","POST"],["/readiness","GET"],["/settlement-rate","PATCH"]]){
-   expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{method,headers:{"content-type":"application/json"},...(method==="GET"?{}:{body:"{}"})})).status).toBe(403);
+   expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{method,headers:{"content-type":"application/json","x-role":"reception"},...(method==="GET"?{}:{body:"{}"})})).status).toBe(403);
   }expect(query).not.toHaveBeenCalled();
  });
  it("stores only a token hash and avoids res.json body logging for the one-time secret",async()=>{

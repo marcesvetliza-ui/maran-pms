@@ -1,3 +1,4 @@
+import {connectionUrl,workerEnvironment} from './connectionPolicy';
 import type { Pool } from "pg";
 import { addDays, AriConfigurationError, buildAriValues, inventoryPreview, STAGING_URL } from "./ari";
 import { decryptChannexApiKey } from "./credentials";
@@ -25,18 +26,18 @@ export async function getChannexReadiness(pool: Pool, connectionId: string) {
     if (!connection) { await c.query("COMMIT"); return null; }
     const checks: ReadinessCheck[] = [];
     const add = (id: string, area: ReadinessCheck["area"], ok: boolean, message: string) => checks.push({ id, area, ok, message });
-    add("staging", "configuration", connection.environment === "demo" && connection.base_url.replace(/\/$/, "") === STAGING_URL,
-      "Usar una conexión de prueba a Channex staging.");
+    add("staging", "configuration", (()=>{try{connectionUrl(connection);return true;}catch{return false;}})(),
+      "El entorno y la dirección de API deben corresponder.");
     add("active", "configuration", connection.is_active, "La conexión debe estar activa.");
-    add("property", "configuration", Boolean(connection.channex_property_id?.trim()), "Identificar la propiedad de prueba.");
+    add("property", "configuration", Boolean(connection.channex_property_id?.trim()), "Identificar la propiedad de Channex.");
     let credentialUsable = false;
     try { credentialUsable = Boolean(connection.api_key_encrypted && decryptChannexApiKey(connection.api_key_encrypted).trim()); } catch { /* Return no credential or crypto details. */ }
     add("credential", "configuration", credentialUsable, "Guardar una credencial que este servidor pueda descifrar. Su validez remota aún debe comprobarse.");
-    add("scope", "configuration", Boolean(connection.scope_id), "Guardar el piso y la moneda del piloto.");
+    add("scope", "configuration", Boolean(connection.scope_id), "Guardar el alcance y la moneda de la propiedad.");
     const rooms = connection.scope_id ? await inventoryPreview(c, connectionId, connection.floor) : [];
     const physicalRooms = new Set(rooms.map(room => room.id));
     add("inventory", "configuration", physicalRooms.size > 0 && rooms.every(room => room.channexRoomTypeId),
-      "El piso necesita habitaciones físicas activas y sus categorías mapeadas.");
+      "El alcance necesita habitaciones físicas activas y sus categorías mapeadas.");
     // Exercise the same 500-day transformation the actual dispatcher uses;
     // checking just base rates would miss expired plans and invalid overrides.
     const today = (await c.query("SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS today")).rows[0].today;
@@ -58,18 +59,21 @@ export async function getChannexReadiness(pool: Pool, connectionId: string) {
     add("reservation_currency", "configuration", connection.currency === "ARS" || (connection.currency === "USD" && settlementRateSchema.safeParse(connection.settlement_exchange_rate).success),
       "Para recibir USD, configurar pesos por dólar. Se conserva el original y la cotización de cada reserva; el folio se registra en ARS.");
     add("ari_capture", "activation", Boolean(connection.ari_enabled), "Habilitar la captura del alcance de prueba.");
-    add("ari_server", "activation", process.env.CHANNEX_ARI_STAGING_ENABLED === "true", "Habilitar los envíos en el servidor aislado de pruebas.");
+    add("ari_server", "activation", !!workerEnvironment("ari"), "Habilitar los envíos en el servidor.");
     add("inbound_connection", "activation", Boolean(connection.inbound_enabled), "Habilitar la recepción en esta conexión.");
-    add("inbound_server", "activation", process.env.CHANNEX_INBOUND_STAGING_ENABLED === "true", "Habilitar la recepción en el servidor aislado de pruebas.");
+    add("inbound_server", "activation", !!workerEnvironment("inbound"), "Habilitar la recepción en el servidor.");
     add("webhook_token", "activation", Boolean(connection.has_webhook_token), "Generar el acceso del webhook y configurarlo en Channex. Su instalación remota aún debe verificarse.");
+    if(connection.environment==='demo'){
     add("certification_currency", "certification", connection.currency === "USD", "El documento de certificación solicita una propiedad en USD. La conversión local y los escenarios completos aún deben validarse con Channex.");
     add("external_validation", "certification", false, "Contrastar contrato y buenas prácticas, ejecutar los escenarios desde el PMS en staging y conservar sus resultados y task IDs reales.");
+    }
     await c.query("COMMIT");
     const configurationReady = checks.filter(check => check.area === "configuration").every(check => check.ok);
     return {
       configurationReady,
       activationReady: configurationReady && checks.filter(check => check.area === "activation").every(check => check.ok),
       certificationReady: false,
+      environment: connection.environment,
       checkedAt: new Date().toISOString(),
       floor: connection.floor ?? null, currency: connection.currency ?? null, roomCount: physicalRooms.size,
       remoteVerified: false, checks,

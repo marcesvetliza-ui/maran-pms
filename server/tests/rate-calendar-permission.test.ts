@@ -1,3 +1,4 @@
+vi.mock('../channex/access',()=>({requireChannex:()=> (req:any,res:any,next:any)=>{if(!req.isAuthenticated())return res.sendStatus(401);if(req.user?.role!=='manager')return res.sendStatus(403);return next();}}));
 import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ async function start(role: string, authenticated = true) {
 it('rejects unauthenticated reads before accessing the database', async () => {
   const { url, pool } = await start('manager', false); expect((await fetch(`${url}/api/rate-calendar`)).status).toBe(401); expect(pool).not.toHaveBeenCalled();
 });
-it('requires the existing rates-write permission for preview and confirmation', async () => {
+it('requires the explicit OTAs configuration permission for preview and confirmation', async () => {
   const { url, pool } = await start('reception');
   for (const action of ['preview', 'apply']) expect((await fetch(`${url}/api/rate-calendar/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changes: [] }) })).status).toBe(403);
   expect(pool).not.toHaveBeenCalled();

@@ -39,6 +39,7 @@ export interface RestaurantReceiptData {
   receiptType: string | null;
   closedAt?: string | null;
   total: string;
+  comments?: string | null;
   items: Array<{
     name: string;
     quantity: number;
@@ -185,10 +186,27 @@ export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptD
     doc.text(`$${fmtMoney(totalAmount)}`, margin + contentW - 120, y + 6, { width: 115, align: "right" });
     y += 32;
 
+    if (data.comments?.trim()) {
+      doc.fillColor("#333333").fontSize(8.5).font("Helvetica-Bold");
+      if (y > pageH - 100) { doc.addPage(); y = 40; }
+      doc.text("Comentarios:", margin, y, { width: contentW });
+      y = doc.y + 5;
+      doc.font("Helvetica");
+      // Render line by line so long comments cannot collide with the footer.
+      for (const line of data.comments.trim().split("\n")) {
+        const height = doc.heightOfString(line || " ", { width: contentW });
+        if (y + height > pageH - 80) { doc.addPage(); y = 40; }
+        doc.text(line || " ", margin, y, { width: contentW });
+        y = doc.y + 3;
+      }
+    }
+
     // ── FOOTER ───────────────────────────────────────────────────────────────
     const footerY = pageH - 55;
     doc.moveTo(margin, footerY - 8).lineTo(margin + contentW, footerY - 8).strokeColor("#e0e0e0").lineWidth(0.5).stroke();
     doc.rect(0, footerY, pageW, 55).fill(NAVY);
+    doc.fillColor("white").fontSize(7).font("Helvetica-Bold")
+      .text("Documento no fiscal", margin + contentW - 160, footerY + 10, { width: 160, align: "right" });
     doc.fillColor("white").fontSize(8).font("Helvetica-Bold")
       .text(`${HOTEL_NAME} — Restaurante`, margin, footerY + 10, { width: contentW });
     doc.fillColor("#aadddd").fontSize(6.8).font("Helvetica")

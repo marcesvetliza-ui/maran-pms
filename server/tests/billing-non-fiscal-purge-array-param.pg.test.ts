@@ -1,11 +1,5 @@
-/**
- * Regresión: GET/DELETE /api/billing/invoices/non-fiscal usaban
- * `tipo_comprobante = ANY(${NON_FISCAL_TIPOS}::text[])`, interpolando el
- * array de drizzle-orm directo en el `sql` — eso nunca serializa como
- * literal de array de Postgres real (con más de un elemento tira "cannot
- * cast type record to text[]"), así que la purga de comprobantes no
- * fiscales estaba rota desde siempre para el array real (9 tipos).
- */
+/** The count remains a read-only regression for array parameters. The old
+ * bulk deletion must now refuse deletion without an individual reason/Caja audit. */
 import express from "express";
 import * as http from "node:http";
 import { randomUUID } from "node:crypto";
@@ -45,7 +39,7 @@ suite("PostgreSQL real: purga de comprobantes no fiscales — array param", () =
     await pool?.end();
   });
 
-  it("cuenta y purga solo los comprobantes no fiscales del rango, sin romper con el array real (9 tipos)", async () => {
+  it("cuenta los no fiscales y bloquea el borrado masivo que omite motivo y Caja", async () => {
     if (!pool) return;
     const fecha = "2020-05-15";
     // Números de comprobante altos y aleatorios para no chocar con datos reales.
@@ -74,21 +68,21 @@ suite("PostgreSQL real: purga de comprobantes no fiscales — array param", () =
         [numero, fecha],
       );
       const fiscalId = Number(fiscal.rows[0].id);
+      ids.push(fiscalId);
 
       const count = await request("GET", `/api/billing/invoices/non-fiscal/count?startDate=${fecha}&endDate=${fecha}`);
       expect(count.status, JSON.stringify(count.body)).toBe(200);
       expect(count.body.count).toBe(3);
 
       const deleted = await request("DELETE", `/api/billing/invoices/non-fiscal?startDate=${fecha}&endDate=${fecha}`);
-      expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
-      expect(deleted.body.deleted).toBe(3);
+      expect(deleted.status, JSON.stringify(deleted.body)).toBe(409);
+      expect(deleted.body.error).toContain("eliminación individual");
 
       const remaining = await pool.query("SELECT id FROM sales_invoices WHERE id = ANY($1::int[])", [ids]);
-      expect(remaining.rows).toHaveLength(0);
+      expect(remaining.rows).toHaveLength(4);
       const fiscalStillThere = await pool.query("SELECT id FROM sales_invoices WHERE id = $1", [fiscalId]);
       expect(fiscalStillThere.rows).toHaveLength(1);
-      ids.length = 0; // ya purgadas por el endpoint
-      await pool.query("DELETE FROM sales_invoices WHERE id = $1", [fiscalId]);
+
     } finally {
       if (ids.length) await pool.query("DELETE FROM sales_invoices WHERE id = ANY($1::int[])", [ids]);
     }

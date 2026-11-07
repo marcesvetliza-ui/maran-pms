@@ -1,6 +1,6 @@
 import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { feCAESolicitar } from "../billing/wsfevClient";
+import { feCAESolicitar,feCompConsultar } from "../billing/wsfevClient";
 import { authorizationFixture } from "./helpers/wsfeConsultationFixture";
 
 /**
@@ -13,6 +13,15 @@ import { authorizationFixture } from "./helpers/wsfeConsultationFixture";
  */
 
 const originalFetch = global.fetch;
+it.each(['cierre_habitacion','ticket','voucher_justo','unknown'])('does not submit an invalid associated type %s to ARCA',async tipo=>{
+ const fetchMock=vi.fn();global.fetch=fetchMock;
+ await expect(feCAESolicitar({...baseRequest,cbteAsoc:[{tipo,puntoVenta:5,numero:14}]},'homologacion')).rejects.toMatchObject({code:'BILLING_INVALID_FISCAL_TYPE',statusCode:400});
+ expect(fetchMock).not.toHaveBeenCalled();
+});
+it('does not turn an unknown consultation type into a Factura B query',async()=>{
+ const fetchMock=vi.fn();global.fetch=fetchMock;
+ await expect(feCompConsultar({...baseRequest,tipo:'cierre_habitacion'},'homologacion')).rejects.toMatchObject({code:'BILLING_INVALID_FISCAL_TYPE'});expect(fetchMock).not.toHaveBeenCalled();
+});
 
 beforeEach(() => {
   resetAppEnvForTests();

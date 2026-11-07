@@ -1,3 +1,4 @@
+import {connectionUrl} from './connectionPolicy';
 import type { Pool } from "pg";
 import { z } from "zod";
 import { STAGING_URL } from "./ari";
@@ -15,7 +16,8 @@ export async function saveSettlementRate(pool: Pool, connectionId: string, input
   try {
     await c.query("BEGIN");
     const connection = (await c.query("SELECT environment,base_url FROM channex_connections WHERE id=$1 FOR SHARE", [connectionId])).rows[0];
-    if (!connection || connection.environment !== "demo" || connection.base_url.replace(/\/$/, "") !== STAGING_URL) throw new Error("La cotización de esta etapa solo admite una conexión staging.");
+    if (!connection) throw new Error("La cotización de esta etapa solo admite una conexión staging.");
+    connectionUrl(connection);
     await c.query("INSERT INTO channex_inbound_settings(connection_id) VALUES($1) ON CONFLICT DO NOTHING", [connectionId]);
     const settings = (await c.query("SELECT settlement_exchange_rate FROM channex_inbound_settings WHERE connection_id=$1 FOR UPDATE", [connectionId])).rows[0];
     if (!settings) throw new Error("Configurá primero la recepción de reservas.");

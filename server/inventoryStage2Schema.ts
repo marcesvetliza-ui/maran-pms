@@ -1,6 +1,7 @@
 import {sql} from 'drizzle-orm';
 import {db} from './db';
 export async function ensureInventoryStage2Schema(){
+ await db.execute(sql`ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS unit_correction_pending boolean NOT NULL DEFAULT false, ADD COLUMN IF NOT EXISTS unit_correction_note text`);
  await db.execute(sql`CREATE TABLE IF NOT EXISTS inventory_unit_conversions (
  item_id varchar NOT NULL REFERENCES inventory_items(id), from_unit text NOT NULL,
  factor numeric(18,9) NOT NULL CHECK(factor>0), updated_at timestamp NOT NULL DEFAULT now(),

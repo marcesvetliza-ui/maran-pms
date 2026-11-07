@@ -2,28 +2,16 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { storage } from "../db-storage";
+import { editLinkedReservationInvoicePayment } from "./linkedReservationInvoicePaymentEdit";
 
 const CASH_METHODS = new Set(["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "mercadopago"]);
 const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
 
-/**
- * Corrige la forma de pago de una factura de Recepción (vinculada a una
- * reserva) que se cobró con un único medio real de Caja — el circuito
- * "cashArea && cashFormaPago" de POST /api/billing/invoices
- * (server/billing/routes.ts), que solo crea cash_movements
- * (source_type='comprobante', source_id=invoiceId) sin tocar payments ni el
- * folio de la reserva. Mismo criterio que editCenterSaleInvoicePaymentMethod
- * (centerSaleSettlement.ts): nunca reescribe el movimiento viejo, siempre lo
- * anula y crea uno nuevo.
- *
- * Alcance de esta primera etapa — confirmado después de investigar cómo se
- * cobra una factura de reserva: NO cubre facturas cobradas a Cuenta
- * Corriente (createReservationPaymentWithLedger también crea un
- * folio_movements y recalcula el saldo del folio — revertir eso de forma
- * segura sin un caso concreto para probarlo es un riesgo real, queda para
- * una vuelta aparte) ni permite pasar A Cuenta Corriente (no hay una ficha
- * asociada de forma confiable en este circuito). Solo cubre cambiar entre
- * medios reales de Caja (efectivo, tarjeta, transferencia, mercadopago).
+/** Correct a reservation invoice paid with one real tender.
+ * Legacy invoice-owned cash receipts retain their existing reversal flow.
+ * Reservation-owned receipts use their explicit payment/folio identity in
+ * editLinkedReservationInvoicePayment, preserving the unique receipt and
+ * auditing its classification change. Neither flow converts CC to money.
  */
 export async function editReservationInvoiceCashMethod(invoiceId: number, newMethod: string, operator: string): Promise<any> {
   const existing = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${invoiceId} LIMIT 1`);
@@ -41,7 +29,7 @@ export async function editReservationInvoiceCashMethod(invoiceId: number, newMet
     WHERE source_type = 'comprobante' AND source_id = ${String(invoiceId)} AND anulado = false
   `);
   if (registered.rows.length === 0) {
-    throw invalid("Este comprobante no tiene un cobro real de Caja para editar — puede estar a Cuenta Corriente o saldado con crédito, todavía no se puede editar desde acá.");
+    return editLinkedReservationInvoicePayment(invoiceId, newMethod, operator);
   }
   for (const row of registered.rows as any[]) {
     if (!row.shift_id) continue;

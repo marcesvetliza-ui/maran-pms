@@ -1,11 +1,13 @@
 import {z} from 'zod';
-import {sql} from 'drizzle-orm';
+import {eq,sql} from 'drizzle-orm';
 import {db,withDatabaseSavepoint} from './db';
 import {storage} from './db-storage';
+import {recipes,recipeIngredients,inventoryItems} from '@shared/schema';
 import {requireActiveInventoryReferences} from './inventoryLifecycle';
 import {computeBaseRecipeCostPerUnit} from './recipeCostCascade';
 import {inventoryUnitFactor} from './inventoryUnits';
 import {unitFactor} from './inventoryStockEngine';
+import {inventoryUnitCorrectionWindow} from './inventoryUnitCorrection';
 const menu=z.object({name:z.string().trim().min(1).max(200),categoryId:z.string().min(1),description:z.string().max(4000).optional(),price:z.coerce.number().finite().min(0).max(99999999),preparationTime:z.coerce.number().int().min(0).optional(),isAvailable:z.enum(['true','false']).default('true'),isEditable:z.enum(['true','false']).default('false'),defaultCourse:z.coerce.number().int().min(0).max(3).optional()});
 export async function copyDishRecipe(sourceId:string,input:unknown){
  const parsed=menu.safeParse(input);if(!parsed.success)throw Object.assign(new Error('Revisá nombre, categoría y precio del nuevo plato'),{statusCode:400});
@@ -36,7 +38,14 @@ export async function copyDishRecipe(sourceId:string,input:unknown){
       }
       await storage.createRecipeIngredient({...values,unitCost:cost,recipeId:recipe.id});
     }
-    catch(error){throw error;}
+    catch(error:any){
+      if(!inventoryUnitCorrectionWindow.enabled||error?.code!=='INVENTORY_UNIT_EQUIVALENCE_REQUIRED')throw error;
+      // During the authorised unit cleanup preserve the original cost when no
+      // conversion exists. Never invent a factor or block copying the dish.
+      await db.insert(recipeIngredients).values({...values,recipeId:recipe.id});
+      if(values.inventoryItemId)await db.update(inventoryItems).set({unitCorrectionPending:true,unitCorrectionNote:String(error.message)}).where(eq(inventoryItems.id,values.inventoryItemId));
+      warnings.push(`${values.ingredientName}: ${error.message}`);
+    }
   }
   return {menuItem:item,recipe:await storage.getRecipe(recipe.id),warnings};
  });

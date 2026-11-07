@@ -1,3 +1,5 @@
+import { requireChannex, registerChannexAccessRoutes } from '../channex/access';
+import { connectionUrl, PRODUCTION_URL, DEMO_URL, productionEnabled } from '../channex/connectionPolicy';
 import { registerChannexInboundRoutes } from "../channex/inboundRoutes";
 import type { Express } from "express";
 import { and, desc, eq } from "drizzle-orm";
@@ -39,14 +41,18 @@ function toPublicConnection(connection: any): ChannexConnectionPublic {
 
 function handleError(res: any, err: unknown, fallback: string) {
   if (err instanceof ChannexApiError) {
-    console.error("[channex]", err.message, err.body);
-    return res.status(502).json({ error: err.message, channexBody: err.body });
+    console.error("[channex]", err.message);
+    return res.status(502).json({ error: err.message });
   }
-  console.error("[channex]", err);
-  return res.status(400).json({ error: (err as Error)?.message ?? fallback });
+  console.error("[channex]", (err as Error)?.message);
+  const message=(err as Error)?.message||fallback;
+  const safe=message.includes('PAUSE_CHANNEX_INBOUND')?'Pausá la recepción de reservas antes de modificar esta conexión.':message.includes('CHANNEX_INBOUND_HISTORY')?'Esta conexión conserva reservas recibidas. Desactivala para conservar su historial.':message;
+  return res.status(400).json({error:safe});
 }
 
 export function registerChannexRoutes(app: Express) {
+  registerChannexAccessRoutes(app);
+  app.get('/api/channex/runtime',requireChannex('config'),(_req,res)=>res.json({productionAriEnabled:productionEnabled('ari'),productionInboundEnabled:productionEnabled('inbound'),credentialsStorageReady:(process.env.CHANNEX_CREDENTIALS_ENCRYPTION_KEY?.length||0)>=32}));
   registerChannexAriRoutes(app, pool);
   registerChannexInboundRoutes(app, pool);
   // --- Conexiones (config restringida) ---
@@ -54,7 +60,7 @@ export function registerChannexRoutes(app: Express) {
   // Lectura de conexiones: cualquier usuario autenticado (la bandeja necesita
   // saber qué conexiones existen para elegir una). apiKey nunca se expone
   // (ver toPublicConnection). Crear/editar/borrar sigue restringido abajo.
-  app.get("/api/channex/connections", requireAuth, async (_req, res) => {
+  app.get("/api/channex/connections", requireChannex('read'), async (_req, res) => {
     try {
       const rows = await db.select().from(channexConnections).orderBy(desc(channexConnections.createdAt));
       res.json(rows.map(toPublicConnection));
@@ -63,13 +69,13 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.post("/api/channex/connections", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/channex/connections", requireChannex('config'), async (req, res) => {
     try {
       const parsed = insertChannexConnectionSchema.parse(req.body);
 
       // Validamos la key/property_id contra Channex antes de guardar, así un
       // typo no queda guardado silenciosamente como "conexión activa".
-      const baseUrl = parsed.baseUrl ?? "https://staging.channex.io/api/v1";
+      const baseUrl = connectionUrl(parsed);
       const properties = await fetchChannexProperties({ apiKey: parsed.apiKey, baseUrl });
       const found = properties.some((p: any) => p.id === parsed.channexPropertyId);
       if (!found) {
@@ -85,6 +91,7 @@ export function registerChannexRoutes(app: Express) {
         .values({
           ...publicFields,
           baseUrl,
+          isActive: parsed.environment === "real" ? false : parsed.isActive,
           apiKey: null,
           apiKeyEncrypted: encryptChannexApiKey(apiKey),
           createdAt: new Date(),
@@ -97,10 +104,15 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/channex/connections/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/channex/connections/:id", requireChannex('config'), async (req, res) => {
     try {
       const parsed = insertChannexConnectionSchema.partial().parse(req.body);
       const { apiKey, ...fields } = parsed;
+      const current=(await db.select().from(channexConnections).where(eq(channexConnections.id,req.params.id)))[0];
+      if(!current)return res.status(404).json({error:'Conexión no encontrada'});
+      const validatedUrl=connectionUrl({...current,...fields});
+      if(fields.baseUrl!==undefined)fields.baseUrl=validatedUrl;
+      if((fields.environment??current.environment)==='real'&&fields.isActive===true&&(!productionEnabled('ari')||!productionEnabled('inbound')))return res.status(409).json({error:'La producción todavía no está habilitada en el servidor.'});
       const [updated] = await db
         .update(channexConnections)
         .set({
@@ -119,7 +131,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.delete("/api/channex/connections/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
+  app.delete("/api/channex/connections/:id", requireChannex('config'), async (req, res) => {
     try {
       const deleted = await db.delete(channexConnections).where(eq(channexConnections.id, req.params.id)).returning();
       if (deleted.length === 0) return res.status(404).json({ error: "Conexión no encontrada" });
@@ -131,7 +143,7 @@ export function registerChannexRoutes(app: Express) {
 
   // --- Mapeo de catálogo (config restringida) ---
 
-  app.post("/api/channex/connections/:id/sync-catalog", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/channex/connections/:id/sync-catalog", requireChannex('config'), async (req, res) => {
     try {
       const summary = await syncCatalog(req.params.id);
       res.json(summary);
@@ -143,7 +155,7 @@ export function registerChannexRoutes(app: Express) {
   // Lectura del mapeo: cualquier usuario autenticado (Recepción la necesita
   // para ver el nombre de categoría/tarifa en la bandeja). Editar el mapeo
   // sigue restringido más abajo.
-  app.get("/api/channex/connections/:id/room-type-mappings", requireAuth, async (req, res) => {
+  app.get("/api/channex/connections/:id/room-type-mappings", requireChannex('config'), async (req, res) => {
     try {
       const rows = await db
         .select({
@@ -159,7 +171,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/channex/room-type-mappings/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/channex/room-type-mappings/:id", requireChannex('config'), async (req, res) => {
     try {
       const { roomTypeId } = z.object({ roomTypeId: z.string().nullable() }).parse(req.body);
       const [updated] = await db
@@ -178,7 +190,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.get("/api/channex/connections/:id/rate-plan-mappings", requireAuth, async (req, res) => {
+  app.get("/api/channex/connections/:id/rate-plan-mappings", requireChannex('config'), async (req, res) => {
     try {
       const rows = await db
         .select({
@@ -194,7 +206,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/channex/rate-plan-mappings/:id", requirePermission(CHANNEX_CONFIG_RESOURCE_KEY), async (req, res) => {
+  app.patch("/api/channex/rate-plan-mappings/:id", requireChannex('config'), async (req, res) => {
     try {
       const { ratePlanId } = z.object({ ratePlanId: z.string().nullable() }).parse(req.body);
       const [updated] = await db
@@ -214,7 +226,7 @@ export function registerChannexRoutes(app: Express) {
   // --- Bandeja de reservas (cualquier usuario autenticado, ej. Recepción) ---
 
   // "Previsualizar": trae el feed de Channex y lo guarda, sin confirmar nada.
-  app.post("/api/channex/connections/:id/sync-bookings", requireAuth, async (req, res) => {
+  app.post("/api/channex/connections/:id/sync-bookings", requireChannex('bookings'), async (req, res) => {
     try {
       const summary = await syncBookings(req.params.id);
       res.json(summary);
@@ -227,7 +239,7 @@ export function registerChannexRoutes(app: Express) {
   // previsualizado. `revisionIds` opcional: cuáles confirmar; sin eso,
   // confirma el lote completo de lo pendiente. Cualquier id que no esté
   // pendiente en esta conexión rechaza la llamada entera (ver sync.ts).
-  app.post("/api/channex/connections/:id/confirm-bookings", requireAuth, async (req, res) => {
+  app.post("/api/channex/connections/:id/confirm-bookings", requireChannex('bookings'), async (req, res) => {
     try {
       const { revisionIds } = z.object({ revisionIds: z.array(z.string()).optional() }).parse(req.body ?? {});
       const summary = await confirmBookings(req.params.id, revisionIds);
@@ -241,7 +253,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.get("/api/channex/bookings", requireAuth, async (req, res) => {
+  app.get("/api/channex/bookings", requireChannex('read'), async (req, res) => {
     try {
       const { connectionId, status } = req.query as Record<string, string | undefined>;
       const conditions = [
@@ -259,7 +271,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.get("/api/channex/bookings/:id", requireAuth, async (req, res) => {
+  app.get("/api/channex/bookings/:id", requireChannex('read'), async (req, res) => {
     try {
       const [row] = await db.select().from(channexBookings).where(eq(channexBookings.id, req.params.id));
       if (!row) return res.status(404).json({ error: "Reserva no encontrada" });
@@ -269,7 +281,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.post("/api/channex/bookings/:id/import", requireAuth, async (req, res) => {
+  app.post("/api/channex/bookings/:id/import", requireChannex('bookings'), async (req, res) => {
     try {
       const preview = await importBooking(req.params.id, actorName(req));
       res.json(preview);
@@ -278,7 +290,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.post("/api/channex/bookings/:id/mark-review", requireAuth, async (req, res) => {
+  app.post("/api/channex/bookings/:id/mark-review", requireChannex('bookings'), async (req, res) => {
     try {
       const updated = await markForReview(req.params.id);
       res.json(updated);
@@ -287,7 +299,7 @@ export function registerChannexRoutes(app: Express) {
     }
   });
 
-  app.post("/api/channex/bookings/:id/retry", requireAuth, async (req, res) => {
+  app.post("/api/channex/bookings/:id/retry", requireChannex('bookings'), async (req, res) => {
     try {
       const updated = await retryBooking(req.params.id);
       res.json(updated);

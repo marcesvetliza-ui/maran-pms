@@ -1,3 +1,6 @@
+import {LodgingNotice} from "@/components/lodging-notice";
+import { fetchReportJson } from "@/lib/report-request";
+import { ReportQueryError } from "@/components/report-query-error";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -160,7 +163,7 @@ function LoadingSkeleton() {
   );
 }
 
-type OccupancyRow = { date: string; available: number; occupied: number; occupancy: number; totalRooms: number };
+type OccupancyRow = { date: string; available: number; occupied: number; occupancy: number; totalRooms: number; forecast?:number };
 type RevenueByTypeRow = { type: string; rooms: number; nightsSold: number; revenue: number; adr: number; percentage: number };
 type ChannelRow = { source: string; reservations: number; nights: number; revenue: number; commission: number; net: number; percentage: number };
 type ReservationRow = { code: string; guest: string; company: string; room: string; type: string; checkIn: string; checkOut: string; nights: number; source: string; status: string; total: number; paid: number; balance: number };
@@ -198,11 +201,7 @@ export default function ReportsPage() {
 
   const datesChanged = from !== appliedFrom || to !== appliedTo;
 
-  const fetchReport = async (url: string) => {
-    const res = await fetch(url, { credentials: "include" });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-    return res.json();
-  };
+  const fetchReport = fetchReportJson;
 
   const occupancy = useQuery<OccupancyRow[]>({
     queryKey: ["/api/reports/occupancy", appliedFrom, appliedTo],
@@ -394,10 +393,9 @@ export default function ReportsPage() {
   });
 
   type RestaurantFoodCostData = {
-    foodOnlyCostPct: number; beverageCostPct: number; globalCostPct: number;
-    ventasFood: number; ventasBeverage: number;
-    costoFood: number; costoBeverage: number;
-    byDish: { nombre: string; costoTotal: number; ventasTotal: number; foodCostPct: number; tieneReceta: boolean; isBeverage: boolean }[];
+    resumen: { totalVentas: number; foodOnlyCostPct?: number; beverageCostPct?: number; foodCostPct: number;
+      ventasFood?: number; ventasBeverage?: number; costoFood?: number; costoBeverage?: number; costoTeorico: number; };
+    porPlato: { nombre: string; costoTotal: number; totalVenta: number; foodCostPct: number; tieneReceta: boolean; isBeverage: boolean }[];
   };
   const restaurantFoodCostReport = useQuery<RestaurantFoodCostData>({
     queryKey: ["/api/restaurant/reports/food-cost-tab", periodo],
@@ -453,7 +451,11 @@ export default function ReportsPage() {
     setActiveTab(AREA_TABS[area].tabs[0]);
   }
 
+  const reportQueries = {"occupancy":occupancy,"revenue-type":revenueByType,"channel":byChannel,"reservations":reservations,"payments":payments,"top-guests":topGuests,"forecast":forecastReport,"housekeeping":housekeeping,"housekeeping-productivity":hkProductivityReport,"restaurant":restaurant,"restaurant-cmv":restaurantCmvReport,"restaurant-mozo":restaurantMozoReport,"restaurant-foodcost":restaurantFoodCostReport,"billing":billing,"group-payments":groupPayments,"arrivals-departures":arrDep,"pending-balances":pendingBalances,"spa":spaReport,"events":eventsReport,"maintenance":maintenanceReport,"inventory":inventoryReport};
+  const currentReport = reportQueries[activeTab as keyof typeof reportQueries];
+
   const handleExportCSV = () => {
+    if (currentReport?.isError || currentReport?.isFetching || !currentReport?.data) return;
     switch (activeTab) {
       case "occupancy":
         if (occupancy.data) {
@@ -648,11 +650,11 @@ export default function ReportsPage() {
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 ml-auto">
-              <Button variant="outline" size="sm" onClick={handleExportCSV} data-testid="button-export-csv">
+              <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={currentReport?.isError || currentReport?.isFetching || !currentReport?.data} data-testid="button-export-csv">
                 <Download className="h-4 w-4 mr-1" />
                 Exportar CSV
               </Button>
-              <Button variant="outline" size="sm" onClick={() => window.print()} data-testid="button-print">
+              <Button variant="outline" size="sm" onClick={() => window.print()} disabled={currentReport?.isError || currentReport?.isFetching || !currentReport?.data} data-testid="button-print">
                 <Printer className="h-4 w-4 mr-1" />
                 Imprimir
               </Button>
@@ -675,6 +677,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
+      {['occupancy','revenue-type','channel'].includes(activeTab)&&!currentReport?.isError&&<LodgingNotice report={{advertencias:(currentReport?.data as any)?.[0]?.lodgingWarnings}} />}
       <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-reports">
         {activeArea === "hoteleria" && (
           <TabsList className="flex flex-wrap h-auto gap-1">
@@ -791,6 +794,7 @@ export default function ReportsPage() {
         )}
 
         <TabsContent value="occupancy" className="space-y-4 mt-4">
+          {occupancy.isError ? <ReportQueryError retry={occupancy.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Ocupación Diaria</CardTitle>
@@ -817,8 +821,8 @@ export default function ReportsPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Fecha</TableHead>
-                          <TableHead className="text-right">Hab. Disponibles</TableHead>
-                          <TableHead className="text-right">Hab. Ocupadas</TableHead>
+                          <TableHead className="text-right">Sin ocupación realizada</TableHead>
+                          <TableHead className="text-right">Hab. ocupadas (realizado)</TableHead><TableHead className="text-right">Reservadas por venir</TableHead>
                           <TableHead className="text-right">% Ocupación</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -827,7 +831,7 @@ export default function ReportsPage() {
                           <TableRow key={i} data-testid={`row-occupancy-${i}`}>
                             <TableCell>{formatDisplayDate(row.date)}</TableCell>
                             <TableCell className="text-right">{row.available}</TableCell>
-                            <TableCell className="text-right">{row.occupied}</TableCell>
+                            <TableCell className="text-right">{row.occupied}</TableCell><TableCell className="text-right">{row.forecast ?? 0}</TableCell>
                             <TableCell className="text-right">{row.occupancy}%</TableCell>
                           </TableRow>
                         ))}
@@ -840,9 +844,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="revenue-type" className="space-y-4 mt-4">
+          {revenueByType.isError ? <ReportQueryError retry={revenueByType.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Revenue por Tipo de Habitación</CardTitle>
@@ -896,9 +902,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="channel" className="space-y-4 mt-4">
+          {byChannel.isError ? <ReportQueryError retry={byChannel.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Revenue por Canal</CardTitle>
@@ -963,9 +971,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="reservations" className="space-y-4 mt-4">
+          {reservations.isError ? <ReportQueryError retry={reservations.refetch} /> : <>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-4">
               <CardTitle>Detalle de Reservas</CardTitle>
@@ -1043,9 +1053,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="payments" className="space-y-4 mt-4">
+          {payments.isError ? <ReportQueryError retry={payments.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Pagos por Método</CardTitle>
@@ -1100,9 +1112,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="top-guests" className="space-y-4 mt-4">
+          {topGuests.isError ? <ReportQueryError retry={topGuests.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Huéspedes Frecuentes</CardTitle>
@@ -1148,9 +1162,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="forecast" className="space-y-4 mt-4">
+          {forecastReport.isError ? <ReportQueryError retry={forecastReport.refetch} /> : <>
           {forecastReport.isLoading ? (
             <LoadingSkeleton />
           ) : forecastReport.data ? (
@@ -1183,9 +1199,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
 
         <TabsContent value="housekeeping" className="space-y-4 mt-4">
+          {housekeeping.isError ? <ReportQueryError retry={housekeeping.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Housekeeping</CardTitle>
@@ -1235,9 +1253,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="housekeeping-productivity" className="space-y-4 mt-4">
+          {hkProductivityReport.isError ? <ReportQueryError retry={hkProductivityReport.refetch} /> : <>
           {hkProductivityReport.isLoading ? (
             <LoadingSkeleton />
           ) : hkProductivityReport.data ? (
@@ -1277,9 +1297,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
 
         <TabsContent value="restaurant" className="space-y-4 mt-4">
+          {restaurant.isError ? <ReportQueryError retry={restaurant.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle>Restaurante</CardTitle>
@@ -1375,9 +1397,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="restaurant-cmv" className="space-y-4 mt-4">
+          {restaurantCmvReport.isError ? <ReportQueryError retry={restaurantCmvReport.refetch} /> : <>
           {restaurantCmvReport.isLoading ? (
             <LoadingSkeleton />
           ) : restaurantCmvReport.data ? (
@@ -1412,10 +1436,12 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
 
         {/* ── Ventas por Mozo ── */}
         <TabsContent value="restaurant-mozo" className="space-y-4 mt-4">
+          {restaurantMozoReport.isError ? <ReportQueryError retry={restaurantMozoReport.refetch} /> : <>
           {restaurantMozoReport.isLoading ? <LoadingSkeleton /> : restaurantMozoReport.data ? (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1471,20 +1497,22 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : <p className="text-muted-foreground text-center py-8">Sin datos para el período seleccionado</p>}
+         </>}
         </TabsContent>
 
         {/* ── Food & Beverage Cost ── */}
         <TabsContent value="restaurant-foodcost" className="space-y-4 mt-4">
+          {restaurantFoodCostReport.isError ? <ReportQueryError retry={restaurantFoodCostReport.refetch} /> : <>
           {restaurantFoodCostReport.isLoading ? <LoadingSkeleton /> : restaurantFoodCostReport.data ? (
             <>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {[
-                  { label: "Food Cost % (comidas)",    value: `${(restaurantFoodCostReport.data.foodOnlyCostPct ?? 0).toFixed(1)}%`, hi: (restaurantFoodCostReport.data.foodOnlyCostPct ?? 0) > 35 },
-                  { label: "Beverage Cost % (bebidas)",value: `${(restaurantFoodCostReport.data.beverageCostPct ?? 0).toFixed(1)}%`, hi: (restaurantFoodCostReport.data.beverageCostPct ?? 0) > 30 },
-                  { label: "Food Cost % Global",       value: `${(restaurantFoodCostReport.data.globalCostPct ?? 0).toFixed(1)}%`, hi: false },
-                  { label: "Ventas Comidas",  value: formatARS(restaurantFoodCostReport.data.ventasFood ?? 0), hi: false },
-                  { label: "Ventas Bebidas",  value: formatARS(restaurantFoodCostReport.data.ventasBeverage ?? 0), hi: false },
-                  { label: "Costo Total",     value: formatARS((restaurantFoodCostReport.data.costoFood ?? 0) + (restaurantFoodCostReport.data.costoBeverage ?? 0)), hi: false },
+                  { label: "Food Cost % (comidas)",    value: `${(restaurantFoodCostReport.data.resumen.foodOnlyCostPct ?? 0).toFixed(1)}%`, hi: (restaurantFoodCostReport.data.resumen.foodOnlyCostPct ?? 0) > 35 },
+                  { label: "Beverage Cost % (bebidas)",value: `${(restaurantFoodCostReport.data.resumen.beverageCostPct ?? 0).toFixed(1)}%`, hi: (restaurantFoodCostReport.data.resumen.beverageCostPct ?? 0) > 30 },
+                  { label: "Food Cost % Global",       value: `${(restaurantFoodCostReport.data.resumen.foodCostPct ?? 0).toFixed(1)}%`, hi: false },
+                  { label: "Ventas Comidas",  value: formatARS(restaurantFoodCostReport.data.resumen.ventasFood ?? 0), hi: false },
+                  { label: "Ventas Bebidas",  value: formatARS(restaurantFoodCostReport.data.resumen.ventasBeverage ?? 0), hi: false },
+                  { label: "Costo Total",     value: formatARS((restaurantFoodCostReport.data.resumen.costoFood ?? 0) + (restaurantFoodCostReport.data.resumen.costoBeverage ?? 0)), hi: false },
                 ].map(k => (
                   <Card key={k.label}><CardContent className="p-4">
                     <p className="text-xs text-muted-foreground">{k.label}</p>
@@ -1495,8 +1523,8 @@ export default function ReportsPage() {
               <Card>
                 <CardHeader><CardTitle>Desglose por Plato</CardTitle></CardHeader>
                 <CardContent>
-                  {(!restaurantFoodCostReport.data.byDish || restaurantFoodCostReport.data.byDish.length === 0) ? (
-                    <p className="text-muted-foreground text-center py-6 text-sm">Sin datos (requiere recetas con costos cargados)</p>
+                  {(!restaurantFoodCostReport.data.porPlato || restaurantFoodCostReport.data.porPlato.length === 0) ? (
+                    <p className="text-muted-foreground text-center py-6 text-sm">Sin ventas de platos en el período</p>
                   ) : (
                     <div className="overflow-auto">
                       <Table>
@@ -1510,7 +1538,7 @@ export default function ReportsPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {restaurantFoodCostReport.data.byDish.map((r, i) => (
+                          {restaurantFoodCostReport.data.porPlato.map((r, i) => (
                             <TableRow key={i}>
                               <TableCell className="font-medium">{r.nombre}</TableCell>
                               <TableCell>
@@ -1518,7 +1546,7 @@ export default function ReportsPage() {
                                   {r.isBeverage ? "Bebida" : "Comida"}
                                 </span>
                               </TableCell>
-                              <TableCell className="text-right">{formatARS(r.ventasTotal ?? 0)}</TableCell>
+                              <TableCell className="text-right">{formatARS(r.totalVenta ?? 0)}</TableCell>
                               <TableCell className="text-right">{formatARS(r.costoTotal ?? 0)}</TableCell>
                               <TableCell className="text-right">
                                 <span className={(r.foodCostPct ?? 0) > 35 ? "text-red-600 font-semibold" : "text-green-600"}>
@@ -1544,7 +1572,7 @@ export default function ReportsPage() {
                   </p>
                 </CardHeader>
                 <CardContent>
-                  {mermasReport.isLoading ? (
+                  {mermasReport.isError ? <ReportQueryError retry={mermasReport.refetch} /> : mermasReport.isLoading ? (
                     <LoadingSkeleton />
                   ) : mermasReport.data && mermasReport.data.items.length > 0 ? (
                     <>
@@ -1592,9 +1620,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : <p className="text-muted-foreground text-center py-8">Sin datos para el período seleccionado</p>}
+         </>}
         </TabsContent>
 
         <TabsContent value="billing" className="space-y-4 mt-4">
+          {billing.isError ? <ReportQueryError retry={billing.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle data-testid="text-billing-title">Reporte de Facturación</CardTitle>
@@ -1706,9 +1736,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="group-payments" className="space-y-4 mt-4">
+          {groupPayments.isError ? <ReportQueryError retry={groupPayments.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle data-testid="text-group-payments-title">Historial de Pagos Grupales</CardTitle>
@@ -1780,9 +1812,11 @@ export default function ReportsPage() {
               )}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="arrivals-departures" className="space-y-4 mt-4">
+          {arrDep.isError ? <ReportQueryError retry={arrDep.refetch} /> : <>
           <style dangerouslySetInnerHTML={{ __html: `
             @media print {
               @page { size: A4 landscape; margin: 1cm; }
@@ -1886,9 +1920,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : <p className="text-muted-foreground text-center py-8">No hay datos para el período seleccionado</p>}
+         </>}
         </TabsContent>
 
         <TabsContent value="pending-balances" className="space-y-4 mt-4">
+          {pendingBalances.isError ? <ReportQueryError retry={pendingBalances.refetch} /> : <>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -1948,9 +1984,11 @@ export default function ReportsPage() {
               ) : null}
             </CardContent>
           </Card>
+         </>}
         </TabsContent>
 
         <TabsContent value="spa" className="space-y-4 mt-4">
+          {spaReport.isError ? <ReportQueryError retry={spaReport.refetch} /> : <>
           {spaReport.isLoading ? (
             <LoadingSkeleton />
           ) : spaReport.data ? (
@@ -2005,9 +2043,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
 
         <TabsContent value="events" className="space-y-4 mt-4">
+          {eventsReport.isError ? <ReportQueryError retry={eventsReport.refetch} /> : <>
           {eventsReport.isLoading ? (
             <LoadingSkeleton />
           ) : eventsReport.data ? (
@@ -2060,9 +2100,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
 
         <TabsContent value="maintenance" className="space-y-4 mt-4">
+          {maintenanceReport.isError ? <ReportQueryError retry={maintenanceReport.refetch} /> : <>
           {maintenanceReport.isLoading ? (
             <LoadingSkeleton />
           ) : maintenanceReport.data ? (
@@ -2147,9 +2189,11 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
 
         <TabsContent value="inventory" className="space-y-4 mt-4">
+          {inventoryReport.isError ? <ReportQueryError retry={inventoryReport.refetch} /> : <>
           {inventoryReport.isLoading ? (
             <LoadingSkeleton />
           ) : inventoryReport.data ? (
@@ -2227,6 +2271,7 @@ export default function ReportsPage() {
               </Card>
             </>
           ) : null}
+         </>}
         </TabsContent>
       </Tabs>
     </div>

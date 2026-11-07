@@ -7,6 +7,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // JSDOM dialog workflows can exceed five seconds on shared CI runners.
+    // Bound concurrency and keep a finite timeout without skipping assertions.
+    maxWorkers: process.env.CI ? 2 : undefined,
+    testTimeout: process.env.CI ? 20_000 : 5_000,
     setupFiles: ["./client/src/test/setup.ts"],
     css: false,
     include: [

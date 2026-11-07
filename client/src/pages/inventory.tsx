@@ -1,3 +1,4 @@
+import {InventoryRecipeCostWarning} from "@/components/inventory-recipe-cost-warning";
 import { focusFormControl } from "@/lib/popup-tab-navigation";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import {InventoryPriceComparison} from "@/components/inventory-price-comparison";
@@ -93,6 +94,8 @@ type Brand = {
 };
 
 type InventoryItem = {
+  unitCorrectionPending?: boolean;
+  unitCorrectionNote?: string | null;
   id: string;
   sku: string | null;
   name: string;
@@ -833,10 +836,10 @@ export default function InventoryPage() {
   const [actionReason, setActionReason] = useState("");
   const [actionQuantity, setActionQuantity] = useState("");
   const [actionNotes, setActionNotes] = useState("");
-  const refreshInventory = () => { queryClient.invalidateQueries({queryKey:["/api/inventory/items"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/movements"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/warehouse-stock"]}); };
+  const refreshInventory = () => { queryClient.invalidateQueries({predicate:q=>typeof q.queryKey[0]==="string" && /^\/api\/inventory\/items(?:\?|$)/.test(q.queryKey[0])}); queryClient.invalidateQueries({queryKey:["/api/inventory/movements"]}); queryClient.invalidateQueries({queryKey:["/api/inventory/warehouse-stock"]}); };
   const editArticle = (item:InventoryItem) => {setEditingArticle(item);};
   const openInventoryAction = (action:NonNullable<typeof inventoryAction>) => {setInventoryAction(action);setActionReason("");setActionQuantity(action.quantity || "");setActionNotes(action.notes || "");};
-  const editArticleMutation = useMutation({mutationFn:async(data:Partial<InventoryItem>)=>{await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,data);},onSuccess:()=>{refreshInventory();setEditingArticle(null);toast({title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
+  const editArticleMutation = useMutation({mutationFn:async(data:Partial<InventoryItem>)=>{return (await apiRequest("PATCH",`/api/inventory/items/${editingArticle!.id}/metadata`,data)).json();},onSuccess:(updated:InventoryItem)=>{refreshInventory();setEditingArticle(null);toast(updated.unitCorrectionPending?{title:"Unidad guardada; recetas pendientes de revisar",description:"Se conservaron los costos anteriores de las recetas. El detalle queda visible en Inventario y Recetas."}:{title:"Artículo actualizado"});},onError:(e:any)=>toast({title:"No se pudo editar",description:e.message,variant:"destructive"})});
   const purchaseStateMutation = useMutation({mutationFn:async(item:any)=>apiRequest("PATCH",`/api/inventory/items/${item.id}/purchasing`,{purchaseEnabled:item.purchaseEnabled === false}),onSuccess:()=>{refreshInventory();toast({title:"Estado de compras actualizado; stock conservado"});},onError:(e:any)=>toast({title:"No se pudo cambiar el estado",description:e.message,variant:"destructive"})});
   const reactivateItemMutation = useMutation({mutationFn:async(item:{id:string;name:string;minStock:unknown})=>{await apiRequest("PATCH",`/api/inventory/items/${item.id}/metadata`,{name:item.name,minStock:item.minStock,isActive:"true"});},onSuccess:()=>{refreshInventory();toast({title:"Artículo reactivado"});},onError:(e:any)=>toast({title:"No se pudo reactivar",description:e.message,variant:"destructive"})});
   const inventoryActionMutation = useMutation({mutationFn:async()=>{const action=inventoryAction!;await apiRequest("POST",action.kind === "deactivate" ? `/api/inventory/items/${action.id}/deactivate` : `/api/inventory/movements/${action.id}/${action.kind}`,{reason:actionReason.trim(),quantity:actionQuantity,notes:actionNotes});},onSuccess:()=>{refreshInventory();setInventoryAction(null);toast({title:"Operación registrada con historial"});},onError:(e:any)=>toast({title:"No se pudo completar",description:e.message,variant:"destructive"})});
@@ -1205,6 +1208,7 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      <InventoryRecipeCostWarning items={items}/>
       <div className="grid gap-4 md:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-4 pb-2">
@@ -2583,7 +2587,7 @@ ${(consumoReport.items || []).map(r => `<tr><td>${r.item_name}</td><td>${r.unit}
 
       <Dialog open={!!editingArticle} onOpenChange={open=>{if(!open && !editArticleMutation.isPending)setEditingArticle(null);}}>
         <DialogContent className="w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Editar artículo</DialogTitle></DialogHeader>
-          {editingArticle && <><NewItemForm key={editingArticle.id} initialItem={editingArticle} canCost={canCost} categories={categories} brands={brands} suppliers={accountingSuppliers} existingItems={items} onSubmit={data=>editArticleMutation.mutate(data)} isPending={editArticleMutation.isPending} onCancel={()=>setEditingArticle(null)}/><InventoryUnitConversions itemId={editingArticle.id} stockUnit={editingArticle.unit}/></>}
+          {editingArticle && <><NewItemForm key={editingArticle.id} initialItem={editingArticle} canCost={canCost} categories={categories} brands={brands} suppliers={accountingSuppliers} existingItems={items} onSubmit={data=>editArticleMutation.mutate(data)} isPending={editArticleMutation.isPending} onCancel={()=>setEditingArticle(null)}/></>}
         </DialogContent>
       </Dialog>
       <Dialog open={!!inventoryAction} onOpenChange={open=>{if(!open && !inventoryActionMutation.isPending)setInventoryAction(null);}}>
@@ -2809,6 +2813,7 @@ export function NewItemForm({
 }) {
   const { toast } = useToast();
   const [conversions,setConversions]=useState<InventoryConversionDraft[]>([]);
+  const {data:unitCorrectionMode}=useQuery<{enabled:boolean}>({queryKey:['/api/inventory/unit-correction-mode'],enabled:!!initialItem,staleTime:0});
   const [sku, setSku] = useState(initialItem?.sku || "");
   const [active, setActive] = useState(initialItem?.isActive !== "false");
   const [name, setName] = useState(initialItem?.name || "");
@@ -3050,7 +3055,7 @@ export function NewItemForm({
         </div>
         <div className="space-y-2">
           <Label>Unidad</Label>
-          <Select value={unit} onValueChange={value=>{setUnit(value);setConversions([]);}} disabled={!!initialItem}>
+          <Select value={unit} onValueChange={value=>{setUnit(value);setConversions([]);}} disabled={!!initialItem&&!unitCorrectionMode?.enabled}>
             <SelectTrigger data-testid="select-unit">
               <SelectValue />
             </SelectTrigger>
@@ -3062,7 +3067,7 @@ export function NewItemForm({
               ))}
             </SelectContent>
           </Select>
-          {initialItem && <p className="text-xs text-muted-foreground">La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.</p>}
+          {initialItem && <p className="text-xs text-muted-foreground">{unitCorrectionMode?.enabled?'Corrección temporal de unidades habilitada. Conserva los valores numéricos de stock y del historial. Las recetas con unidades anteriores no bloquean el guardado: conservan sus costos previos y quedan pendientes de revisión. Los consumos pendientes tampoco bloquean el cambio y quedan para revisar antes de aplicarlos.':'La unidad base se conserva. Configurá equivalencias debajo para compras y consumos en otras unidades.'}</p>}
         </div>
         {canCost && <div className="space-y-2">
           <Label>Costo Unitario</Label>
@@ -3129,7 +3134,11 @@ export function NewItemForm({
         </Select>
         <p className="text-xs text-muted-foreground">Se usa para sugerir la alícuota al cargar este artículo en una factura de Compras.</p>
       </div>
-      {!initialItem && <InventoryUnitConversions stockUnit={unit} value={conversions} onChange={setConversions}/>}
+      {initialItem && <InventoryRecipeCostWarning items={[initialItem]}/>}
+      {initialItem&&unit!==initialItem.unit&&<p className="text-sm text-amber-700 dark:text-amber-400">Las equivalencias anteriores no se reutilizan al cambiar la unidad base. Configurá las que correspondan a la nueva unidad; se conserva un registro de las anteriores.</p>}
+      {initialItem && unit!==initialItem.unit && <p className="text-sm">Guardá el artículo para aplicar la nueva unidad y sus equivalencias juntas.</p>}
+      <InventoryUnitConversions key={`${initialItem?.id || 'new'}:${unit}`} stockUnit={unit}
+        {...(initialItem && unit===initialItem.unit ? {itemId:initialItem.id} : {value:conversions,onChange:setConversions})}/>
       {!initialItem && missingRequiredFields.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="text-missing-required-fields">
           Falta completar: {missingRequiredFields.join(", ")}.
@@ -3143,7 +3152,7 @@ export function NewItemForm({
           onClick={() => {
             onSubmit({
               name,
-              ...(!initialItem ? {conversions} : {}),
+              ...(!initialItem||unit!==initialItem.unit ? {conversions} : {}),
               ...(initialItem ? {sku:sku.trim() || null,isActive:active ? "true" : "false"} : {}),
               categoryId: categoryId || undefined,
               accountingSupplierIds: supplierIds,

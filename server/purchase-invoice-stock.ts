@@ -3,7 +3,7 @@ import {unitFactor} from "./inventoryStockEngine";
 import {convertInventoryQuantity} from "./inventoryUnits";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
-import { cascadeRecipeCostsFromInventoryItem } from "./recipeCostCascade";
+import { refreshRecipeCostsForInventoryEntry } from "./recipeCostCascade";
 
 type Executor = Omit<typeof db, "$client">;
 
@@ -115,7 +115,7 @@ export async function enterPurchaseInvoiceStock(
         VALUES (${row.itemId}, ${stockCost}, 'entrada', ${reference})
       `);
       await tx.execute(sql`UPDATE inventory_items SET cost_price = ${stockCost} WHERE id = ${row.itemId}`);
-      await cascadeRecipeCostsFromInventoryItem(tx, row.itemId, stockCost);
+      await refreshRecipeCostsForInventoryEntry(tx, row.itemId, stockCost);
     }
     // Preserve an existing preferred supplier. Associate the invoice supplier
     // without replacing other supplier relationships or their preference.

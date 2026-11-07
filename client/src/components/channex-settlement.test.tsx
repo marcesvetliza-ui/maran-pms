@@ -1,3 +1,4 @@
+vi.mock('@/hooks/use-channex-access',()=>({useChannexAccess:()=>({data:{read:true}})}));
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -30,12 +30,12 @@ export function compressValues(values: AriValue[]): AriValue[] {
   }
   return result;
 }
-export async function inventoryPreview(c: Pick<PoolClient, 'query'>, connectionId: string, floor: number) {
+export async function inventoryPreview(c: Pick<PoolClient, 'query'>, connectionId: string, floor: number|null) {
   const { rows } = await c.query(`SELECT r.id,r.room_number AS "roomNumber",r.floor,r.room_type_id AS "roomTypeId",rt.name AS "roomTypeName",r.status,
    m.channex_room_type_id AS "channexRoomTypeId"
    FROM rooms r LEFT JOIN room_types rt ON rt.id=r.room_type_id
    LEFT JOIN channex_room_type_mappings m ON m.connection_id=$1 AND m.room_type_id=r.room_type_id
-   WHERE r.floor=$2 AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB'
+   WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB'
    ORDER BY r.room_number::text`, [connectionId, floor]);
   return rows;
 }
@@ -79,7 +79,7 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
     FROM blocked_groups b GROUP BY b.room_type_id,b.day
    )
    SELECT m.room_type_id,m.channex_room_type_id,d.day::text,
-    GREATEST(0,(SELECT count(*) FROM rooms r WHERE r.floor=$2 AND r.room_type_id=m.room_type_id
+    GREATEST(0,(SELECT count(*) FROM rooms r WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.room_type_id=m.room_type_id
       AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos')
       AND NOT EXISTS(SELECT 1 FROM reservations b WHERE b.room_id=r.id AND b.status IN ('tentative','pending','reserved','confirmed','web_checkin','checked_in') AND b.check_in_date<=d.day AND b.check_out_date>d.day)
       AND NOT EXISTS(SELECT 1 FROM maintenance_blocks b WHERE b.room_id=r.id AND b.block_from<=d.day AND b.block_to>=d.day)

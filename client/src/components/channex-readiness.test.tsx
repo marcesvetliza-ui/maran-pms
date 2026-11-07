@@ -1,3 +1,4 @@
+vi.mock('@/hooks/use-channex-access',()=>({useChannexAccess:()=>({data:{owner:state.allowed,read:state.allowed,config:state.allowed,bookings:state.allowed,sync:state.allowed}})}));
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +26,7 @@ describe("Channex staging preparation", () => {
     expect(apiRequest).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Revisar preparación" }));
     expect(await screen.findByText(/La recepción automática admite ARS/)).toBeInTheDocument();
-    expect(screen.getByText(/no acredita la certificación/)).toBeInTheDocument();
+    expect(screen.getByText(/se comprueban durante la puesta en marcha/)).toBeInTheDocument();
     expect(apiRequest).toHaveBeenCalledExactlyOnceWith("GET", "/api/channex/connections/test-connection/inbound/readiness");
     fireEvent.click(screen.getByRole("button", { name: "Revisar preparación" }));
     await waitFor(() => expect(apiRequest).toHaveBeenCalledTimes(2));
