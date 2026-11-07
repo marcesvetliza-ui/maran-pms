@@ -1,6 +1,7 @@
 import {billingPointOptions} from "@shared/billing-point-of-sale";
 import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
 import { canReviewCreditNoteAccount } from "@shared/credit-note-account-recovery";
+import {creditTypeForInvoice} from '@shared/fiscal-document-types';
 import { CashCardRectification } from '@/components/cash-card-rectification';
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
@@ -451,6 +452,7 @@ export default function BillingPage() {
                         <div className="text-muted-foreground mt-0.5">
                           Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
                         </div>
+                        {!creditTypeForInvoice(nc.original_tipo_comprobante)&&<p className="mt-1 text-amber-800 dark:text-amber-200">El original es un comprobante interno o no verificable como factura fiscal. Requiere revisión antes de conciliar; no emitir otra NC.</p>}
                         {getReconciliationError(nc) && (
                           <div className="text-amber-800 dark:text-amber-200 mt-1">{getReconciliationError(nc)}</div>
                         )}
@@ -460,11 +462,11 @@ export default function BillingPage() {
                         variant="outline"
                         className="shrink-0 border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-100"
                         onClick={() => reconcileCreditNoteMutation.mutate(Number(nc.id))}
-                        disabled={reconcileCreditNoteMutation.isPending}
+                        disabled={reconcileCreditNoteMutation.isPending||!creditTypeForInvoice(nc.original_tipo_comprobante)}
                         data-testid={`btn-reconcile-credit-note-${nc.id}`}
                       >
                         <RefreshCw className={`w-3.5 h-3.5 mr-1 ${reconcileCreditNoteMutation.isPending ? "animate-spin" : ""}`} />
-                        Reintentar y conciliar
+                        {creditTypeForInvoice(nc.original_tipo_comprobante)?'Reintentar y conciliar':'Revisión requerida'}
                       </Button>
                     </div>
                   ))}
@@ -582,7 +584,7 @@ export default function BillingPage() {
                                       <RefreshCw className="w-3.5 h-3.5 mr-1"/>Revisar CC
                                     </Button>
                                   )}
-                                  {(f.estado === "emitida" || f.estado === "parcial") && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
+                                  {(f.estado === "emitida" || f.estado === "parcial") && !!creditTypeForInvoice(f.tipo_comprobante) && (
                                     <Button
                                       variant="ghost"
                                       size="sm"
@@ -2867,6 +2869,13 @@ export function NotaCreditoDialog({ invoiceId, onClose, onSuccess }: { invoiceId
   });
 
   if (!invoice) return null;
+
+  if(!creditTypeForInvoice(invoice.tipo_comprobante))return <Dialog open={!!invoiceId} onOpenChange={o=>!o&&onClose()}>
+    <DialogContent className="max-w-md"><DialogHeader><DialogTitle>Comprobante no elegible para Nota de Crédito</DialogTitle></DialogHeader>
+      <p className="text-sm">Ningún comprobante no fiscal admite una Nota de Crédito fiscal. Esta acción requiere una factura fiscal original.</p>
+      <DialogFooter><Button onClick={onClose}>Cerrar</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>;
 
   // A partial NC leaves the original invoice in estado=parcial, so it is
   // intentionally possible to open this dialog again for the remaining balance.

@@ -1,14 +1,10 @@
 import { resolveFiscalRecipientDocument, resolveCondicionIvaReceptorId } from "./fiscalDocument";
+import {fiscalDocumentCode} from '../../shared/fiscal-document-types';
+import {wsfeFaultReason,wsfeTransportError} from './wsfeTransportError';
 import { parseConsultationResult, parseAuthorizationResult } from "./consultationResult";
 
 const WSFE_HOMOLOG = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx";
 const WSFE_PROD    = "https://servicios1.afip.gov.ar/wsfev1/service.asmx";
-
-const TIPOS_CBT: Record<string, number> = {
-  FA: 1, FB: 6, FC: 11, FT: 195, FM: 201, FMB: 206,
-  NCA: 3, NCB: 8, NCC: 13, NCT: 197, NCM: 203, NCMB: 208,
-  NDA: 2, NDB: 7, NDC: 12, NDT: 196, NDM: 202, NDMB: 207,
-};
 
 export interface FECAERequest {
   tipo: string;
@@ -73,7 +69,8 @@ async function soapPost(url: string, action: string, body: string): Promise<stri
     signal: AbortSignal.timeout(15000),
   });
   const text = await resp.text();
-  if (!resp.ok) throw new Error(`WSFEV1 HTTP ${resp.status}: ${text.slice(0, 400)}`);
+  const fault=wsfeFaultReason(text);
+  if (!resp.ok||fault) throw wsfeTransportError(resp.status,fault,body);
   return text;
 }
 
@@ -100,7 +97,7 @@ export function buildIvaBlock(neto21: number, iva21: number, neto105: number, iv
 function buildCbtesAsocBlock(cbteAsoc: FECAERequest["cbteAsoc"]): string {
   if (!cbteAsoc || cbteAsoc.length === 0) return "";
   const entries = cbteAsoc.map((asoc) => {
-    const tipo = TIPOS_CBT[asoc.tipo] ?? asoc.tipo;
+    const tipo = fiscalDocumentCode(asoc.tipo);
     const cuit = asoc.cuit ? `<ar:Cuit>${asoc.cuit.replace(/-/g, "")}</ar:Cuit>` : "";
     const fecha = asoc.fecha ? `<ar:CbteFch>${asoc.fecha}</ar:CbteFch>` : "";
     return (
@@ -146,7 +143,7 @@ export async function feCompConsultar(
   expected?: { total: number; fecha: string; docTipo: number; docNro: string }
 ): Promise<FECAEResult | null> {
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
-  const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
+  const cbteTipo = fiscalDocumentCode(req.tipo);
   const cuitLimpio = req.cuitEmisor.replace(/-/g, "");
   const envelope =
     `<?xml version="1.0" encoding="utf-8"?>` +
@@ -164,7 +161,7 @@ export async function feCAESolicitar(
   ambiente: "homologacion" | "produccion"
 ): Promise<FECAEResult> {
   const url = ambiente === "homologacion" ? WSFE_HOMOLOG : WSFE_PROD;
-  const cbteTipo = TIPOS_CBT[req.tipo] ?? 6;
+  const cbteTipo = fiscalDocumentCode(req.tipo);
   const recipientDocument = resolveFiscalRecipientDocument({
     cuit: req.clienteCuit,
     dni: req.clienteDni,

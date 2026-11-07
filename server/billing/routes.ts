@@ -23,6 +23,7 @@ import { salesInvoices, invoiceCounters, folioMovements, charges, posConfigs, ty
 import { activeSalesRecord } from '../salesArchive';
 import { getBillingConfig, updateBillingConfig } from "./billingConfig";
 import { buildComprobanteAsociado, calcularMontos, emitirFactura, isNonFiscalTipo, NON_FISCAL_TIPOS, type NewInvoiceData } from "./invoiceService";
+import {requireFiscalInvoiceForCredit,creditTypeForInvoice} from '../../shared/fiscal-document-types';
 import { verifySaleCatalog } from "./verifySaleCatalog";
 import { settleCenterSaleInvoice, validateCenterSalePaymentDetail, editCenterSaleInvoicePaymentMethod } from "./centerSaleSettlement";
 import { editReservationInvoiceCashMethod } from "./reservationInvoicePaymentEdit";
@@ -360,6 +361,7 @@ async function resumeReservationCreditNote(
   pendingNc: any,
   user: any,
 ): Promise<any> {
+  requireFiscalInvoiceForCredit(invoiceValue(original,'tipo_comprobante','tipoComprobante'));
   let nc = pendingNc;
   if (invoiceValue(nc, "reconciliation_status", "reconciliationStatus") !== "pendiente") {
     return nc;
@@ -949,6 +951,7 @@ export function registerBillingRoutes(app: Express) {
       `);
       const nc = initialNc.rows[0] as any;
       const original = initialOriginal.rows[0] as any;
+      if(original)requireFiscalInvoiceForCredit(original.tipo_comprobante);
       if (nc?.group_id && !nc.reserva_id && original?.group_id === nc.group_id) {
         return res.json(await recoverGroupCreditNote(ncId,(req as any).user));
       }
@@ -1143,6 +1146,7 @@ export function registerBillingRoutes(app: Express) {
 
   app.post("/api/billing/invoices", requireAuth, async (req, res) => {
     try {
+      if(typeof req.body?.tipoComprobante==='string'&&req.body.tipoComprobante.startsWith('NC'))return res.status(400).json({error:'La Nota de Crédito debe emitirse desde su factura fiscal original, no desde la emisión genérica de comprobantes.'});
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       const giftExpiryError = giftVoucherItemsExpiryError(items);
       if (giftExpiryError) return res.status(400).json({ error: giftExpiryError });
@@ -3160,6 +3164,8 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       let original = row.rows[0] as any;
+      const eligibleCreditType=creditTypeForInvoice(original.tipo_comprobante);
+      if(!eligibleCreditType)return res.status(400).json({error:'La Nota de Crédito fiscal debe asociarse a la factura fiscal original. Ningún comprobante no fiscal admite una NC fiscal.'});
       let legacyGroupId: string | null = null;
       if (!original.group_id && !original.reserva_id) {
         legacyGroupId = await findLegacyInvoiceGroupId(id);
@@ -3193,12 +3199,7 @@ export function registerBillingRoutes(app: Express) {
       // (e.g., two separate partial credits weeks apart for the same invoice).
 
       const { motivo, items, monto, paymentIdsToVoid, folioMovementIdsToVoid } = req.body;
-      const tipoNC =
-        original.tipo_comprobante === "FA" ? "NCA" :
-        original.tipo_comprobante === "FT" ? "NCT" :
-        original.tipo_comprobante === "FM" ? "NCM" :
-        original.tipo_comprobante === "FMB" ? "NCMB" :
-        original.tipo_comprobante === "FC" ? "NCC" : "NCB";
+      const tipoNC = eligibleCreditType;
       const user = (req as any).user;
 
       const montoTotal = parseFloat(original.monto_total);

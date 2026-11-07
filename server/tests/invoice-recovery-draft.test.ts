@@ -121,7 +121,7 @@ vi.mock("../billing/wsfevClient", () => ({
   feCompConsultar: vi.fn(),
 }));
 
-const { emitirFactura } = await import("../billing/invoiceService");
+const { emitirFactura,buildComprobanteAsociado } = await import("../billing/invoiceService");
 
 describe("recoverable reservation credit-note emission", () => {
   beforeEach(() => {
@@ -139,6 +139,13 @@ describe("recoverable reservation credit-note emission", () => {
   afterEach(() => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
+  });
+  it.each(['ficticio','homologacion','produccion'])('blocks an internal original before counters, drafts or ARCA in %s',async environment=>{
+    state.billingConfig.arcaAmbiente=environment;
+    const callsBefore=vi.mocked(feCAESolicitar).mock.calls.length;
+    await expect(emitirFactura({tipoComprobante:'NCB',cliente:{razonSocial:'Prueba',condicionIva:'Consumidor Final'},items:[{descripcion:'Descuento',cantidad:1,precioUnitario:100,subtotal:100,subtotalNeto:0,alicuotaIva:'no_gravado'}],facturaOriginalId:12,comprobanteAsociado:{tipo:'cierre_habitacion',puntoVenta:5,numero:14}})).rejects.toMatchObject({code:'BILLING_INVALID_FISCAL_TYPE',statusCode:400});
+    expect(()=>buildComprobanteAsociado({tipo_comprobante:'cierre_habitacion',punto_venta:5,numero:14})).toThrow(/voucher interno/);
+    expect(state.events).toEqual([]);expect(state.insertValues).toHaveLength(0);expect(state.schemaChecks).toBe(0);expect(vi.mocked(feCAESolicitar).mock.calls.length).toBe(callsBefore);
   });
 
   it("persists an authorization-pending NC with its charge map before finalizing it", async () => {

@@ -190,6 +190,28 @@ afterEach(() => {
 });
 
 describe("reservation credit-note reconciliation recovery", () => {
+  it('does not bypass original-invoice validation through generic document emission',async()=>{
+    await withServer(async baseUrl=>{
+      const response=await fetch(`${baseUrl}/api/billing/invoices`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipoComprobante:'NCB',facturaOriginalId:12})});
+      expect(response.status).toBe(400);expect((await response.json()).error).toContain('factura fiscal original');
+    });expect(state.emittedCalls).toHaveLength(0);expect(state.transactionExecutions).toBe(0);
+  });
+  it.each(['cierre_habitacion','cierre_spa','cierre_spa_agustin','cierre_spa_cortesia','ticket','voucher_justo','voucher_pedidos_ya','voucher_room_service','voucher_consumo_interno'])('rejects a fiscal NC against %s before locks, emission or financial writes',async type=>{
+    state.responses=[{rows:[{...originalInvoice,tipo_comprobante:type}]}];
+    await withServer(async baseUrl=>{
+      const response=await fetch(`${baseUrl}/api/billing/invoices/12/nota-credito`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({motivo:'Descuento',items:[{sourceId:'accommodation',amount:10}]})});
+      expect(response.status).toBe(400);expect((await response.json()).error).toContain('Ningún comprobante no fiscal');
+    });
+    expect(state.emittedCalls).toHaveLength(0);expect(state.transactionExecutions).toBe(0);
+  });
+  it('keeps a pending NC against a non-fiscal original unresolved without another authorization or folio write',async()=>{
+    state.responses=[{rows:[{id:90,original_invoice_id:12}]},{rows:[pendingCredit('autorizacion_pendiente')]},{rows:[{...originalInvoice,tipo_comprobante:'cierre_habitacion'}]}];
+    await withServer(async baseUrl=>{
+      const response=await fetch(`${baseUrl}/api/billing/credit-notes/90/reconcile`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      expect(response.status).toBe(409);expect(await response.json()).toMatchObject({pendingCreditNoteId:90,reconciliationStatus:'pendiente',error:expect.stringContaining('Ningún comprobante no fiscal')});
+    });
+    expect(state.emittedCalls).toHaveLength(0);expect(state.transactionExecutions).toBe(0);
+  });
   it("rejects new credit notes for archived invoices before fiscal emission", async () => {
     state.archived = true;
     await withServer(async (baseUrl) => {

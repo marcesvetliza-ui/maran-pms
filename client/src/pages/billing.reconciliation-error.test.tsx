@@ -25,6 +25,18 @@ describe("cola de reintentos ARCA", () => {
     queryClient.clear();
     toastMock.mockReset();
   });
+  it('keeps an invalid pending credit visible for review without allowing another fiscal attempt',async()=>{
+    const fetchMock=vi.fn(async(input:RequestInfo|URL,_init?:RequestInit)=>{
+      const url=String(input);
+      if(url.startsWith('/api/billing/invoices?'))return jsonResponse([]);
+      if(url==='/api/billing/config')return jsonResponse({arcaAmbiente:'homologacion'});
+      if(url==='/api/billing/credit-note-reconciliations/pending')return jsonResponse([{id:90,tipo_comprobante:'NCB',punto_venta:5,numero:3,reserva_id:'synthetic',monto_total:'184000',original_tipo_comprobante:'cierre_habitacion',original_punto_venta:5,original_numero:14,reconciliation_status:'pendiente'}]);
+      return jsonResponse([]);
+    });
+    vi.stubGlobal('fetch',fetchMock);render(<QueryClientProvider client={queryClient}><BillingPage/></QueryClientProvider>);
+    expect(await screen.findByText(/El original es un comprobante interno/)).toBeInTheDocument();expect(screen.getByTestId('btn-reconcile-credit-note-90')).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([,init])=>(init as RequestInit|undefined)?.method==='POST')).toBe(false);
+  });
 
   it.each([false,true])("muestra y actualiza el error exacto de NC pendiente (grupo=%s)", async (group) => {
     const firstError = "ARCA: servicio temporalmente no disponible";
