@@ -120,6 +120,9 @@ export function RatePlanFormDialog({
       const payload = Object.fromEntries(
         Object.entries(data).filter(([_, v]) => v !== "" && v !== undefined)
       );
+      // An empty optional date explicitly clears the saved date on PATCH.
+      payload.validFrom = data.validFrom || null;
+      payload.validTo = data.validTo || null;
       if (isEditing) {
         return apiRequest("PATCH", `/api/rate-plans/${ratePlan.id}`, payload);
       }
@@ -329,6 +332,10 @@ export function RatePlanFormDialog({
                   onChange={(e) => setFormData({ ...formData, validFrom: e.target.value || "" })}
                   data-testid="input-valid-from"
                 />
+                <Button type="button" variant="ghost" size="sm" disabled={!formData.validFrom}
+                  onClick={() => setFormData({ ...formData, validFrom: "" })}>
+                  Quitar fecha de inicio
+                </Button>
               </div>
               <div className="grid gap-2">
                 <Label>Válido hasta <span className="text-xs text-muted-foreground">(opcional)</span></Label>
@@ -338,6 +345,10 @@ export function RatePlanFormDialog({
                   onChange={(e) => setFormData({ ...formData, validTo: e.target.value || "" })}
                   data-testid="input-valid-to"
                 />
+                <Button type="button" variant="ghost" size="sm" disabled={!formData.validTo}
+                  onClick={() => setFormData({ ...formData, validTo: "" })}>
+                  Sin vencimiento
+                </Button>
               </div>
             </div>
 
