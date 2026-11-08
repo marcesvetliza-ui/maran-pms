@@ -89,8 +89,11 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
   app.post(`${root}/webhook-token`, permission, async (req, res) => {
     const token = randomBytes(32).toString("hex");
     try {
-      const updated = await pool.query("UPDATE channex_inbound_settings SET token_hash=$2,updated_at=now() WHERE connection_id=$1 RETURNING connection_id", [req.params.id, tokenHash(token).toString("hex")]);
-      if (!updated.rowCount) return res.status(409).json({ error: "Configurá primero la recepción" });
+      const updated = await pool.query(`INSERT INTO channex_inbound_settings(connection_id,enabled,token_hash)
+        SELECT id,false,$2 FROM channex_connections WHERE id=$1
+        ON CONFLICT(connection_id) DO UPDATE SET token_hash=EXCLUDED.token_hash,updated_at=now()
+        RETURNING connection_id`, [req.params.id, tokenHash(token).toString("hex")]);
+      if (!updated.rowCount) return res.status(404).json({ error: "Conexión no encontrada" });
       res.setHeader("Cache-Control", "private, no-store"); res.type("application/json").send(JSON.stringify({ token, header: "X-Channex-Webhook-Token", path: `/api/channex/inbound/${encodeURIComponent(req.params.id)}/notify` }));
     } catch { res.status(503).json({ error: "No se pudo generar el acceso del webhook" }); }
   });

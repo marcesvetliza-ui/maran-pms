@@ -36,6 +36,11 @@ describe("inbound authenticated notifications and configuration",()=>{
   const res=await fetch(`${base}/api/channex/connections/conn/inbound/webhook-token`,{method:"POST",headers:{"x-role":"admin"}});
   const body=await res.json();expect(body.token).toMatch(/^[a-f0-9]{64}$/);expect(query.mock.calls[0][1][1]).toBe(createHash("sha256").update(body.token).digest("hex"));expect(res.headers.get("cache-control")).toBe("private, no-store");
  });
+ it("returns 404 for an unknown connection without exposing a generated token",async()=>{
+  const query=vi.fn(async()=>({rows:[],rowCount:0})),base=await start(query);
+  const response=await fetch(`${base}/api/channex/connections/missing/inbound/webhook-token`,{method:'POST',headers:{'x-role':'admin'}});
+  expect(response.status).toBe(404);expect(await response.json()).toEqual({error:'Conexión no encontrada'});
+ });
  it("requires authentication to read the original channel amount",async()=>{
   const query=vi.fn(async()=>({rows:[{source_currency:"USD",source_total:"250.00",exchange_rate:"1250.000000",settlement_currency:"ARS",settlement_total:"312500.00"}]})),base=await start(query);
   expect((await fetch(`${base}/api/reservations/reservation/channex-settlement`)).status).toBe(401);expect(query).not.toHaveBeenCalled();

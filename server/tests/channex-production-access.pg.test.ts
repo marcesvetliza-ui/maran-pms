@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import express from 'express';
 import type {Server} from 'node:http';
 import {beforeAll,afterAll,it,expect,describe,vi} from 'vitest';
@@ -59,6 +59,20 @@ suite('Production preparation and actual per-user access',()=>{
   expect((await request('POST',`/api/channex/inbound/${result.data.id}/notify`,'',{})).status).toBe(404);
   const calls=remoteCalls.length;
   expect((await request('POST','/api/channex/connections',admin,{label:'Mismatch',environment:'real',baseUrl:'https://staging.channex.io/api/v1',channexPropertyId:conn,apiKey:'synthetic'})).status).toBe(400);expect(remoteCalls).toHaveLength(calls);
+ });
+ it('prepares and rotates a webhook before activation, storing only its hash and preserving existing settings',async()=>{
+  const id=connections[0], calls=remoteCalls.length;
+  expect((await pool.query('SELECT 1 FROM channex_inbound_settings WHERE connection_id=$1',[id])).rowCount).toBe(0);
+  const first=await request('POST',`/api/channex/connections/${id}/inbound/webhook-token`);
+  expect(first.status).toBe(200);expect(first.data.token).toMatch(/^[a-f0-9]{64}$/);
+  expect((await pool.query('SELECT enabled,notification_pending,token_hash FROM channex_inbound_settings WHERE connection_id=$1',[id])).rows[0]).toEqual({enabled:false,notification_pending:false,token_hash:createHash('sha256').update(first.data.token).digest('hex')});
+  await pool.query('UPDATE channex_inbound_settings SET enabled=true,notification_pending=true,settlement_exchange_rate=1250 WHERE connection_id=$1',[id]);
+  const second=await request('POST',`/api/channex/connections/${id}/inbound/webhook-token`);
+  expect(second.status).toBe(200);expect(second.data.token).not.toBe(first.data.token);
+  expect((await pool.query('SELECT enabled,notification_pending,settlement_exchange_rate::text,token_hash FROM channex_inbound_settings WHERE connection_id=$1',[id])).rows[0]).toEqual({enabled:true,notification_pending:true,settlement_exchange_rate:'1250.000000',token_hash:createHash('sha256').update(second.data.token).digest('hex')});
+  expect((await pool.query('SELECT is_active FROM channex_connections WHERE id=$1',[id])).rows[0].is_active).toBe(false);
+  expect(remoteCalls).toHaveLength(calls);
+  await pool.query('DELETE FROM channex_inbound_settings WHERE connection_id=$1',[id]);
  });
  it('counts all physical production floors, excludes test and virtual rooms, without adding test or virtual rooms',async()=>{
   await pool.query("INSERT INTO guests(id,first_name,last_name) VALUES($1,'Synthetic','Guest')",[type]);
