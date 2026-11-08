@@ -94,7 +94,7 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
   } else {
     const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,m.sell_mode,m.rate_mode,m.occupancies,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text,
     to_jsonb(p)->>'rate_1pax' AS rate_1pax,to_jsonb(p)->>'rate_2pax' AS rate_2pax,to_jsonb(p)->>'rate_3pax' AS rate_3pax,to_jsonb(p)->>'rate_4pax' AS rate_4pax
-    FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 ORDER BY m.channex_rate_plan_id`, [connection.id])).rows;
+    FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 AND m.remote_present ORDER BY m.channex_rate_plan_id`, [connection.id])).rows;
     if (!plans.length) throw new AriConfigurationError('Falta mapear los planes tarifarios');
     const overrides = (await c.query('SELECT *,stay_date::text AS day FROM rate_calendar_entries WHERE rate_plan_id=ANY($1::varchar[]) AND stay_date=ANY($2::date[])', [plans.map(p => p.rate_plan_id).filter(Boolean), dates])).rows;
     const byDay = new Map(overrides.map(o => [`${o.rate_plan_id}:${o.day}`, o]));

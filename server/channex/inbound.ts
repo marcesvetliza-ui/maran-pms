@@ -182,7 +182,7 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
             const maps = (await db.execute(sql`SELECT rm.room_type_id,rm.room_ids,rp.rate_plan_id,rt.max_occupancy,p.currency,p.room_type_id AS plan_room_type
               FROM channex_room_type_mappings rm JOIN channex_rate_plan_mappings rp ON rp.connection_id=rm.connection_id AND rp.channex_room_type_id=rm.channex_room_type_id
               JOIN room_types rt ON rt.id=rm.room_type_id JOIN rate_plans p ON p.id=rp.rate_plan_id
-              WHERE rm.connection_id=${connectionId} AND rm.channex_room_type_id=${room.remoteType} AND rp.channex_rate_plan_id=${room.remotePlan} FOR SHARE OF rm,rp,rt,p`)).rows as any[];
+              WHERE rm.connection_id=${connectionId} AND rm.channex_room_type_id=${room.remoteType} AND rp.channex_rate_plan_id=${room.remotePlan} AND rp.remote_present FOR SHARE OF rm,rp,rt,p`)).rows as any[];
             if (maps.length !== 1 || maps[0].room_type_id !== maps[0].plan_room_type || maps[0].currency !== booking.currency) return review("INVALID_ROOM_MAPPING");
             const map = maps[0], old = existing.get(room.key);
             if (map.room_ids === null && room.occupancy > map.max_occupancy) return review("OCCUPANCY_EXCEEDS_CAPACITY");

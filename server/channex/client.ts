@@ -84,13 +84,42 @@ export async function fetchChannexProperties(connection: ChannexConnectionCreden
 }
 
 export async function fetchChannexRoomTypes(connection: ChannexConnectionCredentials, propertyId: string): Promise<any[]> {
-  const body = await channexRequest(connection, `/room_types?filter[property_id]=${encodeURIComponent(propertyId)}`);
-  return body?.data ?? [];
+  return fetchCatalogCollection(connection, "room_types", propertyId);
 }
 
 export async function fetchChannexRatePlans(connection: ChannexConnectionCredentials, propertyId: string): Promise<any[]> {
-  const body = await channexRequest(connection, `/rate_plans?filter[property_id]=${encodeURIComponent(propertyId)}`);
-  return body?.data ?? [];
+  return fetchCatalogCollection(connection, "rate_plans", propertyId);
+}
+
+/** Reconciliation must see every page; a failed/incomplete list never means deletion. */
+async function fetchCatalogCollection(connection: ChannexConnectionCredentials, resource: string, propertyId: string): Promise<any[]> {
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  let expectedTotal: number | undefined;
+  for (let page = 1; page <= 1000; page++) {
+    const body = await channexRequest(connection, `/${resource}?filter[property_id]=${encodeURIComponent(propertyId)}&pagination[page]=${page}&pagination[limit]=100`);
+    const invalid = () => new ChannexApiError("Catálogo de Channex incompleto o inválido; se conserva el catálogo anterior", 502, null);
+    if (!Array.isArray(body?.data)) throw invalid();
+    for (const item of body.data) {
+      if (typeof item?.id !== "string" || !item.id.trim() || seen.has(item.id)) throw invalid();
+      seen.add(item.id);
+      rows.push(item);
+    }
+    if (body.meta?.total != null) {
+      const total = body.meta.total;
+      if (!Number.isSafeInteger(total) || total < 0 || (expectedTotal !== undefined && expectedTotal !== total)) throw invalid();
+      expectedTotal = total;
+      if (body.meta.page != null && body.meta.page !== page) throw invalid();
+      if (rows.length > total) throw invalid();
+      if (rows.length === total) return rows;
+      if (!body.data.length) throw invalid();
+    } else {
+      // Without pagination metadata only a short, single page is unambiguous.
+      if (expectedTotal !== undefined || page !== 1 || body.data.length >= 100 || body.links?.next) throw invalid();
+      return rows;
+    }
+  }
+  throw new ChannexApiError("Catálogo de Channex demasiado extenso; se conserva el catálogo anterior", 502, null);
 }
 
 /**

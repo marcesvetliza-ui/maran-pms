@@ -154,6 +154,59 @@ runIfDatabaseIsConfigured("Channex — sincronización de reservas (fase 1)", ()
     await pool?.end();
   });
 
+  it("retires missing plans per connection, preserves history, and restores the same mapping when a plan returns", async () => {
+    if (!pool) throw new Error("DATABASE_URL no está configurado");
+    const client = await import("../channex/client");
+    const suffix = randomUUID();
+    const connectionId = await createConnection(`catalog-${suffix}`, client);
+    const otherConnectionId = await createConnection(`other-${suffix}`, client);
+    const localPlanId = `local-${suffix}`;
+    const localTypeId = `type-${suffix}`;
+    const remotePlan = (id: string, title: string) => ({id, attributes:{title,sell_mode:'per_person',rate_mode:'manual',options:[{occupancy:1},{occupancy:2},{occupancy:3}]},relationships:{room_type:{data:{id:'remote-premium'}}}});
+    try {
+      await pool.query("INSERT INTO room_types(id,code,name) VALUES($1,$2,'Premium')", [localTypeId,localTypeId]);
+      await pool.query("INSERT INTO rate_plans(id,name,room_type_id,base_rate) VALUES($1,'Premium',$2,100)", [localPlanId,localTypeId]);
+      (client.fetchChannexRoomTypes as any).mockResolvedValue([{id:'remote-premium',attributes:{title:'Premium'}}]);
+      (client.fetchChannexRatePlans as any).mockResolvedValue([remotePlan('old','Hasta 4')]);
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(200);
+      expect((await request('POST', `/api/channex/connections/${otherConnectionId}/sync-catalog`)).status).toBe(200);
+      const [old] = (await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body;
+      expect((await request('PATCH', `/api/channex/rate-plan-mappings/${old.id}`, {ratePlanId:localPlanId})).status).toBe(200);
+      // Same identity renamed: update the title without duplicating its mapping.
+      (client.fetchChannexRatePlans as any).mockResolvedValue([remotePlan('old','Renombrado')]);
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(200);
+      expect((await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body).toMatchObject([{id:old.id,channexRatePlanTitle:'Renombrado',ratePlanId:localPlanId}]);
+      // Replaced identity: hide the old row, retaining its association for history.
+      (client.fetchChannexRatePlans as any).mockResolvedValue([remotePlan('new','Hasta 3')]);
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(200);
+      expect((await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body).toMatchObject([{channexRatePlanId:'new',ratePlanId:null}]);
+      expect((await pool.query('SELECT remote_present,rate_plan_id FROM channex_rate_plan_mappings WHERE id=$1',[old.id])).rows[0]).toEqual({remote_present:false,rate_plan_id:localPlanId});
+      expect((await request('PATCH', `/api/channex/rate-plan-mappings/${old.id}`, {ratePlanId:localPlanId})).status).toBe(404);
+      expect((await request('GET', `/api/channex/connections/${otherConnectionId}/rate-plan-mappings`)).body).toHaveLength(1);
+      // A failed snapshot leaves the catalog unchanged.
+      (client.fetchChannexRatePlans as any).mockRejectedValueOnce(new Error('simulated network failure'));
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(400);
+      expect((await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body).toHaveLength(1);
+      (client.fetchChannexRatePlans as any).mockResolvedValue([remotePlan('broken','Incomplete')]);
+      (client.fetchChannexRoomTypes as any).mockResolvedValue([]);
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(400);
+      expect((await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body).toMatchObject([{channexRatePlanId:'new'}]);
+      (client.fetchChannexRoomTypes as any).mockResolvedValue([{id:'remote-premium',attributes:{title:'Premium'}}]);
+      (client.fetchChannexRatePlans as any).mockResolvedValue([remotePlan('old','Retorna')]);
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(200);
+      expect((await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body).toMatchObject([{id:old.id,ratePlanId:localPlanId,channexRatePlanTitle:'Retorna'}]);
+      (client.fetchChannexRatePlans as any).mockResolvedValue([]);
+      expect((await request('POST', `/api/channex/connections/${connectionId}/sync-catalog`)).status).toBe(200);
+      expect((await request('GET', `/api/channex/connections/${connectionId}/rate-plan-mappings`)).body).toEqual([]);
+    } finally {
+      await pool.query('DELETE FROM channex_rate_plan_mappings WHERE connection_id=ANY($1::varchar[])',[[connectionId,otherConnectionId]]);
+      await pool.query('DELETE FROM channex_room_type_mappings WHERE connection_id=ANY($1::varchar[])',[[connectionId,otherConnectionId]]);
+      await pool.query('DELETE FROM channex_connections WHERE id=ANY($1::varchar[])',[[connectionId,otherConnectionId]]);
+      await pool.query('DELETE FROM rate_plans WHERE id=$1',[localPlanId]);
+      await pool.query('DELETE FROM room_types WHERE id=$1',[localTypeId]);
+    }
+  });
+
   it("bloquea aceptar sin mapeo, acepta cuando está mapeado sin crear ninguna reserva real, previsualizar no confirma nada, no duplica en re-sync y respeta cancelaciones", async () => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();

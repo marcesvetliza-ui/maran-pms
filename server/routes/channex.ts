@@ -206,7 +206,7 @@ export function registerChannexRoutes(app: Express) {
         })
         .from(channexRatePlanMappings)
         .leftJoin(ratePlans, eq(ratePlans.id, channexRatePlanMappings.ratePlanId))
-        .where(eq(channexRatePlanMappings.connectionId, req.params.id));
+        .where(and(eq(channexRatePlanMappings.connectionId, req.params.id), eq(channexRatePlanMappings.remotePresent, true)));
       res.json(rows.map((r) => ({ ...r.mapping, ratePlanName: r.ratePlanName })));
     } catch (err) {
       handleError(res, err, "Error al obtener el mapeo de tarifas");
@@ -219,7 +219,7 @@ export function registerChannexRoutes(app: Express) {
       const [updated] = await db
         .update(channexRatePlanMappings)
         .set({ ratePlanId })
-        .where(eq(channexRatePlanMappings.id, req.params.id))
+        .where(and(eq(channexRatePlanMappings.id, req.params.id), eq(channexRatePlanMappings.remotePresent, true)))
         .returning();
       if (!updated) return res.status(404).json({ error: "Mapeo no encontrado" });
       await recomputeMappedFlags(updated.connectionId);
