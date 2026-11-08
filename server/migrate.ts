@@ -4207,6 +4207,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("channex_rate_plan_mappings.occupancies", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("channex_rate_plan_mappings", "occupancies", "integer[]")))
   );
+  await withTimeout("channex_rate_plan_mappings.remote_present", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("channex_rate_plan_mappings", "remote_present", "boolean NOT NULL DEFAULT true")))
+  );
   await withTimeout("channex_rate_plan_mappings_connection_channex_id_idx", T, () =>
     db.execute(sql.raw(createIndexWithoutRerunNotice(
       "channex_rate_plan_mappings_connection_channex_id_idx",

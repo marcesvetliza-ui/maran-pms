@@ -34,8 +34,8 @@ export async function editCalendar(pool: Pool, request: CalendarRequest, actorId
     await c.query("SET LOCAL lock_timeout='3s'"); await c.query("SET LOCAL statement_timeout='15s'");
     const { plans, entries } = await load(c, ids, dates[0], dates[dates.length - 1], !!previewToken);
     const hasMappings = (await c.query("SELECT to_regclass('channex_rate_plan_mappings') IS NOT NULL AS present")).rows[0].present;
-    const linkedPlans = new Set<string>(hasMappings ? (await c.query('SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings WHERE rate_plan_id=ANY($1::varchar[])', [ids])).rows.map(p => p.rate_plan_id) : []);
-    const occupancyPlans = new Set<string>(hasMappings ? (await c.query(`SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings m WHERE rate_plan_id=ANY($1::varchar[]) AND to_jsonb(m)->>'sell_mode'='per_person'`, [ids])).rows.map(p=>p.rate_plan_id) : []);
+    const linkedPlans = new Set<string>(hasMappings ? (await c.query(`SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings m WHERE rate_plan_id=ANY($1::varchar[]) AND COALESCE((to_jsonb(m)->>'remote_present')::boolean,true)`, [ids])).rows.map(p => p.rate_plan_id) : []);
+    const occupancyPlans = new Set<string>(hasMappings ? (await c.query(`SELECT DISTINCT rate_plan_id FROM channex_rate_plan_mappings m WHERE rate_plan_id=ANY($1::varchar[]) AND COALESCE((to_jsonb(m)->>'remote_present')::boolean,true) AND to_jsonb(m)->>'sell_mode'='per_person'`, [ids])).rows.map(p=>p.rate_plan_id) : []);
     for (const intent of intents) {
       const values = intent.values;
       if (occupancyPlans.has(intent.ratePlanId) && values.rate != null) throw new CalendarInputError('Este plan usa precios por ocupación: ingresá los importes por cantidad de personas, no un precio único');

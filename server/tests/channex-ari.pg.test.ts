@@ -57,6 +57,15 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
   `);
   });
   async function enable() { await pool.query(`INSERT INTO channex_ari_settings(connection_id,enabled,floor,currency,last_horizon_date,capture_started_at) VALUES('connection',true,2,'USD',(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,now())`); }
+  it('excludes retired plans from readiness values and published restrictions', async () => {
+    await pool.query(`INSERT INTO channex_rate_plan_mappings(connection_id,channex_room_type_id,channex_rate_plan_id,rate_plan_id,remote_present)
+      VALUES('connection','remote-twin','retired-plan',NULL,false)`);
+    const values = await buildAriValues(pool as any, connection, [event('restrictions')], day);
+    expect(values).toHaveLength(1);
+    expect(values[0].rate_plan_id).toBe('remote-bar');
+    await pool.query(`UPDATE channex_rate_plan_mappings SET remote_present=true WHERE channex_rate_plan_id='retired-plan'`);
+    await expect(buildAriValues(pool as any, connection, [event('restrictions')], day)).rejects.toThrow(/no coincide/);
+  });
   it('keeps the 500-day full sync at two API calls with multi-occupancy prices',async()=>{
     await pool.query(`UPDATE rate_plans SET rate_1pax=169000,rate_2pax=190000;
       UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies=ARRAY[1,2]`);

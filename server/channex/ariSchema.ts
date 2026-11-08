@@ -7,6 +7,7 @@ ALTER TABLE channex_room_type_mappings ADD COLUMN IF NOT EXISTS room_ids text[];
 ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS sell_mode text;
 ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS rate_mode text;
 ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS occupancies integer[];
+ALTER TABLE channex_rate_plan_mappings ADD COLUMN IF NOT EXISTS remote_present boolean NOT NULL DEFAULT true;
 CREATE TABLE IF NOT EXISTS channex_ari_settings (
  connection_id varchar PRIMARY KEY REFERENCES channex_connections(id) ON DELETE CASCADE,
  floor integer NOT NULL DEFAULT 2, currency text NOT NULL DEFAULT 'ARS' CHECK(currency ~ '^[A-Z]{3}$'),
@@ -163,7 +164,7 @@ export async function ensureChannexAriSchema(pool: Pool) {
     for (const [table, events] of Object.entries({
       channex_connections: 'DELETE OR UPDATE OF environment,base_url,channex_property_id',
       channex_room_type_mappings: 'INSERT OR DELETE OR UPDATE OF room_type_id,room_ids,channex_room_type_id,connection_id',
-      channex_rate_plan_mappings: 'INSERT OR DELETE OR UPDATE OF rate_plan_id,channex_rate_plan_id,channex_room_type_id,sell_mode,rate_mode,occupancies,connection_id',
+      channex_rate_plan_mappings: 'INSERT OR DELETE OR UPDATE OF rate_plan_id,channex_rate_plan_id,channex_room_type_id,sell_mode,rate_mode,occupancies,remote_present,connection_id',
     })) {
       await client.query(`DROP TRIGGER IF EXISTS channex_ari_mapping_guard ON ${table}`);
       await client.query(`CREATE TRIGGER channex_ari_mapping_guard BEFORE ${events} ON ${table} FOR EACH ROW EXECUTE FUNCTION channex_guard_ari_mapping()`);

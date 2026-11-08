@@ -64,7 +64,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
       const previous = new Map<string, AriValue>(published.map(p => [`${p.target_id}:${p.day}`, p.value]));
       const full = events.some(e => e.reason === 'full_sync');
       const planTargets = job.kind === 'restrictions'
-        ? (await c.query('SELECT rate_plan_id,channex_rate_plan_id FROM channex_rate_plan_mappings WHERE connection_id=$1', [connection.id])).rows : [];
+        ? (await c.query('SELECT rate_plan_id,channex_rate_plan_id FROM channex_rate_plan_mappings WHERE connection_id=$1 AND remote_present', [connection.id])).rows : [];
       const changed: AriValue[] = [];
       for (const value of daily) {
         const matching = events.filter(e => e.date_from <= value.date_from && e.date_to >= value.date_from &&

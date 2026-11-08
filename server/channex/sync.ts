@@ -1,5 +1,5 @@
 import {connectionUrl,productionEnabled} from './connectionPolicy';
-import { and, eq } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   channexBookings,
@@ -59,77 +59,100 @@ export async function syncCatalog(connectionId: string) {
   const connection = await getConnectionOrThrow(connectionId);
   const credentials = toCredentials(connection);
 
-  const [remoteRoomTypes, remoteRatePlans] = await Promise.all([
-    fetchChannexRoomTypes(credentials, connection.channexPropertyId),
-    fetchChannexRatePlans(credentials, connection.channexPropertyId),
-  ]);
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT id FROM channex_connections WHERE id=${connectionId} FOR UPDATE`);
+    const [remoteRoomTypes, remoteRatePlans] = await Promise.all([
+      fetchChannexRoomTypes(credentials, connection.channexPropertyId),
+      fetchChannexRatePlans(credentials, connection.channexPropertyId),
+    ]);
 
-  for (const item of remoteRoomTypes) {
-    const channexRoomTypeId = item.id as string;
-    const title = item.attributes?.title ?? channexRoomTypeId;
-    const [existing] = await db
-      .select()
-      .from(channexRoomTypeMappings)
-      .where(and(eq(channexRoomTypeMappings.connectionId, connectionId), eq(channexRoomTypeMappings.channexRoomTypeId, channexRoomTypeId)));
-    if (existing) {
-      await db
-        .update(channexRoomTypeMappings)
-        .set({ channexRoomTypeTitle: title })
-        .where(eq(channexRoomTypeMappings.id, existing.id));
-    } else {
-      await db.insert(channexRoomTypeMappings).values({
-        connectionId,
-        channexRoomTypeId,
-        channexRoomTypeTitle: title,
-        roomTypeId: null,
-        createdAt: new Date(),
-      });
+    // Never retire mappings from a malformed or ambiguous snapshot.
+    for (const rows of [remoteRoomTypes, remoteRatePlans]) {
+      if (!Array.isArray(rows) || rows.some(item => !item || typeof item.id !== 'string' || !item.id.trim()) || new Set(rows.map(item => item.id)).size !== rows.length) {
+        throw new Error('Catálogo de Channex inválido; se conserva el catálogo anterior');
+      }
     }
-  }
-
-  for (const item of remoteRatePlans) {
-    const channexRatePlanId = item.id as string;
-    const title = item.attributes?.title ?? channexRatePlanId;
-    const channexRoomTypeId = item.relationships?.room_type?.data?.id ?? null;
-    const sellMode = item.attributes?.sell_mode ?? null;
-    const rateMode = item.attributes?.rate_mode ?? null;
-    const options = item.attributes?.options;
-    const occupancies = Array.isArray(options) && options.length > 0 && options.every(option => Number.isInteger(option?.occupancy) && option.occupancy > 0)
-      ? [...new Set<number>(options.map(option => option.occupancy))].sort((a,b) => a-b) : null;
-    if (!channexRoomTypeId) continue; // no podemos mapear una tarifa sin saber a qué habitación pertenece
-    const [existing] = await db
-      .select()
-      .from(channexRatePlanMappings)
-      .where(and(eq(channexRatePlanMappings.connectionId, connectionId), eq(channexRatePlanMappings.channexRatePlanId, channexRatePlanId)));
-    if (existing) {
-      await db
-        .update(channexRatePlanMappings)
-        .set({ channexRatePlanTitle: title, channexRoomTypeId, sellMode, rateMode, occupancies })
-        .where(eq(channexRatePlanMappings.id, existing.id));
-    } else {
-      await db.insert(channexRatePlanMappings).values({
-        connectionId,
-        channexRatePlanId,
-        channexRatePlanTitle: title,
-        sellMode,
-        rateMode,
-        occupancies,
-        channexRoomTypeId,
-        ratePlanId: null,
-        createdAt: new Date(),
-      });
+    const roomIds = new Set(remoteRoomTypes.map(item => item.id));
+    if (remoteRatePlans.some(item => !roomIds.has(item.relationships?.room_type?.data?.id))) {
+      throw new Error('Catálogo de Channex incompleto; se conserva el catálogo anterior');
     }
-  }
+    for (const item of remoteRoomTypes) {
+      const channexRoomTypeId = item.id as string;
+      const title = item.attributes?.title ?? channexRoomTypeId;
+      const [existing] = await tx
+        .select()
+        .from(channexRoomTypeMappings)
+        .where(and(eq(channexRoomTypeMappings.connectionId, connectionId), eq(channexRoomTypeMappings.channexRoomTypeId, channexRoomTypeId)));
+      if (existing) {
+        await tx
+          .update(channexRoomTypeMappings)
+          .set({ channexRoomTypeTitle: title })
+          .where(eq(channexRoomTypeMappings.id, existing.id));
+      } else {
+        await tx.insert(channexRoomTypeMappings).values({
+          connectionId,
+          channexRoomTypeId,
+          channexRoomTypeTitle: title,
+          roomTypeId: null,
+          createdAt: new Date(),
+        });
+      }
+    }
 
-  await db
-    .update(channexConnections)
-    .set({ lastCatalogSyncAt: new Date() })
-    .where(eq(channexConnections.id, connectionId));
+    for (const item of remoteRatePlans) {
+      const channexRatePlanId = item.id as string;
+      const title = item.attributes?.title ?? channexRatePlanId;
+      const channexRoomTypeId = item.relationships?.room_type?.data?.id ?? null;
+      const sellMode = item.attributes?.sell_mode ?? null;
+      const rateMode = item.attributes?.rate_mode ?? null;
+      const options = item.attributes?.options;
+      const occupancies = Array.isArray(options) && options.length > 0 && options.every(option => Number.isInteger(option?.occupancy) && option.occupancy > 0)
+        ? [...new Set<number>(options.map(option => option.occupancy))].sort((a,b) => a-b) : null;
+      if (!channexRoomTypeId) continue; // no podemos mapear una tarifa sin saber a qué habitación pertenece
+      const [existing] = await tx
+        .select()
+        .from(channexRatePlanMappings)
+        .where(and(eq(channexRatePlanMappings.connectionId, connectionId), eq(channexRatePlanMappings.channexRatePlanId, channexRatePlanId)));
+      if (existing) {
+        await tx
+          .update(channexRatePlanMappings)
+          .set({ channexRatePlanTitle: title, channexRoomTypeId, sellMode, rateMode, occupancies, remotePresent: true })
+          .where(eq(channexRatePlanMappings.id, existing.id));
+      } else {
+        await tx.insert(channexRatePlanMappings).values({
+          connectionId,
+          channexRatePlanId,
+          channexRatePlanTitle: title,
+          sellMode,
+          rateMode,
+          occupancies,
+          channexRoomTypeId,
+          ratePlanId: null,
+          createdAt: new Date(),
+        });
+      }
+    }
 
-  return {
-    roomTypes: remoteRoomTypes.length,
-    ratePlans: remoteRatePlans.length,
-  };
+    // Preserve mapping identities and local links for history/reappearance.
+    // Only a complete successful snapshot can retire a missing remote plan.
+    const remoteIds = remoteRatePlans.map(item => item.id as string);
+    await tx.update(channexRatePlanMappings).set({ remotePresent: false }).where(and(
+      eq(channexRatePlanMappings.connectionId, connectionId),
+      ...(remoteIds.length ? [notInArray(channexRatePlanMappings.channexRatePlanId, remoteIds)] : []),
+    ));
+
+    await tx
+      .update(channexConnections)
+      .set({ lastCatalogSyncAt: new Date() })
+      .where(eq(channexConnections.id, connectionId));
+
+    return {
+      roomTypes: remoteRoomTypes.length,
+      ratePlans: remoteRatePlans.length,
+    };
+  });
+  await recomputeMappedFlags(connectionId);
+  return result;
 }
 
 async function isMapped(connectionId: string, channexRoomTypeId: string | null, channexRatePlanId: string | null): Promise<boolean> {
@@ -141,7 +164,7 @@ async function isMapped(connectionId: string, channexRoomTypeId: string | null, 
   const [ratePlanMapping] = await db
     .select()
     .from(channexRatePlanMappings)
-    .where(and(eq(channexRatePlanMappings.connectionId, connectionId), eq(channexRatePlanMappings.channexRatePlanId, channexRatePlanId)));
+    .where(and(eq(channexRatePlanMappings.connectionId, connectionId), eq(channexRatePlanMappings.channexRatePlanId, channexRatePlanId), eq(channexRatePlanMappings.remotePresent, true)));
   return Boolean(roomTypeMapping?.roomTypeId) && Boolean(ratePlanMapping?.ratePlanId);
 }
 
@@ -465,7 +488,7 @@ export async function importBooking(bookingRowId: string, actor: string): Promis
   const [ratePlanMapping] = await db
     .select()
     .from(channexRatePlanMappings)
-    .where(and(eq(channexRatePlanMappings.connectionId, row.connectionId), eq(channexRatePlanMappings.channexRatePlanId, row.channexRatePlanId)));
+    .where(and(eq(channexRatePlanMappings.connectionId, row.connectionId), eq(channexRatePlanMappings.channexRatePlanId, row.channexRatePlanId), eq(channexRatePlanMappings.remotePresent, true)));
 
   if (!roomTypeMapping?.roomTypeId || !ratePlanMapping?.ratePlanId) {
     throw new Error("Faltan mapeos de habitación y/o tarifa para esta reserva — completalos en 'Mapeo' antes de aceptar");
