@@ -10,6 +10,10 @@ export function diagnosisFailure(error: unknown) {
           message?: string;
         })
       : {};
+  if(typeof e.code === "string" && e.code.startsWith("codex_")) {
+    const reasons:Record<string,string>={codex_not_enabled:"Codex no está habilitado para esta investigación. No se invocó el modelo.",codex_configuration_changed:"La configuración cambió después de encolar el caso. Solicitá una nueva investigación; no se invocó el modelo.",codex_budget:"La investigación alcanzó el límite configurado de turnos, tokens o contexto.",codex_native_tool:"Se bloqueó una herramienta fuera del alcance de lectura autorizado.",codex_protocol:"Codex no devolvió una respuesta con el formato esperado.",codex_provenance:"El informe no pudo respaldar sus citas con el código leído.",codex_review_protocol:"La revisión de Codex no devolvió un veredicto consistente.",codex_turn_failed:"La ejecución de Codex falló antes de entregar un diagnóstico."};
+    return {code:e.code in reasons?e.code:"codex_turn_failed",message:reasons[e.code]||reasons.codex_turn_failed};
+  }
   if (e.status === 401)
     return {
       code: "api_auth",

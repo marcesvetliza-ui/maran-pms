@@ -42,7 +42,7 @@ export const executionStageSchema=z.object({
   estimatedTokens:optionalCount,reservedTokens:optionalCount,availableTokens:optionalCount,issueCount:optionalCount,
   reason:z.enum(['schema','provenance','claim','attribution','consistency','budget']).optional().catch(undefined),
 });
-const failureCodes=['api_auth','api_quota','api_rate_limit','api_model_access','api_request','api_unavailable','timeout','connection','diagnosis_coherence','diagnosis_audit','report_format','investigation_tokens','investigation_rounds','diagnosis_length','investigation_limit','evidence_validation','diagnosis_failed'] as const;
+const failureCodes=['api_auth','api_quota','api_rate_limit','api_model_access','api_request','api_unavailable','timeout','connection','diagnosis_coherence','diagnosis_audit','report_format','investigation_tokens','investigation_rounds','diagnosis_length','investigation_limit','evidence_validation','diagnosis_failed','codex_budget','codex_native_tool','codex_protocol','codex_provenance','codex_review_protocol','codex_turn_failed','codex_configuration_changed','codex_not_enabled'] as const;
 const executionSchema=z.object({
   revision:z.string().regex(/^[a-f0-9]{40}$/),finishedAt:z.string().datetime(),
   outcome:z.enum(['complete','incomplete','failed','clarification']),
@@ -50,6 +50,7 @@ const executionSchema=z.object({
   failureCode:z.enum(failureCodes).optional().catch(undefined),
   auditReason:auditReasonSchema.optional().catch(undefined),
   auditSchemaIssues:z.array(auditSchemaIssue).max(4).optional().catch(undefined),
+  usageIncomplete:z.boolean().optional().catch(undefined),
   tokens:optionalCount,calls:optionalCount,semanticAudits:optionalCount,
   stages:z.array(executionStageSchema).max(100),
 });

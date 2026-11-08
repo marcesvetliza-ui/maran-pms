@@ -1,3 +1,4 @@
+import { supportInvestigatorMode } from "@shared/support-investigator-mode";
 import { hasPermission } from "../permissions";
 import { supportDecisionSchema } from "@shared/support-change-workflow";
 import type { Express } from "express";
@@ -11,6 +12,7 @@ import {
 } from "@shared/programming-support";
 
 export function registerProgrammingSupport(app: Express) {
+  const investigatorMode = supportInvestigatorMode(process.env);
   app.use(
     "/api/programming-support",
     requireAuth,
@@ -25,7 +27,8 @@ export function registerProgrammingSupport(app: Express) {
       userId: String((_req.user as Express.User).id),
       canViewAll: ( _req.user as Express.User).role === "admin" || hasPermission((_req.user as Express.User).role, "api:support:view-all"),
       canReview: (_req.user as Express.User).role === "admin" || hasPermission((_req.user as Express.User).role, "api:support:review"),
-      workflowSimulation: process.env.SUPPORT_WORKFLOW_SIMULATION_ENABLED === "true",
+      workflowSimulation: investigatorMode === "simulation",
+      investigatorMode,
       version:
         process.env.RAILWAY_GIT_COMMIT_SHA ||
         process.env.ASSISTANT_SOURCE_VERSION ||
@@ -81,7 +84,7 @@ export function registerProgrammingSupport(app: Express) {
           Authorization: `Bearer ${process.env.SUPPORT_SHARED_SECRET}`,
           "Content-Type": "application/json",
           "X-Support-User": String((req.user as Express.User).id),
-          "X-Support-Mode": process.env.SUPPORT_WORKFLOW_SIMULATION_ENABLED === "true" ? "simulation" : "legacy",
+          "X-Support-Mode": investigatorMode,
           "X-Support-View-All": viewAll ? "true" : "false",
           "X-Support-Reviewer": canReview ? "true" : "false",
           "X-Support-Version":

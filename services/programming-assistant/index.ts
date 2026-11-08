@@ -1,3 +1,4 @@
+import { supportInvestigatorMode } from "../../shared/support-investigator-mode";
 import { createService } from "./service";
 import {dailyInvestigationLimit} from "./budget";
 
@@ -17,6 +18,7 @@ if (notification && Object.values(notification).some((v) => !v))
   throw new Error(
     "Completar configuración del correo o mantener SUPPORT_NOTIFY_ENABLED=false.",
   );
+const mode=supportInvestigatorMode(process.env);
 const service = await createService({
   databaseUrl: process.env.ASSISTANT_DATABASE_URL,
   secret: process.env.SUPPORT_SHARED_SECRET || "",
@@ -26,9 +28,11 @@ const service = await createService({
     "",
   sourceRoot: process.env.ASSISTANT_SOURCE_ROOT || process.cwd(),
   apiKey: process.env.OPENAI_API_KEY,
-  model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  model: mode === "codex" ? process.env.SUPPORT_CODEX_MODEL || "" : process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  engine: mode === "codex" ? "codex" : "legacy",
+  codexPaidEnabled: process.env.SUPPORT_CODEX_PAID_ENABLED === "true",
   dailyLimit: dailyInvestigationLimit(process.env.ASSISTANT_DAILY_LIMIT),
-  workflowSimulation: process.env.SUPPORT_WORKFLOW_SIMULATION_ENABLED === "true",
+  workflowSimulation: mode === "simulation",
   notification,
 });
 const server = service.app.listen(

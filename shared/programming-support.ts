@@ -136,6 +136,9 @@ export type SupportTicket = {
   workflowEvents?: SupportWorkflowEvent[];
   feedback?: Array<{requestId:string;reportId:string;outcome:"resolved"|"unresolved";createdAt:string}>;
   lastError: string | null;
+  queuedInvestigatorMode?: "legacy"|"simulation"|"codex";
+  queuedRequestedModel?: string;
+  investigator?: {engine:'codex';requestedModel:string;effectiveModel:null;providerTurns:number;inputTokens:number;cachedInputTokens:number;outputTokens:number};
   execution?: SupportExecution;
   rejectedReviews?: RejectedReview[];
   clarification?: {facts:OperationalFact[];questions:string[];requestedAfterMessageCount?:number};

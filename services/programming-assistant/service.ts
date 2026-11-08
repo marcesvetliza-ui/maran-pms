@@ -1,3 +1,4 @@
+import { investigateWithCodex } from "./codex-investigator";
 import { supportDecisionSchema } from "../../shared/support-change-workflow";
 import { simulateInvestigation, prepareSimulatedChange, decideSimulatedChange, invalidateChange, appendWorkflowEvent } from "./change-workflow";
 import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails, semanticFailureDetails } from "./errors";
@@ -40,6 +41,8 @@ export async function createService(
     dailyLimit?: number;
     notification?: NotificationConfig;
     workflowSimulation?: boolean;
+    engine?: "legacy"|"codex";
+    codexPaidEnabled?: boolean;
   },
   investigator = diagnose,
 ) {
@@ -71,7 +74,8 @@ export async function createService(
       res.json({
         status: "ok",
         mode: "pilot",
-        configured: !!config.apiKey || !!config.workflowSimulation,
+        configured: !!config.workflowSimulation || (!!config.apiKey && (config.engine !== "codex" || !!config.codexPaidEnabled && !!config.model)),
+        engine: config.workflowSimulation ? "simulation" : config.engine || "legacy",
         workflowSimulation: !!config.workflowSimulation,
         version: config.version,
       });
@@ -207,9 +211,12 @@ export async function createService(
         catch(error) { await client.query("ROLLBACK"); return res.status(409).json({error:(error as Error).message}); }
       } else if (action === "analyze") {
         const expectedMode = req.get("X-Support-Mode");
-        if(expectedMode && expectedMode !== (config.workflowSimulation ? "simulation" : "legacy")) {
+        if((expectedMode && expectedMode !== (config.workflowSimulation ? "simulation" : config.engine || "legacy")) || (!config.workflowSimulation && config.engine === "codex" && expectedMode !== "codex")) {
           await client.query("ROLLBACK");
           return res.status(409).json({error:"El modo de soporte no coincide entre PMS y asistente. No se inició la investigación."});
+        }
+        if (!config.workflowSimulation && config.engine === "codex" && (!config.codexPaidEnabled || !config.model)) {
+          await client.query("ROLLBACK");return res.status(409).json({error:"La evaluación de Codex necesita un modelo explícito y habilitación de llamadas pagadas. No se inició la investigación."});
         }
         if (
           (!config.apiKey && !config.workflowSimulation) ||
@@ -237,7 +244,10 @@ export async function createService(
         ticket.version = config.version;
         ticket.report = null;
         ticket.status = "queued";
+        ticket.queuedInvestigatorMode=config.workflowSimulation ? "simulation" : config.engine || "legacy";
+        ticket.queuedRequestedModel=config.model;
         ticket.lastError = null;
+        delete ticket.investigator;
         delete ticket.execution;
         delete ticket.rejectedReviews;
       } else if (action === "feedback") {
@@ -324,11 +334,16 @@ export async function createService(
       if (ticket) {
         const lease = ticket.updatedAt;
         try {
-          const result = config.workflowSimulation ? simulateInvestigation(ticket) : await investigator(
+          const mode=config.workflowSimulation ? "simulation" : config.engine || "legacy";
+          if((ticket.queuedInvestigatorMode||"legacy")!==mode)throw Object.assign(Error('El modo cambió después de encolar'),{code:'codex_configuration_changed'});
+          if(mode==='codex'&&(!config.codexPaidEnabled||!config.apiKey||!config.model||ticket.queuedRequestedModel!==config.model))throw Object.assign(Error('Codex no habilitado para este trabajo'),{code:'codex_not_enabled'});
+          const selectedInvestigator = config.engine === "codex" ? investigateWithCodex : investigator;
+          const result = config.workflowSimulation ? simulateInvestigation(ticket) : await selectedInvestigator(
             ticket,
             new CodeSource(config.sourceRoot, config.version),
             { apiKey: config.apiKey!, model: config.model },
           );
+          ticket.investigator=result.investigator;
           ticket.execution=safeSupportExecution({
             revision:config.version,finishedAt:new Date().toISOString(),
             outcome:result.clarification?'clarification':result.report.validationStatus==='incomplete'?'incomplete':'complete',
@@ -345,6 +360,7 @@ export async function createService(
             stages:safeStageEvents(result.stages),
           });
           if(result.clarification){
+            if(config.engine === "codex")ticket.messages=[...(ticket.messages||[]),{id:randomUUID(),author:"assistant",text:result.clarification.questions.join("\n"),createdAt:new Date().toISOString()}];
             ticket.clarification={...result.clarification,requestedAfterMessageCount:(ticket.messages||[]).filter(m=>m.author==="user").length};
             ticket.report=null;
             delete ticket.reportId;
@@ -361,12 +377,14 @@ export async function createService(
           }
           ticket.lastError = null;
         } catch (error) {
+          if(config.engine === "codex")ticket.investigator=(error as {investigator?:SupportTicket["investigator"]})?.investigator;
           const failure = diagnosisFailure(error);
           const metrics=investigationMetrics(error);
           ticket.rejectedReviews=safeRejectedReviews((error as {rejectedReviews?:unknown})?.rejectedReviews);
           ticket.execution=safeSupportExecution({
             revision:config.version,finishedAt:new Date().toISOString(),outcome:'failed',
             tokens:metrics?.tokens,calls:metrics?.calls,failureCode:failure.code,
+            usageIncomplete:(error as {usageIncomplete?:unknown})?.usageIncomplete===true,
             semanticAudits:(error as {semanticAudits?:unknown})?.semanticAudits,
             auditReason:auditFailureReason(error),auditSchemaIssues:auditSchemaFailureDetails(error),
             stages:(error as {stages?:unknown})?.stages,

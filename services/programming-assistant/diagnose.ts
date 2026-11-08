@@ -125,7 +125,7 @@ const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     },
   },
 ];
-export type DiagnosisResult={report:SupportDiagnosis;tokens:number;calls:number;readFiles:string[];searches:string[];semanticAudits?:number;partialReason?:string;stages?:import("./lifecycle").StageEvent[];rejectedReviews?:RejectedReview[];clarification?:{facts:OperationalFact[];questions:string[]}};
+export type DiagnosisResult={investigator?:import("../../shared/programming-support").SupportTicket["investigator"];report:SupportDiagnosis;tokens:number;calls:number;readFiles:string[];searches:string[];semanticAudits?:number;partialReason?:string;stages?:import("./lifecycle").StageEvent[];rejectedReviews?:RejectedReview[];clarification?:{facts:OperationalFact[];questions:string[]}};
 export async function diagnose(
   ticket: SupportTicket,
   source: CodeSource,
