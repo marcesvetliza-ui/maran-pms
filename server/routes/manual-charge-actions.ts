@@ -152,8 +152,9 @@ async function inspectManualSource(
   client: PoolClient,
   reservationId: string,
   charge: ChargeRow,
+  operation: "edit" | "void" = "edit",
 ): Promise<{ eligible: boolean; reason?: string; movementId?: string; movementSnapshot?: Record<string, unknown>; supplement?: "early_checkin" | "late_checkout"; legacySupplement?: boolean }> {
-  if (!MANUAL_CHARGE_CATEGORIES.has(charge.category) || charge.is_recurring || charge.unit_amount != null) {
+  if (!MANUAL_CHARGE_CATEGORIES.has(charge.category) || (operation === "edit" && (charge.is_recurring || charge.unit_amount != null))) {
     return { eligible: false, reason: "El origen del cargo no corresponde a un extra manual editable." };
   }
   if (!charge.description.trim() || !cents(charge.amount)) {
@@ -376,7 +377,7 @@ async function mutateManualCharge(
         throw actionError(409, "El extra cambió desde que se abrió. Actualizá la pantalla e intentá nuevamente.", "stale_snapshot");
       }
 
-      const proof = await inspectManualSource(client, reservationId, charge);
+      const proof = await inspectManualSource(client, reservationId, charge, operation);
       if (!proof.movementId && !proof.legacySupplement) {
         throw actionError(409, proof.reason ?? "No se pudo comprobar el origen manual del cargo.", "source_conflict");
       }
