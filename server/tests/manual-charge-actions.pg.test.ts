@@ -112,6 +112,19 @@ const bodyFor = (charge: { description?: string; amount?: string } = {}) => ({
 });
 
 runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)", () => {
+  it.each([{recurring:true,unitAmount:'7500.00'},{recurring:false,unitAmount:'7500.00'}])('voids a unit-priced parking charge atomically without enabling generic editing: %j',async flags=>{
+    const fixture=await createFixture({...flags,amount:'7500.00'});
+    expect((await request('GET',`/api/reservations/${fixture.reservationId}/manual-charge-actions`)).body.charges[0].eligible).toBe(false);
+    const response=await request('PATCH',`/api/charges/${fixture.chargeId}/anular`,{motivoAnulacion:'Cochera cargada por error'});
+    expect(response.status).toBe(200);expect(response.body.status).toBe('anulado');
+    const movements=(await testPool.query('SELECT type,amount::text,source_type,voided_movement_id FROM folio_movements WHERE folio_id=$1 ORDER BY amount DESC',[fixture.folioId])).rows;
+    expect(movements).toHaveLength(2);
+    expect(movements[1]).toMatchObject({type:'charge',amount:'-7500.00',source_type:'manual_charge_void',voided_movement_id:fixture.movementId});
+    expect((await testPool.query('SELECT balance::text FROM folios WHERE id=$1',[fixture.folioId])).rows[0].balance).toBe('0.00');
+    expect((await testPool.query('SELECT count(*)::int AS n FROM audit_logs WHERE entity_id=$1',[fixture.chargeId])).rows[0].n).toBe(1);
+    expect((await request('PATCH',`/api/charges/${fixture.chargeId}/anular`,{motivoAnulacion:'Reintento'})).status).toBe(400);
+    expect((await testPool.query('SELECT count(*)::int AS n FROM folio_movements WHERE folio_id=$1',[fixture.folioId])).rows[0].n).toBe(2);
+  });
   async function restaurantFixture(legacy = false) {
     const fixture = await createFixture({ category: "restaurant" });
     const orderId = randomUUID();
