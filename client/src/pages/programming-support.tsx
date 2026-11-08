@@ -1,3 +1,4 @@
+import { SupportChangeReview } from "@/components/support-change-review";
 import {citedScreens} from "@shared/programming-support-scope";
 import {SupportExecutionDetails} from '@/components/support-execution-details';
 import {SupportRejectedReviews} from '@/components/support-rejected-reviews';
@@ -16,6 +17,10 @@ import { formatHotelDateTime } from "@/lib/hotelTime";
 export default function ProgrammingSupport() {
   const cache = useQueryClient();
   const { data: config, isError: configError } = useQuery<{
+    userId?: string;
+    canViewAll?: boolean;
+    canReview?: boolean;
+    workflowSimulation?: boolean;
     enabled: boolean;
     configured: boolean;
     version: string | null;
@@ -41,6 +46,7 @@ export default function ProgrammingSupport() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const ticket = cases.find((c) => c.id === selected);
+  const ownsTicket = !config?.userId || ticket?.createdBy === config.userId;
   const pending = useRef<{ key: string; id: string } | null>(null);
   async function send(path: string, body: unknown) {
     const { requestId: ignored, ...data } = body as Record<string, unknown>;
@@ -97,6 +103,8 @@ export default function ProgrammingSupport() {
           Nueva consulta
         </Button>
       </div>
+      <p className="text-sm">{config?.canViewAll ? 'Bandeja de administración: todas las consultas' : 'Mis consultas de soporte'}</p>
+      {config?.workflowSimulation && <p role="status" className="rounded border p-3">Demostración del circuito: investigador y propuestas simulados. No se consulta ningún modelo ni se publican cambios.</p>}
       <div className="rounded-xl border bg-blue-50 p-4 text-sm text-blue-950 dark:bg-blue-950 dark:text-blue-100">
         Piloto: el asistente lee el código y propone una solución. No ejecuta
         pruebas ni aplica cambios. Escribí referencias internas; evitá nombres
@@ -262,7 +270,7 @@ export default function ProgrammingSupport() {
               {ticket.lastError && <p role="alert">{ticket.lastError}</p>}
               <Button
                 disabled={
-                  busy ||
+                  busy || !ownsTicket ||
                   ["queued", "investigating", "closed"].includes(ticket.status) ||
                   (ticket.status==='needs_info' && !!ticket.clarification && (ticket.messages||[]).filter(m=>m.author==='user').length <= (ticket.clarification.requestedAfterMessageCount||0))
                 }
@@ -278,8 +286,7 @@ export default function ProgrammingSupport() {
                   : "Solicitar diagnóstico"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Al solicitarlo, se envía el contenido de la consulta al modelo
-                de OpenAI. El diagnóstico aparecerá acá.
+                {config?.workflowSimulation ? 'Esta demostración no envía la consulta a un modelo y no consume su API.' : 'Al solicitarlo, se envía el contenido de la consulta al modelo de OpenAI. El diagnóstico aparecerá acá.'}
               </p>
               {ticket.status==='needs_info'&&ticket.clarification&&<section className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 space-y-2 dark:border-blue-900 dark:bg-blue-950/20"><h2 className="font-semibold">Necesito un dato para continuar</h2><p className="text-sm text-muted-foreground">Todavía no hay un diagnóstico. Respondé abajo en Agregar información y luego solicitá continuar.</p><ul className="list-disc pl-5 text-sm space-y-2">{ticket.clarification.questions.map((q,i)=><li key={i}>{q}</li>)}</ul></section>}
               {ticket.report && (
@@ -336,7 +343,7 @@ export default function ProgrammingSupport() {
                     <p className="text-sm font-medium">¿Te sirvió este diagnóstico?</p>
                     <div className="flex flex-wrap gap-2">
                       {([['resolved','Resolvió mi consulta'],['unresolved','Sigue el problema']] as const).map(([outcome,label])=>(
-                        <Button key={outcome} variant="outline" disabled={busy || ['queued','investigating','closed'].includes(ticket.status)}
+                        <Button key={outcome} variant="outline" disabled={busy || !ownsTicket || ['queued','investigating','closed'].includes(ticket.status)}
                           onClick={()=>void send(`/${ticket.id}/feedback`,{reportId:ticket.reportId || ticket.version,outcome})}>{label}</Button>
                       ))}
                     </div>
@@ -367,6 +374,7 @@ export default function ProgrammingSupport() {
                   </details>
                 </div>
               )}
+              <SupportChangeReview ticket={ticket} canReview={!!config?.canReview} simulation={!!config?.workflowSimulation} busy={busy} onDecision={body=>void send(`/${ticket.id}/decision`,body)}/>
               <SupportExecutionDetails ticket={ticket}/>
               <SupportRejectedReviews ticket={ticket}/>
               <section className="space-y-3">
@@ -393,7 +401,7 @@ export default function ProgrammingSupport() {
                 <Button
                   variant="outline"
                   disabled={
-                    busy ||
+                    busy || !ownsTicket ||
                     message.trim().length < 2 ||
                     ["queued", "investigating"].includes(ticket.status)
                   }
@@ -410,7 +418,7 @@ export default function ProgrammingSupport() {
               <Button
                 variant="outline"
                 disabled={
-                  busy ||
+                  busy || !ownsTicket ||
                   ["queued", "investigating", "closed"].includes(ticket.status)
                 }
                 onClick={() =>

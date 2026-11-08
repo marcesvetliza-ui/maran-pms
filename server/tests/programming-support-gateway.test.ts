@@ -1,3 +1,4 @@
+vi.mock("../permissions", () => ({ hasPermission: (role: string, key: string) => role === "reviewer" && ["api:support:view-all", "api:support:review"].includes(key) }));
 import express from "express";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { initAppEnv } from "../app-env";
@@ -9,8 +10,8 @@ vi.mock("../auth", () => ({
       next();
     } else res.sendStatus(401);
   },
-  requirePermission: () => (req: any, res: any, next: () => void) =>
-    req.user.role === "admin" ? next() : res.sendStatus(403),
+  requirePermission: (key: string) => (req: any, res: any, next: () => void) =>
+    req.user.role === "admin" || (key === "sidebar:/programming-support" && ["support-user", "reviewer"].includes(req.user.role)) ? next() : res.sendStatus(403),
 }));
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -18,6 +19,24 @@ afterEach(() => {
   initAppEnv({ APP_ENV: "test", NODE_ENV: "test" });
 });
 describe("PMS support gateway", () => {
+  it("uses a separate support permission and never forwards forged review capabilities", async () => {
+    const originalFetch=global.fetch,calls:any[]=[];
+    vi.stubEnv('SUPPORT_ENABLED','true');vi.stubEnv('SUPPORT_SERVICE_URL','http://assistant.invalid');vi.stubEnv('SUPPORT_SHARED_SECRET','synthetic-secret-for-gateway');
+    initAppEnv({APP_ENV:'pilot',NODE_ENV:'production'});
+    vi.spyOn(global,'fetch').mockImplementation(async(input,options)=>{
+      if(String(input).includes('assistant.invalid')){calls.push(options);return new Response('[]',{headers:{'Content-Type':'application/json'}});}
+      return originalFetch(input,options);
+    });
+    const app=express();app.use(express.json());registerProgrammingSupport(app);const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
+    const url=`http://127.0.0.1:${(server.address() as any).port}/api/programming-support/cases`;
+    try {
+      expect((await originalFetch(url,{headers:{'x-test-role':'support-user','X-Support-Reviewer':'true','X-Support-View-All':'true','X-Support-Mode':'simulation'}})).status).toBe(200);
+      expect(calls[0].headers).toMatchObject({'X-Support-Reviewer':'false','X-Support-View-All':'false','X-Support-Mode':'legacy'});
+      expect((await originalFetch(url+'/11111111-1111-4111-8111-111111111111/decision',{method:'POST',headers:{'x-test-role':'support-user','Content-Type':'application/json','X-Support-Reviewer':'true'},body:'{}'})).status).toBe(403);
+      expect(calls).toHaveLength(1);
+    } finally {await new Promise<void>(r=>server.close(()=>r()));}
+  });
+
   it("requires administrator access, stays off outside pilot, and strips forged identity", async () => {
     const originalFetch = global.fetch;
     const calls: any[] = [];

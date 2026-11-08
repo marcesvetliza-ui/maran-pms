@@ -28,6 +28,7 @@ const service = await createService({
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   dailyLimit: dailyInvestigationLimit(process.env.ASSISTANT_DAILY_LIMIT),
+  workflowSimulation: process.env.SUPPORT_WORKFLOW_SIMULATION_ENABLED === "true",
   notification,
 });
 const server = service.app.listen(

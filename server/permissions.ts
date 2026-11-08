@@ -174,6 +174,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "sidebar:/config/presupuestos": ["admin"],
   "sidebar:/pos-configs": ["admin", "resp_administracion"],
   "sidebar:/seguridad": ["admin"],
+  "sidebar:/programming-support": ["admin"],
   // devOnly además de esto — se sigue chequeando aparte en el cliente, no
   // forma parte del modelo de permisos.
   "sidebar:/source-code": ["admin"],
@@ -193,6 +194,8 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * que cualquier resourceKey agregado después del seed inicial.
  */
 export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
+  "api:support:view-all": ["admin"],
+  "api:support:review": ["admin"],
   "api:manuals:restricted": ["admin"],
   "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
@@ -403,6 +406,9 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:/admin/countries": { label: "Países (ARCA)", section: "Configuración" },
   "sidebar:/config/presupuestos": { label: "Conf. Presupuestos", section: "Configuración" },
   "sidebar:/pos-configs": { label: "Puntos de Venta", section: "Configuración" },
+  "sidebar:/programming-support": { label: "Soporte: crear y seguir consultas propias", section: "Soporte" },
+  "api:support:view-all": { label: "Soporte: ver todas las consultas", section: "Soporte" },
+  "api:support:review": { label: "Soporte: revisar y aprobar propuestas", section: "Soporte" },
   "sidebar:/seguridad": { label: "Seguridad de claves", section: "Configuración" },
   "sidebar:/source-code": { label: "Código fuente", section: "Configuración" },
   // Agregado en Etapa 2, después del seed inicial — no forma parte de

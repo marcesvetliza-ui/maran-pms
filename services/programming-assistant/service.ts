@@ -1,3 +1,5 @@
+import { supportDecisionSchema } from "../../shared/support-change-workflow";
+import { simulateInvestigation, prepareSimulatedChange, decideSimulatedChange, invalidateChange, appendWorkflowEvent } from "./change-workflow";
 import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails, semanticFailureDetails } from "./errors";
 import {safeStageEvents} from "./lifecycle";
 import {safeSupportExecution} from '../../shared/programming-support-execution';
@@ -37,6 +39,7 @@ export async function createService(
     model: string;
     dailyLimit?: number;
     notification?: NotificationConfig;
+    workflowSimulation?: boolean;
   },
   investigator = diagnose,
 ) {
@@ -68,7 +71,8 @@ export async function createService(
       res.json({
         status: "ok",
         mode: "pilot",
-        configured: !!config.apiKey,
+        configured: !!config.apiKey || !!config.workflowSimulation,
+        workflowSimulation: !!config.workflowSimulation,
         version: config.version,
       });
     } catch {
@@ -89,8 +93,8 @@ export async function createService(
   app.get("/cases", async (_req, res) => {
     try {
       const rows = await pool.query(
-        "SELECT data FROM support_cases WHERE owner=$1 ORDER BY data->>'updatedAt' DESC LIMIT 100",
-        [res.locals.owner],
+        "SELECT data FROM support_cases WHERE owner=$1 OR $2::boolean ORDER BY data->>'updatedAt' DESC LIMIT 100",
+        [res.locals.owner, _req.get("X-Support-View-All") === "true"],
       );
       res.json(rows.rows.map((row) => row.data));
     } catch {
@@ -133,12 +137,14 @@ export async function createService(
   app.post("/cases/:id/:action", async (req, res) => {
     const { action, id } = req.params;
     if (
-      !["messages", "analyze", "close", "feedback"].includes(action) ||
+      !["messages", "analyze", "close", "feedback", "decision"].includes(action) ||
       !/^[a-f0-9-]{36}$/.test(id)
     )
       return res.status(404).json({ error: "Caso no encontrado" });
+    if (action === "decision" && req.get("X-Support-Reviewer") !== "true") return res.status(403).json({ error: "Sin permiso para aprobar propuestas" });
+    if (action === "decision" && !config.workflowSimulation) return res.status(409).json({ error: "El circuito de aprobación aún no está habilitado" });
     const parsed = (
-      action === "messages" ? supportMessageSchema : action === "feedback" ? supportFeedbackSchema : supportRunSchema
+      action === "decision" ? supportDecisionSchema : action === "messages" ? supportMessageSchema : action === "feedback" ? supportFeedbackSchema : supportRunSchema
     ).safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Datos inválidos" });
@@ -150,8 +156,8 @@ export async function createService(
       // Serializes daily reservations across all service replicas.
       await client.query("SELECT pg_advisory_xact_lock(78349215)");
       const row = await client.query(
-        "SELECT data FROM support_cases WHERE id=$1 AND owner=$2 FOR UPDATE",
-        [id, res.locals.owner],
+        "SELECT data FROM support_cases WHERE id=$1 AND (owner=$2 OR $3::boolean) FOR UPDATE",
+        [id, res.locals.owner, action === "decision" && req.get("X-Support-Reviewer") === "true" && req.get("X-Support-View-All") === "true"],
       );
       if (!row.rows.length) {
         await client.query("ROLLBACK");
@@ -163,6 +169,10 @@ export async function createService(
         [res.locals.owner, parsed.data.requestId],
       );
       if (previous.rows.length) {
+        if(action === "decision") {
+          try { decideSimulatedChange(ticket, supportDecisionSchema.parse(req.body), res.locals.owner, config.version); }
+          catch(error) { await client.query("ROLLBACK"); return res.status(409).json({error:(error as Error).message}); }
+        }
         if(action === "feedback") {
           const feedback=supportFeedbackSchema.parse(req.body);
           const saved=ticket.feedback?.find(item=>item.requestId===feedback.requestId);
@@ -192,9 +202,17 @@ export async function createService(
           .status(409)
           .json({ error: "La investigación está en curso" });
       }
-      if (action === "analyze") {
+      if (action === "decision") {
+        try { decideSimulatedChange(ticket, supportDecisionSchema.parse(req.body), res.locals.owner, config.version); }
+        catch(error) { await client.query("ROLLBACK"); return res.status(409).json({error:(error as Error).message}); }
+      } else if (action === "analyze") {
+        const expectedMode = req.get("X-Support-Mode");
+        if(expectedMode && expectedMode !== (config.workflowSimulation ? "simulation" : "legacy")) {
+          await client.query("ROLLBACK");
+          return res.status(409).json({error:"El modo de soporte no coincide entre PMS y asistente. No se inició la investigación."});
+        }
         if (
-          !config.apiKey ||
+          (!config.apiKey && !config.workflowSimulation) ||
           req.headers["x-support-version"] !== config.version
         ) {
           await client.query("ROLLBACK");
@@ -215,6 +233,7 @@ export async function createService(
         if(ticket.status==='needs_info' && ticket.clarification && (ticket.messages||[]).filter(m=>m.author==='user').length <= (ticket.clarification.requestedAfterMessageCount||0)){
           await client.query("ROLLBACK");return res.status(409).json({error:"Agregá la información solicitada antes de continuar la investigación."});
         }
+        invalidateChange(ticket, res.locals.owner);
         ticket.version = config.version;
         ticket.report = null;
         ticket.status = "queued";
@@ -232,6 +251,7 @@ export async function createService(
         ticket.messages=[...(ticket.messages || []),{id:randomUUID(),author:"user",text:feedback.outcome==="resolved" ? "Evaluación del diagnóstico: resolvió mi consulta." : "Evaluación del diagnóstico: sigue el problema.",createdAt}];
       } else if (action === "close") ticket.status = "closed";
       else {
+        invalidateChange(ticket, res.locals.owner);
         if ((ticket.messages?.length || 0) >= 30) {
           await client.query("ROLLBACK");
           return res
@@ -304,7 +324,7 @@ export async function createService(
       if (ticket) {
         const lease = ticket.updatedAt;
         try {
-          const result = await investigator(
+          const result = config.workflowSimulation ? simulateInvestigation(ticket) : await investigator(
             ticket,
             new CodeSource(config.sourceRoot, config.version),
             { apiKey: config.apiKey!, model: config.model },
@@ -317,7 +337,7 @@ export async function createService(
           });
           ticket.rejectedReviews=safeRejectedReviews(result.rejectedReviews);
           console.info("Investigación del asistente completada", {
-            caseId:ticket.id, model:config.model, revision:config.version, resultKind:result.clarification?"clarification":"diagnosis",
+            caseId:ticket.id, model:config.workflowSimulation ? "simulation" : config.model, revision:config.version, resultKind:result.clarification?"clarification":"diagnosis",
             tokens:result.tokens, calls:result.calls, semanticAudits:result.semanticAudits || 0,
             readFileCount:result.readFiles.length,
             certainty:result.report.certainty,
@@ -334,6 +354,10 @@ export async function createService(
             ticket.report = result.report;
             ticket.reportId = randomUUID();
             ticket.status = diagnosisState(result.report);
+            if (config.workflowSimulation && ticket.status === "proposal_ready") {
+              ticket.changeCandidate = prepareSimulatedChange(ticket);
+              appendWorkflowEvent(ticket, 'prepared', 'simulator', 'Cambio ficticio para comprobar el circuito. No autoriza publicación.');
+            }
           }
           ticket.lastError = null;
         } catch (error) {
@@ -371,7 +395,7 @@ export async function createService(
           ticket.report &&
           ticket.report.validationStatus !== "incomplete" &&
           ticket.status !== "failed" &&
-          config.notification
+          config.notification && !config.workflowSimulation
         )
           await notifyReady(
             config.notification,

@@ -1,3 +1,5 @@
+import { hasPermission } from "../permissions";
+import { supportDecisionSchema } from "@shared/support-change-workflow";
 import type { Express } from "express";
 import { requireAuth, requirePermission } from "../auth";
 import { isPilotEnv } from "../app-env";
@@ -12,7 +14,7 @@ export function registerProgrammingSupport(app: Express) {
   app.use(
     "/api/programming-support",
     requireAuth,
-    requirePermission("sidebar:/seguridad"),
+    requirePermission("sidebar:/programming-support"),
   );
   app.get("/api/programming-support/config", (_req, res) =>
     res.json({
@@ -20,6 +22,10 @@ export function registerProgrammingSupport(app: Express) {
       configured:
         !!process.env.SUPPORT_SERVICE_URL &&
         !!process.env.SUPPORT_SHARED_SECRET,
+      userId: String((_req.user as Express.User).id),
+      canViewAll: ( _req.user as Express.User).role === "admin" || hasPermission((_req.user as Express.User).role, "api:support:view-all"),
+      canReview: (_req.user as Express.User).role === "admin" || hasPermission((_req.user as Express.User).role, "api:support:review"),
+      workflowSimulation: process.env.SUPPORT_WORKFLOW_SIMULATION_ENABLED === "true",
       version:
         process.env.RAILWAY_GIT_COMMIT_SHA ||
         process.env.ASSISTANT_SOURCE_VERSION ||
@@ -36,14 +42,20 @@ export function registerProgrammingSupport(app: Express) {
       (req.method === "GET" && (id || action)) ||
       (req.method !== "GET" && req.method !== "POST") ||
       (id && !/^[a-f0-9-]{36}$/.test(id)) ||
-      (action && !["messages", "analyze", "close", "feedback"].includes(action)) ||
+      (action && !["messages", "analyze", "close", "feedback", "decision"].includes(action)) ||
       !!id !== !!action
     )
       return res.status(404).json({ error: "Operación no disponible" });
+    const role = (req.user as Express.User).role;
+    const viewAll = role === "admin" || hasPermission(role, "api:support:view-all");
+    const canReview = role === "admin" || hasPermission(role, "api:support:review");
+    if (action === "decision" && !canReview) return res.status(403).json({ error: "Sin permiso para aprobar propuestas" });
     let body: unknown;
     if (req.method === "POST") {
       const parsed = (
-        action === "feedback"
+        action === "decision"
+          ? supportDecisionSchema
+          : action === "feedback"
           ? supportFeedbackSchema
           : action === "messages"
           ? supportMessageSchema
@@ -69,6 +81,9 @@ export function registerProgrammingSupport(app: Express) {
           Authorization: `Bearer ${process.env.SUPPORT_SHARED_SECRET}`,
           "Content-Type": "application/json",
           "X-Support-User": String((req.user as Express.User).id),
+          "X-Support-Mode": process.env.SUPPORT_WORKFLOW_SIMULATION_ENABLED === "true" ? "simulation" : "legacy",
+          "X-Support-View-All": viewAll ? "true" : "false",
+          "X-Support-Reviewer": canReview ? "true" : "false",
           "X-Support-Version":
             process.env.RAILWAY_GIT_COMMIT_SHA ||
             process.env.ASSISTANT_SOURCE_VERSION ||

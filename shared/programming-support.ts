@@ -1,3 +1,4 @@
+import type { SupportChangeCandidate, SupportWorkflowEvent } from "./support-change-workflow";
 import type { OperationalFact } from "./programming-support-clarification";
 import type {SupportExecution} from './programming-support-execution';
 import { z } from "zod";
@@ -131,6 +132,8 @@ export type SupportTicket = {
   createdBy: string;
   report: SupportDiagnosis | null;
   reportId?: string;
+  changeCandidate?: SupportChangeCandidate;
+  workflowEvents?: SupportWorkflowEvent[];
   feedback?: Array<{requestId:string;reportId:string;outcome:"resolved"|"unresolved";createdAt:string}>;
   lastError: string | null;
   execution?: SupportExecution;
