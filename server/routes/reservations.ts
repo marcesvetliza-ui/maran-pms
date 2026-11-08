@@ -1,3 +1,4 @@
+import {groupPersonalExtrasFactsQuery} from "../groupPersonalExtrasFacts";
 import { accommodationNights } from '@shared/accommodationNights';
 import { withReservationFinancialLock } from "../nightlyPricingGuard";
 import { formatDisplayDate } from "../../shared/date-display";
@@ -51,6 +52,8 @@ import { classifyReservationPaymentMethod } from "../payment-method";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { getReservationRateValidationError, normalizeZeroRateNotes } from "@shared/reservationRate";
 import { GROUP_BLOCK_WARNING_CODE } from "@shared/group-inventory";
+import { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
+export { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
 
 async function assertGroupInventoryForReservation(input: {
   roomTypeId: string; checkInDate: string; checkOutDate: string;
@@ -116,24 +119,6 @@ function nightCount(checkIn: string, checkOut: string): number {
   return Math.round((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / 86400000);
 }
 const normalizeDate = (date: string) => date;
-
-export function calculateGroupPersonalExtrasCap(input: {
-  config: unknown;
-  extras: unknown;
-  directPaid: unknown;
-  groupFunds: unknown;
-  groupLodging: unknown;
-}): number {
-  if (input.config !== "accommodation") return 0;
-  const asAmount = (value: unknown) => {
-    const amount = Number(value);
-    return Number.isFinite(amount) ? amount : 0;
-  };
-  const remaining = asAmount(input.extras)
-    - asAmount(input.directPaid)
-    - Math.max(0, asAmount(input.groupFunds) - asAmount(input.groupLodging));
-  return Math.round(Math.max(0, remaining) * 100) / 100;
-}
 
 export function registerReservationsRoutes(app: Express) {
   // Release counters are server-owned; relinking preserves persisted values.
@@ -2903,58 +2888,14 @@ export function registerReservationsRoutes(app: Express) {
             "SELECT id FROM groups WHERE id = $1 FOR UPDATE",
             [groupLink.groupId],
           );
-          const outstandingExtras = await db.execute(sql`
-            WITH linked AS (
-              SELECT l.group_id, r.id AS reservation_id
-              FROM group_reservation_links l
-              JOIN reservations r ON r.id = l.reservation_id
-              WHERE r.id = ${lockedReservationId}
-            ),
-            facts AS (
-              SELECT linked.group_id,
-                COALESCE((SELECT master_folio_config FROM groups WHERE id = linked.group_id), 'accommodation') AS config,
-                COALESCE((SELECT SUM(c.amount::numeric)
-                  FROM charges c
-                  WHERE c.reservation_id = linked.reservation_id
-                    AND c.status <> 'anulado'
-                    AND (
-                      c.amount::numeric < 0
-                      OR COALESCE(c.category, '') NOT IN (
-                        'room', 'payment', 'adjustment', 'transfer_in', 'transfer_out'
-                      )
-                    )), 0) AS extras,
-                COALESCE((SELECT SUM(p.amount::numeric)
-                  FROM payments p
-                  LEFT JOIN group_payments gp ON gp.id = p.group_payment_id
-                    AND gp.group_id = linked.group_id
-                  WHERE p.reservation_id = linked.reservation_id
-                    AND p.status <> 'anulado'
-                    AND (
-                      p.group_payment_id IS NULL
-                      OR (
-                        gp.id IS NOT NULL
-                        AND gp.destination IS DISTINCT FROM 'master_folio'
-                        AND gp.distribution IS DISTINCT FROM 'master_folio'
-                      )
-                    )), 0) AS direct_paid,
-                COALESCE((SELECT SUM(gp.amount::numeric)
-                  FROM group_payments gp
-                  WHERE gp.group_id = linked.group_id
-                    AND (gp.destination = 'master_folio' OR gp.distribution = 'master_folio')), 0) AS group_funds,
-                COALESCE((SELECT SUM(r2.total_room_amount::numeric)
-                  FROM group_reservation_links l2
-                  JOIN reservations r2 ON r2.id = l2.reservation_id
-                  WHERE l2.group_id = linked.group_id
-                    AND r2.status <> 'cancelled'), 0) AS group_lodging
-              FROM linked
-            )
-            SELECT config, extras, direct_paid, group_funds, group_lodging FROM facts
-          `);
+          const outstandingExtras = await db.execute(groupPersonalExtrasFactsQuery(lockedReservationId));
           const capRow = outstandingExtras.rows[0] as any;
           const cap = calculateGroupPersonalExtrasCap({
             config: capRow?.config,
             extras: capRow?.extras,
             directPaid: capRow?.direct_paid,
+            lodging: capRow?.room_lodging,
+            personalPaid: capRow?.personal_paid,
             groupFunds: capRow?.group_funds,
             groupLodging: capRow?.group_lodging,
           });
