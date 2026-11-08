@@ -114,9 +114,8 @@ async function fetchCatalogCollection(connection: ChannexConnectionCredentials, 
       if (rows.length === total) return rows;
       if (!body.data.length) throw invalid();
     } else {
-      // Without pagination metadata only a short, single page is unambiguous.
-      if (expectedTotal !== undefined || page !== 1 || body.data.length >= 100 || body.links?.next) throw invalid();
-      return rows;
+      // A short page without a total could still be a truncated response.
+      throw invalid();
     }
   }
   throw new ChannexApiError("Catálogo de Channex demasiado extenso; se conserva el catálogo anterior", 502, null);

@@ -12,6 +12,7 @@ it('collects every page before returning a catalog snapshot', async () => {
 });
 it.each([
   [{}, null],
+  [{data:[{id:'one'}]}, null],
   [{data:[{id:'one'}],meta:{page:1,total:2}}, {data:[],meta:{page:2,total:2}}],
   [{data:[{id:'one'}],meta:{page:1,total:2}}, {data:[{id:'one'}],meta:{page:2,total:2}}],
   [{data:[{id:'one'}],meta:{page:1,total:2}}, {data:[{id:'two'}],meta:{page:2,total:3}}],
