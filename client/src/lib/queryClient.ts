@@ -161,6 +161,9 @@ export function parseApiError(err: unknown): string {
       const message = typeof parsed?.error === "object" ? parsed?.error?.message : (parsed?.error || parsed?.message);
       if (typeof message === "string" && isHtmlError(message)) return gatewayErrorMessage(status);
       if (parsed?.error) {
+        if (parsed.code === "GROUP_PERSONAL_EXTRAS_CAP" && typeof parsed.cap === "number" && Number.isFinite(parsed.cap)) {
+          return `${String(parsed.error)}. Saldo de extras verificado: ${new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'}).format(parsed.cap)}.`;
+        }
         if (parsed.code === "GROUP_BLOCK_SHORTAGE" && parsed.warning) {
           const warning = parsed.warning;
           const details = [

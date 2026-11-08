@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   groupLinks: [] as any[],
   extraCap: 0,
   extraDirectPaid: 0,
+  extraPersonalPaid: 0,
+  roomLodging: 0,
   extraGroupFunds: 0,
   groupLodging: 100,
   extraConfig: "accommodation",
@@ -26,6 +28,7 @@ const storage = {
   createReservationPaymentWithLedger: vi.fn(async ({ payment }: any) => {
     if (payment.notes?.includes("[personal_extras]")) {
       state.extraDirectPaid += Number(payment.amount) || 0;
+      state.extraPersonalPaid += Number(payment.amount) || 0;
     }
     return { id: "payment-test", ...payment };
   }),
@@ -48,6 +51,8 @@ vi.mock("../db", () => ({
       rows: [{
         extras: state.extraCap,
         direct_paid: state.extraDirectPaid,
+        personal_paid: state.extraPersonalPaid,
+        room_lodging: state.roomLodging,
         group_funds: state.extraGroupFunds,
         group_lodging: state.groupLodging,
         config: state.extraConfig,
@@ -139,6 +144,8 @@ beforeEach(() => {
   state.charges = [];
   state.extraCap = 25;
   state.extraDirectPaid = 0;
+  state.extraPersonalPaid = 0;
+  state.roomLodging = 0;
   state.extraGroupFunds = 0;
   state.groupLodging = 100;
   state.extraConfig = "accommodation";
@@ -148,6 +155,20 @@ beforeEach(() => {
 });
 
 describe("approved group departure and direct payment policy", () => {
+  it('collects 77000 of extras after a direct lodging receipt and refuses a second collection',async()=>{
+    state.extraCap=77000;state.extraDirectPaid=181500;state.roomLodging=181500;
+    await withServer(async baseUrl=>{
+      const body={reservationId:state.reservation.id,amount:'77000',method:'efectivo',paymentPurpose:'personal_extras'};
+      const excessive=await post(baseUrl,'/api/payments',{...body,amount:'77000.01'});
+      expect(excessive.status).toBe(409);expect(excessive.body.cap).toBe(77000);
+      const accepted=await post(baseUrl,'/api/payments',body);
+      expect(accepted.status).toBe(201);
+      expect(storage.createReservationPaymentWithLedger).toHaveBeenCalledTimes(1);
+      const repeated=await post(baseUrl,'/api/payments',{...body,amount:'0.01'});
+      expect(repeated.status).toBe(409);expect(repeated.body.cap).toBe(0);
+      expect(storage.createReservationPaymentWithLedger).toHaveBeenCalledTimes(1);
+    });
+  });
   it("calculates extras caps from direct receipts and group funding above aggregate lodging without prorating", () => {
     expect(calculateGroupPersonalExtrasCap({
       config: "accommodation",

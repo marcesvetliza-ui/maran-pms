@@ -1,3 +1,4 @@
+import { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
 import {ReservationChannexSettlement} from '@/components/channex-settlement';
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { StaySection, SelectedFamilyCompanions, StaySelectionEditor, ReservationStayDetails, ReservationGuestCount, useStayDraft } from "@/components/guest-stay-profile";
@@ -2688,11 +2689,14 @@ export function ReservationDetailDialog({
     payment.status !== "anulado" &&
     (payment.paymentPurpose === "personal_extras" || String(payment.notes || "").includes("[personal_extras]"))
   );
-  const groupPersonalExtrasBalance = Math.max(
-    0,
-    activePersonalExtraCharges.reduce((sum: number, charge: any) => sum + Number(charge.amount || 0), 0) -
-      recordedPersonalExtrasPayments.reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0),
-  );
+  const groupPersonalExtrasBalance = calculateGroupPersonalExtrasCap({
+    config:'accommodation',
+    extras:activePersonalExtraCharges.reduce((sum:number,charge:any)=>sum+Number(charge.amount||0),0),
+    directPaid:safePayments.filter((payment:any)=>payment.status!=='anulado').reduce((sum:number,payment:any)=>sum+Number(payment.amount||0),0),
+    personalPaid:recordedPersonalExtrasPayments.reduce((sum:number,payment:any)=>sum+Number(payment.amount||0),0),
+    lodging:reservation.totalRoomAmount,
+    groupFunds:0,groupLodging:0,
+  });
 
   // Derive the invoice ID linked to the payment currently being voided.
   // Used to check whether an active NC already exists before showing the checkbox.
@@ -2885,7 +2889,7 @@ export function ReservationDetailDialog({
       toast({ title: "Pago registrado", description: "El pago ha sido registrado exitosamente." });
     },
     onError: (error: any) => {
-      const message = error?.data?.error || error?.message || "No se pudo registrar el pago";
+      const message = parseApiError(error) || "No se pudo registrar el pago";
       toast({
         title: "Error al registrar pago",
         description: message,

@@ -23,9 +23,11 @@ const GROUP_RESERVATION = {
   guest: { id: "guest-extras-1", firstName: "Alicia", lastName: "Pérez" },
   room: { id: "room-extras-1", roomNumber: "101", roomType: { name: "Doble" } },
 };
+let previousPayments:any[]=[];
 
 describe("Reservation detail — group personal extras payment", () => {
   beforeEach(() => {
+    previousPayments=[];
     queryClient.clear();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -46,7 +48,7 @@ describe("Reservation detail — group personal extras payment", () => {
         ]), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url.endsWith("/payments?includeAnulados=true")) {
-        return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify(previousPayments), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       if (url === "/api/payments" && init?.method === "POST") {
         return new Response(JSON.stringify({ id: "payment-extras-1" }), { status: 201, headers: { "Content-Type": "application/json" } });
@@ -91,5 +93,13 @@ describe("Reservation detail — group personal extras payment", () => {
       }));
       expect(JSON.parse(String(request?.[1]?.body)).method).not.toBe("cuenta_corriente");
     });
+  });
+  it('does not deduct paid lodging from extras and still deducts an explicit extras receipt',async()=>{
+    previousPayments=[{id:'lodging',amount:'90000',status:'active'},{id:'extra',amount:'25',status:'active',notes:'[personal_extras]'}];
+    const user=userEvent.setup();
+    render(<QueryClientProvider client={queryClient}><ReservationDetailDialog reservation={GROUP_RESERVATION as any} open onOpenChange={vi.fn()} onCancel={vi.fn()}/></QueryClientProvider>);
+    await user.click(await screen.findByTestId('tab-folio'));
+    await user.click(await screen.findByTestId('button-add-payment'));
+    expect(screen.getByTestId('input-payment-amount-0')).toHaveValue(50);
   });
 });
