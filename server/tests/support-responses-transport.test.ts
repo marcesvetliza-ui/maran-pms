@@ -1,7 +1,7 @@
 import { expect,it,vi } from 'vitest';
 import { responsesTransport, type ResponsesClient } from '../../services/programming-assistant/responses-transport';
 import { safeFailure } from '../../services/programming-assistant/evaluation-models';
-import { evaluationProfile } from '../../services/programming-assistant/evaluation-profile';
+import { evaluationProfile,evaluationRevisionAllowed } from '../../services/programming-assistant/evaluation-profile';
 const completed=()=>({status:'completed',model:'reported-model',output_text:'{"action":"clarify"}',output:[{type:'message'}],usage:{input_tokens:120,output_tokens:30,input_tokens_details:{cached_tokens:20}}});
 function setup(response:unknown=completed()) {
   const create=vi.fn(async()=>response),onModel=vi.fn();
@@ -47,4 +47,10 @@ it('supports the bounded larger evaluation history while retaining the default c
   expect(create).toHaveBeenCalledTimes(1);
   await expect(transport.session().run('x'.repeat(125001),{},new AbortController().signal)).rejects.toMatchObject({code:'codex_budget',budgetReason:'transport_context_limit'});
   expect(create).toHaveBeenCalledTimes(1);
+});
+it('requires an explicitly selected revision and blocks subsequent code pushes',()=>{
+ expect(evaluationRevisionAllowed({RAILWAY_GIT_COMMIT_SHA:'a'.repeat(40)})).toBe(false);
+ expect(evaluationRevisionAllowed({RAILWAY_GIT_COMMIT_SHA:'a'.repeat(40),SUPPORT_EVALUATION_RUN_REVISION:'a'.repeat(8)})).toBe(true);
+ expect(evaluationRevisionAllowed({RAILWAY_GIT_COMMIT_SHA:'b'.repeat(40),SUPPORT_EVALUATION_RUN_REVISION:'a'.repeat(8)})).toBe(false);
+ expect(evaluationRevisionAllowed({RAILWAY_GIT_COMMIT_SHA:'a'.repeat(40),SUPPORT_EVALUATION_RUN_REVISION:'a'})).toBe(false);
 });

@@ -1,5 +1,9 @@
 /** Prices copied by the user from the official model page on 2026-11-09.
  * This profile only applies to the authorized isolated three-case evaluation. */
+export function evaluationRevisionAllowed(env:Record<string,string|undefined>) {
+  const approved=env.SUPPORT_EVALUATION_RUN_REVISION||'',actual=env.RAILWAY_GIT_COMMIT_SHA||'';
+  return /^[a-f0-9]{8,40}$/.test(approved)&&/^[a-f0-9]{40}$/.test(actual)&&actual.startsWith(approved);
+}
 export function evaluationProfile(env:Record<string,string|undefined>):Record<string,string> {
   if(!env.SUPPORT_EVALUATION_PROFILE)return {};
   const fail=()=>{throw Object.assign(Error('Perfil de evaluación inválido'),{evaluationCode:'evaluation_profile_invalid'});};

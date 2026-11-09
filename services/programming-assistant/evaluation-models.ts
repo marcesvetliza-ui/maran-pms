@@ -1,11 +1,11 @@
 /** Isolated, non-inference credential/model check. Never starts the assistant. */
 import OpenAI from 'openai';
-import { evaluationProfile } from './evaluation-profile';
+import { evaluationProfile,evaluationRevisionAllowed } from './evaluation-profile';
 
 const fail=(code:string):never=>{throw Object.assign(new Error(code),{evaluationCode:code});};
 export function safeFailure(error:unknown) {
   const e=error as {evaluationCode?:string;status?:number;name?:string};
-  const known=['pilot_job_required','operational_credentials_present','invalid_action','api_key_reference_missing','evaluation_configuration_missing','evaluation_profile_invalid'];
+  const known=['pilot_job_required','operational_credentials_present','invalid_action','api_key_reference_missing','evaluation_configuration_missing','evaluation_profile_invalid','evaluation_revision_not_selected'];
   if(known.includes(e?.evaluationCode||'')) return e.evaluationCode!;
   if(e?.status===401)return 'api_authentication_failed';
   if(e?.status===403)return 'api_permission_denied';
@@ -33,6 +33,7 @@ export async function main() {
   }
   const action=process.env.SUPPORT_EVALUATION_ACTION || 'dry-run';
   if(action==='evaluate') {
+    if(!evaluationRevisionAllowed(process.env))fail('evaluation_revision_not_selected');
     Object.assign(process.env,evaluationProfile(process.env));
     const required=['OPENAI_API_KEY','SUPPORT_CODEX_MODEL','SUPPORT_CODEX_PAID_ENABLED','SUPPORT_EVALUATION_APPROVED_USD','SUPPORT_EVALUATION_INPUT_USD_PER_MILLION','SUPPORT_EVALUATION_OUTPUT_USD_PER_MILLION','SUPPORT_EVALUATION_CACHED_USD_PER_MILLION','SUPPORT_EVALUATION_PRICE_SOURCE','RAILWAY_GIT_COMMIT_SHA'];
     const missing=required.filter(key=>!process.env[key]?.trim());

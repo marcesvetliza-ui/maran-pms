@@ -38,6 +38,8 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
   const signal=AbortSignal.timeout(options.timeoutMs??150000),telemetry=new StageTelemetry();
   let input=0,output=0,cachedInput=0,turns=0,tools=0,audits=0,contextChars=0,repairs=0,pendingUsage=false;
   let transport:AgentTransport|undefined;
+  let rejectedDraft:SupportDiagnosis|undefined,provenanceIssues:string[]=[];
+  const readLedger=()=>[...source.readRanges].map(([path,ranges])=>({path,ranges}));
   const fail=(code:string)=>Object.assign(Error(code),{code,tokens:input+output,calls:tools,semanticAudits:audits,stages:telemetry.events,investigation:{rounds:turns,calls:tools,tokens:input+output,phase:audits?"coverage_review":"research"}});
   const budget=(reason:string)=>Object.assign(fail('codex_budget'),{budgetReason:reason});
   const run=async(session:AgentSession,prompt:string,schema:unknown,stage:'research'|'audit'|'correction'|'reaudit')=>{
@@ -56,8 +58,12 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
     return reply.text;
   };
   const provenance=(report:SupportDiagnosis)=>{
-    if(report.certainty==='falta_informacion'||report.certainty==='sustentado_en_codigo'&&!report.evidence.some(ref=>/\.tsx?$/.test(ref.path)&&!/(?:\/tests\/|\.test\.)/.test(ref.path)))return false;
-    return report.evidence.every(ref=>source.validates(ref));
+    const issues:string[]=[];
+    if(report.certainty==='falta_informacion')issues.push('requires_clarify_action');
+    if(report.certainty==='sustentado_en_codigo'&&!report.evidence.some(ref=>/\.tsx?$/.test(ref.path)&&!/(?:\/tests\/|\.test\.)/.test(ref.path)))issues.push('implementation_evidence_required');
+    report.evidence.forEach((ref,index)=>{if(!source.validates(ref))issues.push(`unread_citation_${index}`);});
+    provenanceIssues=issues;
+    return issues.length===0;
   };
   try {
     transport=await factory(options.apiKey,options.model);
@@ -65,7 +71,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
     let prompt=instruction+'\nCASO Y RESPUESTAS:\n'+JSON.stringify({case:investigationCase(ticket),pendingClarification:ticket.clarification||null});
     while(true){
       if(options.maxResearchTools!==undefined&&(tools>=options.maxResearchTools||turns>=maxTurns-5||shouldCloseInvestigation(input+output,contextChars,prompt.length,maxTokens)))closing=true;
-      if(closing)prompt+='\nFASE FINAL OBLIGATORIA: entregá report o clarify. No hay más lecturas. Si la causa no está demostrada, reportá una hipótesis con limitaciones y sin inventar evidencia. Conservá las citas ya leídas.';
+      if(closing)prompt+='\nFASE FINAL OBLIGATORIA: entregá report o clarify. No hay más lecturas. Si la causa no está demostrada, reportá una hipótesis con limitaciones y sin inventar evidencia. Si usás report, certainty sólo puede ser hipotesis o sustentado_en_codigo; falta_informacion corresponde a la acción clarify. Si no hay lecturas verificadas, usá hipotesis con evidence vacío y causa no demostrada. Registro exacto de rangos autorizados (elegí subrangos dentro de éstos, sin completar huecos):\n'+JSON.stringify(readLedger());
       if(turns>=maxTurns-3||input+output+Math.ceil(contextChars/2)+8500>maxTokens)prompt+='\nCERRÁ la investigación ahora: devolvé report con la evidencia ya leída y limitaciones explícitas, o clarify si falta un dato operativo. Reservá presupuesto para la revisión independiente; no solicites otra lectura.';
       contextChars+=prompt.length;if(contextChars>maxContextChars)throw budget('author_context_limit');
       const raw=await run(author,prompt,closing?closingOutputSchema:agentOutputSchema,repairs?'correction':'research');contextChars+=raw.length;
@@ -81,9 +87,10 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
       }
       if(step.action==='report'){
         if(!step.report||!provenance(step.report)){
+          if(step.report)rejectedDraft=step.report;
           telemetry.record('validation','invalid',telemetry.start(),0,input+output,{reason:'provenance',issueCount:1});
           if(repairs++>=1)throw fail('codex_provenance');
-          prompt='El informe contiene una cita no leída o una certeza sin evidencia. Leé el código faltante o limitá la conclusión; no inventes evidencia.';continue;
+          prompt='Corregí el informe usando este diagnóstico exacto de validación: '+JSON.stringify({issues:provenanceIssues,allowedReads:readLedger()})+'. requires_clarify_action exige la acción clarify, no report. implementation_evidence_required exige una cita de implementación realmente leída o bajar certainty a hipotesis. unread_citation_N señala la cita N que cubre líneas no leídas: quitála o elegí un subrango autorizado. No inventes líneas ni afirmes una causa sin evidencia.';continue;
         }
         const report=step.report;
         const evidence=[];
@@ -116,7 +123,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
       }catch{prompt='No se pudo completar esa lectura. Revisá los argumentos y usá únicamente archivos del catálogo autorizado y rangos de hasta 160 líneas.';}
     }
   }catch(error){
-    if(error&&typeof error==='object')Object.assign(error,{knownUsage:{input,cachedInput,output},usageIncomplete:pendingUsage,investigator:{engine:"codex",requestedModel:options.model,effectiveModel:null,providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output},tokens:input+output,calls:tools,semanticAudits:audits,stages:telemetry.events,investigation:{rounds:turns,calls:tools,tokens:input+output,phase:audits?"coverage_review":"research"}});
+    if(error&&typeof error==='object')Object.assign(error,{rejectedDraft,provenanceIssues,allowedReads:readLedger(),knownUsage:{input,cachedInput,output},usageIncomplete:pendingUsage,investigator:{engine:"codex",requestedModel:options.model,effectiveModel:null,providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output},tokens:input+output,calls:tools,semanticAudits:audits,stages:telemetry.events,investigation:{rounds:turns,calls:tools,tokens:input+output,phase:audits?"coverage_review":"research"}});
     throw error;
   }finally{await transport?.close();}
 }

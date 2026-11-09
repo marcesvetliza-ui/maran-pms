@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { CodeSource } from './source';
 import { investigateWithCodex } from './codex-investigator';
 import { createResponsesTransport } from './responses-transport';
+import { evaluationRevisionAllowed } from './evaluation-profile';
 import type { SupportTicket } from '../../shared/programming-support';
 const root=process.cwd();
 const container=process.env.SUPPORT_EVALUATION_ISOLATED_JOB==='true';
@@ -29,6 +30,7 @@ const snapshot=async()=>{
  return {fileCount:files.length,sha256:hash.digest('hex')};
 };
 const before=await snapshot(),execute=container?process.env.SUPPORT_EVALUATION_ACTION==='evaluate':process.argv.includes('--execute');
+if(container&&execute&&!evaluationRevisionAllowed(process.env))throw Error('Seleccionar explícitamente la revisión de la tanda');
 if(before.fileCount===0)throw Error('Catálogo de código vacío');
 const model=process.env.SUPPORT_CODEX_MODEL||null;
 const reportedModels=new Set<string>();
@@ -53,10 +55,10 @@ if(execute){
    manifest.estimatedUsd+=((usage.inputTokens-usage.cachedInputTokens)*inputRate+usage.cachedInputTokens*cachedRate+usage.outputTokens*outputRate)/1e6;
    manifest.results.push({id:item.id,result,evaluatorChecks:item.checks,humanVerdict:null});
   }catch(error){
-   const failure=error as {code?:string;budgetReason?:string;budgetPhase?:string;usageIncomplete?:boolean;knownUsage?:{input:number;cachedInput:number;output:number};investigation?:{rounds:number;tokens:number}};
+   const failure=error as {code?:string;budgetReason?:string;budgetPhase?:string;rejectedDraft?:unknown;provenanceIssues?:string[];allowedReads?:unknown;usageIncomplete?:boolean;knownUsage?:{input:number;cachedInput:number;output:number};investigation?:{rounds:number;tokens:number}};
    manifest.providerTurns+=failure.investigation?.rounds||0;manifest.reportedTokens+=failure.investigation?.tokens||0;
    if(failure.knownUsage){const u=failure.knownUsage;manifest.estimatedUsd+=((u.input-u.cachedInput)*inputRate+u.cachedInput*cachedRate+u.output*outputRate)/1e6;}
-   manifest.usageIncomplete=!!failure.usageIncomplete;manifest.results.push({id:item.id,failed:true,code:failure.code||'evaluation_failed',budgetReason:failure.budgetReason||null,budgetPhase:failure.budgetPhase||null,usageIncomplete:!!failure.usageIncomplete,reportedTokens:failure.investigation?.tokens??null,humanVerdict:null});
+   manifest.usageIncomplete=!!failure.usageIncomplete;manifest.results.push({id:item.id,failed:true,code:failure.code||'evaluation_failed',budgetReason:failure.budgetReason||null,budgetPhase:failure.budgetPhase||null,rejectedDraft:failure.rejectedDraft||null,provenanceIssues:failure.provenanceIssues||[],allowedReads:failure.allowedReads||[],usageIncomplete:!!failure.usageIncomplete,reportedTokens:failure.investigation?.tokens??null,humanVerdict:null});
    // Do not retry or advance to another billable case after a failure.
    manifest.stopped=true;break;
   }

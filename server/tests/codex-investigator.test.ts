@@ -122,3 +122,21 @@ it('does not execute a tool requested after the forced closing phase',async()=>{
  await expect(investigateWithCodex(ticket,source,{...options,maxTokens:60000,maxResearchTools:1},agent.factory)).rejects.toMatchObject({code:'codex_closing_protocol',usageIncomplete:false});
  expect(agent.run).toHaveBeenCalledTimes(2);
 });
+it('gives the exact invalid citation and verified ranges to the single repair',async()=>{
+ const invalid={...report,evidence:[{...report.evidence[0],end:3}]};
+ const agent=fake([read,step('report',{report:invalid}),step('report',{report}),{approved:true,issues:[]}]);
+ const result=await investigateWithCodex(ticket,source,options,agent.factory);
+ expect(result.report.validationStatus).toBe('complete');
+ expect(agent.run.mock.calls[2][0]).toContain('unread_citation_0');
+ expect(agent.run.mock.calls[2][0]).toContain('"ranges":[[1,2]]');
+});
+it('preserves rejected evidence diagnostics without publishing it as an approved report',async()=>{
+ const invalid={...report,evidence:[{...report.evidence[0],end:3}]};
+ const agent=fake([read,step('report',{report:invalid}),step('report',{report:invalid})]);
+ await expect(investigateWithCodex(ticket,source,options,agent.factory)).rejects.toMatchObject({code:'codex_provenance',provenanceIssues:['unread_citation_0'],rejectedDraft:invalid,allowedReads:[{path:'server/example.ts',ranges:[[1,2]]}]});
+});
+it('explains when missing information requires the clarify action',async()=>{
+ const agent=fake([step('report',{report:{...report,certainty:'falta_informacion',evidence:[]}}),step('clarify',{question:'¿Qué mensaje exacto apareció al cerrar la caja?'})]);
+ const result=await investigateWithCodex(ticket,source,options,agent.factory);
+ expect(result.clarification).toBeDefined();expect(agent.run.mock.calls[1][0]).toContain('requires_clarify_action');
+});
