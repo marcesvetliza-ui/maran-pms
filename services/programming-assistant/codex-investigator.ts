@@ -4,6 +4,7 @@ import { investigationCase } from './context';
 import type { CodeSource } from './source';
 import type { DiagnosisResult } from './diagnose';
 import { createCodexTransport, type AgentTransport, type AgentSession } from './codex-transport';
+import {createResponsesTransport} from './responses-transport';
 import { agentStepSchema, agentOutputSchema, closingOutputSchema, reviewSchema, reviewOutputSchema } from './codex-protocol';
 import { StageTelemetry } from './lifecycle';
 const instruction=`Sos el investigador de soporte de Xenia/Maran. Conversá en español claro.
@@ -17,11 +18,12 @@ No afirmes que identificaste un ingrediente, que ejecutaste un test o que reprod
 No recomiendes reemitir comprobantes o repetir pagos ante un estado incierto. Las pruebas que leas no fueron ejecutadas.
 Los diagnósticos anteriores no son evidencia. No propongas como nuevo algo ya implementado en la revisión consultada.
 Usá clarify sólo por un dato operativo indispensable que no esté aportado y no se pueda investigar en código. No preguntes al operador datos técnicos que puedas buscar ni pidas claves, tokens o datos de tarjetas. La pregunta puede ser específica del negocio usando question; missing permite las preguntas genéricas.
+Las preguntas al usuario deben usar lenguaje cotidiano: pantalla, operación y mensaje. No le expliques router, endpoint ni validaciones internas. El resumen del informe debe ser comprensible para recepción; dejá los detalles de implementación en causa, propuesta y evidencia.
 Citas: sólo rangos entregados por herramientas de lectura (read_code, inspect_symbol o trace_endpoint), no líneas adivinadas ni snippets de búsqueda. Para certeza sustentado_en_codigo necesitás evidencia directa de la causa.
 En el informe final seleccioná hasta tres citas breves de hasta 20 líneas cada una, dentro de los rangos ya leídos. No cites bloques completos: la revisión recibe esas citas y debe poder comprobar la conclusión con ellas.
 La solución es una propuesta; no hay cambios aplicados. Si no podés demostrar la causa, explicitá hipótesis y límites.
 Para campos no aplicables devolvé null. Mantené el informe breve, con problema, causa, solución y limitaciones.`;
-export type CodexInvestigationOptions={apiKey:string;model:string;timeoutMs?:number;maxTurns?:number;maxTokens?:number;maxContextChars?:number;maxResearchTools?:number;groundScreen?:boolean};
+export type CodexInvestigationOptions={apiKey:string;model:string;transport?:'sdk'|'responses';timeoutMs?:number;maxTurns?:number;maxTokens?:number;maxContextChars?:number;maxResearchTools?:number;groundScreen?:boolean};
 export function shouldCloseInvestigation(used:number,contextChars:number,nextPromptChars:number,maxTokens:number) {
   const currentTurn=Math.ceil((contextChars+nextPromptChars)/2)+2500;
   // Reserve another author turn after a maximum-sized read, plus independent review.
@@ -29,7 +31,7 @@ export function shouldCloseInvestigation(used:number,contextChars:number,nextPro
   return used+currentTurn+closingTurn+review>maxTokens;
 }
 export async function investigateWithCodex(ticket:SupportTicket,source:CodeSource,options:CodexInvestigationOptions,
-  factory:(key:string,model:string)=>Promise<AgentTransport>=createCodexTransport):Promise<DiagnosisResult>{
+  factory:(key:string,model:string)=>Promise<AgentTransport>=options.transport==='responses'?async(key,model)=>createResponsesTransport(key,model,undefined,125000):createCodexTransport):Promise<DiagnosisResult>{
   if(ticket.version!==source.version)throw Error('La revisión del caso no coincide con el código');
   const maxTurns=options.maxTurns??12,maxTokens=options.maxTokens??40000,maxContextChars=options.maxContextChars??60000;
   if(options.maxResearchTools!==undefined&&(!Number.isInteger(options.maxResearchTools)||options.maxResearchTools<1||options.maxResearchTools>10))throw Error('Límite de lecturas inválido');
@@ -39,6 +41,8 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
   const signal=AbortSignal.timeout(options.timeoutMs??150000),telemetry=new StageTelemetry();
   let input=0,output=0,cachedInput=0,turns=0,tools=0,audits=0,contextChars=0,repairs=0,pendingUsage=false;
   let transport:AgentTransport|undefined;
+  const reportedModels=new Set<string>();
+  const effectiveModel=()=>reportedModels.size===1?[...reportedModels][0]:null;
   let rejectedDraft:SupportDiagnosis|undefined,provenanceIssues:string[]=[];
   const readLedger=()=>[...source.readRanges].map(([path,ranges])=>({path,ranges}));
   const fail=(code:string)=>Object.assign(Error(code),{code,tokens:input+output,calls:tools,semanticAudits:audits,stages:telemetry.events,investigation:{rounds:turns,calls:tools,tokens:input+output,phase:audits?"coverage_review":"research"}});
@@ -50,6 +54,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
     if(input+output+Math.ceil((stage==='audit'||stage==='reaudit'?prompt.length:contextChars)/2)+2500>maxTokens)throw Object.assign(budget('next_turn_reservation'),{budgetPhase:stage});
     const started=telemetry.start();turns++;pendingUsage=true;
     const reply=await session.run(prompt,schema,signal);
+    if(reply.model)reportedModels.add(reply.model);
     for(const value of [reply.usage.input,reply.usage.output,reply.usage.cachedInput])if(!Number.isSafeInteger(value)||value<0)throw fail('codex_protocol');
     if(reply.usage.cachedInput>reply.usage.input)throw fail('codex_protocol');
     input+=reply.usage.input;output+=reply.usage.output;cachedInput+=reply.usage.cachedInput;pendingUsage=false;
@@ -85,7 +90,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
         if(step.question&&ticket.clarification?.questions.some(question=>question.trim().toLowerCase()===step.question!.trim().toLowerCase()))throw fail('codex_protocol');
         const clarification=step.question?{facts:step.missing||[],questions:[step.question]}:operationalQuestions({missing:step.missing},ticket.clarification?.facts||[]);
         return {clarification,report:{summary:'Falta un dato operativo para continuar.',certainty:'falta_informacion',cause:'',proposal:'',proposedTests:[],questions:clarification.questions,dataRepair:'',limitations:['Inspección de código; no se ejecutaron pruebas ni operaciones.'],evidence:[]},tokens:input+output,calls:tools,semanticAudits:audits,readFiles:[...source.readRanges.keys()],searches:source.searches,stages:telemetry.events,
-          investigator:{engine:'codex',requestedModel:options.model,effectiveModel:null,providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output}};
+          investigator:{engine:'codex',requestedModel:options.model,effectiveModel:effectiveModel(),providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output}};
       }
       if(step.action==='report'){
         if(!step.report||!provenance(step.report)){
@@ -108,7 +113,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
           prompt='La revisión detectó errores materiales. Corregí una sola vez usando evidencia leída; si necesitás más código, solicitá su lectura. Observaciones:\n'+JSON.stringify(review.issues);continue;
         }
         return {report:{...report,validationStatus:'complete',limitations:[...report.limitations.filter(v=>v!=='Inspección de código; no se ejecutaron pruebas ni operaciones.'),'Inspección de código; no se ejecutaron pruebas ni operaciones.'].slice(-10)},tokens:input+output,calls:tools,semanticAudits:audits,readFiles:[...source.readRanges.keys()],searches:source.searches,stages:telemetry.events,
-          investigator:{engine:'codex',requestedModel:options.model,effectiveModel:null,providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output}};
+          investigator:{engine:'codex',requestedModel:options.model,effectiveModel:effectiveModel(),providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output}};
       }
       if(turns>=maxTurns-2)throw budget('review_turn_reserve');
       tools++;
@@ -126,7 +131,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
       }catch{prompt='No se pudo completar esa lectura. Revisá los argumentos y usá únicamente archivos del catálogo autorizado y rangos de hasta 160 líneas.';}
     }
   }catch(error){
-    if(error&&typeof error==='object')Object.assign(error,{rejectedDraft,provenanceIssues,allowedReads:readLedger(),knownUsage:{input,cachedInput,output},usageIncomplete:pendingUsage,investigator:{engine:"codex",requestedModel:options.model,effectiveModel:null,providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output},tokens:input+output,calls:tools,semanticAudits:audits,stages:telemetry.events,investigation:{rounds:turns,calls:tools,tokens:input+output,phase:audits?"coverage_review":"research"}});
+    if(error&&typeof error==='object')Object.assign(error,{rejectedDraft,provenanceIssues,allowedReads:readLedger(),knownUsage:{input,cachedInput,output},usageIncomplete:pendingUsage,investigator:{engine:"codex",requestedModel:options.model,effectiveModel:effectiveModel(),providerTurns:turns,inputTokens:input,cachedInputTokens:cachedInput,outputTokens:output},tokens:input+output,calls:tools,semanticAudits:audits,stages:telemetry.events,investigation:{rounds:turns,calls:tools,tokens:input+output,phase:audits?"coverage_review":"research"}});
     throw error;
   }finally{await transport?.close();}
 }

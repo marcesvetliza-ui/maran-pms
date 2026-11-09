@@ -2,7 +2,7 @@ import type { Thread, Usage } from '@openai/codex-sdk';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-export type AgentReply = { text: string; usage: { input: number; cachedInput: number; output: number } };
+export type AgentReply = { text: string; model?:string; usage: { input: number; cachedInput: number; output: number } };
 export interface AgentSession { run(prompt:string,schema:unknown,signal:AbortSignal):Promise<AgentReply>; }
 export interface AgentTransport { session():AgentSession; close():Promise<void>; }
 export const codexToolPolicy = {

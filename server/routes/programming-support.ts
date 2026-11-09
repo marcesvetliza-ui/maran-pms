@@ -28,6 +28,7 @@ export function registerProgrammingSupport(app: Express) {
       canViewAll: ( _req.user as Express.User).role === "admin" || hasPermission((_req.user as Express.User).role, "api:support:view-all"),
       canReview: (_req.user as Express.User).role === "admin" || hasPermission((_req.user as Express.User).role, "api:support:review"),
       workflowSimulation: investigatorMode === "simulation",
+      proposalReview:process.env.SUPPORT_PROPOSAL_REVIEW_ENABLED==='true',
       investigatorMode,
       version:
         process.env.RAILWAY_GIT_COMMIT_SHA ||

@@ -6,6 +6,15 @@ const state=vi.hoisted(()=>({ready:true,request:vi.fn(),cases:[] as any[]}));
 vi.mock("@tanstack/react-query",()=>({useQuery:({queryKey}:any)=>({data:queryKey[0].endsWith("config")?{enabled:state.ready,configured:state.ready}:state.cases}),useQueryClient:()=>({invalidateQueries:vi.fn(async()=>{})})}));
 vi.mock("@/lib/queryClient",()=>({apiRequest:state.request}));
 beforeEach(()=>{state.ready=true;state.cases=[];state.request.mockReset();});
+it('presents clean report headings and hides null placeholders without changing the report',()=>{
+ const report={summary:'Corrección: El mensaje se oculta',certainty:'sustentado_en_codigo',validationStatus:'complete',cause:'El catch descarta el detalle',proposal:'Mostrar el detalle recibido',dataRepair:':null',questions:[],proposedTests:[],limitations:[],evidence:[]};
+ state.cases=[{id:'case-presentation',title:'Mensaje incompleto',status:'proposal_ready',version:'a'.repeat(40),report,actual:'Error',expected:'Ver detalle',updatedAt:'2026-11-09T12:00:00Z',messages:[]}];
+ render(<ProgrammingSupport/>);
+ fireEvent.click(screen.getByRole('button',{name:/Mensaje incompleto/}));
+ expect(screen.getByRole('heading',{name:'Problema'})).toBeInTheDocument();
+ expect(screen.getByText('El mensaje se oculta')).toBeInTheDocument();
+ expect(screen.queryByText(':null')).not.toBeInTheDocument();expect(report.summary).toContain('Corrección:');
+});
 it("keeps queries disabled until configured",()=>{
   state.ready=false;render(<ProgrammingSupport/>);expect(screen.getByRole("button",{name:"Nueva consulta"})).toBeDisabled();expect(state.request).not.toHaveBeenCalled();
 });

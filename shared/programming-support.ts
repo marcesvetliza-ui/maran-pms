@@ -138,7 +138,8 @@ export type SupportTicket = {
   lastError: string | null;
   queuedInvestigatorMode?: "legacy"|"simulation"|"codex";
   queuedRequestedModel?: string;
-  investigator?: {engine:'codex';requestedModel:string;effectiveModel:null;providerTurns:number;inputTokens:number;cachedInputTokens:number;outputTokens:number};
+  queuedCodexTransport?: "sdk"|"responses";
+  investigator?: {engine:'codex';requestedModel:string;effectiveModel:string|null;providerTurns:number;inputTokens:number;cachedInputTokens:number;outputTokens:number};
   execution?: SupportExecution;
   rejectedReviews?: RejectedReview[];
   clarification?: {facts:OperationalFact[];questions:string[];requestedAfterMessageCount?:number};

@@ -9,15 +9,17 @@ export const supportDecisionSchema = z.object({
 }).strict();
 export type SupportDecision = z.infer<typeof supportDecisionSchema>;
 export type SupportChangeCandidate = {
-  id: string; kind: 'simulation'; target: 'xenia-pilot';
+  id: string; kind: 'simulation'|'proposal'; target: 'xenia-pilot';
   baseRevision: string; reportId: string; digest: string; diff: string;
-  tests: { name: string; result: 'simulated' }[];
-  status: 'awaiting_review'|'approved_simulation'|'rejected'|'changes_requested'|'invalidated';
+  reportDigest?: string;
+  tests: { name: string; result: 'simulated'|'planned' }[];
+  status: 'awaiting_review'|'approved_simulation'|'approved_for_preparation'|'rejected'|'changes_requested'|'invalidated';
   createdAt: string;
 };
 export type SupportWorkflowEvent = {
   id: string; kind: 'prepared'|'approve'|'reject'|'revise'|'invalidated';
   candidateId: string; digest: string; actor: string; at: string; comment: string;
   reportId: string;
+  candidateKind?: 'simulation'|'proposal';
   requestId?: string;
 };

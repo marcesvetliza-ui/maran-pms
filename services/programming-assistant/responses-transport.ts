@@ -23,7 +23,7 @@ export function responsesTransport(client:ResponsesClient,model:string,onModel:(
         if(values.some(value=>!Number.isSafeInteger(value)||value<0)||values[2]>values[0])throw Object.assign(Error('Uso inválido'),{code:'codex_protocol'});
         onModel(response.model);
         history.push({role:'user',content:prompt},{role:'assistant',content:response.output_text});
-        return {text:response.output_text,usage:{input:values[0],output:values[1],cachedInput:values[2]}};
+        return {text:response.output_text,model:response.model,usage:{input:values[0],output:values[1],cachedInput:values[2]}};
       }};
     },
     async close(){},

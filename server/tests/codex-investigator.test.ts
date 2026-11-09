@@ -151,3 +151,8 @@ it('passes router grounding to the author and independent reviewer without spend
  expect(agent.run.mock.calls[0][0]).toContain('counted - expected');
  expect(agent.run.mock.calls[2][0]).toContain('"screen":{"page":"/example","file":"client/src/pages/example.tsx"}');
 });
+it('records the effective model when Responses reports it',async()=>{
+ const agent=fake([read,step('report',{report}),{approved:true,issues:[]}]);const run=agent.run;
+ const result=await investigateWithCodex(ticket,source,options,async()=>({session:()=>({run:async(...args:any[])=>({...await (run as any)(...args),model:'reported-model'})}),close:agent.close}));
+ expect(result.investigator?.effectiveModel).toBe('reported-model');
+});

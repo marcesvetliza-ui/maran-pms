@@ -12,6 +12,7 @@ const notification =
         apiKey: process.env.RESEND_API_KEY || "",
         from: process.env.SUPPORT_NOTIFY_FROM || "",
         to: process.env.SUPPORT_NOTIFY_EMAIL || "",
+        ...(process.env.SUPPORT_NOTIFY_INCLUDE_SUMMARY==='true'?{includeSummary:true}:{}),
       }
     : undefined;
 if (notification && Object.values(notification).some((v) => !v))
@@ -19,6 +20,8 @@ if (notification && Object.values(notification).some((v) => !v))
     "Completar configuración del correo o mantener SUPPORT_NOTIFY_ENABLED=false.",
   );
 const mode=supportInvestigatorMode(process.env);
+const codexTransport=process.env.SUPPORT_CODEX_TRANSPORT||'responses';
+if(mode==='codex'&&codexTransport!=='responses'&&codexTransport!=='sdk')throw Error('SUPPORT_CODEX_TRANSPORT debe ser responses o sdk');
 const service = await createService({
   databaseUrl: process.env.ASSISTANT_DATABASE_URL,
   secret: process.env.SUPPORT_SHARED_SECRET || "",
@@ -31,6 +34,8 @@ const service = await createService({
   model: mode === "codex" ? process.env.SUPPORT_CODEX_MODEL || "" : process.env.OPENAI_MODEL || "gpt-4.1-mini",
   engine: mode === "codex" ? "codex" : "legacy",
   codexPaidEnabled: process.env.SUPPORT_CODEX_PAID_ENABLED === "true",
+  codexTransport:codexTransport as 'responses'|'sdk',
+  proposalReview:process.env.SUPPORT_PROPOSAL_REVIEW_ENABLED==='true',
   dailyLimit: dailyInvestigationLimit(process.env.ASSISTANT_DAILY_LIMIT),
   workflowSimulation: mode === "simulation",
   notification,

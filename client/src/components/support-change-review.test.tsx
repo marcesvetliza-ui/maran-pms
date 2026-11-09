@@ -18,3 +18,10 @@ it('does not permit approving an invalidated candidate',()=>{
  expect(screen.queryByRole('button',{name:'Aprobar simulación'})).not.toBeInTheDocument();
  expect(screen.getByRole('status')).toHaveTextContent('Propuesta desactualizada');
 });
+it('lets a reviewer approve preparation without presenting it as deployment authorization',()=>{
+ const onDecision=vi.fn();render(<SupportChangeReview ticket={{...ticket,changeCandidate:{...candidate,kind:'proposal',tests:[{name:'Prueba de mensaje',result:'planned'}]}} as any} canReview simulation={false} proposalReview busy={false} onDecision={onDecision}/>);
+ expect(screen.getByText(/Todavía no hay archivos modificados ni pruebas ejecutadas/)).toBeInTheDocument();
+ expect(screen.getByText(/pendiente de ejecución/)).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Aprobar preparación del cambio'}));
+ expect(onDecision).toHaveBeenCalledWith(expect.objectContaining({candidateId:'candidate',decision:'approve',digest:'digest'}));
+});

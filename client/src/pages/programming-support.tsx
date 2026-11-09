@@ -1,3 +1,4 @@
+import {supportReportText} from "@shared/support-report-presentation";
 import { SupportChangeReview } from "@/components/support-change-review";
 import {citedScreens} from "@shared/programming-support-scope";
 import {SupportExecutionDetails} from '@/components/support-execution-details';
@@ -21,6 +22,7 @@ export default function ProgrammingSupport() {
     canViewAll?: boolean;
     canReview?: boolean;
     workflowSimulation?: boolean;
+    proposalReview?: boolean;
     enabled: boolean;
     configured: boolean;
     version: string | null;
@@ -33,6 +35,7 @@ export default function ProgrammingSupport() {
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [reviewOnly,setReviewOnly]=useState(false);
   const [form, setForm] = useState({
     title: "",
     module: "otro",
@@ -226,7 +229,8 @@ export default function ProgrammingSupport() {
       )}
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
         <div className="space-y-3">
-          {cases.map((c) => (
+          {config?.canReview&&<Button variant="outline" onClick={()=>setReviewOnly(value=>!value)}>{reviewOnly?'Ver todos los casos':'Ver propuestas pendientes'}</Button>}
+          {cases.filter(c=>!reviewOnly||c.changeCandidate?.kind==='proposal'&&c.changeCandidate.status==='awaiting_review').map((c) => (
             <button
               key={c.id}
               onClick={() => {
@@ -236,6 +240,7 @@ export default function ProgrammingSupport() {
               className={`w-full rounded-xl border p-4 text-left ${selected === c.id ? "border-blue-500 bg-blue-50 dark:bg-blue-950" : "bg-card"}`}
             >
               <span className="block font-medium">{c.title}</span>
+              {c.changeCandidate?.kind==='proposal'&&c.changeCandidate.status==='awaiting_review'&&<span className="block text-sm text-blue-700 dark:text-blue-300">Pendiente de revisión</span>}
               <Badge variant="secondary" className="my-2">
                 {supportLabels[c.status]}
               </Badge>
@@ -300,10 +305,10 @@ export default function ProgrammingSupport() {
                   {citedScreens(ticket.report).length>0 && <p className="text-sm text-muted-foreground">Interfaz con evidencia citada: {citedScreens(ticket.report).join(', ')}.</p>}
                   {(
                     [
-                      ["Resumen", ticket.report.summary],
-                      ["Causa posible", ticket.report.cause],
-                      ["Solución propuesta", ticket.report.proposal],
-                      ["Datos históricos", ticket.report.dataRepair],
+                      ["Problema", supportReportText(ticket.report.summary)],
+                      [ticket.report.certainty === "sustentado_en_codigo" ? "Causa identificada en el código" : "Causa posible", supportReportText(ticket.report.cause)],
+                      ["Solución propuesta", supportReportText(ticket.report.proposal)],
+                      ["Correcciones de datos propuestas", supportReportText(ticket.report.dataRepair)],
                     ] as const
                   ).map(
                     ([label, value]) =>
@@ -374,7 +379,7 @@ export default function ProgrammingSupport() {
                   </details>
                 </div>
               )}
-              <SupportChangeReview ticket={ticket} canReview={!!config?.canReview} simulation={!!config?.workflowSimulation} busy={busy} onDecision={body=>void send(`/${ticket.id}/decision`,body)}/>
+              <SupportChangeReview ticket={ticket} canReview={!!config?.canReview} simulation={!!config?.workflowSimulation} proposalReview={!!config?.proposalReview} busy={busy} onDecision={body=>void send(`/${ticket.id}/decision`,body)}/>
               <SupportExecutionDetails ticket={ticket}/>
               <SupportRejectedReviews ticket={ticket}/>
               <section className="space-y-3">

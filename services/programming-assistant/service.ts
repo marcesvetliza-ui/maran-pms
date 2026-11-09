@@ -1,6 +1,6 @@
 import { investigateWithCodex } from "./codex-investigator";
 import { supportDecisionSchema } from "../../shared/support-change-workflow";
-import { simulateInvestigation, prepareSimulatedChange, decideSimulatedChange, invalidateChange, appendWorkflowEvent } from "./change-workflow";
+import { simulateInvestigation, prepareSimulatedChange, prepareReviewedProposal, decideSimulatedChange, invalidateChange, appendWorkflowEvent } from "./change-workflow";
 import { diagnosisFailure, investigationMetrics, auditFailureReason, auditSchemaFailureDetails, semanticFailureDetails } from "./errors";
 import {safeStageEvents} from "./lifecycle";
 import {safeSupportExecution} from '../../shared/programming-support-execution';
@@ -43,6 +43,8 @@ export async function createService(
     workflowSimulation?: boolean;
     engine?: "legacy"|"codex";
     codexPaidEnabled?: boolean;
+    codexTransport?: 'sdk'|'responses';
+    proposalReview?: boolean;
   },
   investigator = diagnose,
 ) {
@@ -146,7 +148,7 @@ export async function createService(
     )
       return res.status(404).json({ error: "Caso no encontrado" });
     if (action === "decision" && req.get("X-Support-Reviewer") !== "true") return res.status(403).json({ error: "Sin permiso para aprobar propuestas" });
-    if (action === "decision" && !config.workflowSimulation) return res.status(409).json({ error: "El circuito de aprobación aún no está habilitado" });
+    if (action === "decision" && !config.workflowSimulation&&!config.proposalReview) return res.status(409).json({ error: "El circuito de aprobación aún no está habilitado" });
     const parsed = (
       action === "decision" ? supportDecisionSchema : action === "messages" ? supportMessageSchema : action === "feedback" ? supportFeedbackSchema : supportRunSchema
     ).safeParse(req.body);
@@ -174,7 +176,7 @@ export async function createService(
       );
       if (previous.rows.length) {
         if(action === "decision") {
-          try { decideSimulatedChange(ticket, supportDecisionSchema.parse(req.body), res.locals.owner, config.version); }
+          try { decideSimulatedChange(ticket, supportDecisionSchema.parse(req.body), res.locals.owner, config.version,config.workflowSimulation?"simulation":"proposal"); }
           catch(error) { await client.query("ROLLBACK"); return res.status(409).json({error:(error as Error).message}); }
         }
         if(action === "feedback") {
@@ -207,7 +209,7 @@ export async function createService(
           .json({ error: "La investigación está en curso" });
       }
       if (action === "decision") {
-        try { decideSimulatedChange(ticket, supportDecisionSchema.parse(req.body), res.locals.owner, config.version); }
+        try { decideSimulatedChange(ticket, supportDecisionSchema.parse(req.body), res.locals.owner, config.version,config.workflowSimulation?"simulation":"proposal"); }
         catch(error) { await client.query("ROLLBACK"); return res.status(409).json({error:(error as Error).message}); }
       } else if (action === "analyze") {
         const expectedMode = req.get("X-Support-Mode");
@@ -246,6 +248,7 @@ export async function createService(
         ticket.status = "queued";
         ticket.queuedInvestigatorMode=config.workflowSimulation ? "simulation" : config.engine || "legacy";
         ticket.queuedRequestedModel=config.model;
+        if(config.engine==='codex')ticket.queuedCodexTransport=config.codexTransport||'sdk';
         ticket.lastError = null;
         delete ticket.investigator;
         delete ticket.execution;
@@ -337,11 +340,12 @@ export async function createService(
           const mode=config.workflowSimulation ? "simulation" : config.engine || "legacy";
           if((ticket.queuedInvestigatorMode||"legacy")!==mode)throw Object.assign(Error('El modo cambió después de encolar'),{code:'codex_configuration_changed'});
           if(mode==='codex'&&(!config.codexPaidEnabled||!config.apiKey||!config.model||ticket.queuedRequestedModel!==config.model))throw Object.assign(Error('Codex no habilitado para este trabajo'),{code:'codex_not_enabled'});
+          if(mode==='codex'&&(ticket.queuedCodexTransport||'sdk')!==(config.codexTransport||'sdk'))throw Object.assign(Error('El transporte cambió después de encolar'),{code:'codex_configuration_changed'});
           const selectedInvestigator = config.engine === "codex" ? investigateWithCodex : investigator;
           const result = config.workflowSimulation ? simulateInvestigation(ticket) : await selectedInvestigator(
             ticket,
             new CodeSource(config.sourceRoot, config.version),
-            { apiKey: config.apiKey!, model: config.model },
+            { apiKey: config.apiKey!, model: config.model,...(config.engine==='codex'?{transport:config.codexTransport||'sdk',groundScreen:true,maxTurns:16,maxTokens:100000,maxContextChars:120000,maxResearchTools:10,timeoutMs:240000}:{}) },
           );
           ticket.investigator=result.investigator;
           ticket.execution=safeSupportExecution({
@@ -373,6 +377,9 @@ export async function createService(
             if (config.workflowSimulation && ticket.status === "proposal_ready") {
               ticket.changeCandidate = prepareSimulatedChange(ticket);
               appendWorkflowEvent(ticket, 'prepared', 'simulator', 'Cambio ficticio para comprobar el circuito. No autoriza publicación.');
+            } else if(config.proposalReview&&ticket.status==='proposal_ready'&&ticket.report.validationStatus==='complete'&&ticket.report.certainty==='sustentado_en_codigo'&&ticket.report.proposal.trim()) {
+              ticket.changeCandidate=prepareReviewedProposal(ticket);
+              appendWorkflowEvent(ticket,'prepared','investigator','Propuesta pendiente de revisión. Aprobarla habilita preparar un cambio; todavía no hay código aplicado ni pruebas ejecutadas.');
             }
           }
           ticket.lastError = null;
@@ -420,6 +427,7 @@ export async function createService(
             ticket.id,
             fetch,
             `${ticket.id}/${lease}`,
+            ticket.report,
           ).catch(() =>
             console.warn(
               "Diagnóstico guardado; no se pudo enviar el aviso por correo.",

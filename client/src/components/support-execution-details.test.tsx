@@ -13,3 +13,8 @@ it('identifies the requested model while explicitly leaving the effective model 
  expect(screen.getByText(/modelo solicitado: synthetic-test-model/)).toBeInTheDocument();
  expect(screen.getByText(/El SDK no informó la identificación del modelo efectivo/)).toBeInTheDocument();
 });
+it('shows the effective model reported by Responses',()=>{
+ render(<SupportExecutionDetails ticket={{...base,investigator:{engine:'codex',requestedModel:'requested-model',effectiveModel:'reported-model',providerTurns:3,inputTokens:100,cachedInputTokens:0,outputTokens:20}} as any}/>);
+ expect(screen.getByText(/Modelo informado: reported-model/)).toBeInTheDocument();
+ expect(screen.queryByText(/El SDK no informó/)).not.toBeInTheDocument();
+});

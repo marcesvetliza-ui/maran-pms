@@ -1,10 +1,13 @@
-export type NotificationConfig = { apiKey: string; from: string; to: string };
-// An opt-in notification contains no case text, customer data or diagnosis.
+import type {SupportDiagnosis} from '../../shared/programming-support';
+import {supportReportText} from '../../shared/support-report-presentation';
+export type NotificationConfig = { apiKey: string; from: string; to: string; includeSummary?:boolean };
+// Diagnosis text is included only when explicitly enabled for the recipient.
 export async function notifyReady(
   config: NotificationConfig,
   caseId: string,
   send: typeof fetch = fetch,
   eventId: string = caseId,
+  report?:SupportDiagnosis,
 ) {
   if (
     !/^[a-f0-9-]{36}$/.test(caseId) ||
@@ -23,8 +26,8 @@ export async function notifyReady(
     body: JSON.stringify({
       from: config.from,
       to: [config.to],
-      subject: "Maran: diagnóstico disponible",
-      text: "Hay un diagnóstico disponible en Soporte del sistema. Ingresá con tu usuario en https://demo.maranpms.com.ar/programming-support",
+      subject: config.includeSummary?"Xenia: propuesta de soporte para revisar":"Maran: diagnóstico disponible",
+      text: (config.includeSummary&&report?`Problema: ${supportReportText(report.summary).slice(0,1800)}\n\nCausa${report.certainty==='hipotesis'?' posible':''}: ${supportReportText(report.cause).slice(0,1800)}\n\nPropuesta: ${supportReportText(report.proposal).slice(0,1800)}\n\nNo se aplicaron cambios. Revisá la propuesta ingresando con tu usuario.\n\n`:'Hay un diagnóstico disponible en Soporte del sistema. ')+"Ingresá con tu usuario en https://demo.maranpms.com.ar/programming-support",
     }),
     signal: AbortSignal.timeout(10000),
   });
