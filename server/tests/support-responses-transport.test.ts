@@ -40,3 +40,11 @@ it('applies the user-verified price profile without enabling paid calls',()=>{
   expect(()=>evaluationProfile({SUPPORT_EVALUATION_PROFILE:'unknown'})).toThrow();
   expect(()=>evaluationProfile({SUPPORT_EVALUATION_PROFILE:'gpt53codex-2026-11-09',SUPPORT_CODEX_MODEL:'different-model'})).toThrow();
 });
+it('supports the bounded larger evaluation history while retaining the default cap',async()=>{
+  const create=vi.fn(async()=>completed());
+  const transport=responsesTransport({responses:{create}} as unknown as ResponsesClient,'requested-model',()=>{},125000);
+  await transport.session().run('x'.repeat(70000),{},new AbortController().signal);
+  expect(create).toHaveBeenCalledTimes(1);
+  await expect(transport.session().run('x'.repeat(125001),{},new AbortController().signal)).rejects.toMatchObject({code:'codex_budget',budgetReason:'transport_context_limit'});
+  expect(create).toHaveBeenCalledTimes(1);
+});

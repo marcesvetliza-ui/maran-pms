@@ -4,14 +4,15 @@ import type { AgentTransport } from './codex-transport';
 
 export type ResponsesClient={responses:{create(body:ResponseCreateParamsNonStreaming,options:{signal:AbortSignal}):PromiseLike<Response>}};
 /** No native tools, remote sessions, host authentication, or operational access. */
-export function responsesTransport(client:ResponsesClient,model:string,onModel:(model:string)=>void=()=>{}):AgentTransport {
+export function responsesTransport(client:ResponsesClient,model:string,onModel:(model:string)=>void=()=>{},maxContextChars=65000):AgentTransport {
   if(!model.trim())throw Error('Modelo explícito requerido');
+  if(!Number.isInteger(maxContextChars)||maxContextChars<1000||maxContextChars>125000)throw Error('Límite de contexto inválido');
   return {
     session(){
       const history:Array<{role:'user'|'assistant';content:string}>=[];
       return {async run(prompt,schema,signal){
         const input=[...history,{role:'user' as const,content:prompt}];
-        if(input.reduce((n,item)=>n+item.content.length,0)>65000)throw Object.assign(Error('Contexto excedido'),{code:'codex_budget'});
+        if(input.reduce((n,item)=>n+item.content.length,0)>maxContextChars)throw Object.assign(Error('Contexto excedido'),{code:'codex_budget',budgetReason:'transport_context_limit'});
         const response=await client.responses.create({model,input,store:false,stream:false,tools:[],tool_choice:'none',
           max_output_tokens:2500,reasoning:{effort:'low'},text:{format:{type:'json_schema',name:'support_agent_step',schema:schema as Record<string,unknown>,strict:true}}}, {signal});
         // No tool output is executed, even if a provider unexpectedly returns it.
@@ -28,7 +29,7 @@ export function responsesTransport(client:ResponsesClient,model:string,onModel:(
     async close(){},
   };
 }
-export function createResponsesTransport(apiKey:string,model:string,onModel?:(model:string)=>void) {
+export function createResponsesTransport(apiKey:string,model:string,onModel?:(model:string)=>void,maxContextChars?:number) {
   if(!apiKey.trim())throw Error('Clave requerida');
-  return responsesTransport(new OpenAI({apiKey,maxRetries:0,timeout:60000}),model,onModel);
+  return responsesTransport(new OpenAI({apiKey,maxRetries:0,timeout:60000}),model,onModel,maxContextChars);
 }

@@ -98,3 +98,11 @@ it('provides the prior question along with a short user reply',async()=>{
  await investigateWithCodex({...ticket,clarification:{facts:[],questions:['¿El pago anterior correspondía a alojamiento?']},messages:[{id:'reply',author:'user',text:'Sí',createdAt:new Date().toISOString()}]},source,options,agent.factory);
  expect(agent.run.mock.calls[0][0]).toContain('¿El pago anterior correspondía a alojamiento?');
 });
+it('supports the larger evaluation context and identifies the old context limit',async()=>{
+ await writeFile(path.join(root,'server/example.ts'),Array.from({length:20},()=> 'x'.repeat(1000)).join('\n'));
+ const reading=step('read_code',{path:'server/example.ts',start:1,end:20});
+ const replies=()=>[...Array.from({length:5},()=>reading),step('clarify',{question:'¿En qué pantalla se produjo el cierre de caja?'})];
+ await expect(investigateWithCodex(ticket,source,{...options,maxTokens:60000},fake(replies()).factory)).rejects.toMatchObject({code:'codex_budget',budgetReason:'author_context_limit',usageIncomplete:false});
+ const result=await investigateWithCodex(ticket,source,{...options,maxTokens:60000,maxContextChars:120000},fake(replies()).factory);
+ expect(result.clarification).toBeDefined();expect(result.investigator?.providerTurns).toBe(6);
+});
