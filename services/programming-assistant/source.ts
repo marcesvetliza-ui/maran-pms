@@ -105,6 +105,43 @@ export class CodeSource {
     const declaration=await this.read(ref.path,route.line,route.line);
     return {...route,containsRange:!routes[index+1] || ref.end<routes[index+1].line,declaration};
   }
+  /** Resolve the reported URL through the real router before selecting a page.
+   * Ranking only locates a reading; it never establishes a cause. */
+  async screenContext(page:string,caseText:string) {
+    const pathname=page.split('?')[0];
+    if(!/^\/[A-Za-z0-9_/-]{1,200}$/.test(pathname))return {resolved:false,reason:'unsupported_page',readings:[],endpoints:[]};
+    const files=await this.files(),router='client/src/App.tsx';
+    if(!files.includes(router))return {resolved:false,reason:'router_not_found',readings:[],endpoints:[]};
+    const app=await this.content(router);
+    const routes=[...app.matchAll(/<Route\b[^>]*\bpath=["']([^"']+)["'][\s\S]*?(?:\/>|<\/Route>)/g)];
+    const route=routes.find(match=>match[1]===pathname);
+    if(!route)return {resolved:false,reason:'route_not_found',readings:[],endpoints:[]};
+    const imports=[...app.matchAll(/\bconst\s+(\w+)\s*=\s*lazy\(\s*\(\)\s*=>\s*import\(["'](@\/[^"']+)["']\)/g)];
+    const candidates=imports.filter(match=>new RegExp(`\\b${match[1]}\\b`).test(route[0]))
+      .map(match=>({match,file:'client/src/'+match[2].slice(2)+'.tsx'}))
+      .filter(item=>item.file.startsWith('client/src/pages/')&&files.includes(item.file));
+    if(candidates.length!==1)return {resolved:false,reason:'ambiguous_component',readings:[],endpoints:[]};
+    const {file,match}=candidates[0],lines=(await this.content(file)).split('\n'),text=caseText.toLowerCase().slice(0,12000);
+    const stop=new Set(['para','como','desde','hasta','sobre','esta','este','esto','cuando','donde','muestra','sistema','todavia','operador','pantalla','investigar','puede','hacer','tiene','debe','tener','pero','porque','entre','solo']);
+    const terms=[...new Set(text.match(/[\p{L}]{4,}/gu)||[])].filter(term=>!stop.has(term)).slice(0,60);
+    const frequency=new Map(terms.map(term=>[term,lines.filter(line=>line.toLowerCase().includes(term)).length]));
+    const ranked=lines.map((line,index)=>{
+      const lower=line.toLowerCase();
+      let score=terms.reduce((total,term)=>total+(lower.includes(term)?1/(1+Math.log(1+(frequency.get(term)||0))):0),0);
+      const exact=[...line.matchAll(/["']([^"'\n]{10,120})["']/g)].some(value=>text.includes(value[1].toLowerCase()));
+      if(exact)score+=100;
+      if(score>0&&/\b(?:const|let|throw|catch|function)\b/.test(line))score+=0.5;
+      if(score>0&&/\b(?:const|let)\b[^=]*=[^;]*\s[-+]\s/.test(line))score+=2;
+      return {line:index+1,score};
+    }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||a.line-b.line);
+    const readings=[];
+    const routeLine=app.slice(0,route.index).split('\n').length,importLine=app.slice(0,match.index).split('\n').length;
+    readings.push(await this.read(router,routeLine,routeLine));
+    readings.push(await this.read(router,importLine,importLine));
+    if(ranked.length){const start=Math.max(1,ranked[0].line-25);readings.push(await this.read(file,start,Math.min(lines.length,ranked[0].line+15)));}
+    const endpoints=[...new Set(readings.filter(item=>item.path===file).flatMap(item=>[...item.content.matchAll(/["'`](\/api\/[A-Za-z0-9_/:.-]+)["'`]/g)].map(value=>value[1])))].slice(0,5);
+    return {resolved:true,page:pathname,file,readings,endpoints,guidance:'La ruta prueba qué pantalla corresponde; el fragmento es una ubicación candidata, no una causa. Continuar los cálculos y peticiones con read_code, trace_endpoint e inspect_symbol. Los resultados de búsqueda no equivalen a lecturas.'};
+  }
   async findFiles(term: string, prefix = "") {
     if (typeof term !== "string" || term.trim().length < 3 || term.length > 120)
       throw new Error("Nombre entre 3 y 120 caracteres.");

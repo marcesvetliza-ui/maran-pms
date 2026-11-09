@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { diagnosisSchema } from '../../shared/programming-support';
 export const agentStepSchema=z.object({
-  action:z.enum(['find_files','search_code','read_code','inspect_symbol','trace_endpoint','clarify','report']),
+  action:z.enum(['locate_screen','find_files','search_code','read_code','inspect_symbol','trace_endpoint','clarify','report']),
   path:z.string().max(300).nullable(),term:z.string().max(120).nullable(),prefix:z.string().max(200).nullable(),
   start:z.number().int().positive().nullable(),end:z.number().int().positive().nullable(),
   question:z.string().trim().min(5).max(600).nullable().optional(),
@@ -14,7 +14,7 @@ const reportProperties={summary:text,certainty:{type:'string',enum:['hipotesis',
   evidence:{type:'array',items:{type:'object',properties:{path:text,start:{type:'integer'},end:{type:'integer'},explanation:text},required:['path','start','end','explanation'],additionalProperties:false}},
 };
 export const agentOutputSchema={type:'object',properties:{
-  action:{type:'string',enum:['find_files','search_code','read_code','inspect_symbol','trace_endpoint','clarify','report']},
+  action:{type:'string',enum:['locate_screen','find_files','search_code','read_code','inspect_symbol','trace_endpoint','clarify','report']},
   path:{type:['string','null']},term:{type:['string','null']},prefix:{type:['string','null']},start:{type:['integer','null']},end:{type:['integer','null']},
   question:{type:['string','null']},
   missing:{anyOf:[{type:'null'},{type:'array',items:{type:'string',enum:['exact_error','where_it_happened','what_happened_next']}}]},

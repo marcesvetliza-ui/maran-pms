@@ -140,3 +140,14 @@ it('explains when missing information requires the clarify action',async()=>{
  const result=await investigateWithCodex(ticket,source,options,agent.factory);
  expect(result.clarification).toBeDefined();expect(agent.run.mock.calls[1][0]).toContain('requires_clarify_action');
 });
+it('passes router grounding to the author and independent reviewer without spending a provider turn on navigation',async()=>{
+ await mkdir(path.join(root,'client/src/pages'),{recursive:true});
+ await writeFile(path.join(root,'client/src/App.tsx'),'const Example = lazy(() => import("@/pages/example"));\n<Route path="/example" component={Example} />');
+ await writeFile(path.join(root,'client/src/pages/example.tsx'),'const difference = counted - expected;');
+ const agent=fake([read,step('report',{report}),{approved:true,issues:[]}]);
+ const result=await investigateWithCodex({...ticket,page:'/example',actual:'El valor difference usa counted y expected'},source,{...options,groundScreen:true},agent.factory);
+ expect(result.calls).toBe(1);expect(result.investigator?.providerTurns).toBe(3);
+ expect(agent.run.mock.calls[0][0]).toContain('client/src/pages/example.tsx');
+ expect(agent.run.mock.calls[0][0]).toContain('counted - expected');
+ expect(agent.run.mock.calls[2][0]).toContain('"screen":{"page":"/example","file":"client/src/pages/example.tsx"}');
+});

@@ -34,7 +34,7 @@ if(container&&execute&&!evaluationRevisionAllowed(process.env))throw Error('Sele
 if(before.fileCount===0)throw Error('Catálogo de código vacío');
 const model=process.env.SUPPORT_CODEX_MODEL||null;
 const reportedModels=new Set<string>();
-const manifest:any={engine:'responses-api',sourceVerification:container?'container-content-hash':'clean-git-and-content-hash',revision,source:before,requestedModel:model,effectiveModel:null,executed:false,providerTurns:0,reportedTokens:0,estimatedUsd:0,usageIncomplete:false,cases:selectedIds,maxTurnsPerCase:16,maxReportedTokensPerCase:100000,maxContextCharsPerCase:120000,humanReview:'pending',results:[]};
+const manifest:any={engine:'responses-api',sourceVerification:container?'container-content-hash':'clean-git-and-content-hash',revision,source:before,requestedModel:model,effectiveModel:null,executed:false,providerTurns:0,reportedTokens:0,estimatedUsd:0,usageIncomplete:false,cases:selectedIds,maxTurnsPerCase:16,maxReportedTokensPerCase:100000,maxContextCharsPerCase:120000,maxResearchToolsPerCase:10,groundScreen:true,humanReview:'pending',results:[]};
 if(execute){
  const number=(key:string,zero=false)=>{const value=Number(process.env[key]);if(!process.env[key]||!Number.isFinite(value)||(zero?value<0:value<=0))throw Error(`Configurar ${key}`);return value;};
  if(process.env.SUPPORT_CODEX_PAID_ENABLED!=='true'||!process.env.OPENAI_API_KEY||!model)throw Error('Falta autorización de llamadas pagadas, clave o modelo explícito');
@@ -50,7 +50,7 @@ if(execute){
  for(const item of selected){
   const ticket={id:item.id,title:item.title,module:item.module,actual:item.actual,expected:item.expected,page:item.page,reference:'',steps:'Sólo investigación de código; no ejecutar pruebas ni operaciones.',version:revision,messages:[],status:'received',environment:'pilot',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),createdBy:'synthetic-evaluator',report:null,lastError:null} as SupportTicket;
   try{
-   const result=await investigateWithCodex(ticket,new EvaluationSource(root,revision),{apiKey:process.env.OPENAI_API_KEY,model,maxTurns:16,maxTokens:100000,maxContextChars:120000,maxResearchTools:6,timeoutMs:240000},async(key,name)=>createResponsesTransport(key,name,reported=>reportedModels.add(reported),125000));
+   const result=await investigateWithCodex(ticket,new EvaluationSource(root,revision),{apiKey:process.env.OPENAI_API_KEY,model,maxTurns:16,maxTokens:100000,maxContextChars:120000,maxResearchTools:10,groundScreen:true,timeoutMs:240000},async(key,name)=>createResponsesTransport(key,name,reported=>reportedModels.add(reported),125000));
    const usage=result.investigator!;manifest.providerTurns+=usage.providerTurns;manifest.reportedTokens+=result.tokens;
    manifest.estimatedUsd+=((usage.inputTokens-usage.cachedInputTokens)*inputRate+usage.cachedInputTokens*cachedRate+usage.outputTokens*outputRate)/1e6;
    manifest.results.push({id:item.id,result,evaluatorChecks:item.checks,humanVerdict:null});
