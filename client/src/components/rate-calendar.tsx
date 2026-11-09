@@ -73,11 +73,11 @@ export function RateCalendar({ plans, canEdit }: { plans: Plan[]; canEdit: boole
   const currentDraft=drafts.find(d=>d.id===editing)||drafts[0];
   const monthChanged=(month:string)=>{setFrom(month);setTo(new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10));};
   return <section data-testid="rate-calendar" className="space-y-5"><p className="text-sm text-muted-foreground">Precios y restricciones de venta para canales. Se conserva la moneda de cada plan; las reservas y facturas existentes no se recalculan.</p>
-    <fieldset className="rounded-xl border bg-white dark:bg-card p-4 space-y-3" disabled={busy}><legend className="px-2 text-xs font-semibold uppercase text-muted-foreground">Planes y fechas</legend>
-      <div className="flex flex-wrap gap-3"><Label>Desde<Input aria-label="Consultar desde" type="date" value={from} onChange={e => { setFrom(e.target.value); }} /></Label><Label>Hasta<Input aria-label="Consultar hasta" type="date" value={to} onChange={e => { setTo(e.target.value); }} /></Label></div>
+    <fieldset className="rounded-xl border bg-white dark:bg-card p-4 space-y-3" disabled={busy}><legend className="px-2 text-xs font-semibold uppercase text-muted-foreground">Planes y habitaciones</legend>
+
       <div className="flex flex-wrap gap-2">{plans.map(p => <Label key={p.id} className="flex gap-2 items-center rounded-full border px-3 py-2 text-sm"><input type="checkbox" checked={selected.includes(p.id)} onChange={() => { const ids=choose(selected,p.id); setSelected(ids); update(currentDraft.id,{ratePlanIds:ids}); }} />{label(p.id)}</Label>)}</div>
     </fieldset>
-    {!validRange && <p role="alert">Elegí hasta 20 planes y un período de hasta 500 días, con un máximo de 5000 noches entre todos los planes.</p>}
+    {!validRange && <p role="alert">Elegí entre 1 y 20 planes para consultar el calendario.</p>}
     {error && <p role="alert">No se pudo cargar el calendario. <Button variant="outline" onClick={() => refetch()}>Volver a consultar</Button></p>}
     {isFetching && <p>Cargando calendario…</p>}
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
