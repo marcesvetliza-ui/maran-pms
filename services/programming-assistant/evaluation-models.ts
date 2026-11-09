@@ -1,10 +1,11 @@
 /** Isolated, non-inference credential/model check. Never starts the assistant. */
 import OpenAI from 'openai';
+import { evaluationProfile } from './evaluation-profile';
 
 const fail=(code:string):never=>{throw Object.assign(new Error(code),{evaluationCode:code});};
 export function safeFailure(error:unknown) {
   const e=error as {evaluationCode?:string;status?:number;name?:string};
-  const known=['pilot_job_required','operational_credentials_present','invalid_action','api_key_reference_missing'];
+  const known=['pilot_job_required','operational_credentials_present','invalid_action','api_key_reference_missing','evaluation_configuration_missing','evaluation_profile_invalid'];
   if(known.includes(e?.evaluationCode||'')) return e.evaluationCode!;
   if(e?.status===401)return 'api_authentication_failed';
   if(e?.status===403)return 'api_permission_denied';
@@ -31,6 +32,15 @@ export async function main() {
     fail('operational_credentials_present');
   }
   const action=process.env.SUPPORT_EVALUATION_ACTION || 'dry-run';
+  if(action==='evaluate') {
+    Object.assign(process.env,evaluationProfile(process.env));
+    const required=['OPENAI_API_KEY','SUPPORT_CODEX_MODEL','SUPPORT_CODEX_PAID_ENABLED','SUPPORT_EVALUATION_APPROVED_USD','SUPPORT_EVALUATION_INPUT_USD_PER_MILLION','SUPPORT_EVALUATION_OUTPUT_USD_PER_MILLION','SUPPORT_EVALUATION_CACHED_USD_PER_MILLION','SUPPORT_EVALUATION_PRICE_SOURCE','RAILWAY_GIT_COMMIT_SHA'];
+    const missing=required.filter(key=>!process.env[key]?.trim());
+    if(missing.length){console.error(JSON.stringify({missingConfiguration:missing,inferenceEnabled:false}));fail('evaluation_configuration_missing');}
+    // Separate bundle; no evaluation code or transport starts in discovery mode.
+    await import(new URL('./evaluator.mjs',import.meta.url).href);
+    return;
+  }
   if(action==='dry-run') {
     console.log(JSON.stringify({action,providerTurns:0,inferenceEnabled:false}));
     return;
