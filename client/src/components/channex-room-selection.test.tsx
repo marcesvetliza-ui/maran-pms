@@ -7,7 +7,7 @@ const rooms=[{id:'301',roomNumber:'301',roomTypeId:'premium',floor:3},{id:'307',
 it('saves an explicit room selection without sending the other Premium or another category',async()=>{
  const onSave=vi.fn(),user=userEvent.setup();
  render(<ChannexRoomSelection mapping={{id:'m',channexRoomTypeTitle:'Premium 4',roomTypeId:'premium'}} types={[{id:'premium',name:'Premium'}]} rooms={rooms} disabled={false} onSave={onSave}/>);
- await user.selectOptions(screen.getByLabelText('Alcance de Premium 4'),'specific');
+ fireEvent.click(screen.getByRole('radio',{name:'Habitaciones específicas'}));
  expect(screen.getByRole('button')).toBeDisabled();
  expect(screen.queryByRole('checkbox',{name:'302'})).not.toBeInTheDocument();
  // The shared PointerEvent shim extends Event; use a native MouseEvent for checkbox activation.
@@ -23,7 +23,7 @@ it('preserves whole-category mode explicitly as null and clears room selections 
  expect(screen.getByRole('checkbox',{name:'307'})).toBeChecked();
  await user.selectOptions(screen.getByLabelText('Categoría de Premium 2'),'exec');
  expect(screen.getByRole('button')).toBeDisabled();
- await user.selectOptions(screen.getByLabelText('Alcance de Premium 2'),'category');
+ fireEvent.click(screen.getByRole('radio',{name:'Toda la categoría'}));
  await user.click(screen.getByRole('button'));
  expect(onSave).toHaveBeenCalledWith({roomTypeId:'exec',roomIds:null});
 });
