@@ -15,7 +15,7 @@ import { Link } from "wouter";
 import { getArgentinaToday } from "@/lib/date-utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useQueries, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiErrorPayload } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InventoryButton as Button, useInventoryPermission } from "@/components/inventory-access";
 import { Badge } from "@/components/ui/badge";
@@ -474,8 +474,13 @@ export function InternalMovementForm({ embedded, open, onClose, initialMotivo }:
       setImRecipeId("");
       setImPorciones("1");
       toast({ title: `${newRows.length} ingrediente(s) cargados desde la receta` });
-    } catch {
-      toast({ title: "Error al cargar receta", variant: "destructive" });
+    } catch (error) {
+      const detail = parseApiErrorPayload(error)?.error;
+      toast({
+        title: "Error al cargar receta",
+        ...(typeof detail === "string" && detail.trim() ? { description: detail.trim() } : {}),
+        variant: "destructive",
+      });
     } finally {
       setImRecipeLoading(false);
     }
