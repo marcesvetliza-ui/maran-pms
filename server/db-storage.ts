@@ -59,6 +59,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool, withDatabaseTransaction } from "./db";
 import { initializeNightlyPricing, guardPricingUpdate, mayChangePricing, withReservationFinancialLock } from "./nightlyPricingGuard";
+import { archiveCancelledReservationFolio } from "./reservation-folio-lifecycle";
 import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
 import {
   type User, type InsertUser,
@@ -1413,6 +1414,7 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db.update(reservations).set(safeData).where(eq(reservations.id, id)).returning();
     if (!updated) return updated;
 
+    if (updated.status === "cancelled") await archiveCancelledReservationFolio(id, updated.lastModifiedBy || "Sistema");
     if (before) await this.syncGiftVoucherStatusTransition(before, updated);
     await db.insert(auditLogs).values({ userId: updated.lastModifiedBy || null, userName: updated.lastModifiedBy || "Sistema",
       action: "update", module: "reservations", entityType: "reservation", entityId: id,
@@ -1458,6 +1460,7 @@ export class DatabaseStorage implements IStorage {
       if (["cancelled", "checked_out"].includes(locked.status)) throw Object.assign(new Error("La reserva ya está anulada o finalizada"), { statusCode: 409 });
       const before = await this.getReservation(id);
       const [after] = await db.update(reservations).set({ status: "cancelled", lastModifiedBy: actor.id || "Sistema" }).where(eq(reservations.id, id)).returning();
+      await archiveCancelledReservationFolio(id, actor.name || actor.id || "Sistema");
       await this.syncGiftVoucherStatusTransition(locked, after);
       await db.insert(cancelledReservationLogs).values({ reservationId: id, reservationCode: locked.reservationCode,
         guestName: before?.guest ? `${before.guest.firstName} ${before.guest.lastName}` : "Sin huésped",
@@ -2988,6 +2991,7 @@ export class DatabaseStorage implements IStorage {
         if (String(input.patch.status) === "cancelled") patch.status = "cancelled";
         if (Object.keys(patch).length) {
           await tx.update(reservations).set(patch as any).where(eq(reservations.id, row.id));
+          if (patch.status === "cancelled") await archiveCancelledReservationFolio(row.id, "Cancelación de grupo", tx);
           propagatedCount++; writes++;
         }
       }
@@ -3051,6 +3055,7 @@ export class DatabaseStorage implements IStorage {
           await db.update(reservations)
             .set({ status: "cancelled" })
             .where(eq(reservations.id, res.id));
+          await archiveCancelledReservationFolio(res.id, "Cancelación de grupo");
         }
         // Free the room (set to available) if it was held/occupied by this reservation
         if (res.roomId) {
@@ -8837,6 +8842,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getOrCreateFolio(entityType: FolioEntityType, entityId: string): Promise<Folio> {
+    if (entityType === "reservation") return withDatabaseTransaction(async () => {
+      // Serialize lazy creation/PDF reads with cancellation of the same stay.
+      const rows = await db.execute(sql`SELECT status FROM reservations WHERE id=${entityId} FOR UPDATE`);
+      const cancelled = (rows.rows[0] as { status: string } | undefined)?.status === "cancelled";
+      if (cancelled) await archiveCancelledReservationFolio(entityId, "Reserva cancelada");
+      return this.getOrCreateFolioForState(entityType, entityId, cancelled);
+    });
+    return this.getOrCreateFolioForState(entityType, entityId, false);
+  }
+
+  private async getOrCreateFolioForState(entityType: FolioEntityType, entityId: string, cancelled: boolean): Promise<Folio> {
     const [existing] = await db.select().from(folios)
       .where(and(eq(folios.entityType, entityType), eq(folios.entityId, entityId)));
     if (existing) return existing;
@@ -8857,7 +8873,8 @@ export class DatabaseStorage implements IStorage {
         codigo,
         entityType,
         entityId,
-        status: "open",
+        status: cancelled ? "closed" : "open",
+        ...(cancelled ? { closedAt: new Date(), closedBy: "Reserva cancelada" } : {}),
         totalCharges: "0",
         totalPayments: "0",
         balance: "0",
@@ -9549,7 +9566,7 @@ export class DatabaseStorage implements IStorage {
       if(count.status === 'cerrado')return {adjustments:0,alreadyClosed:true};
       if(!count.warehouse_id)throw Object.assign(new Error("Esta toma anterior no tiene depósito. Creá una nueva toma por depósito; el historial se conserva."),{statusCode:409});
       if(count.status !== 'borrador')throw Object.assign(new Error("La toma no está en borrador"),{statusCode:409});
-      const rows=await db.execute(sql`SELECT * FROM inventory_count_items WHERE count_id=${id} AND actual_stock IS NOT NULL ORDER BY item_id FOR UPDATE`);
+      const rows = await db.execute(sql`SELECT * FROM inventory_count_items WHERE count_id=${id} AND actual_stock IS NOT NULL ORDER BY item_id FOR UPDATE`);
       if(!rows.rows.length)throw Object.assign(new Error("Registrá al menos un artículo contado antes de cerrar"),{statusCode:400});
       for(const item of rows.rows as any[]) await db.execute(sql`SELECT id FROM inventory_items WHERE id=${item.item_id} FOR UPDATE`);
       await requireActiveInventoryReferences(db,null,count.warehouse_id);
