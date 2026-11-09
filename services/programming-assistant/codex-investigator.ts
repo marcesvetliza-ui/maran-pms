@@ -4,7 +4,7 @@ import { investigationCase } from './context';
 import type { CodeSource } from './source';
 import type { DiagnosisResult } from './diagnose';
 import { createCodexTransport, type AgentTransport, type AgentSession } from './codex-transport';
-import { agentStepSchema, agentOutputSchema, reviewSchema, reviewOutputSchema } from './codex-protocol';
+import { agentStepSchema, agentOutputSchema, closingOutputSchema, reviewSchema, reviewOutputSchema } from './codex-protocol';
 import { StageTelemetry } from './lifecycle';
 const instruction=`Sos el investigador de soporte de Xenia/Maran. Conversá en español claro.
 Investigá el caso recorriendo pantalla, endpoint, validaciones y persistencia. Devolvé una acción JSON por turno.
@@ -17,15 +17,24 @@ No recomiendes reemitir comprobantes o repetir pagos ante un estado incierto. La
 Los diagnósticos anteriores no son evidencia. No propongas como nuevo algo ya implementado en la revisión consultada.
 Usá clarify sólo por un dato operativo indispensable que no esté aportado y no se pueda investigar en código. No preguntes al operador datos técnicos que puedas buscar ni pidas claves, tokens o datos de tarjetas. La pregunta puede ser específica del negocio usando question; missing permite las preguntas genéricas.
 Citas: sólo rangos entregados por herramientas de lectura (read_code, inspect_symbol o trace_endpoint), no líneas adivinadas ni snippets de búsqueda. Para certeza sustentado_en_codigo necesitás evidencia directa de la causa.
+En el informe final seleccioná hasta tres citas breves de hasta 20 líneas cada una, dentro de los rangos ya leídos. No cites bloques completos: la revisión recibe esas citas y debe poder comprobar la conclusión con ellas.
 La solución es una propuesta; no hay cambios aplicados. Si no podés demostrar la causa, explicitá hipótesis y límites.
 Para campos no aplicables devolvé null. Mantené el informe breve, con problema, causa, solución y limitaciones.`;
-export type CodexInvestigationOptions={apiKey:string;model:string;timeoutMs?:number;maxTurns?:number;maxTokens?:number;maxContextChars?:number};
+export type CodexInvestigationOptions={apiKey:string;model:string;timeoutMs?:number;maxTurns?:number;maxTokens?:number;maxContextChars?:number;maxResearchTools?:number};
+export function shouldCloseInvestigation(used:number,contextChars:number,nextPromptChars:number,maxTokens:number) {
+  const currentTurn=Math.ceil((contextChars+nextPromptChars)/2)+2500;
+  // Reserve another author turn after a maximum-sized read, plus independent review.
+  const closingTurn=currentTurn+18000,review=17500;
+  return used+currentTurn+closingTurn+review>maxTokens;
+}
 export async function investigateWithCodex(ticket:SupportTicket,source:CodeSource,options:CodexInvestigationOptions,
   factory:(key:string,model:string)=>Promise<AgentTransport>=createCodexTransport):Promise<DiagnosisResult>{
   if(ticket.version!==source.version)throw Error('La revisión del caso no coincide con el código');
   const maxTurns=options.maxTurns??12,maxTokens=options.maxTokens??40000,maxContextChars=options.maxContextChars??60000;
+  if(options.maxResearchTools!==undefined&&(!Number.isInteger(options.maxResearchTools)||options.maxResearchTools<1||options.maxResearchTools>10))throw Error('Límite de lecturas inválido');
+  let closing=false;
   if(!Number.isInteger(maxContextChars)||maxContextChars<1000||maxContextChars>120000)throw Error('Límite de contexto inválido');
-  if(!Number.isInteger(maxTurns)||maxTurns<4||maxTurns>16||!Number.isInteger(maxTokens)||maxTokens<1000||maxTokens>60000)throw Error('Límites inválidos de Codex');
+  if(!Number.isInteger(maxTurns)||maxTurns<4||maxTurns>16||!Number.isInteger(maxTokens)||maxTokens<1000||maxTokens>100000)throw Error('Límites inválidos de Codex');
   const signal=AbortSignal.timeout(options.timeoutMs??150000),telemetry=new StageTelemetry();
   let input=0,output=0,cachedInput=0,turns=0,tools=0,audits=0,contextChars=0,repairs=0,pendingUsage=false;
   let transport:AgentTransport|undefined;
@@ -35,7 +44,7 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
     if(signal.aborted)throw Object.assign(Error('Tiempo agotado'),{name:'TimeoutError'});
     // Estimates are reservations, not a promise of an exact monetary ceiling.
     if(turns>=maxTurns)throw budget('turn_limit');
-    if(input+output+Math.ceil((stage==='audit'||stage==='reaudit'?prompt.length:contextChars)/2)+2500>maxTokens)throw budget('next_turn_reservation');
+    if(input+output+Math.ceil((stage==='audit'||stage==='reaudit'?prompt.length:contextChars)/2)+2500>maxTokens)throw Object.assign(budget('next_turn_reservation'),{budgetPhase:stage});
     const started=telemetry.start();turns++;pendingUsage=true;
     const reply=await session.run(prompt,schema,signal);
     for(const value of [reply.usage.input,reply.usage.output,reply.usage.cachedInput])if(!Number.isSafeInteger(value)||value<0)throw fail('codex_protocol');
@@ -55,11 +64,14 @@ export async function investigateWithCodex(ticket:SupportTicket,source:CodeSourc
     const author=transport.session();
     let prompt=instruction+'\nCASO Y RESPUESTAS:\n'+JSON.stringify({case:investigationCase(ticket),pendingClarification:ticket.clarification||null});
     while(true){
+      if(options.maxResearchTools!==undefined&&(tools>=options.maxResearchTools||turns>=maxTurns-5||shouldCloseInvestigation(input+output,contextChars,prompt.length,maxTokens)))closing=true;
+      if(closing)prompt+='\nFASE FINAL OBLIGATORIA: entregá report o clarify. No hay más lecturas. Si la causa no está demostrada, reportá una hipótesis con limitaciones y sin inventar evidencia. Conservá las citas ya leídas.';
       if(turns>=maxTurns-3||input+output+Math.ceil(contextChars/2)+8500>maxTokens)prompt+='\nCERRÁ la investigación ahora: devolvé report con la evidencia ya leída y limitaciones explícitas, o clarify si falta un dato operativo. Reservá presupuesto para la revisión independiente; no solicites otra lectura.';
       contextChars+=prompt.length;if(contextChars>maxContextChars)throw budget('author_context_limit');
-      const raw=await run(author,prompt,agentOutputSchema,repairs?'correction':'research');contextChars+=raw.length;
+      const raw=await run(author,prompt,closing?closingOutputSchema:agentOutputSchema,repairs?'correction':'research');contextChars+=raw.length;
       let step;
       try{step=agentStepSchema.parse(JSON.parse(raw));}catch{if(repairs++>=1)throw fail('codex_protocol');prompt='La respuesta no cumple el esquema. Corregí una sola vez, sin agregar campos ni metadatos de validación.';continue;}
+      if(closing&&step.action!=='report'&&step.action!=='clarify')throw fail('codex_closing_protocol');
       if(step.action==='clarify'){
         if(!step.missing&&!step.question)throw fail('codex_protocol');
         if(step.question&&ticket.clarification?.questions.some(question=>question.trim().toLowerCase()===step.question!.trim().toLowerCase()))throw fail('codex_protocol');

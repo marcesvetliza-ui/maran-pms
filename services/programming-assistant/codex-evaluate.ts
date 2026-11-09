@@ -32,7 +32,7 @@ const before=await snapshot(),execute=container?process.env.SUPPORT_EVALUATION_A
 if(before.fileCount===0)throw Error('Catálogo de código vacío');
 const model=process.env.SUPPORT_CODEX_MODEL||null;
 const reportedModels=new Set<string>();
-const manifest:any={engine:'responses-api',sourceVerification:container?'container-content-hash':'clean-git-and-content-hash',revision,source:before,requestedModel:model,effectiveModel:null,executed:false,providerTurns:0,reportedTokens:0,estimatedUsd:0,usageIncomplete:false,cases:selectedIds,maxTurnsPerCase:16,maxReportedTokensPerCase:60000,maxContextCharsPerCase:120000,humanReview:'pending',results:[]};
+const manifest:any={engine:'responses-api',sourceVerification:container?'container-content-hash':'clean-git-and-content-hash',revision,source:before,requestedModel:model,effectiveModel:null,executed:false,providerTurns:0,reportedTokens:0,estimatedUsd:0,usageIncomplete:false,cases:selectedIds,maxTurnsPerCase:16,maxReportedTokensPerCase:100000,maxContextCharsPerCase:120000,humanReview:'pending',results:[]};
 if(execute){
  const number=(key:string,zero=false)=>{const value=Number(process.env[key]);if(!process.env[key]||!Number.isFinite(value)||(zero?value<0:value<=0))throw Error(`Configurar ${key}`);return value;};
  if(process.env.SUPPORT_CODEX_PAID_ENABLED!=='true'||!process.env.OPENAI_API_KEY||!model)throw Error('Falta autorización de llamadas pagadas, clave o modelo explícito');
@@ -42,21 +42,21 @@ if(execute){
  if(cachedRate>inputRate)throw Error('La tarifa de caché excede la de entrada');
  manifest.approvedUsd=budget;manifest.prices={inputRate,outputRate,cachedRate,source:process.env.SUPPORT_EVALUATION_PRICE_SOURCE,verifiedOn:process.env.SUPPORT_EVALUATION_PRICE_VERIFIED_ON||null};
  // Allow for the last bounded reply crossing the recorded-token limit.
- manifest.estimatedReservationUsd=selected.length*62500*Math.max(inputRate,outputRate,cachedRate)/1e6;
+ manifest.estimatedReservationUsd=selected.length*102500*Math.max(inputRate,outputRate,cachedRate)/1e6;
  if(manifest.estimatedReservationUsd>budget)throw Error('La reserva estimada de la tanda supera el presupuesto aprobado');
  manifest.executed=true;
  for(const item of selected){
   const ticket={id:item.id,title:item.title,module:item.module,actual:item.actual,expected:item.expected,page:item.page,reference:'',steps:'Sólo investigación de código; no ejecutar pruebas ni operaciones.',version:revision,messages:[],status:'received',environment:'pilot',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),createdBy:'synthetic-evaluator',report:null,lastError:null} as SupportTicket;
   try{
-   const result=await investigateWithCodex(ticket,new EvaluationSource(root,revision),{apiKey:process.env.OPENAI_API_KEY,model,maxTurns:16,maxTokens:60000,maxContextChars:120000,timeoutMs:240000},async(key,name)=>createResponsesTransport(key,name,reported=>reportedModels.add(reported),125000));
+   const result=await investigateWithCodex(ticket,new EvaluationSource(root,revision),{apiKey:process.env.OPENAI_API_KEY,model,maxTurns:16,maxTokens:100000,maxContextChars:120000,maxResearchTools:6,timeoutMs:240000},async(key,name)=>createResponsesTransport(key,name,reported=>reportedModels.add(reported),125000));
    const usage=result.investigator!;manifest.providerTurns+=usage.providerTurns;manifest.reportedTokens+=result.tokens;
    manifest.estimatedUsd+=((usage.inputTokens-usage.cachedInputTokens)*inputRate+usage.cachedInputTokens*cachedRate+usage.outputTokens*outputRate)/1e6;
    manifest.results.push({id:item.id,result,evaluatorChecks:item.checks,humanVerdict:null});
   }catch(error){
-   const failure=error as {code?:string;budgetReason?:string;usageIncomplete?:boolean;knownUsage?:{input:number;cachedInput:number;output:number};investigation?:{rounds:number;tokens:number}};
+   const failure=error as {code?:string;budgetReason?:string;budgetPhase?:string;usageIncomplete?:boolean;knownUsage?:{input:number;cachedInput:number;output:number};investigation?:{rounds:number;tokens:number}};
    manifest.providerTurns+=failure.investigation?.rounds||0;manifest.reportedTokens+=failure.investigation?.tokens||0;
    if(failure.knownUsage){const u=failure.knownUsage;manifest.estimatedUsd+=((u.input-u.cachedInput)*inputRate+u.cachedInput*cachedRate+u.output*outputRate)/1e6;}
-   manifest.usageIncomplete=!!failure.usageIncomplete;manifest.results.push({id:item.id,failed:true,code:failure.code||'evaluation_failed',budgetReason:failure.budgetReason||null,usageIncomplete:!!failure.usageIncomplete,reportedTokens:failure.investigation?.tokens??null,humanVerdict:null});
+   manifest.usageIncomplete=!!failure.usageIncomplete;manifest.results.push({id:item.id,failed:true,code:failure.code||'evaluation_failed',budgetReason:failure.budgetReason||null,budgetPhase:failure.budgetPhase||null,usageIncomplete:!!failure.usageIncomplete,reportedTokens:failure.investigation?.tokens??null,humanVerdict:null});
    // Do not retry or advance to another billable case after a failure.
    manifest.stopped=true;break;
   }

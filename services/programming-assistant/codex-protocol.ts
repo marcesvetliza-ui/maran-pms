@@ -20,5 +20,6 @@ export const agentOutputSchema={type:'object',properties:{
   missing:{anyOf:[{type:'null'},{type:'array',items:{type:'string',enum:['exact_error','where_it_happened','what_happened_next']}}]},
   report:{anyOf:[{type:'null'},{type:'object',properties:reportProperties,required:Object.keys(reportProperties),additionalProperties:false}]},
 },required:['action','path','term','prefix','start','end','missing','question','report'],additionalProperties:false};
+export const closingOutputSchema={...agentOutputSchema,properties:{...agentOutputSchema.properties,action:{type:'string',enum:['clarify','report']}}};
 export const reviewSchema=z.object({approved:z.boolean(),issues:z.array(z.string().min(1).max(700)).max(4)}).strict().refine(v=>v.approved?v.issues.length===0:v.issues.length>0,'Veredicto y observaciones inconsistentes');
 export const reviewOutputSchema={type:'object',properties:{approved:{type:'boolean'},issues:{type:'array',items:text}},required:['approved','issues'],additionalProperties:false};

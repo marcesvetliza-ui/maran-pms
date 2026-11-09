@@ -4,7 +4,7 @@ import { mkdtemp,mkdir,writeFile,rm } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { CodeSource } from '../../services/programming-assistant/source';
-import { investigateWithCodex } from '../../services/programming-assistant/codex-investigator';
+import { investigateWithCodex,shouldCloseInvestigation } from '../../services/programming-assistant/codex-investigator';
 import { readTurn } from '../../services/programming-assistant/codex-transport';
 import type { SupportTicket } from '../../shared/programming-support';
 const version='a'.repeat(40),options={apiKey:'synthetic-not-a-key',model:'synthetic-test-model'};
@@ -105,4 +105,20 @@ it('supports the larger evaluation context and identifies the old context limit'
  await expect(investigateWithCodex(ticket,source,{...options,maxTokens:60000},fake(replies()).factory)).rejects.toMatchObject({code:'codex_budget',budgetReason:'author_context_limit',usageIncomplete:false});
  const result=await investigateWithCodex(ticket,source,{...options,maxTokens:60000,maxContextChars:120000},fake(replies()).factory);
  expect(result.clarification).toBeDefined();expect(result.investigator?.providerTurns).toBe(6);
+});
+it('reserves a closing turn and review before another tool result grows the history',()=>{
+ expect(shouldCloseInvestigation(25000,30000,10000,60000)).toBe(true);
+ expect(shouldCloseInvestigation(0,0,2000,60000)).toBe(false);
+});
+it('enforces a final report schema after the research allowance and still audits it',async()=>{
+ const agent=fake([read,step('report',{report}),{approved:true,issues:[]}]);
+ const result=await investigateWithCodex(ticket,source,{...options,maxTokens:60000,maxResearchTools:1},agent.factory);
+ expect(result.report.validationStatus).toBe('complete');expect(result.semanticAudits).toBe(1);
+ const calls=agent.run.mock.calls as unknown as Array<[string,{properties:{action:{enum:string[]}}}]>;
+ expect(calls[1][1].properties.action.enum).toEqual(['clarify','report']);
+});
+it('does not execute a tool requested after the forced closing phase',async()=>{
+ const agent=fake([read,read]);
+ await expect(investigateWithCodex(ticket,source,{...options,maxTokens:60000,maxResearchTools:1},agent.factory)).rejects.toMatchObject({code:'codex_closing_protocol',usageIncomplete:false});
+ expect(agent.run).toHaveBeenCalledTimes(2);
 });
