@@ -124,9 +124,9 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
         const settlementRate = booking.currency === "USD" ? cursor.settlement_exchange_rate || config.settlement_exchange_rate : "1.000000";
         const settledRooms = booking.status === "cancelled" ? [] : settleBooking(booking, settlementRate);
         if (booking.status !== "cancelled" && cursor.cancelled) return review("CANCELLED_BOOKING_REOPEN");
-        // A single-room revision may regenerate its remote room UUID. Preserve
-        // the local stay only when the previous accepted revision proves a
-        // unique, same-category/plan continuation. Never guess multi-room pairs.
+        // CRS can regenerate room UUIDs even for a booking-level edit. Only
+        // remap when the last accepted revision proves a unique category/plan
+        // continuation for every removed room. Never pair by array position.
         const active = [...existing.entries()].filter(([, r]) => r.status !== "cancelled");
         const incoming = new Set(booking.rooms.map(room => room.key));
         const removed = active.filter(([key]) => !incoming.has(key));
@@ -135,14 +135,22 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
           const prior = (await db.execute(sql`SELECT payload FROM channex_inbound_revisions
             WHERE connection_id=${connectionId} AND revision_id=${cursor.last_revision_id}`)).rows[0] as any;
           const previous = prior ? parseBookingRevision(prior.payload, config.channex_property_id) : null;
-          const before = previous?.rooms[0], after = booking.rooms[0];
-          if (active.length !== 1 || booking.rooms.length !== 1 || previous?.rooms.length !== 1 ||
-              before?.key !== removed[0][0] || before.remoteType !== after.remoteType || before.remotePlan !== after.remotePlan)
+          if (removed.length !== added.length || !previous) return review("ROOM_IDENTITY_REQUIRES_REVIEW");
+          const pairs = removed.map(([oldKey, stay]) => {
+            const before = previous.rooms.find(room => room.key === oldKey);
+            const matches = before ? added.filter(room => room.remoteType === before.remoteType && room.remotePlan === before.remotePlan) : [];
+            if (matches.length !== 1) return review("ROOM_IDENTITY_REQUIRES_REVIEW");
+            return { oldKey, stay, after: matches[0] };
+          });
+          if (new Set(pairs.map(pair => pair.after.key)).size !== pairs.length)
             return review("ROOM_IDENTITY_REQUIRES_REVIEW");
-          const [oldKey, stay] = removed[0];
-          await db.execute(sql`UPDATE channex_inbound_rooms SET remote_room_id=${after.key}
-            WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId} AND remote_room_id=${oldKey}`);
-          existing.delete(oldKey); existing.set(after.key, stay);
+          for (const { oldKey, stay, after } of pairs) {
+            // Includes historical cancelled links: never reuse an owned key.
+            if (existing.has(after.key)) return review("ROOM_IDENTITY_REQUIRES_REVIEW");
+            await db.execute(sql`UPDATE channex_inbound_rooms SET remote_room_id=${after.key}
+              WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId} AND remote_room_id=${oldKey}`);
+            existing.delete(oldKey); existing.set(after.key, stay);
+          }
         }
         const wanted = new Set(booking.rooms.map(room => room.key));
         for (const [key, r] of existing) {
