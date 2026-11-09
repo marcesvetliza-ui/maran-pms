@@ -10,11 +10,15 @@ it('distinguishes duplicate plan names by category and currency and saves the ex
   expect(await screen.findByRole('option', { name: 'BAR · Premium · ARS' })).toBeTruthy();
   expect(screen.getByRole('option', { name: 'BAR · Ejecutiva · USD' })).toBeTruthy();
   fireEvent.click(screen.getByRole('option', { name: 'BAR · Premium · USD' }));
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Guardar tarifa'}));
   expect(onChange).toHaveBeenCalledWith('usd');
 });
 it('shows the remote category for identically named remote plans and permits clearing a mapping', async () => {
   const onChange = vi.fn(); render(<ChannexRatePlanMapping {...props} roomTitle="Double Room" selected="usd" onChange={onChange} />);
   fireEvent.pointerDown(screen.getByRole('combobox', { name: 'Best Available Rate · Double Room' }), { button: 0 });
   fireEvent.click(await screen.findByRole('option', { name: 'Sin mapear' }));
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Guardar tarifa'}));
   expect(onChange).toHaveBeenCalledWith(null);
 });

@@ -36,7 +36,7 @@ it('reviews and confirms independent occupancy totals without a scalar price',as
  await screen.findByRole('region',{name:'Revisión de cambios'});
  const preview=requests.find(r=>r.url.endsWith('/preview'))!;
  expect(preview.body.changes[0].values).toEqual({occupancyRates:{'1':'169000','2':'190000'}});
- expect(screen.getByText(/1 persona\(s\): sin precio → 169000.00 USD/)).toBeInTheDocument();
+ expect(screen.getByText(/1 persona\(s\): sin precio → .*169.000,00/)).toBeInTheDocument();
  expect(requests.some(r=>r.url.endsWith('/apply'))).toBe(false);
  fireEvent.click(screen.getByRole('button',{name:'Confirmar cambios'}));
  await waitFor(()=>expect(requests.find(r=>r.url.endsWith('/apply'))?.body).toEqual({...preview.body,previewToken:'a'.repeat(64)}));
@@ -74,4 +74,9 @@ it('allows read-only viewing without edit or confirmation controls', async () =>
   mount(false); await waitFor(() => expect(requests.length).toBeGreaterThan(0));
   expect(screen.queryByRole('button', { name: 'Revisar cambios' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Agregar período' })).toBeNull();
+});
+it('adapts an occupancy plan without offering an incompatible scalar price',()=>{
+ render(<QueryClientProvider client={queryClient}><RateCalendar plans={[{...plans[0],rate1pax:'150',rate2pax:'170'}]} canEdit/></QueryClientProvider>);
+ expect(screen.queryByLabelText('Acción de precio período 1')).not.toBeInTheDocument();
+ expect(screen.getByLabelText('Acción de precios por ocupación período 1')).toBeInTheDocument();
 });
