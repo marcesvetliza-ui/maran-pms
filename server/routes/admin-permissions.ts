@@ -73,6 +73,7 @@ export function registerAdminPermissionsRoutes(app: Express) {
       if (!KNOWN_RESOURCE_KEYS.has(resourceKey)) {
         return res.status(400).json({ error: "resourceKey desconocido" });
       }
+      if (role === "admin" && resourceKey.startsWith("api:ota:")) return res.status(400).json({error:"Admin conserva acceso completo a Canales OTAs."});
       await revokePermission(role, resourceKey);
       await audit(req, "update", "permisos", `Permiso revocado: ${role} → ${resourceKey}`, {
         entityType: "role_permission",

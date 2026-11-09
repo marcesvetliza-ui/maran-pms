@@ -14,7 +14,7 @@ async function enqueueFull(c: PoolClient, id: string, today: string) {
 }
 export function registerChannexAriRoutes(app: Express, pool: Pool) {
   const configure = requireChannex('config');
-  app.get('/api/channex/connections/:id/ari', requireChannex('read'), async (req, res) => {
+  app.get('/api/channex/connections/:id/ari', requireChannex('status'), async (req, res) => {
     try {
       const c = await pool.connect(); try {
         const connection=(await c.query('SELECT id,environment FROM channex_connections WHERE id=$1',[req.params.id])).rows[0];
