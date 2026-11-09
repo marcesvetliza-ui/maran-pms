@@ -13,7 +13,7 @@ const owners:string[]=[], types:string[]=[], guestIds=new Set<string>();
 function revision(property:string, bookingId:string, id:string, status="new",stamp="2026-10-29T23:00:00Z",rooms=1){return {id,attributes:{property_id:property,booking_id:bookingId,inserted_at:stamp,status,
  arrival_date:"2026-11-10",departure_date:"2026-11-12",amount:String(rooms*250),currency:"ARS",customer:{name:"Channel",surname:"Test"},
  rooms:Array.from({length:rooms},(_,i)=>({id:`remote-${i}`,room_type_id:"remote-type",rate_plan_id:"remote-plan",occupancy:{adults:2},days:{"2026-11-10":"100.00","2026-11-11":"150.00"}}))}};}
-async function fixture(rooms=2){
+async function fixture(rooms=2,extraPlan=false){
  const id=randomUUID(),type=randomUUID(),plan=randomUUID();owners.push(id);types.push(type);
  await pool.query("INSERT INTO room_types(id,code,name) VALUES($1,$2,$3)",[type,type,type]);
  await pool.query("INSERT INTO rate_plans(id,name,room_type_id,base_rate,currency) VALUES($1,'Test',$2,100,'ARS')",[plan,type]);
@@ -21,6 +21,7 @@ async function fixture(rooms=2){
  await pool.query("INSERT INTO channex_connections(id,label,environment,channex_property_id,base_url,is_active,created_at) VALUES($1,'Test','demo',$2,$3,true,now())",[id,id,STAGING_URL]);
  await pool.query("INSERT INTO channex_room_type_mappings(id,connection_id,channex_room_type_id,channex_room_type_title,room_type_id,created_at) VALUES($1,$2,'remote-type','Test',$3,now())",[id,id,type]);
  await pool.query("INSERT INTO channex_rate_plan_mappings(id,connection_id,channex_room_type_id,channex_rate_plan_id,channex_rate_plan_title,rate_plan_id,created_at) VALUES($1,$2,'remote-type','remote-plan','Test',$3,now())",[id,id,plan]);
+ if(extraPlan) await pool.query("INSERT INTO channex_rate_plan_mappings(id,connection_id,channex_room_type_id,channex_rate_plan_id,channex_rate_plan_title,rate_plan_id,created_at) VALUES($1,$2,'remote-type','other-plan','Other',$3,now())",[randomUUID(),id,plan]);
  await pool.query("INSERT INTO channex_ari_settings(connection_id,floor,currency,enabled,capture_started_at) VALUES($1,2,'ARS',true,now())",[id]);
  await pool.query("INSERT INTO channex_inbound_settings(connection_id,enabled) VALUES($1,true)",[id]);
  return {id,type,plan};
@@ -117,6 +118,37 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   change.attributes.rooms.forEach((room,i)=>room.id=`changed-${i}`);
   expect((await apply(f,change)).review_code).toBe("ROOM_IDENTITY_REQUIRES_REVIEW");
   expect(await linked(f)).toEqual(before);
+ });
+ it("preserves both stays when an arrival-hour edit regenerates and reorders distinct room identities",async()=>{
+  const f=await fixture(2,true);
+  const first:any=revision(f.id,"booking-multi-hour","multi-hour-original","new",undefined,2);
+  first.attributes.arrival_hour="15:00";first.attributes.rooms[1].rate_plan_id="other-plan";
+  expect((await apply(f,first)).status).toBe("applied");const before=await linked(f);
+  const change:any=structuredClone(first);change.id="multi-hour-change";
+  Object.assign(change.attributes,{status:"modified",inserted_at:"2026-10-30T01:00:00Z",arrival_hour:"18:00"});
+  change.attributes.rooms.forEach((room:any,i:number)=>room.id=`new-hour-${i}`);change.attributes.rooms.reverse();
+  expect((await apply(f,change)).status).toBe("applied");await apply(f,change);
+  const after=await linked(f);expect(after).toHaveLength(2);
+  for(let i=0;i<2;i++)expect(after[i]).toMatchObject({id:before[i].id,room_id:before[i].room_id,reservation_code:before[i].reservation_code,total_room_amount:before[i].total_room_amount,status:"confirmed"});
+  expect((await pool.query("SELECT payload->'attributes'->>'arrival_hour' AS hour FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2",[f.id,change.id])).rows[0].hour).toBe("18:00");
+  expect((await apply(f,revision(f.id,"booking-multi-hour","multi-hour-cancel","cancelled","2026-10-30T02:00:00Z"))).status).toBe("applied");
+  expect((await linked(f)).every(r=>r.status==="cancelled")).toBe(true);
+ });
+ it("keeps stable room links while remapping the one regenerated room in a multi-room revision",async()=>{
+  const f=await fixture();await apply(f,revision(f.id,"booking-partial-id","partial-original","new",undefined,2));const before=await linked(f);
+  const change=revision(f.id,"booking-partial-id","partial-change","modified","2026-10-30T01:00:00Z",2);
+  change.attributes.rooms[1].id="new-partial-room";
+  expect((await apply(f,change)).status).toBe("applied");
+  expect(new Set((await linked(f)).map(r=>r.id))).toEqual(new Set(before.map(r=>r.id)));
+ });
+ it("rolls back all multi-room identity remaps if a later room fails capacity validation",async()=>{
+  const f=await fixture(2,true);
+  const first=revision(f.id,"booking-multi-rollback","multi-rollback-original","new",undefined,2);first.attributes.rooms[1].rate_plan_id="other-plan";
+  expect((await apply(f,first)).status).toBe("applied");const before=await linked(f);
+  const change=structuredClone(first);change.id="multi-rollback-change";change.attributes.status="modified";change.attributes.inserted_at="2026-10-30T01:00:00Z";
+  change.attributes.rooms.forEach((room,i)=>room.id=`new-rollback-${i}`);change.attributes.rooms[1].occupancy.adults=20;
+  expect((await apply(f,change)).review_code).toBe("OCCUPANCY_EXCEEDS_CAPACITY");expect(await linked(f)).toEqual(before);
+  expect((await pool.query("SELECT remote_room_id FROM channex_inbound_rooms WHERE connection_id=$1 ORDER BY remote_room_id",[f.id])).rows.map(r=>r.remote_room_id)).toEqual(["remote-0","remote-1"]);
  });
  it("cancels all owned rooms once and releases availability without payments",async()=>{
   const f=await fixture();await apply(f,revision(f.id,"booking-cancel","cancel-original","new",undefined,2));
