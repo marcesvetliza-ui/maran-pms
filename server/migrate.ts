@@ -4841,6 +4841,12 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   }
 
+  // Seed OTA role permissions once. Later revocations survive every deploy.
+  const { CHANNEX_ROLE_DEFAULTS } = await import("@shared/channexAccess");
+  await seedResourcePermissionsOnce(Object.fromEntries(
+    Object.entries(CHANNEX_ROLE_DEFAULTS).map(([key, roles]) => [`api:ota:${key}`, [...roles]])
+  ));
+
   // Backfill: registra los ~52 resourceKey del seed masivo de Etapa 1 y el
   // de "sidebar:/admin/permisos" (Etapa 2, sembrado antes con un INSERT
   // puntual sin esta guardia) como ya sembrados, sin reinsertar nada — sus

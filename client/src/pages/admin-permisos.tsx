@@ -1,4 +1,3 @@
-import {ChannexAccessManagement} from '@/components/channex-access-management';
 import { Fragment, useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -74,6 +73,7 @@ export default function AdminPermisosPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ["/api/permissions/mine"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/channex/access"] }),
       ]);
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -84,7 +84,6 @@ export default function AdminPermisosPage() {
 
   return (
     <div className="p-6 max-w-full mx-auto space-y-6">
-      <ChannexAccessManagement/>
       <div className="flex items-center gap-3">
         <ShieldCheck className="h-7 w-7 text-primary" />
         <div>
@@ -141,13 +140,14 @@ export default function AdminPermisosPage() {
                           <td className="py-2 px-3 sticky left-0 bg-background">{item.label}</td>
                           {roles.map((role) => {
                             const key = `${role}:${item.resourceKey}`;
-                            const checked = grantSet.has(key);
+                            const fixedAdmin = role === "admin" && item.resourceKey.startsWith("api:ota:");
+                            const checked = fixedAdmin || grantSet.has(key);
                             const isPending = pendingKey === key && toggleMutation.isPending;
                             return (
                               <td key={role} className="text-center py-2 px-2">
                                 <Checkbox
                                   checked={checked}
-                                  disabled={isPending}
+                                  disabled={isPending || fixedAdmin}
                                   onCheckedChange={(value) =>
                                     toggleMutation.mutate({ role, resourceKey: item.resourceKey, grant: !!value })
                                   }

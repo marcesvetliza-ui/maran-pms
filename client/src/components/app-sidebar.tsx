@@ -415,7 +415,7 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user, hasPermission: roleHasPermission } = useAuth();
   const {data:otaAccess}=useChannexAccess();
-  const hasPermission=(key:string)=>key==='sidebar:/ota-channels'?!!otaAccess?.read:roleHasPermission(key);
+  const hasPermission=(key:string)=>key==='sidebar:/ota-channels'?!!otaAccess?.entry:roleHasPermission(key);
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {

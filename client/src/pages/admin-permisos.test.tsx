@@ -31,6 +31,7 @@ function jsonResponse(body: unknown, status = 200) {
 const catalogResponse = {
   roles: ["admin", "reception"],
   catalog: [
+    {resourceKey:"api:ota:config",label:"Configurar conexiones, credenciales y mapeos",section:"Canales OTAs"},
     {
       resourceKey: "reservations:edit-accommodation",
       label: "Edición de folios de reservas",
@@ -83,6 +84,16 @@ describe("pantalla de administración de permisos", () => {
         ),
       ),
     );
+  });
+
+  it("includes OTA actions in the same matrix and keeps admin access fixed", async () => {
+    renderPage();
+    const row=await screen.findByTestId("row-permiso-api:ota:config");
+    expect(within(row).getByTestId("checkbox-permiso-admin-api:ota:config")).toBeDisabled();
+    const reception=within(row).getByTestId("checkbox-permiso-reception-api:ota:config");
+    await userEvent.setup().click(reception);
+    await waitFor(()=>expect(apiRequestMock).toHaveBeenCalledWith("POST","/api/admin/role-permissions/grant",{role:"reception",resourceKey:"api:ota:config"}));
+    expect(screen.queryByText("Canales OTAs — permisos por usuario")).not.toBeInTheDocument();
   });
 
   it("muestra la matriz con el estado actual de los checkboxes", async () => {

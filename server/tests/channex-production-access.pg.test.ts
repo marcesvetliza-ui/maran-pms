@@ -1,3 +1,5 @@
+import {setRolePermissionsCacheForTests,hasPermission} from '../permissions';
+import {CHANNEX_ROLE_DEFAULTS} from '@shared/channexAccess';
 import {randomUUID,createHash} from 'node:crypto';
 import express from 'express';
 import type {Server} from 'node:http';
@@ -17,6 +19,7 @@ suite('Production preparation and actual per-user access',()=>{
  beforeAll(async()=>{
   const url=new URL(process.env.DATABASE_URL!);if(!['localhost','127.0.0.1'].includes(url.hostname)||!/test/.test(url.pathname))throw Error('Local test database required');
   vi.stubEnv('CHANNEX_PRODUCTION_ENABLED','');vi.stubEnv('CHANNEX_ARI_PRODUCTION_ENABLED','');vi.stubEnv('CHANNEX_INBOUND_PRODUCTION_ENABLED','');vi.stubEnv('CHANNEX_CREDENTIALS_ENCRYPTION_KEY','test-only-credential-encryption-0123456789');
+  setRolePermissionsCacheForTests(Object.entries(CHANNEX_ROLE_DEFAULTS).flatMap(([key,roles])=>roles.map(role=>({role,resourceKey:`api:ota:${key}`}))));
   await ensureChannexAccessSchema();await ensureChannexAriSchema(pool);await ensureChannexInboundSchema(pool);
   for(const [id,role] of [[admin,'admin'],[reader,'reception'],[operator,'manager']])await pool.query("INSERT INTO system_users(id,username,email,full_name,role,is_active,created_at) VALUES($1::text,$1::text,$1::text||'@test.invalid',$1::text,$2,'true',now())",[id,role]);
   const app=express();app.use(express.json());app.use((req,_res,next)=>{const id=String(req.get('x-user')||'');req.isAuthenticated=(()=>!!id) as any;req.user={id,username:id,role:id===admin?'admin':'reception'} as any;next();});registerChannexInboundWebhook(app,pool);registerChannexRoutes(app);
@@ -32,21 +35,33 @@ suite('Production preparation and actual per-user access',()=>{
   await pool.query('DELETE FROM user_permission_overrides WHERE user_id=ANY($1)',[[admin,reader,operator]]);await pool.query('DELETE FROM system_users WHERE id=ANY($1)',[[admin,reader,operator]]);
  });
  async function request(method:string,path:string,user=admin,body?:any){const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(user?{'x-user':user}:{})},body:body===undefined?undefined:JSON.stringify(body)});return {status:response.status,data:await response.json().catch(()=>null)};}
- it('gives admin every capability and keeps all other roles denied until explicitly granted',async()=>{
-  expect(await channexAccess(admin)).toMatchObject({owner:true,read:true,config:true,bookings:true,sync:true});
-  expect(await channexAccess(operator)).toMatchObject({owner:false,read:false,config:false,bookings:false,sync:false});
-  expect((await request('GET','/api/channex/connections',reader)).status).toBe(403);
-  expect((await request('GET','/api/channex/access/users',operator)).status).toBe(403);
-  expect((await request('PUT',`/api/channex/access/users/${operator}`,reader,{permissions:['config']})).status).toBe(403);
-  expect((await request('PUT',`/api/channex/access/users/${reader}`,admin,{permissions:['read']})).status).toBe(200);
+ it('uses the role matrix, denies reception operations, and retires per-user edits',async()=>{
+  expect(await channexAccess(admin)).toMatchObject({owner:true,entry:true,read:true,status:true,config:true,bookings:true,sync:true});
+  expect(await channexAccess(operator)).toMatchObject({owner:false,entry:true,read:true,status:true,config:true,bookings:true,sync:true});
+  expect(await channexAccess(reader)).toMatchObject({owner:false,entry:true,read:true,status:false,config:false,bookings:false,sync:false});
   expect((await request('GET','/api/channex/connections',reader)).status).toBe(200);
+  expect((await request('GET','/api/channex/connections/unknown/ari',reader)).status).toBe(403);
   expect((await request('POST','/api/channex/connections',reader,{})).status).toBe(403);
   expect((await request('POST','/api/channex/connections/unknown/ari/full-sync',reader,{})).status).toBe(403);
   expect((await request('POST','/api/channex/connections/unknown/inbound/retry',reader,{})).status).toBe(403);
-  expect((await request('PUT',`/api/channex/access/users/${operator}`,admin,{permissions:['sync']})).status).toBe(200);
-  expect(await channexAccess(operator)).toMatchObject({read:true,sync:true,config:false,bookings:false});
-  expect((await request('PUT',`/api/channex/access/users/${reader}`,admin,{permissions:[]})).status).toBe(200);
-  expect((await request('GET','/api/channex/connections',reader)).status).toBe(403);
+  expect((await request('GET','/api/channex/access/users',operator)).status).toBe(403);
+  expect((await request('PUT',`/api/channex/access/users/${reader}`,admin,{permissions:['config']})).status).toBe(410);
+  // Legacy individual grants must not bypass a matrix revocation.
+  await pool.query("INSERT INTO user_permission_overrides(user_id,resource_key,allowed) VALUES($1,'api:ota:config',true)",[reader]);
+  expect((await channexAccess(reader)).config).toBe(false);
+  for(const role of ['manager','jefe_recepcion','comercial','housekeeping']){
+   await pool.query('UPDATE system_users SET role=$2 WHERE id=$1',[operator,role]);
+   expect((await channexAccess(operator)).config).toBe(role!=='housekeeping');
+  }
+  await pool.query("UPDATE system_users SET role='manager' WHERE id=$1",[operator]);
+  const entries=Object.entries(CHANNEX_ROLE_DEFAULTS).flatMap(([key,roles])=>roles.map(role=>({role,resourceKey:`api:ota:${key}`})));
+  setRolePermissionsCacheForTests(entries.filter(e=>!(e.role==='manager'&&e.resourceKey==='api:ota:config')));
+  expect((await channexAccess(operator)).config).toBe(false);
+  expect((await channexAccess(operator)).sync).toBe(true);
+  setRolePermissionsCacheForTests(entries);
+  await pool.query("UPDATE system_users SET is_active='false' WHERE id=$1",[operator]);
+  expect((await channexAccess(operator)).entry).toBe(false);
+  await pool.query("UPDATE system_users SET is_active='true' WHERE id=$1",[operator]);
   expect((await request('GET','/api/channex/connections','')).status).toBe(401);
  });
  it('saves a production credential encrypted, forces inactive status, and blocks activation and webhooks by default',async()=>{

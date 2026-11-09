@@ -1,3 +1,4 @@
+import { CHANNEX_CAPABILITIES, CHANNEX_ROLE_DEFAULTS } from "@shared/channexAccess";
 import { ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db";
@@ -196,6 +197,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "api:support:view-all": ["admin"],
   "api:support:review": ["admin"],
+  ...Object.fromEntries(Object.entries(CHANNEX_ROLE_DEFAULTS).map(([key, roles]) => [`api:ota:${key}`, [...roles]])),
   "api:manuals:restricted": ["admin"],
   "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
@@ -343,6 +345,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
  * detectar faltantes.
  */
 export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: string }> = {
+  ...Object.fromEntries(Object.entries(CHANNEX_CAPABILITIES).map(([key, label]) => [`api:ota:${key}`, { label, section: "Canales OTAs" }])),
   [ACCOMMODATION_PERMISSION]: { label: "Edición de folios de reservas", section: "API — Reservas" },
   "funding:read": { label: "Consultar financiación de Folio/SPA", section: "Financiación Folio/SPA" },
   "funding:write": { label: "Operar financiación de Folio/SPA", section: "Financiación Folio/SPA" },

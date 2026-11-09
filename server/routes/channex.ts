@@ -71,7 +71,7 @@ export function registerChannexRoutes(app: Express) {
       res.json(rows.rows);
     } catch(error) { handleError(res,error,'No se pudieron consultar las habitaciones del alcance'); }
   });
-  app.get("/api/channex/connections", requireChannex('read'), async (_req, res) => {
+  app.get("/api/channex/connections", requireChannex('entry'), async (_req, res) => {
     try {
       const rows = await db.select().from(channexConnections).orderBy(desc(channexConnections.createdAt));
       res.json(rows.map(toPublicConnection));
