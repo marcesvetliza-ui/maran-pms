@@ -6651,6 +6651,7 @@ export default function ReservationsPage() {
                         .filter((p: any) => p.status !== "anulado")
                         .reduce((sum: number, p: any) => sum + parseFloat(p.amount || "0"), 0);
                       const saldo = room + extras - pagado;
+                      if(reservation.status==='cancelled')return <span title="Importe original más extras menos pagos. Referencia histórica; no es un saldo operativo de la reserva."><span className="block text-sm text-muted-foreground">Reserva cancelada</span><span className="text-xs text-muted-foreground">Referencia histórica: ${saldo.toLocaleString('es-AR',{minimumFractionDigits:2})}</span></span>;
                       return `$${saldo.toLocaleString("es-AR", { minimumFractionDigits: 2 })}`;
                     })()}
                   </TableCell>
