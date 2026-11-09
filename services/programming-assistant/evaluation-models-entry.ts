@@ -1,6 +1,6 @@
-import { main } from './evaluation-models';
-main().catch(() => {
+import { main, safeFailure } from './evaluation-models';
+main().catch((error:unknown) => {
   // Provider errors may include request details. Keep secrets out of Railway logs.
-  console.error('No se pudo completar la comprobación aislada. Revisar configuración, acceso y permisos de la clave.');
+  console.error(JSON.stringify({error:safeFailure(error),inferenceEnabled:false}));
   process.exitCode=1;
 });

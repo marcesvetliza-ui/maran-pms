@@ -1,6 +1,19 @@
 /** Isolated, non-inference credential/model check. Never starts the assistant. */
 import OpenAI from 'openai';
 
+const fail=(code:string):never=>{throw Object.assign(new Error(code),{evaluationCode:code});};
+export function safeFailure(error:unknown) {
+  const e=error as {evaluationCode?:string;status?:number;name?:string};
+  const known=['pilot_job_required','operational_credentials_present','invalid_action','api_key_reference_missing'];
+  if(known.includes(e?.evaluationCode||'')) return e.evaluationCode!;
+  if(e?.status===401)return 'api_authentication_failed';
+  if(e?.status===403)return 'api_permission_denied';
+  if(e?.status===429)return 'api_rate_limit';
+  if(e?.name==='APIConnectionTimeoutError')return 'api_connection_timeout';
+  if(e?.name==='APIConnectionError')return 'api_connection_failed';
+  return 'model_catalog_check_failed';
+}
+
 export async function discoverModels(client: { models: { list(): PromiseLike<AsyncIterable<{id:string}>> } }) {
   const page = await client.models.list();
   const ids:string[] = [];
@@ -12,18 +25,18 @@ export async function discoverModels(client: { models: { list(): PromiseLike<Asy
 
 export async function main() {
   if (process.env.APP_ENV !== 'pilot' || process.env.SUPPORT_EVALUATION_ISOLATED_JOB !== 'true') {
-    throw Error('Se requiere un trabajo aislado de evaluación piloto');
+    fail('pilot_job_required');
   }
   if (['DATABASE_URL','ASSISTANT_DATABASE_URL','SUPPORT_SHARED_SECRET','RAILWAY_MARAN_PROJECT_TOKEN'].some(key => !!process.env[key])) {
-    throw Error('El trabajo no debe recibir credenciales operativas');
+    fail('operational_credentials_present');
   }
   const action=process.env.SUPPORT_EVALUATION_ACTION || 'dry-run';
   if(action==='dry-run') {
     console.log(JSON.stringify({action,providerTurns:0,inferenceEnabled:false}));
     return;
   }
-  if(action!=='models') throw Error('Acción no admitida: usar dry-run o models');
-  if(!process.env.OPENAI_API_KEY) throw Error('Falta la referencia a la clave del asistente de Xenia');
+  if(action!=='models') fail('invalid_action');
+  if(!process.env.OPENAI_API_KEY?.trim()) fail('api_key_reference_missing');
   const client=new OpenAI({apiKey:process.env.OPENAI_API_KEY,maxRetries:0,timeout:30000});
   const models=await discoverModels(client);
   console.log(JSON.stringify({action,models,providerTurns:0,inferenceEnabled:false}));
