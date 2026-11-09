@@ -25,6 +25,9 @@ try{
   await page.getByLabel('Acción de precios por ocupación período 1',{exact:true}).selectOption('set');
   await page.getByLabel('Precio 1 personas período 1',{exact:true}).fill('150000');
   await page.getByLabel('Precio 2 personas período 1',{exact:true}).fill('170000');
+  await page.getByRole('button',{name:'Vincular habitaciones',exact:true}).click();
+  await page.getByRole('button',{name:'Calendario',exact:true}).click();
+  assert.equal(await page.getByLabel('Precio 1 personas período 1',{exact:true}).inputValue(),'150000');
   assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.method!=='GET').length),0);
   await page.getByRole('button',{name:'Revisar cambios',exact:true}).click();
   await page.getByRole('region',{name:'Revisión de cambios'}).waitFor();
