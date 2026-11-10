@@ -99,9 +99,8 @@ it('provides the prior question along with a short user reply',async()=>{
  expect(agent.run.mock.calls[0][0]).toContain('¿El pago anterior correspondía a alojamiento?');
 });
 it('supports the larger evaluation context and identifies the old context limit',async()=>{
- await writeFile(path.join(root,'server/example.ts'),Array.from({length:20},()=> 'x'.repeat(1000)).join('\n'));
- const reading=step('read_code',{path:'server/example.ts',start:1,end:20});
- const replies=()=>[...Array.from({length:5},()=>reading),step('clarify',{question:'¿En qué pantalla se produjo el cierre de caja?'})];
+ await writeFile(path.join(root,'server/example.ts'),Array.from({length:100},(_,i)=> String(i)+':'+ 'x'.repeat(1000)).join('\n'));
+ const replies=()=>[...Array.from({length:5},(_,i)=>step('read_code',{path:'server/example.ts',start:1+i*20,end:20+i*20})),step('clarify',{question:'¿En qué pantalla se produjo el cierre de caja?'})];
  await expect(investigateWithCodex(ticket,source,{...options,maxTokens:60000},fake(replies()).factory)).rejects.toMatchObject({code:'codex_budget',budgetReason:'author_context_limit',usageIncomplete:false});
  const result=await investigateWithCodex(ticket,source,{...options,maxTokens:60000,maxContextChars:120000},fake(replies()).factory);
  expect(result.clarification).toBeDefined();expect(result.investigator?.providerTurns).toBe(6);
@@ -155,4 +154,40 @@ it('records the effective model when Responses reports it',async()=>{
  const agent=fake([read,step('report',{report}),{approved:true,issues:[]}]);const run=agent.run;
  const result=await investigateWithCodex(ticket,source,options,async()=>({session:()=>({run:async(...args:any[])=>({...await (run as any)(...args),model:'reported-model'})}),close:agent.close}));
  expect(result.investigator?.effectiveModel).toBe('reported-model');
+});
+
+it('reuses an exact successful read within one case without removing citation evidence or independent review',async()=>{
+ const actualRead=vi.spyOn(source,'read');
+ const agent=fake([read,read,step('read_code',{path:'server/example.ts',start:1,end:1}),step('report',{report}),{approved:true,issues:[]}]);
+ const result=await investigateWithCodex(ticket,source,options,agent.factory);
+ const repeated=String(agent.run.mock.calls[2][0]);
+ expect(repeated).toContain('"alreadyRead":true');
+ expect(repeated).toContain('"previousToolResult":1');
+ expect(repeated).not.toContain('throw new Error');
+ expect(actualRead.mock.calls.filter(args=>args[1]===1&&args[2]===2)).toHaveLength(1);
+ expect(source.validates(report.evidence[0])).toBe(true);
+ expect(result.semanticAudits).toBe(1);
+ expect(agent.session).toHaveBeenCalledTimes(2);
+ expect(String(agent.run.mock.calls[4][0])).toContain('Falta equivalencia');
+});
+it('does not reuse read results across separate investigations',async()=>{
+ const actualRead=vi.spyOn(source,'read');
+ for(let i=0;i<2;i++){
+  const agent=fake([read,step('report',{report}),{approved:true,issues:[]}]);
+  await investigateWithCodex(ticket,source,options,agent.factory);
+  expect(String(agent.run.mock.calls[1][0])).not.toContain('"alreadyRead":true');
+ }
+ expect(actualRead.mock.calls.filter(args=>args[1]===1&&args[2]===2)).toHaveLength(2);
+});
+it('keeps error-origin evidence and actionable tests in both author and review contracts',async()=>{
+ // This checks the instructions delivered to simulated sessions, not model reasoning quality.
+ const agent=fake([read,step('report',{report}),{approved:true,issues:[]}]);
+ await investigateWithCodex(ticket,source,options,agent.factory);
+ const author=String(agent.run.mock.calls[0][0]),reviewer=String(agent.run.mock.calls[2][0]);
+ expect(author).toContain('hasta cinco citas');
+ expect(author).toContain('función que construye el error');
+ expect(author).toContain('no se agreguen ingredientes');
+ expect(author).toContain('no demuestra qué mensaje ni qué status');
+ expect(reviewer).toContain('un handler que propaga e.message no demuestra');
+ expect(reviewer).toContain('aceptá esa conclusión acotada');
 });
