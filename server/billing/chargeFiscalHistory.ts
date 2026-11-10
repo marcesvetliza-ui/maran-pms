@@ -103,7 +103,7 @@ export async function invoiceSourceConflict(client: PoolClient, reservationId: s
     if(notes.reduce((sum,note)=>sum+money(note.monto_total)!,0n)!==total)continue;
     const originalSources=resolveSourceMap(original).sourceIds;
     if(notes.some(note=>[...resolveSourceMap(note).sourceIds].some(id=>!originalSources.has(id) &&
-      ![...originalSources].some(source=>unitParent(source)===unitParent(id)))))continue;
+      ![...originalSources].some(source=>(unitParent(source)??source)===(unitParent(id)??id)))))continue;
     const noteIds=new Set(notes.map(note=>String(note.id)));
     // A debit note, pending adjustment, or unknown descendant can restore
     // coverage. The original may hold a backwards pointer to its latest NC.
