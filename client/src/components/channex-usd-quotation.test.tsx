@@ -14,7 +14,7 @@ beforeEach(()=>{queryClient.clear();calls=[];savedQuote=true;vi.stubGlobal('fetc
  return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});
 }));});
 afterEach(()=>{cleanup();queryClient.clear();vi.unstubAllGlobals();});
-function mount(){render(<QueryClientProvider client={queryClient}><ChannexUsdQuotation connectionId="conn" plans={plans}/></QueryClientProvider>);}
+function mount(){render(<QueryClientProvider client={queryClient}><ChannexUsdQuotation connectionId="conn" plans={plans}/></QueryClientProvider>);fireEvent.click(screen.getByText("Importar precios ARS a USD (opcional, para carga inicial)"));}
 it('prepares a USD review without writes and applies exactly its token only after confirmation',async()=>{
  mount();await screen.findByText(/Actualizó: Marcelo/);
  expect(screen.queryByLabelText(/USD existente/)).not.toBeInTheDocument();

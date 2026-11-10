@@ -125,4 +125,24 @@ suite('Production preparation and actual per-user access',()=>{
   // The plan remains referenced by the reservation until normal cleanup.
  });
 
+ it('allows OTA operators to save native USD plans while rejecting ARS mutations and reception access',async()=>{
+  const body={name:'Canales USD test',roomTypeId:type,currency:'USD',baseRate:'119.09',rate1pax:'119.09',rate2pax:'144.98',validFrom:null,validTo:null};
+  expect((await request('POST','/api/channex/usd-rate-plans',reader,body)).status).toBe(403);
+  expect((await request('POST','/api/channex/usd-rate-plans',operator,{...body,currency:'ARS'})).status).toBe(400);
+  const created=await request('POST','/api/channex/usd-rate-plans',operator,body);expect(created.status,JSON.stringify(created.data)).toBe(201);
+  const plan=created.data.id;
+  try{
+   expect(created.data).toMatchObject({currency:'USD',baseRate:'119.09',rate2pax:'144.98'});
+   for(const role of ['jefe_recepcion','comercial']){
+    await pool.query('UPDATE system_users SET role=$2 WHERE id=$1',[operator,role]);
+    expect((await request('PATCH',`/api/channex/usd-rate-plans/${plan}`,operator,{...body,baseRate:'120.00'})).status).toBe(200);
+   }
+   expect((await request('PATCH',`/api/channex/usd-rate-plans/${plan}`,operator,{...body,roomTypeId:'unknown'})).status).toBe(404);
+   await pool.query("UPDATE rate_plans SET currency='ARS' WHERE id=$1",[plan]);
+   expect((await request('PATCH',`/api/channex/usd-rate-plans/${plan}`,operator,body)).status).toBe(409);
+   expect((await pool.query('SELECT base_rate::text FROM rate_plans WHERE id=$1',[plan])).rows[0].base_rate).toBe('120.00');
+   expect((await pool.query("SELECT 1 FROM audit_logs WHERE entity_id=$1 AND module='rate-plans'",[plan])).rowCount).toBe(3);
+  }finally{await pool.query('DELETE FROM audit_logs WHERE entity_id=$1',[plan]);await pool.query('DELETE FROM rate_plans WHERE id=$1',[plan]);await pool.query("UPDATE system_users SET role='manager' WHERE id=$1",[operator]);}
+ });
+
 });

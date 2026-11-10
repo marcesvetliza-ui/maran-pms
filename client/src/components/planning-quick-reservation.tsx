@@ -307,7 +307,7 @@ export function QuickReservationDialog({
     { value: "despegar", label: "Despegar" }, { value: "empresa", label: "Empresa" },
     { value: "agencia", label: "Agencia de Viajes" },
   ];
-  const roomRatePlans = ratePlans?.filter(rp => rp.roomTypeId === reservationData.roomTypeId) || [];
+  const roomRatePlans = ratePlans?.filter(rp => rp.roomTypeId === reservationData.roomTypeId && (!rp.currency || rp.currency === "ARS")) || [];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

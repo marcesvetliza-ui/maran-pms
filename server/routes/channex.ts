@@ -1,3 +1,4 @@
+import {registerUsdRatePlans} from '../channex/usdRatePlans';
 import {registerUsdConversionRoutes} from '../channex/usdRoutes';
 import { updateRoomSelection } from "../channex/roomSelection";
 import { requireChannex, registerChannexAccessRoutes } from '../channex/access';
@@ -58,6 +59,7 @@ export function registerChannexRoutes(app: Express) {
   registerChannexAriRoutes(app, pool);
   registerChannexInboundRoutes(app, pool);
   registerUsdConversionRoutes(app, pool);
+  registerUsdRatePlans(app);
   // --- Conexiones (config restringida) ---
 
   // Lectura de conexiones: cualquier usuario autenticado (la bandeja necesita

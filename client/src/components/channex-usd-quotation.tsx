@@ -17,13 +17,13 @@ export function ChannexUsdQuotation({connectionId,plans}:{connectionId:string;pl
  const sources=plans.filter(p=>p.currency==='ARS'),busy=saveQuote.isPending||convert.isPending;
  const rows=preview?.plans.flatMap((p:any)=>p.calendarChanges.map((change:any)=>({...change,planId:p.sourceId})))||[];
  const name=(id:string)=>{const plan=plans.find(p=>p.id===id);return `${plan?.roomType?.name||''} · ${plan?.name||id}`;};
- return <div className="space-y-5"><Card><CardHeader><CardTitle>Cotización ARS / USD</CardTitle><p className="text-sm text-muted-foreground">Una referencia para calcular tarifas de Booking en USD y registrar nuevas reservas USD en el folio ARS. Cambiarla no recalcula tarifas ni reservas automáticamente.</p></CardHeader><CardContent className="space-y-4">
+ return <div className="space-y-5"><Card><CardHeader><CardTitle>Cotización ARS / USD</CardTitle><p className="text-sm text-muted-foreground">Referencia para registrar nuevas reservas USD en el folio ARS. Las tarifas de los canales se cargan directamente en Tarifas USD y no se recalculan al cambiar esta cotización.</p></CardHeader><CardContent className="space-y-4">
  {query.isLoading?<p>Cargando cotización…</p>:query.error?<p role="alert">No se pudo consultar la cotización. <Button variant="outline" onClick={()=>query.refetch()}>Reintentar</Button></p>:<>
  {query.data.quote.rate?<div className="rounded-lg border bg-primary/5 p-4"><p className="font-semibold">1 USD = {money(query.data.quote.rate,'ARS')}</p><p className="text-sm text-muted-foreground">Vigente desde {new Date(query.data.quote.updatedAt).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires'})} · Actualizó: {query.data.lastEdit?.actor||'Sin registro'}</p><p className="text-sm">{query.data.lastEdit?.reason}</p></div>:<p className="text-sm">Todavía no hay cotización guardada. Valor inicial propuesto: ARS 1.545 por USD.</p>}
  <ChannexSettlementRate key={query.data.quote.updatedAt||'initial'} rate={query.data.quote.rate} initialRate="1545" pending={busy} onSave={(rate,reason)=>saveQuote.mutate({rate,reason})}/>
  </>}
  </CardContent></Card>
- <Card><CardHeader><CardTitle>Preparar tarifas USD para Booking</CardTitle><p className="text-sm text-muted-foreground">Tarifa USD = tarifa ARS ÷ cotización. Se crean o actualizan copias USD identificadas por esta conexión. No se modifica el plan ARS de origen ni se activa o remapea el canal.</p></CardHeader><CardContent className="space-y-4">
+ <details className="rounded-lg border"><summary className="cursor-pointer p-4 text-sm">Importar precios ARS a USD (opcional, para carga inicial)</summary><Card><CardHeader><CardTitle>Preparar tarifas USD para Booking</CardTitle><p className="text-sm text-muted-foreground">Tarifa USD = tarifa ARS ÷ cotización. Se crean o actualizan copias USD identificadas por esta conexión. No se modifica el plan ARS de origen ni se activa o remapea el canal.</p></CardHeader><CardContent className="space-y-4">
  <p className="rounded border p-3 text-sm">Antes de enviar estos planes a Booking, tendremos que revisar la moneda USD en Channex y sus mapeos. La conversión prepara los planes del PMS; no cambia esa configuración.</p>
  <fieldset disabled={busy} className="space-y-3"><legend className="font-medium">Planes ARS de origen ({selected.length} seleccionados)</legend>
  <div className="flex flex-wrap gap-2">{sources.map(p=><label key={p.id} className={`flex items-center gap-2 rounded-lg border p-3 text-sm ${selected.includes(p.id)?'border-primary bg-primary/5':''}`}><input type="checkbox" checked={selected.includes(p.id)} onChange={()=>{setSelected(ids=>ids.includes(p.id)?ids.filter(id=>id!==p.id):[...ids,p.id]);setPreview(null);}}/>{name(p.id)}</label>)}</div>
@@ -37,5 +37,5 @@ export function ChannexUsdQuotation({connectionId,plans}:{connectionId:string;pl
  <Button disabled={busy} onClick={()=>convert.mutate(true)}>Confirmar conversión de planes USD</Button><Button variant="ghost" disabled={busy} onClick={()=>setPreview(null)}>Cancelar revisión</Button>
  </section>}
  {notice&&<p role="status" className="text-sm">{notice}</p>}{(saveQuote.error||convert.error)&&<p role="alert" className="text-destructive">{parseApiError(saveQuote.error||convert.error)}</p>}
- </CardContent></Card></div>;
+ </CardContent></Card></details></div>;
 }

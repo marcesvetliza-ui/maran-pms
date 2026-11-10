@@ -23,11 +23,11 @@ try{
   assert.equal(await page.getByLabel('Hasta período 1',{exact:true}).inputValue(),'2026-11-16');
   assert.equal(await page.getByLabel('Acción de precio período 1',{exact:true}).count(),0);
   await page.getByLabel('Acción de precios por ocupación período 1',{exact:true}).selectOption('set');
-  await page.getByLabel('Precio 1 personas período 1',{exact:true}).fill('150000');
-  await page.getByLabel('Precio 2 personas período 1',{exact:true}).fill('170000');
+  await page.getByLabel('Precio 1 personas período 1',{exact:true}).fill('150');
+  await page.getByLabel('Precio 2 personas período 1',{exact:true}).fill('170');
   await page.getByRole('button',{name:'Vincular habitaciones',exact:true}).click();
   await page.getByRole('button',{name:'Calendario',exact:true}).click();
-  assert.equal(await page.getByLabel('Precio 1 personas período 1',{exact:true}).inputValue(),'150000');
+  assert.equal(await page.getByLabel('Precio 1 personas período 1',{exact:true}).inputValue(),'150');
   assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.method!=='GET').length),0);
   await page.getByRole('button',{name:'Revisar cambios',exact:true}).click();
   await page.getByRole('region',{name:'Revisión de cambios'}).waitFor();
@@ -43,6 +43,7 @@ try{
   const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',error=>errors.push(error.message));
   await page.goto('http://127.0.0.1:5018/?role=manager');await page.getByRole('button',{name:'Cotización',exact:true}).click();
   await page.getByText('Cotización ARS / USD',{exact:true}).waitFor();
+  await page.getByText('Importar precios ARS a USD (opcional, para carga inicial)',{exact:true}).click();
   await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Revisar conversión a USD'}).click();
   await page.getByRole('region',{name:'Revisión de conversión USD'}).waitFor();
   assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.url.endsWith('/usd/apply')).length),0);
@@ -51,6 +52,15 @@ try{
   await page.getByRole('button',{name:'Confirmar conversión de planes USD'}).click();await page.getByRole('status').filter({hasText:'Planes USD guardados'}).waitFor();
   assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.url.endsWith('/usd/apply')).length),1);await page.close();
  }
+ const native=await browser.newPage({viewport:{width:1440,height:1000}});native.on('pageerror',error=>errors.push(error.message));
+ await native.goto('http://127.0.0.1:5018/?role=manager');await native.getByRole('button',{name:'Tarifas USD',exact:true}).click();
+ await native.getByRole('button',{name:'Nueva tarifa USD'}).click();await native.getByTestId('input-rate-plan-name').fill('Canales USD');
+ await native.getByTestId('select-room-type').click();await native.getByRole('option',{name:'Premium',exact:true}).click();
+ await native.getByTestId('input-base-rate').fill('119.09');await native.getByTestId('input-rate-1pax').fill('119.09');await native.getByTestId('input-rate-2pax').fill('144.98');
+ await native.screenshot({path:`${out}/native-usd-form.png`,fullPage:true});await native.getByRole('button',{name:'Crear Plan',exact:true}).click();
+ await native.waitForFunction(()=>window.__otaRequests.some(r=>r.method==='POST'&&r.url==='/api/channex/usd-rate-plans'));
+ const created=await native.evaluate(()=>window.__otaRequests.find(r=>r.method==='POST'&&r.url==='/api/channex/usd-rate-plans').body);
+ assert.equal(created.currency,'USD');assert.equal(created.rate2pax,'144.98');await native.close();
  const matrix=await browser.newPage({viewport:{width:1440,height:1000}});await matrix.goto('http://127.0.0.1:5018/?matrix');await matrix.getByTestId('checkbox-permiso-reception-api:ota:read').waitFor();
  assert(await matrix.getByTestId('checkbox-permiso-admin-api:ota:config').isDisabled());
  await matrix.screenshot({path:`${out}/matrix.png`,fullPage:true});

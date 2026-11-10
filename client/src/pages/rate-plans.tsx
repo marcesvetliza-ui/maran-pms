@@ -63,7 +63,9 @@ export function RatePlanFormDialog({
   open,
   onOpenChange,
   onSuccess,
+  channelUsd = false,
 }: {
+  channelUsd?: boolean;
   ratePlan?: RatePlanWithRoomType;
   roomTypes: RoomType[];
   open: boolean;
@@ -82,7 +84,7 @@ export function RatePlanFormDialog({
     rate2pax: ratePlan?.rate2pax || "",
     rate3pax: ratePlan?.rate3pax || "",
     rate4pax: ratePlan?.rate4pax || "",
-    currency: ratePlan?.currency || "ARS",
+    currency: ratePlan?.currency || (channelUsd ? "USD" : "ARS"),
     refundable: ratePlan?.refundable || "true",
     cancellationPolicy: ratePlan?.cancellationPolicy || "",
     validFrom: ratePlan?.validFrom || "",
@@ -101,7 +103,7 @@ export function RatePlanFormDialog({
         rate2pax: ratePlan?.rate2pax || "",
         rate3pax: ratePlan?.rate3pax || "",
         rate4pax: ratePlan?.rate4pax || "",
-        currency: ratePlan?.currency || "ARS",
+        currency: ratePlan?.currency || (channelUsd ? "USD" : "ARS"),
         refundable: ratePlan?.refundable || "true",
         cancellationPolicy: ratePlan?.cancellationPolicy || "",
         validFrom: ratePlan?.validFrom || "",
@@ -110,7 +112,7 @@ export function RatePlanFormDialog({
       setVersionMode("direct");
       setEffectiveFrom("");
     }
-  }, [open, ratePlan?.id]);
+  }, [open, ratePlan?.id, channelUsd]);
 
   const selectedRoomType = roomTypes.find(rt => rt.id === formData.roomTypeId);
   const maxOcc = selectedRoomType?.maxOccupancy || 4;
@@ -124,9 +126,9 @@ export function RatePlanFormDialog({
       payload.validFrom = data.validFrom || null;
       payload.validTo = data.validTo || null;
       if (isEditing) {
-        return apiRequest("PATCH", `/api/rate-plans/${ratePlan.id}`, payload);
+        return apiRequest("PATCH", `${channelUsd ? "/api/channex/usd-rate-plans" : "/api/rate-plans"}/${ratePlan.id}`, payload);
       }
-      return apiRequest("POST", "/api/rate-plans", payload);
+      return apiRequest("POST", channelUsd ? "/api/channex/usd-rate-plans" : "/api/rate-plans", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/rate-plans"] });
@@ -203,6 +205,7 @@ export function RatePlanFormDialog({
             <div className="grid gap-2">
               <Label htmlFor="roomType">Tipo de Habitación</Label>
               <Select
+                disabled={channelUsd && isEditing}
                 value={formData.roomTypeId}
                 onValueChange={(value) => setFormData({ ...formData, roomTypeId: value })}
               >
@@ -235,17 +238,18 @@ export function RatePlanFormDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="currency">Moneda</Label>
-                {isPilot ? <Select value={formData.currency || "ARS"} onValueChange={currency => setFormData({ ...formData, currency })}>
+                {isPilot && !channelUsd ? <Select value={formData.currency || "ARS"} onValueChange={currency => setFormData({ ...formData, currency })}>
                   <SelectTrigger id="currency"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ARS">ARS — Peso Argentino</SelectItem>
                     <SelectItem value="USD">USD — Dólar estadounidense</SelectItem>
                   </SelectContent>
                 </Select> : <div id="currency" className="flex items-center h-10 px-3 rounded-md border bg-muted/50 text-sm text-muted-foreground">
-                  {formData.currency || "ARS"}
+                  {formData.currency === "USD" ? "USD — Dólar estadounidense" : "ARS — Peso Argentino"}
                 </div>}
-                {isPilot && formData.currency === "USD" && <p className="text-xs text-muted-foreground">Ingresá los precios en USD. Esta selección no convierte importes.</p>}
-                {isPilot && isEditing && formData.currency !== ratePlan.currency && <p role="status" className="text-sm text-amber-700 dark:text-amber-300">Vas a corregir la moneda de {ratePlan.currency} a {formData.currency}. Los importes se conservan: no se aplica conversión.</p>}
+                {isPilot && !channelUsd && formData.currency === "USD" && <p className="text-xs text-muted-foreground">Ingresá los precios en USD. Esta selección no convierte importes.</p>}
+                {isPilot && !channelUsd && isEditing && formData.currency !== ratePlan.currency && <p role="status" className="text-sm text-amber-700 dark:text-amber-300">Vas a corregir la moneda de {ratePlan.currency} a {formData.currency}. Los importes se conservan: no se aplica conversión.</p>}
+
               </div>
             </div>
             {formData.roomTypeId && (
@@ -352,7 +356,7 @@ export function RatePlanFormDialog({
               </div>
             </div>
 
-            {isEditing && (
+            {isEditing && !channelUsd && (
               <div className="rounded-md border bg-muted/50 p-3 space-y-3">
                 <Label className="text-sm font-medium">Modo de edición</Label>
                 <div className="flex gap-2">
