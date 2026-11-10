@@ -4,9 +4,10 @@ import { requireAuth, requirePermission } from "../auth";
 import { guestStayProfileSchema } from "@shared/guestStayProfile";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool } from "../db";
-import { guests, reservations, roomTypes as roomTypesTable, accountMovements, type AccountEntityType } from "../../shared/schema";
-import { eq, and, inArray, gte, lte, sql } from "drizzle-orm";
+import { guests, companies, agencies, reservations, roomTypes as roomTypesTable, accountMovements, type AccountEntityType } from "../../shared/schema";
+import { eq, and, inArray, gte, lte, sql, getTableColumns, isNull, desc } from "drizzle-orm";
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
+import { activeSalesRecord } from "../salesArchive";
 import { visibleGuestCondition } from "../guest-visibility";
 import { registerCcReceiptCashRepairRoutes } from "./cc-receipt-cash-repair";
 
@@ -763,35 +764,28 @@ export function registerGuestsRoutes(app: Express) {
   app.get("/api/account-movements/receipts", async (req, res) => {
     try {
       const { from, to, entityType, search } = req.query as { from?: string; to?: string; entityType?: string; search?: string };
-      const summary = await storage.getAccountSummary();
-
-      const movements: any[] = [];
-
-      const pushEntity = async (entities: { id: string; name: string }[], typeName: string, typeKey: string) => {
-        for (const e of entities) {
-          if (entityType && entityType !== typeKey) continue;
-          if (search && !e.name.toLowerCase().includes(search.toLowerCase())) continue;
-          const ms = await storage.getAccountMovements(typeKey as any, e.id);
-          ms
-            .filter(m => m.type === "pago"
-              && !m.reservationId && !m.paymentId && !m.groupPaymentId)
-            .forEach(m => movements.push({ ...m, entityName: e.name, entityTypeName: typeName }));
-        }
-      };
-
-      await pushEntity(summary.companies, "Empresa", "company");
-      await pushEntity(summary.agencies, "Agencia", "agency");
-      if (summary.guests) await pushEntity(summary.guests, "Huésped", "guest");
-
-      const filtered = movements
-        .filter(m => {
-          if (from && m.date < from) return false;
-          if (to && m.date > to) return false;
-          return true;
-        })
-        .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt).localeCompare(String(a.createdAt)));
-
-      res.json(filtered);
+      // Receipts are historical documents, independent of the account's
+      // current balance. A settled account must retain all of its receipts.
+      const name=sql<string>`COALESCE(CASE ${accountMovements.entityType}
+        WHEN 'company' THEN COALESCE(NULLIF(${companies.nombreFantasia},''),${companies.razonSocial})
+        WHEN 'agency' THEN COALESCE(NULLIF(${agencies.nombreFantasia},''),${agencies.razonSocial})
+        WHEN 'guest' THEN ${guests.lastName} || ' ' || ${guests.firstName} END,${accountMovements.entityId})`;
+      const conditions=[eq(accountMovements.type,'pago'),isNull(accountMovements.reservationId),
+        isNull(accountMovements.paymentId),isNull(accountMovements.groupPaymentId),
+        activeSalesRecord('account_movement',accountMovements.id)];
+      if(from)conditions.push(gte(accountMovements.date,from));
+      if(to)conditions.push(lte(accountMovements.date,to));
+      if(entityType && !['company','agency','guest'].includes(entityType))return res.status(400).json({error:'Tipo de cuenta inválido'});
+      if(entityType)conditions.push(eq(accountMovements.entityType,entityType as AccountEntityType));
+      if(search)conditions.push(sql`strpos(lower(${name}),lower(${search})) > 0`);
+      const receipts=await db.select({...getTableColumns(accountMovements),entityName:name,
+        entityTypeName:sql<string>`CASE ${accountMovements.entityType} WHEN 'company' THEN 'Empresa' WHEN 'agency' THEN 'Agencia' WHEN 'guest' THEN 'Huésped' END`})
+        .from(accountMovements)
+        .leftJoin(companies,and(eq(accountMovements.entityType,'company'),eq(accountMovements.entityId,companies.id)))
+        .leftJoin(agencies,and(eq(accountMovements.entityType,'agency'),eq(accountMovements.entityId,agencies.id)))
+        .leftJoin(guests,and(eq(accountMovements.entityType,'guest'),eq(accountMovements.entityId,guests.id)))
+        .where(and(...conditions)).orderBy(desc(accountMovements.date),desc(accountMovements.createdAt),desc(accountMovements.id));
+      res.json(receipts);
     } catch (error) {
       console.error("Error fetching receipts:", error);
       res.status(500).json({ error: "Error fetching receipts" });

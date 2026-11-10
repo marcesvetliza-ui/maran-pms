@@ -241,6 +241,7 @@ export function CCPaymentDialog({ open, onOpenChange, entityType, entityId, enti
       queryClient.invalidateQueries({ queryKey: [`/api/${pathSegment}`, entityId, "account"] });
       queryClient.invalidateQueries({ queryKey: [`/api/${pathSegment}`, entityId, "account", "pending-charges"] });
       queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/account-movements/receipts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
       onSuccess();
