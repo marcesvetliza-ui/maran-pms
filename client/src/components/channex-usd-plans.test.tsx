@@ -1,0 +1,31 @@
+import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import {QueryClientProvider} from '@tanstack/react-query';
+import {beforeEach,afterEach,it,expect,vi} from 'vitest';
+import {queryClient,apiRequest} from '@/lib/queryClient';
+import {ChannexUsdPlans} from './channex-usd-plans';
+vi.mock('@/hooks/use-toast',()=>({useToast:()=>({toast:vi.fn()})}));
+vi.mock('@/lib/queryClient',async original=>({...await original<typeof import('@/lib/queryClient')>(),apiRequest:vi.fn()}));
+beforeEach(()=>{queryClient.clear();vi.mocked(apiRequest).mockReset().mockResolvedValue(new Response('{}'));});
+afterEach(()=>{cleanup();queryClient.clear();});
+const rooms=[{id:'premium',name:'Premium',maxOccupancy:2}] as any;
+it('shows only USD plans, preserves their currency in editing and posts USD values without FX conversion',async()=>{
+ const plans=[{id:'usd',name:'Canales',roomTypeId:'premium',currency:'USD',baseRate:'119.09',rate1pax:'119.09',rate2pax:'144.98',refundable:'true',roomType:{name:'Premium'}},{id:'ars',name:'Venta directa ARS',currency:'ARS',baseRate:'184000'}] as any;
+ render(<QueryClientProvider client={queryClient}><ChannexUsdPlans plans={plans} roomTypes={rooms} onCalendar={vi.fn()}/></QueryClientProvider>);
+ expect(screen.queryByText(/Venta directa ARS/)).not.toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'Editar tarifa USD'}));
+ expect(screen.getByText('USD — Dólar estadounidense')).toBeInTheDocument();
+ fireEvent.change(screen.getByTestId('input-base-rate'),{target:{value:'125.50'}});
+ fireEvent.click(screen.getByRole('button',{name:'Guardar Cambios'}));
+ await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('PATCH','/api/channex/usd-rate-plans/usd',expect.objectContaining({currency:'USD',baseRate:'125.50',rate1pax:'119.09',rate2pax:'144.98'})));
+});
+it('creates a native USD plan using the OTA endpoint without saving ARS copies',async()=>{
+ const user=userEvent.setup();render(<QueryClientProvider client={queryClient}><ChannexUsdPlans plans={[]} roomTypes={rooms} onCalendar={vi.fn()}/></QueryClientProvider>);
+ await user.click(screen.getByRole('button',{name:'Nueva tarifa USD'}));
+ await user.type(screen.getByTestId('input-rate-plan-name'),'Canales USD');await user.click(screen.getByTestId('select-room-type'));await user.click(screen.getByRole('option',{name:'Premium'}));
+ await user.type(screen.getByTestId('input-base-rate'),'119.09');await user.type(screen.getByTestId('input-rate-1pax'),'119.09');await user.type(screen.getByTestId('input-rate-2pax'),'144.98');
+ expect([...document.querySelectorAll('input')].filter(input=>!input.checkValidity()).map(input=>({id:input.id,value:input.value,message:input.validationMessage}))).toEqual([]);
+ fireEvent.submit(screen.getByRole('button',{name:'Crear Plan'}).closest('form')!);
+ await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('POST','/api/channex/usd-rate-plans',expect.objectContaining({currency:'USD',roomTypeId:'premium',baseRate:'119.09',rate2pax:'144.98'})));
+ expect(vi.mocked(apiRequest).mock.calls).toHaveLength(1);
+});

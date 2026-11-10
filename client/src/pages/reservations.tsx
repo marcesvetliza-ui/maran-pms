@@ -549,6 +549,7 @@ export function ReservationFormDialog({
 
   // Filtra planes vencidos: si validTo existe y es anterior a la fecha de check-in, se excluye
   const ratePlans = ratePlansRaw?.filter(rp => {
+    if (rp.currency && rp.currency !== "ARS" && rp.id !== formData.ratePlanId) return false;
     if (rp.validTo && formData.checkInDate && rp.validTo < formData.checkInDate) return false;
     return true;
   });
