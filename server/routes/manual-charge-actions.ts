@@ -227,7 +227,7 @@ async function inspectManualSource(
     return { eligible: false, reason: "El cargo tiene otros movimientos financieros vinculados." };
   }
 
-  const fiscalConflict = await invoiceSourceConflict(client, reservationId, charge.id);
+  const fiscalConflict = await invoiceSourceConflict(client, reservationId, charge.id, undefined, operation === 'edit');
   if (fiscalConflict) return { eligible: false, reason: fiscalConflict };
 
   if (charge.status !== "active") {
@@ -321,7 +321,7 @@ async function loadActions(client: PoolClient, reservationId: string) {
   for (const row of result.rows as ChargeRow[]) {
     let proof: {eligible:boolean;reason?:string};
     if(row.category==='restaurant'){
-      try {const {inspectRestaurantRoomCharge}=await import('./restaurant-room-charge-void');await inspectRestaurantRoomCharge(client,reservationId,row);proof={eligible:true};}
+      try {const {inspectRestaurantRoomCharge}=await import('./restaurant-room-charge-void');await inspectRestaurantRoomCharge(client,reservationId,row,true);proof={eligible:true};}
       catch(error:any){if(!error.statusCode)throw error;proof={eligible:false,reason:error.message};}
     }else proof = await inspectManualSource(client, reservationId, row);
     let reason = proof.reason;

@@ -100,7 +100,7 @@ export async function anularRestaurantRoomCharge(
 }
 
 /** Verifies the room imputation without touching the Restaurant sale. */
-export async function inspectRestaurantRoomCharge(client: import('pg').PoolClient, reservationId: string, charge: NonNullable<Awaited<ReturnType<typeof support.getCharge>>>) {
+export async function inspectRestaurantRoomCharge(client: import('pg').PoolClient, reservationId: string, charge: NonNullable<Awaited<ReturnType<typeof support.getCharge>>>, allowReversed = false) {
   if (charge.category !== 'restaurant' || charge.status !== 'active' || charge.is_recurring || charge.unit_amount != null || !support.cents(charge.amount)) throw support.actionError(409,'Solo se pueden corregir cargos activos de Restaurante sin cálculo recurrente.');
   const chargeId = charge.id, expected = {amount:support.cents(charge.amount)!};
       // Group funding and master-folio fiscal attribution need their own scope.
@@ -112,7 +112,7 @@ export async function inspectRestaurantRoomCharge(client: import('pg').PoolClien
       if (group.rows.length) {
         throw support.actionError(409, "La reserva pertenece a un grupo. Revisá su Folio Maestro antes de corregir esta imputación.", "group_scope_review");
       }
-      const fiscal = await support.invoiceSourceConflict(client, reservationId, chargeId);
+      const fiscal = await support.invoiceSourceConflict(client, reservationId, chargeId, undefined, allowReversed);
       if (fiscal) throw support.actionError(409, fiscal, "fiscal_history");
 
       const transfer = await client.query(
@@ -180,7 +180,7 @@ export async function editRestaurantRoomCharge(reservationId:string, chargeId:st
       const charge=await support.getCharge(client,reservationId,chargeId);
       if(!charge)throw support.actionError(404,'Cargo no encontrado en esta reserva.');
       if(charge.description!==expected.description || support.cents(charge.amount)!==expected.amount)throw support.actionError(409,'El cargo cambió desde que se abrió. Actualizá la pantalla.','stale_snapshot');
-      const movement=await inspectRestaurantRoomCharge(client,reservationId,charge);
+      const movement=await inspectRestaurantRoomCharge(client,reservationId,charge,true);
       const updated=(await client.query(`UPDATE charges SET description=$1,amount=$2 WHERE id=$3 AND reservation_id=$4
         RETURNING id,reservation_id,description,amount::text,date::text,category,status,created_by,is_recurring,unit_amount::text,anulado_por,motivo_anulacion,anulado_at`,[description,support.money(amount),chargeId,reservationId])).rows[0];
       let afterMovement=null;

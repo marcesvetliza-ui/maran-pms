@@ -179,6 +179,30 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     expect(JSON.parse(audit.details).after).toMatchObject({scope:'room_only',restaurantConsumptionPreserved:true});
     expect((await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Edición vieja',amount:'100'})).status).toBe(409);
   });
+  it.each(['restaurant','otros'])('allows %s correction after a fully reconciled NC and preserves all fiscal rows',async category=>{
+    const f=await createFixture({category});
+    const original=(await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,reserva_id,source_charge_ids,monto_total,monto_acreditado)VALUES('FB','anulada',$1,$2,300.50,300.50)RETURNING id",[f.reservationId,JSON.stringify([f.chargeId])])).rows[0].id;
+    const nc=(await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,nota_credito_id,monto_total,reconciliation_status)VALUES('NCB','emitida',$1,300.50,'conciliada')RETURNING id",[original])).rows[0].id;
+    await testPool.query('UPDATE sales_invoices SET nota_credito_id=$2 WHERE id=$1',[original,nc]);
+    const fiscal=(await testPool.query('SELECT * FROM sales_invoices WHERE id=ANY($1) ORDER BY id',[[original,nc]])).rows;
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`);
+    expect(actions.body.charges[0]).toMatchObject({eligible:true,canEdit:true});
+    const result=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Cargo corregido tras NC',amount:'200'});
+    expect(result.status,JSON.stringify(result.body)).toBe(200);
+    expect((await testPool.query('SELECT * FROM sales_invoices WHERE id=ANY($1) ORDER BY id',[[original,nc]])).rows).toEqual(fiscal);
+    expect((await testPool.query('SELECT balance::text FROM folios WHERE id=$1',[f.folioId])).rows[0].balance).toBe('200.00');
+  });
+  it.each(['partial','pending','debit','replacement','over-credit','wrong-source'])('keeps the edit blocked after %s fiscal coverage',async mode=>{
+    const f=await restaurantFixture();
+    const original=(await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,reserva_id,source_charge_ids,monto_total,monto_acreditado)VALUES('FB',$3,$1,$2,300.50,$4)RETURNING id",[f.reservationId,JSON.stringify([f.chargeId]),mode==='partial'?'parcial':'anulada',mode==='partial'?'100':'300.50'])).rows[0].id;
+    const nc=(await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,nota_credito_id,monto_total,reconciliation_status)VALUES('NCB','emitida',$1,$2,$3)RETURNING id",[original,mode==='partial'?'100':mode==='over-credit'?'301':'300.50',mode==='pending'?'pendiente':'conciliada'])).rows[0].id;
+    if(mode==='wrong-source')await testPool.query('UPDATE sales_invoices SET source_charge_ids=$2 WHERE id=$1',[nc,JSON.stringify(['unrelated-charge'])]);
+    if(mode==='debit')await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,nota_credito_id)VALUES('NDB','emitida',$1)",[nc]);
+    if(mode==='replacement')await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,reserva_id,source_charge_ids)VALUES('FB','emitida',$1,$2)",[f.reservationId,JSON.stringify([f.chargeId])]);
+    const result=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Corrección tras NC',amount:'200'});
+    expect(result.status).toBe(409);
+    expect((await testPool.query('SELECT amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0].amount).toBe('300.50');
+  });
   it('edits legacy Restaurant charges without inventing a financial mirror',async()=>{
     const f=await restaurantFixture(true),before=await restaurantSnapshot();
     expect((await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Consumo corregido',amount:'200'})).status).toBe(200);
@@ -378,7 +402,8 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
         source_charge_amounts jsonb,
         items jsonb,
         observaciones text,
-        nota_credito_id integer
+        nota_credito_id integer,
+        monto_total numeric(14,2), monto_acreditado numeric(14,2), reconciliation_status text
       );
       CREATE TABLE audit_logs (
         id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
