@@ -744,7 +744,7 @@ export default function AdminCuentasPage() {
 
   type ReceiptMovement = AccountMovement & { entityName: string; entityTypeName: string };
 
-  const { data: recibosRaw, isFetching: isRecibosFetching } = useQuery<ReceiptMovement[]>({
+  const { data: recibosRaw, isFetching: isRecibosFetching, isError: isRecibosError, refetch: refetchRecibos } = useQuery<ReceiptMovement[]>({
     queryKey: ["/api/account-movements/receipts", recibosFrom, recibosTo, recibosEntityType, recibosSearch],
     queryFn: async () => {
       const params = new URLSearchParams({ from: recibosFrom, to: recibosTo });
@@ -1385,6 +1385,8 @@ export default function AdminCuentasPage() {
           <div className="space-y-1.5">
             {[1,2,3,4].map(i => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}
           </div>
+        ) : isRecibosError ? (
+          <div role="alert" className="rounded-lg border p-4 text-sm">No se pudieron consultar los recibos emitidos. <Button variant="outline" size="sm" onClick={()=>refetchRecibos()}>Reintentar</Button></div>
         ) : recibos.length === 0 ? (
           <div className="text-center py-14 text-muted-foreground border rounded-lg bg-muted/20">
             <Receipt className="h-9 w-9 mx-auto mb-2 opacity-30" />
