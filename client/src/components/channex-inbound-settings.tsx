@@ -7,7 +7,6 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/App";
 import { ChannexReadiness } from "./channex-readiness";
-import { ChannexSettlementRate } from "./channex-settlement";
 const reasons: Record<string, string> = {
   UNLINKED_EXTERNAL_RESERVATION: "Ya existe una reserva con esta referencia externa; revisá su vínculo",
   INVALID_REVISION: "La revisión no tiene el formato esperado", INVALID_BOOKING: "Faltan datos de la reserva",
@@ -46,8 +45,7 @@ export function ChannexInboundSettings({ connectionId }: { connectionId: string 
     {canWrite&&<ChannexReadiness key={connectionId} connectionId={connectionId} />}
     {query.isLoading ? <p>Cargando estado…</p> : query.error ? <p role="alert">No se pudo consultar la recepción.</p> : query.data ? <>
       <p className="text-sm">Esta conexión: {query.data.settings.enabled ? "habilitada" : "pausada"}.</p>
-      {canWrite&&<ChannexSettlementRate key={query.data.settings.exchange_rate_updated_at || "initial"} rate={query.data.settings.settlement_exchange_rate || null} pending={action.isPending}
-        onSave={(rate, reason) => action.mutate({ method: "PATCH", path: "/settlement-rate", body: { rate, reason } })} />}
+      {canWrite&&<p className="text-sm text-muted-foreground">La cotización para nuevas reservas USD se administra en Configuración y mapeos → Cotización.</p>}
       <div className="flex flex-wrap gap-2">{canWrite&&<Button disabled={action.isPending} variant="outline" onClick={() => action.mutate({ method: "PATCH", body: { enabled: !query.data!.settings.enabled } })}>{query.data.settings.enabled ? "Pausar recepción" : "Habilitar recepción"}</Button>}
         {canWrite&&<Button disabled={action.isPending} variant="outline" onClick={() => action.mutate({ method: "POST", path: "/webhook-token" })}>{query.data.settings.has_token ? "Renovar acceso del webhook" : "Generar acceso del webhook"}</Button>}
         <Button variant="ghost" onClick={() => query.refetch()}>Actualizar estado</Button></div>

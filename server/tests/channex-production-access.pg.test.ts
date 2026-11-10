@@ -44,6 +44,9 @@ suite('Production preparation and actual per-user access',()=>{
   expect((await request('POST','/api/channex/connections',reader,{})).status).toBe(403);
   expect((await request('POST','/api/channex/connections/unknown/ari/full-sync',reader,{})).status).toBe(403);
   expect((await request('POST','/api/channex/connections/unknown/inbound/retry',reader,{})).status).toBe(403);
+  expect((await request('GET','/api/channex/connections/unknown/usd',reader)).status).toBe(403);
+  for(const action of ['preview','apply'])expect((await request('POST',`/api/channex/connections/unknown/usd/${action}`,reader,{})).status).toBe(403);
+  expect((await request('GET','/api/channex/connections/unknown/usd',operator)).status).toBe(404);
   expect((await request('GET','/api/channex/access/users',operator)).status).toBe(403);
   expect((await request('PUT',`/api/channex/access/users/${reader}`,admin,{permissions:['config']})).status).toBe(410);
   // Legacy individual grants must not bypass a matrix revocation.

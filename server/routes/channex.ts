@@ -1,3 +1,4 @@
+import {registerUsdConversionRoutes} from '../channex/usdRoutes';
 import { updateRoomSelection } from "../channex/roomSelection";
 import { requireChannex, registerChannexAccessRoutes } from '../channex/access';
 import { connectionUrl, PRODUCTION_URL, DEMO_URL, productionEnabled } from '../channex/connectionPolicy';
@@ -56,6 +57,7 @@ export function registerChannexRoutes(app: Express) {
   app.get('/api/channex/runtime',requireChannex('config'),(_req,res)=>res.json({productionAriEnabled:productionEnabled('ari'),productionInboundEnabled:productionEnabled('inbound'),credentialsStorageReady:(process.env.CHANNEX_CREDENTIALS_ENCRYPTION_KEY?.length||0)>=32}));
   registerChannexAriRoutes(app, pool);
   registerChannexInboundRoutes(app, pool);
+  registerUsdConversionRoutes(app, pool);
   // --- Conexiones (config restringida) ---
 
   // Lectura de conexiones: cualquier usuario autenticado (la bandeja necesita
