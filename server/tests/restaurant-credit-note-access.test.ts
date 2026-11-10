@@ -5,6 +5,7 @@ import {PgDialect} from 'drizzle-orm/pg-core';
 const state=vi.hoisted(()=>({grants:new Set<string>(),rows:[] as unknown[],queries:[] as unknown[]}));
 vi.mock('../permissions',()=>({hasPermission:(_role:string,key:string)=>state.grants.has(key)}));
 vi.mock('../db',()=>({db:{execute:vi.fn(async(query:unknown)=>{state.queries.push(query);return {rows:state.rows};})}}));
+import {db} from '../db';
 import {requireCreditNoteAccess,RESTAURANT_CREDIT_NOTE_PERMISSION} from '../billing/restaurantCreditNoteAccess';
 let server:Server|undefined;
 afterEach(async()=>{if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;state.grants.clear();state.rows=[];state.queries=[];});
@@ -29,4 +30,10 @@ it('rejects invoices outside the scoped lookup and never enters the fiscal handl
 });
 it('does not grant fiscal access from the restaurant sidebar alone',async()=>{
  state.grants.add('sidebar:/restaurant');expect((await request()).status).toBe(403);expect(state.queries).toHaveLength(0);
+});
+
+it('fails closed if origin verification is unavailable',async()=>{
+ state.grants.add(RESTAURANT_CREDIT_NOTE_PERMISSION);
+ vi.mocked(db.execute).mockRejectedValueOnce(Error('synthetic database failure'));
+ expect((await request()).status).toBe(503);
 });

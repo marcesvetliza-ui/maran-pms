@@ -89,6 +89,12 @@ vi.mock("../db-storage", () => ({
   },
   getArgentinaToday: () => "2026-08-23",
 }));
+// Financial workflow fixtures already bypass authentication. Supply the same
+// general-finance grant to the scoped NC middleware; origin authorization has
+// separate HTTP and real-PostgreSQL tests.
+vi.mock("../permissions", () => ({
+  hasPermission: (_role: string, key: string) => key === "api:billing:nc-reconciliation",
+}));
 vi.mock("../auth", () => ({
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
   requireRole: () => (_req: any, _res: any, next: () => void) => next(),
