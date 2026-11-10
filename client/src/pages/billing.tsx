@@ -321,6 +321,7 @@ export default function BillingPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/companies"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/agencies"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/account-summary"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/groups"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/billing/credit-note-reconciliations/pending"] }),
       ]);

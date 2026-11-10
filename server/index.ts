@@ -6,6 +6,7 @@ import { setupAuth } from "./auth";
 import { registerDebugPdfDownloadRoute } from "./debug-assets-routes";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
+import {createApiLimiter} from "./apiRateLimit";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
 import { InvalidAppEnvError, initAppEnv } from "./app-env";
@@ -110,15 +111,6 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 500,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Demasiadas solicitudes, intente en unos minutos" },
-  skip: (req) => req.path.startsWith("/api/public/"),
-});
-app.use("/api", apiLimiter);
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -147,6 +139,7 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 setupAuth(app);
+app.use("/api", createApiLimiter());
 
 // Descarga temporal de PDF — requiere sesión autenticada y bloquea
 // explícitamente al rol piloto_externo (Fase 9, ronda 2): no vive bajo
