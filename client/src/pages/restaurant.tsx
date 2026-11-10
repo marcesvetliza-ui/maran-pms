@@ -6279,7 +6279,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                         disabled={moveItemSelectedIds.size === 0 || !moveItemTargetOrderId || (moveItemTargetOrderId.startsWith("table:") && !transferNewWaiter.trim()) || transferItemsInSplitMutation.isPending}
                         onClick={() => {
                           if (currentOrder && moveItemTargetOrderId) {
-                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), itemQuantities: getOrderItems().filter((i:any)=>moveItemSelectedIds.has(i.id)).map((i:any)=>({id:i.id,quantity:moveItemQuantities[i.id],expectedQuantity:i.quantity,expectedSubtotal:i.subtotal})), targetOrderId: moveItemTargetOrderId,
+                            transferItemsInSplitMutation.mutate({ orderId: currentOrder.id, itemIds: Array.from(moveItemSelectedIds), itemQuantities: getOrderItems().filter((i:any)=>moveItemSelectedIds.has(i.id)).map((i:any)=>({id:i.id,quantity:moveItemQuantities[i.id],expectedQuantity:i.quantity,expectedSubtotal:String(i.subtotal)})), targetOrderId: moveItemTargetOrderId,
                               newOrderData: moveItemTargetOrderId.startsWith("table:") ? { waiterName: transferNewWaiter.trim(), areaId: currentOrder.areaId, orderLabel: null, covers: 1 } : undefined });
                           }
                         }}
@@ -6519,7 +6519,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                             payItemsMutation.mutate({
                               orderId: currentOrder.id,
                               itemIds: Array.from(payItemSelectedIds),
-                              itemQuantities: allItems.filter((i:any)=>payItemSelectedIds.has(i.id)).map((i:any)=>({id:i.id,quantity:payItemQuantities[i.id],expectedQuantity:i.quantity,expectedSubtotal:i.subtotal})),
+                              itemQuantities: allItems.filter((i:any)=>payItemSelectedIds.has(i.id)).map((i:any)=>({id:i.id,quantity:payItemQuantities[i.id],expectedQuantity:i.quantity,expectedSubtotal:String(i.subtotal)})),
                               method: payItemMethod,
                               receiptType: payItemReceipt,
                               roomReservationId: payItemMethod === "cuenta_habitacion" ? payItemRoomId : undefined,

@@ -83,6 +83,24 @@ suite("PostgreSQL real: transfer-items y pay-items de Restaurant", () => {
     await pool?.end();
   });
 
+  it('collects items from the actual bulk order response without rejecting the decimal snapshot',async()=>{
+    if(!pool)return;const source=await createOpenOrder('84800.00');
+    try{
+      const ids=[];
+      for(const amount of ['11000.00','35000.00','8800.00','30000.00']){
+        const item=await storage.createOrderItem({orderId:source,menuItemId:randomUUID(),quantity:1,unitPrice:amount,subtotal:amount,status:'ready'} as any);ids.push(item.id);
+      }
+      const listed=(await storage.getRestaurantOrders()).find(order=>order.id===source)!;
+      expect(listed.items).toHaveLength(4);
+      const chosen=listed.items.filter(item=>ids.slice(2).includes(item.id));
+      expect(chosen.every(item=>typeof item.subtotal==='string'&&typeof item.unitPrice==='string')).toBe(true);
+      const response=await request('POST',`/api/restaurant/orders/${source}/pay-items`,{itemIds:chosen.map(item=>item.id),itemQuantities:chosen.map(item=>({id:item.id,quantity:1,expectedQuantity:item.quantity,expectedSubtotal:item.subtotal})),method:'efectivo',receiptType:'ticket'});
+      expect(response.status,JSON.stringify(response.body)).toBe(200);
+      expect(response.body).toMatchObject({amount:'38800.00',remainingTotal:'46000.00',allPaid:false});
+      const rows=await storage.getOrderItems(source);expect(rows.filter(row=>row.paid)).toHaveLength(2);expect(rows.filter(row=>!row.paid)).toHaveLength(2);
+      expect((await pool.query("SELECT id FROM cash_movements WHERE source_type='restaurant_partial' AND source_id=$1",[source])).rows).toHaveLength(1);
+    }finally{await cleanupOrder(source);}
+  });
   it('collects one unit, rejects the stale retry and preserves the remaining units',async()=>{
     if(!pool)return;const source=await createOpenOrder('25000.00');
     try{

@@ -1,3 +1,4 @@
+import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
@@ -610,7 +611,7 @@ export function registerBillingRoutes(app: Express) {
   };
   app.patch('/api/billing/invoices/:id', requireAuth, requireActiveInvoice);
   app.post('/api/billing/invoices/:id/settle-center', requireAuth, requireActiveInvoice);
-  app.post('/api/billing/invoices/:id/nota-credito', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
+  app.post('/api/billing/invoices/:id/nota-credito', requireAuth, requireCreditNoteAccess, requireActiveInvoice);
   app.post('/api/billing/invoices/:id/nota-debito', requireAuth, requireActiveInvoice);
   app.post('/api/billing/credit-notes/:id/reconcile', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
   registerGroupFiscalCashRecoveryRoutes(app);
@@ -3193,7 +3194,7 @@ export function registerBillingRoutes(app: Express) {
   });
 
   // POST /api/billing/invoices/:id/nota-credito
-  app.post("/api/billing/invoices/:id/nota-credito", requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), async (req, res) => {
+  app.post("/api/billing/invoices/:id/nota-credito", requireAuth, requireCreditNoteAccess, async (req, res) => {
     let creditLockClient: any = null;
     let creditLockKey: string | null = null;
     try {
