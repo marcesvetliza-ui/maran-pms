@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function ChannexSettlementRate({ rate, pending, onSave }: { rate: string | null; pending: boolean; onSave: (rate: string | null, reason: string) => void }) {
-  const [value, setValue] = useState(rate || ""), [reason, setReason] = useState("");
+export function ChannexSettlementRate({ rate, pending, onSave, initialRate = "" }: { rate: string | null; initialRate?: string; pending: boolean; onSave: (rate: string | null, reason: string) => void }) {
+  const [value, setValue] = useState(rate || initialRate), [reason, setReason] = useState("");
   const validReason = reason.trim().length >= 5;
   const validRate = /^\d{1,6}(?:\.\d{1,6})?$/.test(value) && Number(value) > 0;
   return <div className="rounded border p-3 space-y-2 text-sm">
@@ -15,6 +15,7 @@ export function ChannexSettlementRate({ rate, pending, onSave }: { rate: string 
     <p>Ingresá cuántos pesos equivalen a un dólar y la fuente o criterio utilizado. Se aplica a reservas nuevas; las ya ingresadas conservan su cotización, incluso ante modificaciones del canal. Sin cotización, las nuevas reservas USD quedan para revisión.</p>
     <Label htmlFor="channex-settlement-rate">Pesos por USD</Label>
     <Input id="channex-settlement-rate" value={value} inputMode="decimal" onChange={event => setValue(event.target.value.replace(",", "."))} placeholder="Sin cotización configurada" disabled={pending} />
+    {initialRate&&<p className="text-xs text-muted-foreground">Ingresá 1545 para indicar mil quinientos cuarenta y cinco pesos, sin separador de miles.</p>}
     <Label htmlFor="channex-settlement-reason">Fuente o motivo de la cotización</Label>
     <Input id="channex-settlement-reason" value={reason} maxLength={500} onChange={event => setReason(event.target.value)} disabled={pending} />
     <div className="flex flex-wrap gap-2">

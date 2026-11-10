@@ -266,6 +266,8 @@ app.use((req, res, next) => {
       await ensureChannexAriSchema(pool);
       const {ensureChannexInboundSchema}=await import('./channex/inboundSchema');
       await ensureChannexInboundSchema(pool);
+      const {ensureUsdConversionSchema}=await import('./channex/usdConversion');
+      await ensureUsdConversionSchema(pool);
       const {startChannexAriWorker}=await import('./channex/ariWorker');
       const {startInboundWorker}=await import('./channex/inboundWorker');
       httpServer.once('close',startChannexAriWorker(pool));

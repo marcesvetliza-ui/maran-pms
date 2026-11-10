@@ -39,6 +39,18 @@ try{
   assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.url.endsWith('/apply')).length),1);
   await page.close();
  }
+ for(const width of [1440,390]){
+  const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('http://127.0.0.1:5018/?role=manager');await page.getByRole('button',{name:'Cotización',exact:true}).click();
+  await page.getByText('Cotización ARS / USD',{exact:true}).waitFor();
+  await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Revisar conversión a USD'}).click();
+  await page.getByRole('region',{name:'Revisión de conversión USD'}).waitFor();
+  assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.url.endsWith('/usd/apply')).length),0);
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Quotation should not overflow');
+  await page.screenshot({path:`${out}/quotation-${width}.png`,fullPage:true});
+  await page.getByRole('button',{name:'Confirmar conversión de planes USD'}).click();await page.getByRole('status').filter({hasText:'Planes USD guardados'}).waitFor();
+  assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.url.endsWith('/usd/apply')).length),1);await page.close();
+ }
  const matrix=await browser.newPage({viewport:{width:1440,height:1000}});await matrix.goto('http://127.0.0.1:5018/?matrix');await matrix.getByTestId('checkbox-permiso-reception-api:ota:read').waitFor();
  assert(await matrix.getByTestId('checkbox-permiso-admin-api:ota:config').isDisabled());
  await matrix.screenshot({path:`${out}/matrix.png`,fullPage:true});

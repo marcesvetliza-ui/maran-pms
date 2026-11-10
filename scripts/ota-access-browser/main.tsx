@@ -28,6 +28,8 @@ window.fetch=async(input:any,init?:RequestInit)=>{const url=String(input);let da
  }else if(url.endsWith('/apply')){for(const change of body.changes)for(const id of change.ratePlanIds)for(const date of calendarDays(change.dateFrom,change.dateTo))saved.set(id+date,applyCalendarValues(effective(id,date),change.values,'184000'));data={saved:true};}
  else{const q=new URL(url,location.origin).searchParams;data={cells:calendarDays(q.get('dateFrom')!,q.get('dateTo')!).flatMap(date=>(q.get('ratePlanIds')||'rack').split(',').map(id=>effective(id,date)))};}
  }
+ else if(url.endsWith('/usd'))data={quote:{rate:'1545',updatedAt:'2026-11-10T12:00:00Z'},lastEdit:{actor:'Administrador',reason:'Cotización de prueba'}};
+ else if(url.endsWith('/usd/preview')||url.endsWith('/usd/apply'))data={previewToken:'b'.repeat(64),exchangeRate:'1545',effectiveFrom:'2026-11-10',plans:[{sourceId:'rack',targetName:'RACK · Booking USD',sourceValues:{base_rate:'184000',rate_1pax:'184000',rate_2pax:'224000',rate_3pax:'236000'},values:{base_rate:'119.09',rate_1pax:'119.09',rate_2pax:'144.98',rate_3pax:'152.75'},before:null,calendarChanges:[]}]};
  else if(url.endsWith('/room-options'))data=rooms;
  else if(url.endsWith('/room-type-mappings'))data=[{id:'m1',channexRoomTypeTitle:'Premium hasta 3 personas',channexRoomTypeId:'remote',roomTypeId:'premium',roomIds:['301']}];
  else if(url.endsWith('/rate-plan-mappings'))data=[{id:'p1',channexRatePlanTitle:'Premium con desayuno',channexRoomTypeId:'remote',ratePlanId:'rack'}];
