@@ -60,3 +60,13 @@ it('disables the pencil when server fiscal/source checks reject editing',async()
  await waitFor(()=>expect(screen.getByTestId('button-edit-charge-parking')).toHaveAttribute('title','El cargo tiene comprobantes asociados.'));
  expect(screen.getByTestId('button-edit-charge-parking')).toBeDisabled();
 });
+
+it.each(['folio','checkout'] as const)('edits a Restaurant imputation from %s with its scope explained',async view=>{
+ charge={...charge,category:'restaurant',description:'CONSUMOS JUSTO RESTAURANT',roomOnly:true};
+ const user=await open(view);
+ expect(screen.getByText(/Se corrige el cargo a la habitación/)).toBeInTheDocument();
+ await user.clear(screen.getByLabelText('Importe total'));await user.type(screen.getByLabelText('Importe total'),'1500');
+ await user.type(screen.getByLabelText('Motivo del cambio'),'Consumo cargado de más');
+ await user.click(screen.getByRole('button',{name:'Guardar cargo'}));
+ await waitFor(()=>expect(charge.amount).toBe('1500'));
+});

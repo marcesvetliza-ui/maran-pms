@@ -166,6 +166,36 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     return Promise.all(queries.map(async sql => (await testPool.query(sql)).rows));
   }
 
+  it.each(['reception','jefe_recepcion','manager','admin'])('%s edits Restaurant room charges while retaining the originating sale',async role=>{
+    const f=await restaurantFixture(),before=await restaurantSnapshot();
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`,undefined,{'x-test-role':role});
+    expect(actions.body.charges[0]).toMatchObject({eligible:true,canEdit:true,roomOnly:true});
+    const result=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Restaurant corregido',amount:'200.25'},{'x-test-role':role});
+    expect(result.status,JSON.stringify(result.body)).toBe(200);
+    expect(await restaurantSnapshot()).toEqual(before);
+    expect((await testPool.query('SELECT amount::text,description FROM charges WHERE id=$1',[f.chargeId])).rows[0]).toEqual({amount:'200.25',description:'Restaurant corregido'});
+    expect((await testPool.query('SELECT total_charges::text,balance::text FROM folios WHERE id=$1',[f.folioId])).rows[0]).toEqual({total_charges:'200.25',balance:'200.25'});
+    const audit=(await testPool.query('SELECT details FROM audit_logs WHERE entity_id=$1',[f.chargeId])).rows[0];
+    expect(JSON.parse(audit.details).after).toMatchObject({scope:'room_only',restaurantConsumptionPreserved:true});
+    expect((await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Edición vieja',amount:'100'})).status).toBe(409);
+  });
+  it('edits legacy Restaurant charges without inventing a financial mirror',async()=>{
+    const f=await restaurantFixture(true),before=await restaurantSnapshot();
+    expect((await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Consumo corregido',amount:'200'})).status).toBe(200);
+    expect(await restaurantSnapshot()).toEqual(before);
+    expect((await testPool.query('SELECT 1 FROM folio_movements WHERE source_id=$1',[f.chargeId])).rows).toEqual([]);
+  });
+  it('rejects invoiced, closed and unauthorized Restaurant edits without changes',async()=>{
+    for(const mode of ['invoiced','closed','unauthorized']){
+      const f=await restaurantFixture();
+      if(mode==='invoiced')await testPool.query("INSERT INTO sales_invoices(reserva_id,estado,source_charge_ids)VALUES($1,'emitida',$2)",[f.reservationId,JSON.stringify([f.chargeId])]);
+      if(mode==='closed')await testPool.query("UPDATE folios SET status='closed' WHERE id=$1",[f.folioId]);
+      const result=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Corrección',amount:'200'},{'x-test-role':mode==='unauthorized'?'restaurant':'reception'});
+      expect(result.status).toBe(mode==='invoiced'?409:403);
+      expect((await testPool.query('SELECT amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0].amount).toBe('300.50');
+    }
+  });
+
   async function voidRestaurant(fixture: Fixture, role = "reception", overrides: Record<string, unknown> = {}) {
     return request("PATCH", `/api/charges/${fixture.chargeId}/anular`, {
       motivoAnulacion: "Cargo que no corresponde a esta habitación",

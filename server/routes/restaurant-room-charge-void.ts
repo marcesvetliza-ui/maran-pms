@@ -52,6 +52,57 @@ export async function anularRestaurantRoomCharge(
         throw support.actionError(409, "Solo se pueden anular cargos activos.");
       }
 
+      const movement = await inspectRestaurantRoomCharge(client, reservationId, charge);
+
+      const updated = await client.query(
+        `UPDATE charges SET status = 'anulado', anulado_por = $1,
+                motivo_anulacion = $2, anulado_at = NOW()
+          WHERE id = $3 AND reservation_id = $4 AND status = 'active'
+            AND description = $5 AND amount = $6::numeric
+          RETURNING id, reservation_id, description, amount::text, date::text, category,
+                    status, created_by, is_recurring, unit_amount::text,
+                    anulado_por, motivo_anulacion, anulado_at`,
+        [actor.name, motivo, chargeId, reservationId, expected.description, support.money(expected.amount)],
+      );
+      if (!updated.rows[0]) throw support.actionError(409, "El cargo cambió; no se anuló.", "stale_snapshot");
+
+      let reversal: unknown = null;
+      if (movement) {
+        const result = await client.query(
+          `INSERT INTO folio_movements
+             (folio_id, type, amount, description, source_type, source_id,
+              voided_movement_id, void_reason, registered_by)
+           VALUES ($1, 'charge', $2, $3, 'restaurant_room_charge_void', $4, $5, $6, $7)
+           RETURNING *`,
+          [movement.folio_id, support.money(-expected.amount),
+            `Anulación de imputación a habitación: ${charge.description}`,
+            chargeId, movement.id, motivo, actor.name],
+        );
+        reversal = result.rows[0];
+        await support.recalculateFolio(client, movement.folio_id);
+      }
+      const result = support.publicCharge(updated.rows[0]);
+      await support.writeAudit(client, {
+        actorId: actor.id, actorName: actor.name, ipAddress: actor.ipAddress,
+        action: "delete", reservationId, chargeId, entityType: "reservation_room_charge",
+        description: "Anulación de cargo en habitación; consumo de Restaurante conservado",
+        before: { charge: support.publicCharge(charge), folioMovement: movement ?? null },
+        after: { charge: result, reversal, scope: "room_only", restaurantConsumptionPreserved: true },
+        motivo,
+      });
+      await client.query("COMMIT");
+      return { ...result, roomOnly: true };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
+  });
+}
+
+/** Verifies the room imputation without touching the Restaurant sale. */
+export async function inspectRestaurantRoomCharge(client: import('pg').PoolClient, reservationId: string, charge: NonNullable<Awaited<ReturnType<typeof support.getCharge>>>) {
+  if (charge.category !== 'restaurant' || charge.status !== 'active' || charge.is_recurring || charge.unit_amount != null || !support.cents(charge.amount)) throw support.actionError(409,'Solo se pueden corregir cargos activos de Restaurante sin cálculo recurrente.');
+  const chargeId = charge.id, expected = {amount:support.cents(charge.amount)!};
       // Group funding and master-folio fiscal attribution need their own scope.
       // Do not silently reduce an obligation already covered by a group receipt.
       const group = await client.query(
@@ -59,7 +110,7 @@ export async function anularRestaurantRoomCharge(
         [reservationId],
       );
       if (group.rows.length) {
-        throw support.actionError(409, "La reserva pertenece a un grupo. Revisá su Folio Maestro antes de anular esta imputación.", "group_scope_review");
+        throw support.actionError(409, "La reserva pertenece a un grupo. Revisá su Folio Maestro antes de corregir esta imputación.", "group_scope_review");
       }
       const fiscal = await support.invoiceSourceConflict(client, reservationId, chargeId);
       if (fiscal) throw support.actionError(409, fiscal, "fiscal_history");
@@ -107,47 +158,38 @@ export async function anularRestaurantRoomCharge(
         }
       }
 
-      const updated = await client.query(
-        `UPDATE charges SET status = 'anulado', anulado_por = $1,
-                motivo_anulacion = $2, anulado_at = NOW()
-          WHERE id = $3 AND reservation_id = $4 AND status = 'active'
-            AND description = $5 AND amount = $6::numeric
-          RETURNING id, reservation_id, description, amount::text, date::text, category,
-                    status, created_by, is_recurring, unit_amount::text,
-                    anulado_por, motivo_anulacion, anulado_at`,
-        [actor.name, motivo, chargeId, reservationId, expected.description, support.money(expected.amount)],
-      );
-      if (!updated.rows[0]) throw support.actionError(409, "El cargo cambió; no se anuló.", "stale_snapshot");
+  return movement;
+}
 
-      let reversal: unknown = null;
-      if (movement) {
-        const result = await client.query(
-          `INSERT INTO folio_movements
-             (folio_id, type, amount, description, source_type, source_id,
-              voided_movement_id, void_reason, registered_by)
-           VALUES ($1, 'charge', $2, $3, 'restaurant_room_charge_void', $4, $5, $6, $7)
-           RETURNING *`,
-          [movement.folio_id, support.money(-expected.amount),
-            `Anulación de imputación a habitación: ${charge.description}`,
-            chargeId, movement.id, motivo, actor.name],
-        );
-        reversal = result.rows[0];
-        await support.recalculateFolio(client, movement.folio_id);
+/** Corrects the amount charged to the room; the originating sale is retained. */
+export async function editRestaurantRoomCharge(reservationId:string, chargeId:string, body:any, actor:Actor) {
+  if(!actor.id || !actor.name)throw support.actionError(403,'No se pudo identificar al usuario que corrige el cargo.');
+  support.validateEditBody(body);
+  const motivo=support.parseReason(body), expected=support.parseExpected(body);
+  const description=typeof body.description==='string'?body.description.trim():'';
+  const amount=support.cents(body.amount);
+  if(!description || description.length>500 || !amount)throw support.actionError(400,'Ingresá una descripción y un importe positivo válido.');
+  return support.withReservationInvoiceLock(reservationId,async client=>{
+    await client.query('BEGIN');
+    try {
+      const reservation=await support.getReservation(client,reservationId);
+      if(!reservation)throw support.actionError(404,'Reserva no encontrada.');
+      if(support.reservationIsClosed(reservation))throw support.actionError(403,'No se pueden editar cargos de una reserva o folio cerrado.');
+      const folios=await client.query("SELECT id,status,closed_at FROM folios WHERE entity_type='reservation' AND entity_id=$1 FOR UPDATE",[reservationId]);
+      if(folios.rows.length>1 || folios.rows.some(f=>f.status!=='open'||f.closed_at))throw support.actionError(409,'El folio requiere revisión antes de editar cargos.');
+      const charge=await support.getCharge(client,reservationId,chargeId);
+      if(!charge)throw support.actionError(404,'Cargo no encontrado en esta reserva.');
+      if(charge.description!==expected.description || support.cents(charge.amount)!==expected.amount)throw support.actionError(409,'El cargo cambió desde que se abrió. Actualizá la pantalla.','stale_snapshot');
+      const movement=await inspectRestaurantRoomCharge(client,reservationId,charge);
+      const updated=(await client.query(`UPDATE charges SET description=$1,amount=$2 WHERE id=$3 AND reservation_id=$4
+        RETURNING id,reservation_id,description,amount::text,date::text,category,status,created_by,is_recurring,unit_amount::text,anulado_por,motivo_anulacion,anulado_at`,[description,support.money(amount),chargeId,reservationId])).rows[0];
+      let afterMovement=null;
+      if(movement){
+        afterMovement=(await client.query('UPDATE folio_movements SET description=$1,amount=$2 WHERE id=$3 RETURNING *',[description,support.money(amount),movement.id])).rows[0];
+        await support.recalculateFolio(client,movement.folio_id);
       }
-      const result = support.publicCharge(updated.rows[0]);
-      await support.writeAudit(client, {
-        actorId: actor.id, actorName: actor.name, ipAddress: actor.ipAddress,
-        action: "delete", reservationId, chargeId, entityType: "reservation_room_charge",
-        description: "Anulación de cargo en habitación; consumo de Restaurante conservado",
-        before: { charge: support.publicCharge(charge), folioMovement: movement ?? null },
-        after: { charge: result, reversal, scope: "room_only", restaurantConsumptionPreserved: true },
-        motivo,
-      });
-      await client.query("COMMIT");
-      return { ...result, roomOnly: true };
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
-    }
+      await support.writeAudit(client,{actorId:actor.id,actorName:actor.name,ipAddress:actor.ipAddress,action:'update',reservationId,chargeId,entityType:'reservation_room_charge',description:'Corrección de cargo en habitación; consumo de Restaurante conservado',before:{charge:support.publicCharge(charge),folioMovement:movement??null},after:{charge:support.publicCharge(updated),folioMovement:afterMovement,scope:'room_only',restaurantConsumptionPreserved:true},motivo});
+      await client.query('COMMIT');return {...support.publicCharge(updated),roomOnly:true};
+    }catch(error){await client.query('ROLLBACK');throw error;}
   });
 }

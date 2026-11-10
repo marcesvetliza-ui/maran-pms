@@ -319,11 +319,16 @@ async function loadActions(client: PoolClient, reservationId: string) {
   );
   const charges = [];
   for (const row of result.rows as ChargeRow[]) {
-    const proof = await inspectManualSource(client, reservationId, row);
+    let proof: {eligible:boolean;reason?:string};
+    if(row.category==='restaurant'){
+      try {const {inspectRestaurantRoomCharge}=await import('./restaurant-room-charge-void');await inspectRestaurantRoomCharge(client,reservationId,row);proof={eligible:true};}
+      catch(error:any){if(!error.statusCode)throw error;proof={eligible:false,reason:error.message};}
+    }else proof = await inspectManualSource(client, reservationId, row);
     let reason = proof.reason;
     if (reservationIsClosed(reservation)) reason = "La reserva o su folio está cerrado o cancelado.";
     charges.push({
       id: row.id,
+      roomOnly: row.category==='restaurant',
       eligible: proof.eligible && !reservationIsClosed(reservation),
       ...(reason ? { reason } : {}),
       description: row.description,
@@ -590,13 +595,11 @@ export function registerManualChargeActionRoutes(app: Express) {
     requireRole([...MANUAL_CHARGE_EDIT_ROLES]),
     async (req, res) => {
       try {
-        const result = await mutateManualCharge(
-          req.params.reservationId,
-          req.params.chargeId,
-          "edit",
-          req.body,
-          requestActor(req),
-        );
+        assertAllowedBody(req.body,'edit');parseReason(req.body);parseExpected(req.body);
+        const charge=(await pool.query('SELECT category FROM charges WHERE id=$1 AND reservation_id=$2',[req.params.chargeId,req.params.reservationId])).rows[0];
+        const result = charge?.category==='restaurant'
+          ? await (await import('./restaurant-room-charge-void')).editRestaurantRoomCharge(req.params.reservationId,req.params.chargeId,req.body,requestActor(req))
+          : await mutateManualCharge(req.params.reservationId,req.params.chargeId,'edit',req.body,requestActor(req));
         res.json(result);
       } catch (error) {
         sendActionError(res, error);
@@ -636,6 +639,7 @@ export async function manualChargeHasSourceLedger(chargeId: string): Promise<boo
 /** Shared transaction/fiscal primitives; this does not broaden manual eligibility. */
 export const roomChargeActionSupport = {
   actionError, parseReason, parseExpected, cents, money, publicCharge,
+  validateEditBody: (body: unknown): void => { assertAllowedBody(body, "edit"); },
   validateVoidBody: (body: unknown): void => { assertAllowedBody(body, "void"); },
   withReservationInvoiceLock, getReservation, reservationIsClosed, getCharge,
   invoiceSourceConflict, recalculateFolio, writeAudit,
