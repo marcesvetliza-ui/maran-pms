@@ -47,7 +47,7 @@ export async function dispatchChannexAri(pool: Pool, transport: AriTransport = s
      AND waiting.kind=o.kind AND waiting.batch_id=o.batch_id AND waiting.status='pending' AND waiting.run_after>now())
    ORDER BY o.run_after,o.id LIMIT 1`)).rows[0];
     if (!job) return { state: 'idle' };
-    const connection = (await c.query(`SELECT c.id,c.environment,c.base_url,c.channex_property_id,c.api_key_encrypted,s.floor,s.currency
+    const connection = (await c.query(`SELECT c.id,c.environment,c.base_url,c.channex_property_id,c.api_key_encrypted,s.floor,s.currency,s.room_ids
     FROM channex_connections c JOIN channex_ari_settings s ON s.connection_id=c.id WHERE c.id=$1 AND s.enabled AND c.is_active`, [job.connection_id])).rows[0];
     // One committed PMS operation per request. Keep every row of that batch
     // together instead of merging independent cases or splitting a large save.

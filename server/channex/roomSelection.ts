@@ -4,14 +4,19 @@ type Queryable = Pick<PoolClient, 'query'>;
 export class RoomSelectionError extends Error {}
 
 /** null keeps the legacy whole-category mapping; [] never means all rooms. */
-export async function validateRoomSelections(c: Queryable, connectionId: string, floor: number | null, complete = true) {
+export async function validateRoomSelections(c: Queryable, connectionId: string, floor: number | null, complete = true, scopeRoomIds: string[] | null = null) {
   const mappings = (await c.query(`SELECT channex_room_type_id,room_type_id,room_ids
     FROM channex_room_type_mappings WHERE connection_id=$1`, [connectionId])).rows;
   const rooms = (await c.query(`SELECT id,room_type_id,floor FROM rooms
     WHERE is_active AND NOT COALESCE(is_virtual,false) AND room_number<>'REUB'
       AND (($1::int IS NULL AND floor IS DISTINCT FROM 99) OR floor=$1)`, [floor])).rows;
+  if (scopeRoomIds !== null && (!scopeRoomIds.length || new Set(scopeRoomIds).size !== scopeRoomIds.length || scopeRoomIds.some(id => !rooms.some(r => r.id === id)))) {
+    throw new RoomSelectionError('Elegí habitaciones físicas activas del piso configurado, sin repetirlas');
+  }
+  const scopedRooms = scopeRoomIds === null ? rooms : rooms.filter(r => scopeRoomIds.includes(r.id));
+  const relevant = scopeRoomIds === null ? mappings : mappings.filter(map => scopedRooms.some(r => r.room_type_id === map.room_type_id && (map.room_ids === null || map.room_ids.includes(r.id))));
   const owners = new Map<string, string>();
-  for (const map of mappings) {
+  for (const map of relevant) {
     if (!map.room_type_id) {
       if (complete) throw new RoomSelectionError('Completá un mapeo único para cada categoría antes de sincronizar');
       continue;
@@ -23,16 +28,19 @@ export async function validateRoomSelections(c: Queryable, connectionId: string,
     if (map.room_ids !== null && selected.length !== map.room_ids.length) {
       throw new RoomSelectionError('Las habitaciones deben estar activas, ser físicas y pertenecer a la categoría y al piso configurados');
     }
-    for (const room of selected) {
+    for (const room of selected.filter(r => scopeRoomIds === null || scopeRoomIds.includes(r.id))) {
       if (owners.has(room.id)) throw new RoomSelectionError('Una habitación no puede pertenecer a dos categorías de Channex en la misma conexión');
       owners.set(room.id, map.channex_room_type_id);
     }
     // Whole-category mappings still overlap even when there are no rooms yet.
-    if (mappings.some(other => other !== map && other.room_type_id === map.room_type_id && (other.room_ids === null || map.room_ids === null))) {
+    if (scopeRoomIds === null && mappings.some(other => other !== map && other.room_type_id === map.room_type_id && (other.room_ids === null || map.room_ids === null))) {
       throw new RoomSelectionError('Completá un mapeo único: para dividir una categoría elegí habitaciones específicas en ambos mapeos');
     }
   }
-  return mappings;
+  if (complete && scopeRoomIds !== null && scopedRooms.some(r => !owners.has(r.id))) {
+    throw new RoomSelectionError('Mapeá todas las habitaciones seleccionadas antes de activar el envío');
+  }
+  return relevant;
 }
 
 export async function updateRoomSelection(pool: Pool, id: string, input: { roomTypeId: string | null; roomIds?: string[] | null }) {

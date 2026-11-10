@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS channex_ari_settings (
  enabled boolean NOT NULL DEFAULT false, capture_started_at timestamptz, last_horizon_date date,
  updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE channex_ari_settings ADD COLUMN IF NOT EXISTS room_ids text[];
 ALTER TABLE channex_ari_settings ALTER COLUMN floor DROP NOT NULL;
 ALTER TABLE channex_ari_settings ADD COLUMN IF NOT EXISTS capture_started_at timestamptz;
 CREATE TABLE IF NOT EXISTS channex_ari_outbox (

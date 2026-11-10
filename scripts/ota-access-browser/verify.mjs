@@ -61,6 +61,23 @@ try{
  await native.waitForFunction(()=>window.__otaRequests.some(r=>r.method==='POST'&&r.url==='/api/channex/usd-rate-plans'));
  const created=await native.evaluate(()=>window.__otaRequests.find(r=>r.method==='POST'&&r.url==='/api/channex/usd-rate-plans').body);
  assert.equal(created.currency,'USD');assert.equal(created.rate2pax,'144.98');await native.close();
+ for(const width of [1440,390]){
+  const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('http://127.0.0.1:5018/?role=manager');
+  await page.getByRole('tab',{name:'Estado y sincronizaciones'}).click();
+  await page.getByRole('button',{name:'Habitaciones específicas',exact:true}).click();
+  assert(await page.getByRole('button',{name:'Guardar alcance',exact:true}).isDisabled());
+  await page.getByRole('checkbox',{name:'307 · Premium',exact:true}).check();
+  await page.getByLabel('Moneda de envío a Channex',{exact:true}).fill('USD');
+  assert.equal(await page.getByRole('checkbox',{name:'Captura de cambios activa',exact:true}).isChecked(),false);
+  assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.method!=='GET').length),0);
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Room scope should not overflow');
+  await page.screenshot({path:`${out}/single-room-${width}.png`,fullPage:true});
+  await page.getByRole('button',{name:'Guardar alcance',exact:true}).click();
+  await page.waitForFunction(()=>window.__otaRequests.some(r=>r.method==='PATCH'&&r.url.endsWith('/ari')));
+  assert.deepEqual(await page.evaluate(()=>window.__otaRequests.find(r=>r.method==='PATCH'&&r.url.endsWith('/ari')).body),{floor:3,currency:'USD',enabled:false,roomIds:['307']});
+  await page.close();
+ }
  const matrix=await browser.newPage({viewport:{width:1440,height:1000}});await matrix.goto('http://127.0.0.1:5018/?matrix');await matrix.getByTestId('checkbox-permiso-reception-api:ota:read').waitFor();
  assert(await matrix.getByTestId('checkbox-permiso-admin-api:ota:config').isDisabled());
  await matrix.screenshot({path:`${out}/matrix.png`,fullPage:true});

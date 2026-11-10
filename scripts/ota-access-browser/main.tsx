@@ -34,7 +34,7 @@ window.fetch=async(input:any,init?:RequestInit)=>{const url=String(input);let da
  else if(url.endsWith('/room-type-mappings'))data=[{id:'m1',channexRoomTypeTitle:'Premium hasta 3 personas',channexRoomTypeId:'remote',roomTypeId:'premium',roomIds:['301']}];
  else if(url.endsWith('/rate-plan-mappings'))data=[{id:'p1',channexRatePlanTitle:'Premium con desayuno',channexRoomTypeId:'remote',ratePlanId:'rack'}];
  else if(url.endsWith('/inbound'))data={serverEnabled:true,settings:{enabled:true,has_token:true},revisions:[{revision_id:'revision-test',booking_id:'booking-test',status:'applied',acked_at:'2026-11-09',reservations:[{id:'r1',guestName:'Reserva de prueba',roomNumber:'301',checkInDate:'2026-11-14',checkOutDate:'2026-11-15'}]}]};
- else if(url.endsWith('/ari'))data={settings:{floor:3,currency:'ARS',enabled:true},dispatchEnabled:true,rooms:[],summary:[],events:[]};
+ else if(/\/ari(?:\?|$)/.test(url))data={settings:{floor:3,currency:'ARS',enabled:false,room_ids:null},dispatchEnabled:true,rooms:rooms.map(r=>({...r,roomTypeName:'Premium',channexRoomTypeId:'remote'})),summary:[{status:'pending',count:28}],events:[]};
  return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});
 };
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}>{params.has('matrix')?<AdminPermisos/>:<OtaManager/>}</QueryClientProvider>);
