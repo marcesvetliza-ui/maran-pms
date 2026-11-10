@@ -4,9 +4,10 @@ import type { Express } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { requireAuth, requirePermission } from '../auth';
+import { validateRoomSelections } from './roomSelection';
 import { inventoryPreview, STAGING_URL, addDays, buildAriValues } from './ari';
 
-const settingsInput = z.object({ floor: z.number().int().min(-5).max(100).nullable(), currency: z.string().regex(/^[A-Z]{3}$/), enabled: z.boolean() }).strict();
+const settingsInput = z.object({ floor: z.number().int().min(-5).max(100).nullable(), currency: z.string().regex(/^[A-Z]{3}$/), enabled: z.boolean(), roomIds: z.array(z.string().min(1).max(200)).min(1).max(1000).refine(ids => new Set(ids).size === ids.length).nullable().optional() }).strict();
 async function enqueueFull(c: PoolClient, id: string, today: string) {
   if ((await c.query(`SELECT 1 FROM channex_ari_outbox WHERE connection_id=$1 AND reason='full_sync' AND created_at>now()-interval '24 hours' LIMIT 1`, [id])).rowCount) throw Error('Ya hay una sincronización completa registrada en las últimas 24 horas');
   await c.query(`INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,reason)
@@ -19,7 +20,7 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
       const c = await pool.connect(); try {
         const connection=(await c.query('SELECT id,environment FROM channex_connections WHERE id=$1',[req.params.id])).rows[0];
         if (!connection) return res.status(404).json({ error: 'Conexión no encontrada' });
-        const settings = (await c.query('SELECT floor,currency,enabled,updated_at FROM channex_ari_settings WHERE connection_id=$1', [req.params.id])).rows[0] ?? { floor: connection.environment==='real'?null:2, currency: 'ARS', enabled: false };
+        const settings = (await c.query('SELECT floor,currency,enabled,room_ids,updated_at FROM channex_ari_settings WHERE connection_id=$1', [req.params.id])).rows[0] ?? { floor: connection.environment==='real'?null:2, currency: 'ARS', enabled: false, room_ids: null };
         const previewFloor = req.query.floor === 'all' ? null : req.query.floor === undefined ? settings.floor : z.coerce.number().int().min(-5).max(100).parse(req.query.floor);
         const rooms = await inventoryPreview(c, req.params.id, previewFloor);
         const summary = (await c.query(`SELECT status,count(*)::int AS count FROM channex_ari_outbox WHERE connection_id=$1 GROUP BY status`, [req.params.id])).rows;
@@ -37,11 +38,14 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
       const connection = (await c.query('SELECT id,environment,base_url,is_active,channex_property_id FROM channex_connections WHERE id=$1 FOR UPDATE', [req.params.id])).rows[0];
       if (!connection) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'Conexión no encontrada' }); }
       const previous = (await c.query('SELECT * FROM channex_ari_settings WHERE connection_id=$1', [req.params.id])).rows[0];
-      const settings = parsed.data;
-      if (previous?.enabled && (settings.floor !== previous.floor || settings.currency !== previous.currency)) throw Error('Pausá la captura antes de cambiar el piso o la moneda');
+      const { roomIds, ...input } = parsed.data;
+      const settings = { ...input, room_ids: roomIds === undefined ? previous?.room_ids ?? null : roomIds };
+      const scopeChanged = settings.floor !== previous?.floor || settings.currency !== previous?.currency || JSON.stringify(settings.room_ids?.slice().sort() ?? null) !== JSON.stringify(previous?.room_ids?.slice().sort() ?? null);
+      if (settings.room_ids !== null) await validateRoomSelections(c, req.params.id, settings.floor, false, settings.room_ids);
+      if (previous?.enabled && scopeChanged) throw Error('Pausá la captura antes de cambiar las habitaciones, el piso o la moneda');
       if (settings.enabled) {
         if (!operationAllowed(connection,'ari') || !connection.is_active || (connection.environment==='real' && settings.floor===99)) throw Error('Revisá la conexión y la habilitación del entorno antes de activar el inventario');
-        const rooms = await inventoryPreview(c, req.params.id, settings.floor);
+        const rooms = await inventoryPreview(c, req.params.id, settings.floor, settings.room_ids);
         if (!rooms.length || rooms.some(r => !r.channexRoomTypeId)) throw Error('El piso debe tener habitaciones físicas activas y todas sus categorías mapeadas');
 
       }
@@ -52,14 +56,14 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
           if(!values.length)throw Error('Completá el inventario, los mapeos y las tarifas de los próximos 500 días antes de activar.');
         }
       }
-      await c.query(`INSERT INTO channex_ari_settings(connection_id,floor,currency,enabled,last_horizon_date,capture_started_at)
-    VALUES($1,$2,$3,$4,CASE WHEN $4 THEN $5::date END,CASE WHEN $4 THEN now() END)
-    ON CONFLICT(connection_id) DO UPDATE SET floor=EXCLUDED.floor,currency=EXCLUDED.currency,enabled=EXCLUDED.enabled,
+      await c.query(`INSERT INTO channex_ari_settings(connection_id,floor,currency,enabled,last_horizon_date,capture_started_at,room_ids)
+    VALUES($1,$2,$3,$4,CASE WHEN $4 THEN $5::date END,CASE WHEN $4 THEN now() END,$6::text[])
+    ON CONFLICT(connection_id) DO UPDATE SET floor=EXCLUDED.floor,currency=EXCLUDED.currency,enabled=EXCLUDED.enabled,room_ids=EXCLUDED.room_ids,
       capture_started_at=COALESCE(channex_ari_settings.capture_started_at,EXCLUDED.capture_started_at),
       last_horizon_date=CASE WHEN channex_ari_settings.capture_started_at IS NULL THEN EXCLUDED.last_horizon_date ELSE channex_ari_settings.last_horizon_date END,
-      updated_at=now()`, [req.params.id, settings.floor, settings.currency, settings.enabled, today]);
+      updated_at=now()`, [req.params.id, settings.floor, settings.currency, settings.enabled, today, settings.room_ids]);
       if (settings.enabled && !previous?.capture_started_at) await enqueueFull(c, req.params.id, today);
-      else if (previous?.capture_started_at && (settings.floor !== previous.floor || settings.currency !== previous.currency)) {
+      else if (previous?.capture_started_at && scopeChanged) {
         await c.query(`INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,reason)
           SELECT $1,kind,$2,$3,'scope_change' FROM (VALUES('availability'),('restrictions')) k(kind)`, [req.params.id, today, addDays(today, 499)]);
       }

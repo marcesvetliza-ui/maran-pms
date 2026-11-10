@@ -8,13 +8,13 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
-type Settings = { floor: number|null; currency: string; enabled: boolean; updated_at?: string };
+type Settings = { floor: number|null; currency: string; enabled: boolean; room_ids?: string[] | null; updated_at?: string };
 type AriStatus = { settings: Settings; dispatchEnabled: boolean; rooms: { id: string; roomNumber: string; roomTypeName: string; channexRoomTypeId: string | null }[]; summary: { status: string; count: number }[]; events: { id: string; kind: string; status: string; date_from: string; date_to: string; last_error: string | null; task_ids: string[] | null }[] };
 export function ChannexAriSettings({ connectionId,canConfigure=true,canSync=true }: { connectionId: string;canConfigure?:boolean;canSync?:boolean }) {
   const { data, error, isLoading, refetch } = useQuery<AriStatus>({ queryKey: ['/api/channex/connections', connectionId, 'ari'], queryFn: async () => (await apiRequest('GET', `/api/channex/connections/${connectionId}/ari`)).json() });
   return <Card><CardHeader><CardTitle className="text-base">Inventario y envíos a Channex</CardTitle></CardHeader><CardContent className="space-y-4">
     {isLoading ? <p>Cargando alcance…</p> : error ? <p role="alert">No se pudo consultar la integración. <Button variant="outline" onClick={() => refetch()}>Volver a consultar</Button></p> : data ? <>
-      <p className="text-sm">Elegí todo el hotel o un piso concreto. El alcance de todo el hotel excluye el piso 99 de pruebas y las habitaciones virtuales. Se usa el calendario de venta y, en las noches sin precio especial, la tarifa base del plan. No se convierte la moneda.</p>
+      <p className="text-sm">Elegí todo el hotel, un piso o habitaciones específicas. El alcance de todo el hotel excluye el piso 99 de pruebas y las habitaciones virtuales. Se usa el calendario de venta y, en las noches sin precio especial, la tarifa base del plan. No se convierte la moneda.</p>
       <p className="text-sm font-medium">{data.dispatchEnabled ? 'Envíos habilitados en el servidor.' : 'Envíos externos deshabilitados. Podés configurar el alcance y registrar cambios sin enviarlos.'}</p>
       {canConfigure&&<InventoryEditor key={`${connectionId}:${data.settings.updated_at ?? 'new'}`} connectionId={connectionId} initial={data.settings} />}
       <div className="text-sm flex flex-wrap gap-4">{data.summary.map(s => <span key={s.status}>{({ pending: 'Pendientes', delivered: 'Procesados', blocked: 'Requieren revisión' } as Record<string, string>)[s.status]}: {s.count}</span>)}</div>
@@ -36,19 +36,29 @@ function useAriAction(connectionId: string) {
 }
 function InventoryEditor({ connectionId, initial }: { connectionId: string; initial: Settings }) {
   const [floor, setFloor] = useState(initial.floor===null?'':String(initial.floor)), [currency, setCurrency] = useState(initial.currency), [enabled, setEnabled] = useState(initial.enabled), [previewFloor, setPreviewFloor] = useState(initial.floor);
+  const [roomIds, setRoomIds] = useState<string[] | null>(initial.room_ids ?? null);
   const action = useAriAction(connectionId);
   const { data, isFetching } = useQuery<AriStatus>({ queryKey: ['/api/channex/connections', connectionId, 'ari', 'preview', previewFloor], queryFn: async () => (await apiRequest('GET', `/api/channex/connections/${connectionId}/ari?floor=${previewFloor??"all"}`)).json() });
   const validFloor = floor==='' || /^-?\d+$/.test(floor) && Number(floor) >= -5 && Number(floor) <= 100;
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-3 items-end"><div><Label htmlFor="channex-floor">Piso incluido (vacío: todo el hotel)</Label><Input id="channex-floor" type="number" min={-5} max={100} value={floor} onChange={e => setFloor(e.target.value)} disabled={initial.enabled} /></div>
-      <div><Label htmlFor="channex-currency">Moneda de la propiedad</Label><Input id="channex-currency" maxLength={3} value={currency} onChange={e => setCurrency(e.target.value.toUpperCase())} disabled={initial.enabled} /></div>
+      <div><Label htmlFor="channex-currency">Moneda de envío a Channex</Label><Input id="channex-currency" maxLength={3} value={currency} onChange={e => setCurrency(e.target.value.toUpperCase())} disabled={initial.enabled} /></div>
       <Button variant="outline" disabled={!validFloor || isFetching} onClick={() => setPreviewFloor(floor===''?null:Number(floor))}>Ver habitaciones</Button>
     </div>
     <p className="text-sm">{previewFloor===null?'Todo el hotel':`Piso ${previewFloor}`}: {data?.rooms.length ?? '…'} habitaciones físicas activas.</p>
-    <div className="flex flex-wrap gap-2">{data?.rooms.map(r => <span key={r.id} className="rounded border px-2 py-1 text-sm">{r.roomNumber} · {r.roomTypeName}{!r.channexRoomTypeId ? ' · Falta mapear' : ''}</span>)}</div>
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Habitaciones incluidas en el envío">
+      <Button variant={roomIds === null ? 'default' : 'outline'} disabled={initial.enabled} onClick={() => setRoomIds(null)}>Todas las habitaciones del alcance</Button>
+      <Button variant={roomIds !== null ? 'default' : 'outline'} disabled={initial.enabled} onClick={() => setRoomIds(roomIds ?? [])}>Habitaciones específicas</Button>
+    </div>
+    <div className="flex flex-wrap gap-2">{data?.rooms.map(r => <Label key={r.id} className="flex items-center gap-2 rounded border px-2 py-2 text-sm">
+      {roomIds !== null && <Checkbox checked={roomIds.includes(r.id)} disabled={initial.enabled} onCheckedChange={checked => setRoomIds(ids => checked ? [...(ids ?? []), r.id] : (ids ?? []).filter(id => id !== r.id))} />}
+      {r.roomNumber} · {r.roomTypeName}{!r.channexRoomTypeId ? ' · Falta mapear' : ''}
+    </Label>)}</div>
+    {roomIds !== null && <p className="text-sm font-medium">Envío limitado a {roomIds.length} habitación(es): {data?.rooms.filter(r => roomIds.includes(r.id)).map(r => r.roomNumber).join(', ') || 'seleccioná al menos una'}.</p>}
+    {roomIds !== null && data && roomIds.some(id => !data.rooms.some(r => r.id === id)) && <p role="alert" className="text-destructive">Hay habitaciones seleccionadas fuera del piso consultado. Revisá la selección antes de guardar.</p>}
     <Label className="flex gap-2 items-center"><Checkbox checked={enabled} onCheckedChange={value => setEnabled(value === true)} />Captura de cambios activa</Label>
-    <p className="text-sm text-muted-foreground">Al activarlo se prepara una sincronización inicial de 500 días. Para cambiar el piso o la moneda, primero pausá la integración. Durante la pausa los cambios siguen guardándose sin enviarse. Los grupos pendientes de asignación descuentan disponibilidad de forma conservadora.</p>
-    <Button disabled={action.isPending || !validFloor || !/^[A-Z]{3}$/.test(currency)} onClick={() => action.mutate({ method: 'PATCH', body: { floor: floor===''?null:Number(floor), currency, enabled } })}>Guardar alcance</Button>
+    <p className="text-sm text-muted-foreground">Al activarlo se prepara una sincronización inicial de 500 días. Para cambiar las habitaciones, el piso o la moneda, primero pausá la integración. Durante la pausa los cambios siguen guardándose sin enviarse. Los grupos pendientes de asignación descuentan disponibilidad de forma conservadora.</p>
+    <Button disabled={action.isPending || !validFloor || !/^[A-Z]{3}$/.test(currency) || (roomIds !== null && !roomIds.length)} onClick={() => action.mutate({ method: 'PATCH', body: { floor: floor===''?null:Number(floor), currency, enabled, roomIds } })}>Guardar alcance</Button>
   </div>;
 }
 function QueueActions({ connectionId, enabled }: { connectionId: string; enabled: boolean }) {

@@ -57,6 +57,73 @@ suite('Channex outbox with isolated real PostgreSQL', () => {
   `);
   });
   async function enable() { await pool.query(`INSERT INTO channex_ari_settings(connection_id,enabled,floor,currency,last_horizon_date,capture_started_at) VALUES('connection',true,2,'USD',(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,now())`); }
+  async function saveScope(body: any) {
+    return fetch(`${origin}/api/channex/connections/connection/ari`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  }
+  async function addOutsideCategory() {
+    await pool.query(`INSERT INTO room_types VALUES('suite','Suite');
+      INSERT INTO rooms VALUES('203','203','suite',2,'available',true,false);
+      INSERT INTO rate_plans VALUES('ars','suite',90000,'ARS',NULL,NULL);
+      INSERT INTO channex_room_type_mappings VALUES('connection','remote-suite','suite');
+      INSERT INTO channex_rate_plan_mappings VALUES('connection','remote-suite','remote-ars','ars');
+      INSERT INTO channex_rate_plan_mappings VALUES('connection','remote-twin','unmapped-legacy',NULL)`);
+  }
+  it('limits inventory and prices to one physical room, ignoring outside categories and deliberately unmapped plans', async () => {
+    await addOutsideCategory();
+    const scoped = {...connection, room_ids:['201']};
+    expect(await buildAriValues(pool as any, scoped, [event()], day)).toEqual([
+      {property_id:'property',room_type_id:'remote-twin',date_from:day,date_to:day,availability:1}
+    ]);
+    expect((await buildAriValues(pool as any, scoped, [event('restrictions')], day)).map(v=>v.rate_plan_id)).toEqual(['remote-bar']);
+    await pool.query(`INSERT INTO reservations VALUES('booking','201',$1::date,$1::date+1,'confirmed','twin')`,[day]);
+    expect((await buildAriValues(pool as any, scoped, [event()], day))[0].availability).toBe(0);
+    expect(await buildAriValues(pool as any, scoped, [{...event(),room_type_id:'suite'}], day)).toEqual([]);
+    expect(await buildAriValues(pool as any, scoped, [{...event('restrictions'),rate_plan_id:'ars'}], day)).toEqual([]);
+  });
+  it('does not hide missing or wrong-currency prices inside the selected room category', async () => {
+    const scoped = {...connection,room_ids:['201']};
+    await pool.query(`UPDATE rate_plans SET currency='ARS'`);
+    await expect(buildAriValues(pool as any,scoped,[event('restrictions')],day)).rejects.toThrow(/moneda/);
+    await pool.query(`UPDATE channex_rate_plan_mappings SET rate_plan_id=NULL`);
+    await expect(buildAriValues(pool as any,scoped,[event('restrictions')],day)).rejects.toThrow(/Falta mapear/);
+    await pool.query(`DELETE FROM channex_room_type_mappings`);
+    await expect(buildAriValues(pool as any,scoped,[event()],day)).rejects.toThrow(/Mapeá todas/);
+  });
+  it('stores a paused scope without sending, preserves it for older clients and requires pause before changing rooms', async () => {
+    expect((await saveScope({floor:2,currency:'USD',enabled:false,roomIds:['201']})).status).toBe(200);
+    const status = await (await fetch(`${origin}/api/channex/connections/connection/ari`)).json();
+    expect(status.settings).toMatchObject({room_ids:['201'],enabled:false});
+    expect(status.rooms).toHaveLength(2); // The editor still offers other physical rooms.
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_outbox')).rows[0].n).toBe(0);
+    expect((await saveScope({floor:2,currency:'USD',enabled:true})).status).toBe(200);
+    expect((await pool.query('SELECT room_ids FROM channex_ari_settings')).rows[0].room_ids).toEqual(['201']);
+    expect((await saveScope({floor:2,currency:'USD',enabled:true,roomIds:['202']})).status).toBe(409);
+    expect((await saveScope({floor:2,currency:'USD',enabled:false,roomIds:null})).status).toBe(409);
+  });
+  it('rejects invalid room scopes even while paused', async () => {
+    for (const roomIds of [[],['missing'],['inactive'],['virtual'],['301'],['201','201']]) {
+      expect((await saveScope({floor:2,currency:'USD',enabled:false,roomIds})).status).not.toBe(200);
+    }
+    expect((await pool.query('SELECT count(*)::int AS n FROM channex_ari_settings')).rows[0].n).toBe(0);
+  });
+  it('rebuilds old queued events using the saved room scope before any transport call', async () => {
+    await addOutsideCategory();
+    await enable();
+    await pool.query(`UPDATE channex_ari_settings SET enabled=false,room_ids=ARRAY['201']`);
+    await pool.query(`INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,reason)
+      VALUES('connection','availability',$1,$1,'old_pending'),('connection','restrictions',$1,$1,'old_pending')`,[day]);
+    const send = vi.fn(async()=>['scoped-task']);
+    expect((await dispatchChannexAri(pool,send,true)).state).toBe('idle');
+    expect(send).not.toHaveBeenCalled();
+    expect((await saveScope({floor:2,currency:'USD',enabled:true,roomIds:['201']})).status).toBe(200);
+    for (let i=0;i<2;i++) {
+      await pool.query(`UPDATE channex_ari_dispatch SET next_call_at=now()-interval '1 minute'`);
+      expect((await dispatchChannexAri(pool,send,true)).state).toBe('delivered');
+    }
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0][2]).toMatchObject([{room_type_id:'remote-twin',availability:1}]);
+    expect(send.mock.calls[1][2]).toMatchObject([{rate_plan_id:'remote-bar',rate:'100.00'}]);
+  });
   it('excludes retired plans from readiness values and published restrictions', async () => {
     await pool.query(`INSERT INTO channex_rate_plan_mappings(connection_id,channex_room_type_id,channex_rate_plan_id,rate_plan_id,remote_present)
       VALUES('connection','remote-twin','retired-plan',NULL,false)`);

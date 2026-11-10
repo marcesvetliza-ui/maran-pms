@@ -32,13 +32,14 @@ export function compressValues(values: AriValue[]): AriValue[] {
   }
   return result;
 }
-export async function inventoryPreview(c: Pick<PoolClient, 'query'>, connectionId: string, floor: number|null) {
+export async function inventoryPreview(c: Pick<PoolClient, 'query'>, connectionId: string, floor: number|null, roomIds: string[] | null = null) {
   const { rows } = await c.query(`SELECT r.id,r.room_number AS "roomNumber",r.floor,r.room_type_id AS "roomTypeId",rt.name AS "roomTypeName",r.status,
    m.channex_room_type_id AS "channexRoomTypeId"
    FROM rooms r LEFT JOIN room_types rt ON rt.id=r.room_type_id
    LEFT JOIN channex_room_type_mappings m ON m.connection_id=$1 AND m.room_type_id=r.room_type_id AND (m.room_ids IS NULL OR r.id=ANY(m.room_ids))
    WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB'
-   ORDER BY r.room_number::text`, [connectionId, floor]);
+   AND ($3::text[] IS NULL OR r.id::text=ANY($3))
+   ORDER BY r.room_number::text`, [connectionId, floor, roomIds]);
   return rows;
 }
 /** Recomputes current absolute values only for affected dates/types, never scans for changes. */
@@ -60,8 +61,10 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
   const dates = [...dateSet].sort();
   if (!dates.length) return [];
   let mappings: any[];
-  try { mappings = await validateRoomSelections(c, connection.id, connection.floor); }
+  try { mappings = await validateRoomSelections(c, connection.id, connection.floor, true, connection.room_ids ?? null); }
   catch (error) { if (error instanceof RoomSelectionError) throw new AriConfigurationError(error.message); throw error; }
+  const scoped = connection.room_ids != null;
+  const targetIds = mappings.map(m => m.channex_room_type_id);
   const affected = (typeId: string, day: string, planId?: string) => events.some(e => e.date_from <= day && e.date_to >= day && (!e.room_type_id || e.room_type_id === typeId) && (!e.rate_plan_id || !planId || e.rate_plan_id === planId));
   const values: AriValue[] = [];
   if (events[0].kind === 'availability') {
@@ -82,20 +85,22 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
     FROM blocked_groups b GROUP BY b.room_type_id,b.day
    )
    SELECT m.room_type_id,m.channex_room_type_id,d.day::text,
-    GREATEST(0,(SELECT count(*) FROM rooms r WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND r.room_type_id=m.room_type_id AND (m.room_ids IS NULL OR r.id=ANY(m.room_ids))
+    GREATEST(0,(SELECT count(*) FROM rooms r WHERE (($2::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=$2) AND ($5::text[] IS NULL OR r.id::text=ANY($5)) AND r.room_type_id=m.room_type_id AND (m.room_ids IS NULL OR r.id=ANY(m.room_ids))
       AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos')
       AND NOT EXISTS(SELECT 1 FROM reservations b WHERE b.room_id=r.id AND b.status IN ('tentative','pending','reserved','confirmed','web_checkin','checked_in') AND b.check_in_date<=d.day AND b.check_out_date>d.day)
       AND NOT EXISTS(SELECT 1 FROM maintenance_blocks b WHERE b.room_id=r.id AND b.block_from<=d.day AND b.block_to>=d.day)
     )-COALESCE(u.quantity,0))::int AS availability
    FROM channex_room_type_mappings m CROSS JOIN dates d
    LEFT JOIN unassigned u ON u.room_type_id=m.room_type_id AND u.day=d.day
-   WHERE m.connection_id=$1 ORDER BY m.channex_room_type_id,d.day`, [connection.id, connection.floor, dates])).rows;
+   WHERE m.connection_id=$1 AND m.channex_room_type_id=ANY($4::text[]) ORDER BY m.channex_room_type_id,d.day`, [connection.id, connection.floor, dates, targetIds, connection.room_ids ?? null])).rows;
     for (const r of rows) if (affected(r.room_type_id, r.day)) values.push({ property_id: connection.channex_property_id, room_type_id: r.channex_room_type_id, date_from: r.day, date_to: r.day, availability: r.availability });
   } else {
     const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,m.sell_mode,m.rate_mode,m.occupancies,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text,
     to_jsonb(p)->>'rate_1pax' AS rate_1pax,to_jsonb(p)->>'rate_2pax' AS rate_2pax,to_jsonb(p)->>'rate_3pax' AS rate_3pax,to_jsonb(p)->>'rate_4pax' AS rate_4pax
-    FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 AND m.remote_present ORDER BY m.channex_rate_plan_id`, [connection.id])).rows;
-    if (!plans.length) throw new AriConfigurationError('Falta mapear los planes tarifarios');
+    FROM channex_rate_plan_mappings m LEFT JOIN rate_plans p ON p.id=m.rate_plan_id WHERE m.connection_id=$1 AND m.remote_present
+      AND (NOT $2::boolean OR (m.channex_room_type_id=ANY($3::text[]) AND m.rate_plan_id IS NOT NULL))
+      ORDER BY m.channex_rate_plan_id`, [connection.id, scoped, targetIds])).rows;
+    if (!plans.length || (scoped && targetIds.some(id => !plans.some(p => p.channex_room_type_id === id)))) throw new AriConfigurationError('Falta mapear los planes tarifarios de las habitaciones seleccionadas');
     const overrides = (await c.query('SELECT *,stay_date::text AS day FROM rate_calendar_entries WHERE rate_plan_id=ANY($1::varchar[]) AND stay_date=ANY($2::date[])', [plans.map(p => p.rate_plan_id).filter(Boolean), dates])).rows;
     const byDay = new Map(overrides.map(o => [`${o.rate_plan_id}:${o.day}`, o]));
     for (const p of plans) {

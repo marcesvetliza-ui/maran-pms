@@ -31,3 +31,15 @@ it('requests a preview for a changed floor without enabling capture', async () =
   await waitFor(() => expect(requests.some(r => r.url.endsWith('/ari?floor=3'))).toBe(true));
   expect(requests.some(r => r.method === 'PATCH' || r.method === 'POST')).toBe(false);
 });
+
+it('saves only the selected physical room in USD while keeping capture paused', async () => {
+  render(<QueryClientProvider client={queryClient}><ChannexAriSettings connectionId="connection" /></QueryClientProvider>);
+  await screen.findByText(/201 · Twin/);
+  expect(requests.some(r=>r.method!=='GET')).toBe(false);
+  fireEvent.click(screen.getByRole('button',{name:'Habitaciones específicas'}));
+  expect(screen.getByRole('button',{name:'Guardar alcance'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox',{name:/201 · Twin/}));
+  expect(screen.getByText(/Envío limitado a 1/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button',{name:'Guardar alcance'}));
+  await waitFor(()=>expect(requests.find(r=>r.method==='PATCH')?.body).toEqual({floor:2,currency:'USD',enabled:false,roomIds:['r201']}));
+});
