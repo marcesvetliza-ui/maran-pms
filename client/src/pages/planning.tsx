@@ -1,3 +1,4 @@
+import { planningMoveDates } from "@/lib/planning-move";
 import { formatDisplayDate } from "@shared/date-display";
 import {PreparationBadge} from "@/components/housekeeping-preparation";
 import { useState, useEffect, useRef, Fragment, forwardRef, useMemo } from "react";
@@ -67,6 +68,7 @@ function DraggableReservationCell({
   id,
   reservationId,
   roomId,
+  day,
   children,
   className,
   style,
@@ -77,6 +79,7 @@ function DraggableReservationCell({
   id: string;
   reservationId: string;
   roomId: string;
+  day: string;
   children: React.ReactNode;
   className: string;
   style?: React.CSSProperties;
@@ -86,7 +89,7 @@ function DraggableReservationCell({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id,
-    data: { reservationId, roomId },
+    data: { reservationId, roomId, day },
   });
 
   return (
@@ -369,20 +372,10 @@ export default function PlanningPage() {
     const fromRoom = data.rooms.find(r => r.id === fromRoomId);
     if (!toRoom || !fromRoom) return;
 
-    let newCheckIn = reservation.checkIn;
-    let newCheckOut = reservation.checkOut;
-
-    if (toDay && toDay !== reservation.checkIn) {
-      const originalCheckIn = new Date(reservation.checkIn + "T12:00:00");
-      const originalCheckOut = new Date(reservation.checkOut + "T12:00:00");
-      const nights = Math.round(
-        (originalCheckOut.getTime() - originalCheckIn.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      newCheckIn = toDay;
-      const newCheckOutDate = new Date(toDay + "T12:00:00");
-      newCheckOutDate.setDate(newCheckOutDate.getDate() + nights);
-      newCheckOut = toArgentinaDateStr(newCheckOutDate);
-    }
+    const fromDay = (active.data.current as any)?.day || reservation.checkIn;
+    const { checkIn: newCheckIn, checkOut: newCheckOut, dateChanged } = planningMoveDates(
+      reservation.checkIn, reservation.checkOut, fromDay, toDay,
+    );
 
     // Bloquear movimiento de reserva checked_in a habitación con huésped in-house
     if (reservation.status === "checked_in" && fromRoomId !== toRoomId && toRoom.status === "occupied") {
@@ -418,7 +411,7 @@ export default function PlanningPage() {
       toRoomType: toRoom.roomType?.name ?? "",
       newCheckIn,
       newCheckOut,
-      dateChanged: newCheckIn !== reservation.checkIn,
+      dateChanged,
       preparation:fromRoomId!==toRoomId&&reservation.housekeepingPreparation?.state==='prepared'?reservation.housekeepingPreparation:null,
     });
   };
@@ -1163,6 +1156,7 @@ export default function PlanningPage() {
                                   id={`drag-${reservationId}-${reubRoom.id}-${day}`}
                                   reservationId={reservationId!}
                                   roomId={reubRoom.id}
+                                  day={day}
                                   onClick={() => handleCellClick(reubRoom as any, day, "booked", reservationId)}
                                   onContextMenu={(e: React.MouseEvent) => {
                                     e.preventDefault();
@@ -1247,6 +1241,7 @@ export default function PlanningPage() {
                                           id={`drag-${reservationId}-${room.id}-${day}`}
                                           reservationId={reservationId!}
                                           roomId={room.id}
+                                          day={day}
                                           onClick={() => handleCellClick(room, day, status, reservationId)}
                                           onContextMenu={(e: React.MouseEvent) => {
                                             e.preventDefault();
@@ -1551,8 +1546,8 @@ export default function PlanningPage() {
             reservationId: data.reservationId,
             roomId: data.toRoomId,
             preparationVersion:data.preparation?.markedAt,
-            checkInDate: data.newCheckIn,
-            checkOutDate: data.newCheckOut,
+            checkInDate: data.dateChanged ? data.newCheckIn : undefined,
+            checkOutDate: data.dateChanged ? data.newCheckOut : undefined,
           });
         }}
         onCancel={() => setMoveConfirm(null)}
