@@ -3,7 +3,8 @@ import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit as balance } fr
 
 describe("purchase invoice historical correction", () => {
   it("grants only the administration lead the state exception", () => {
-    for (const state of ["pendiente", "parcial", "pagado", "registrado", "anulado"]) expect(canEditPurchaseInvoice("resp_administracion", state)).toBe(true);
+    for (const state of ["pendiente", "registrado", "anulado"]) expect(canEditPurchaseInvoice("resp_administracion", state)).toBe(true);
+    for (const state of ["pagado", "parcial"]) expect(canEditPurchaseInvoice("resp_administracion", state)).toBe(false);
     for (const role of [undefined, "admin", "manager", "resp_deposito", "reception"]) {
       expect(canEditPurchaseInvoice(role, "pendiente")).toBe(true);
       for (const state of ["parcial", "pagado", "registrado", "anulado"]) expect(canEditPurchaseInvoice(role, state)).toBe(false);

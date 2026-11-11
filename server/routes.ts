@@ -1,3 +1,4 @@
+import { purchaseInvoiceMetadataInput, correctPurchaseInvoiceMetadata } from './purchaseInvoiceMetadata';
 import { normalizePurchaseCreditNotePayment } from '@shared/purchase-credit-note-payment';
 import {productionEnabled} from './channex/connectionPolicy';
 import {saveBackupConfig} from './backup-config';
@@ -2946,7 +2947,7 @@ export async function registerRoutes(
 
       // Build flexible query using CASE
       const result = await db.execute(sql`
-        SELECT pi.*, s.razon_social AS supplier_nombre,
+        SELECT pi.*, pi.updated_at::text AS metadata_version, s.razon_social AS supplier_nombre,
           (SELECT COALESCE(sum(l.line_total),0) FROM purchase_invoice_lines l WHERE l.invoice_id=pi.id) AS remito_subtotal
         FROM purchase_invoices pi
         LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
@@ -2970,7 +2971,7 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id);
       const result = await db.execute(sql`
-        SELECT pi.*, s.razon_social AS supplier_nombre, s.alicuota_iibb AS supplier_alicuota_iibb
+        SELECT pi.*, pi.updated_at::text AS metadata_version, s.razon_social AS supplier_nombre, s.alicuota_iibb AS supplier_alicuota_iibb
         FROM purchase_invoices pi
         LEFT JOIN accounting_suppliers s ON s.id = pi.supplier_id
         WHERE pi.id = ${id}
@@ -3338,6 +3339,15 @@ export async function registerRoutes(
     } catch (e: any) {
       res.status(e?.statusCode || 500).json({ error: e.message, ...(e?.code === "PURCHASE_INVOICE_DUPLICATE" ? { existingId: e.existingId } : {}) });
     }
+  });
+
+  app.patch('/api/purchase-invoices/:id/metadata',requireAuth,requirePermission(PURCHASE_INVOICES_WRITE_RESOURCE_KEY),async(req,res)=>{
+    const id=Number(req.params.id),parsed=purchaseInvoiceMetadataInput.safeParse(req.body);
+    if(!Number.isSafeInteger(id)||id<=0||!parsed.success)return res.status(400).json({error:'Revisá punto de venta, número, fecha y motivo. Esta corrección no admite importes, pagos ni cambios de proveedor.'});
+    try{
+      const result=await db.transaction(tx=>correctPurchaseInvoiceMetadata(tx,id,parsed.data,{id:req.user?.id,name:req.user?.fullName||req.user?.username}));
+      res.json(result);
+    }catch(error:any){res.status(error.statusCode||500).json({error:error.message,...(error.code==='PURCHASE_INVOICE_DUPLICATE'?{existingId:error.existingId}:{})});}
   });
 
   app.patch("/api/purchase-invoices/:id", requireAuth, requirePermission(PURCHASE_INVOICES_WRITE_RESOURCE_KEY), async (req, res) => {

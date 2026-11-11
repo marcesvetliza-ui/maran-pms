@@ -264,21 +264,15 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       // Synthetic settled fixture: no operational payment is created.
       await testPool!.query("UPDATE purchase_invoices SET estado='pagado', saldo_pendiente=0 WHERE id=$1", [id]);
       const beforeItems = await testPool!.query("SELECT * FROM payment_order_items WHERE invoice_id=$1", [id]);
-      expect((await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "100", observaciones: "corrección" }, "manager")).status).toBe(403);
-      const corrected = await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "100", observaciones: "corrección" }, "resp_administracion");
-      expect(corrected.status).toBe(200);
-      expect(corrected.body).toMatchObject({ estado: "pagado", saldo_pendiente: "0.00", observaciones: "corrección" });
-      const entry = await readAccountingLines(Number(corrected.body.asiento_id));
-      const totals = accountingTotals(entry);
-      expect(totals.debe).toBeCloseTo(totals.haber, 2);
-      const rejected = await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "90" }, "resp_administracion");
-      expect(rejected.status).toBe(409);
-      const saved = await testPool!.query("SELECT monto_total, saldo_pendiente, estado FROM purchase_invoices WHERE id=$1", [id]);
-      expect(saved.rows[0]).toMatchObject({ monto_total: "100.00", saldo_pendiente: "0.00", estado: "pagado" });
-      expect((await testPool!.query("SELECT * FROM payment_order_items WHERE invoice_id=$1", [id])).rows).toEqual(beforeItems.rows);
-      const partial = await requestInvoice("PATCH", `/api/purchase-invoices/${id}`, { cuentaContableId: accountId, montoNeto: "120" }, "resp_administracion");
-      expect(partial.status).toBe(200);
-      expect(partial.body).toMatchObject({ estado: "parcial", saldo_pendiente: "20.00" });
+      for(const role of ['manager','resp_administracion','admin']){
+        expect((await requestInvoice('PATCH',`/api/purchase-invoices/${id}`,{cuentaContableId:accountId,montoNeto:'120'},role)).status).toBe(403);
+      }
+      const corrected=await requestInvoice('PATCH',`/api/purchase-invoices/${id}/metadata`,{puntoVenta:'00219',numeroComprobante:'00300500',fechaEmision:'2026-08-31',observaciones:'corrección',motivo:'Número registrado incorrectamente',expectedVersion:(await testPool!.query('SELECT updated_at::text AS version FROM purchase_invoices WHERE id=$1',[id])).rows[0].version},'resp_administracion');
+      expect(corrected.status,JSON.stringify(corrected.body)).toBe(200);
+      expect(corrected.body).toMatchObject({estado:'pagado',saldo_pendiente:'0.00',monto_total:'100.00',observaciones:'corrección',asiento_id:created.body.asiento_id});
+      const entry=await readAccountingLines(Number(corrected.body.asiento_id));const totals=accountingTotals(entry);expect(totals.debe).toBeCloseTo(totals.haber,2);
+      expect((await testPool!.query('SELECT * FROM payment_order_items WHERE invoice_id=$1',[id])).rows).toEqual(beforeItems.rows);
+      await testPool!.query("DELETE FROM audit_logs WHERE entity_type='purchase_invoice_metadata' AND entity_id=$1",[String(id)]);
     } finally { await cleanupFixture(fixture); }
   });
 
