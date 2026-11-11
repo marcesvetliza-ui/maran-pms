@@ -511,23 +511,8 @@ async function runNightAuditUnlocked(options: {
       console.error("[NightAudit] Error procesando vencimiento de vouchers:", e);
     }
 
-    // ============================================================
-    // PASO 4 — Notificación interna
-    // ============================================================
-    try {
-      if (!reportingOnlyRerun) await db.insert(systemNotifications).values({
-        id: randomUUID(),
-        type: "hospitality_alert" as any,
-        title: `Night Audit ${auditDate} — ✓ Completado`,
-        message: `${inHouseReservations.length} hab. ocupadas (${foliosConSaldo.length} con saldo). ${arrivalsNextDay.length} llegadas mañana (${arrivalsWithoutPrepago} sin prepago).`,
-        targetArea: "all",
-        priority: arrivalsWithoutPrepago > 0 ? ("high" as any) : "normal",
-        isRead: false,
-        createdAt: new Date(),
-      });
-    } catch {
-      // No fallar por error en notificación
-    }
+    // El resumen queda en el historial de Night Audit, sin aviso en la campanita.
+    // Las alertas operativas específicas (por ejemplo vouchers) se conservan.
 
     const result = {
       auditDate,
