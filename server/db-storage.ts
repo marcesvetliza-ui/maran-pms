@@ -7090,19 +7090,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNotifications(area?: NotificationArea, limit?: number): Promise<SystemNotification[]> {
-    let query;
-    if (area) {
-      query = db.select().from(systemNotifications).where(
-        or(eq(systemNotifications.targetArea, area), eq(systemNotifications.targetArea, "all"))
-      ).orderBy(asc(systemNotifications.isRead), desc(systemNotifications.createdAt));
-    } else {
-      query = db.select().from(systemNotifications).orderBy(asc(systemNotifications.isRead), desc(systemNotifications.createdAt));
-    }
-
-    if (limit) {
-      return (query as any).limit(limit);
-    }
-    return query;
+    // Hide historical audit summaries before LIMIT so they cannot crowd out alerts.
+    const visible = sql`NOT (${systemNotifications.type} = 'hospitality_alert' AND ${systemNotifications.title} LIKE 'Night Audit %')`;
+    const query = db.select().from(systemNotifications).where(and(
+      visible,
+      area ? or(eq(systemNotifications.targetArea, area), eq(systemNotifications.targetArea, "all")) : undefined,
+    )).orderBy(asc(systemNotifications.isRead), desc(systemNotifications.createdAt));
+    return limit ? query.limit(limit) : query;
   }
 
   async createNotification(notification: InsertSystemNotification): Promise<SystemNotification> {
@@ -7151,7 +7145,7 @@ export class DatabaseStorage implements IStorage {
     } else {
       condition = eq(systemNotifications.isRead, false);
     }
-    const result = await db.select({ cnt: count() }).from(systemNotifications).where(condition!);
+    const result = await db.select({ cnt: count() }).from(systemNotifications).where(and(condition, sql`NOT (${systemNotifications.type} = 'hospitality_alert' AND ${systemNotifications.title} LIKE 'Night Audit %')`));
     return Number(result[0]?.cnt ?? 0);
   }
 
