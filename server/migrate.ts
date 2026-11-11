@@ -2535,6 +2535,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await withTimeout("purchase_invoices.envio", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "envio", "jsonb")))
   );
+  await withTimeout("purchase_invoices.forma_pago_informativa", T, () =>
+    db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "forma_pago_informativa", "text")))
+  );
   await withTimeout("purchase_invoices.descuento", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("purchase_invoices", "descuento", "jsonb")))
   );

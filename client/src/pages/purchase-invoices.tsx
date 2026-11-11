@@ -1,3 +1,4 @@
+import { PURCHASE_CREDIT_NOTE_PAYMENT_METHODS } from '@shared/purchase-credit-note-payment';
 import { iibbRateFromAmount } from '@shared/iibbRate';
 import {matchesPurchaseReport,validatePurchaseReportFilters} from "@shared/purchase-invoice-report";
 import { isPurchaseRemito, purchaseDocumentLabel } from "@shared/purchase-remito";
@@ -70,6 +71,7 @@ interface Invoice {
   fechaEmision: string;
   periodo?: string;
   condicionPago: string;
+  formaPagoInformativa?: string | null;
   envio?: PurchaseShipping|null;
   descuento?: PurchaseDiscount | null;
   montoNeto: string;
@@ -265,6 +267,7 @@ function camelInvoice(r: any): Invoice {
     fechaEmision: r.fecha_emision,
     periodo: r.periodo,
     condicionPago: r.condicion_pago,
+    formaPagoInformativa: r.forma_pago_informativa,
     ...mapPurchaseInvoiceAmountFields(r),
     descuento: r.descuento,
     envio: r.envio,
@@ -289,6 +292,7 @@ const emptyForm = () => ({
   fechaEmision: getLocalToday(),
   periodo: calcPeriodo(getLocalToday()),
   condicionPago: "cuenta_corriente",
+  formaPagoInformativa: "cuenta_corriente",
   formaPagoInmediata: "cuenta_corriente",
   montoPagadoAhora: "",
   // Formas de pago adicionales cuando se combina más de una al cargar el
@@ -550,6 +554,7 @@ export function InvoiceDialog({
         fechaEmision: editingInvoice.fechaEmision || "",
         periodo: editingInvoice.periodo || "",
         condicionPago: editingInvoice.condicionPago || "cuenta_corriente",
+        formaPagoInformativa: editingInvoice.formaPagoInformativa || "cuenta_corriente",
         formaPagoInmediata: "cuenta_corriente",
         montoPagadoAhora: "",
         formasPagoExtra: [],
@@ -739,6 +744,14 @@ export function InvoiceDialog({
   // fila; formasPagoExtra son las que se van agregando. Compartido entre el
   // layout unificado (Centro de Comprobantes) y el asistente clásico.
   const montoPagadoAhoraTotal = $n(form.montoPagadoAhora) + form.formasPagoExtra.reduce((s, r) => s + $n(r.monto), 0);
+  const creditNotePaymentSection = /^NC-[ABCM]$/.test(form.tipoComprobante) ? <div className="space-y-2">
+    <Label>Forma de pago (informativa)</Label>
+    <Select value={form.formaPagoInformativa} onValueChange={value=>f("formaPagoInformativa",value)}>
+      <SelectTrigger aria-label="Forma de pago informativa de la NC" data-testid="select-forma-pago-informativa"><SelectValue /></SelectTrigger>
+      <SelectContent>{PURCHASE_CREDIT_NOTE_PAYMENT_METHODS.map(item=><SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+    </Select>
+    <p className="text-xs text-muted-foreground">Dato informativo. No registra pagos ni devoluciones de dinero. El crédito se mantiene en la cuenta corriente del proveedor.</p>
+  </div> : null;
   const formaPagoInmediataSection = (
     <div>
       <Label>Forma de Pago</Label>
@@ -922,7 +935,7 @@ export function InvoiceDialog({
       return;
     }
     if (isEditing) {
-      patchMut.mutate({ ...form, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
+      patchMut.mutate({ ...form, formaPagoInformativa: /^NC-[ABCM]$/.test(form.tipoComprobante) ? form.formaPagoInformativa : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
       return;
     }
     if (!form.numeroComprobante) {
@@ -960,6 +973,7 @@ export function InvoiceDialog({
       ...(form.tipoComprobante === "REMITO-NF" ? { montoNeto: total.toFixed(2) } : {}),
       supplierId: form.supplierId ? parseInt(form.supplierId) : null,
       cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null,
+      formaPagoInformativa: /^NC-[ABCM]$/.test(form.tipoComprobante) ? form.formaPagoInformativa : null,
       formasPago: form.formaPagoInmediata !== "cuenta_corriente"
         ? [{ formaPago: form.formaPagoInmediata, monto: form.montoPagadoAhora }, ...form.formasPagoExtra]
         : [],
@@ -1560,6 +1574,7 @@ export function InvoiceDialog({
                 </div>
               {/* La forma de pago va al final: es el último dato que
                   normalmente se conoce al cargar un comprobante. */}
+              {creditNotePaymentSection && <div className="col-span-2">{creditNotePaymentSection}</div>}
               {isSupplierPayable && !isEditing && !sourceRemito && !form.tipoComprobante.startsWith("NC") && (
                 <div className="col-span-2">{formaPagoInmediataSection}</div>
               )}
@@ -2087,6 +2102,7 @@ export function InvoiceDialog({
               {/* La forma de pago se pide acá, al final, en vez de en el
                   encabezado: es el último dato que normalmente se conoce al
                   cargar un comprobante. */}
+              {creditNotePaymentSection && <div className="col-span-2">{creditNotePaymentSection}</div>}
               {isSupplierPayable && !isEditing && !sourceRemito && !form.tipoComprobante.startsWith("NC") && (
                 <>
                   <Separator />
@@ -2171,6 +2187,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
     ["Fecha de Emisión", invoice.fechaEmision],
     ["Período", invoice.periodo || "—"],
     ["Condición de Pago", invoice.condicionPago],
+    ...(invoice.formaPagoInformativa ? [["Forma de pago (informativa)", PURCHASE_CREDIT_NOTE_PAYMENT_METHODS.find(item=>item.value===invoice.formaPagoInformativa)?.label || invoice.formaPagoInformativa] as [string,string]] : []),
     ["Estado", invoice.estado],
     ["Cuenta contable", account ? `${account.codigo} — ${account.nombre}` : "—"],
   ];
