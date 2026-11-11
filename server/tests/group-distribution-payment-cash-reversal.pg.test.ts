@@ -331,4 +331,18 @@ runIfDatabaseIsConfigured("PostgreSQL real: Caja stops showing income when a dir
       await cleanupFixture(fixture, null);
     }
   }, 15_000);
+  it('records a transfer for one group room and leaves the other room and both statuses intact',async()=>{
+    const fixture=await createFixture(true);let paymentId:string|null=null;
+    try{
+      const before=(await testPool!.query('SELECT id,status FROM reservations WHERE id=ANY($1::text[]) ORDER BY id',[[fixture.reservationId,fixture.additionalReservationId]])).rows;
+      const response=await fetch(`${baseUrl}/api/groups/${fixture.groupId}/payment`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({receiptType:'none',receiverDetails:{razonSocial:'Synthetic AIMETTA',dni:'30123456'},concepts:[{description:'Habitación elegida',amount:150}],paymentRows:[{method:'transfer',amount:'150.00',reference:'TR-ONLY-505'}],paymentReservationId:fixture.reservationId,closeAllRooms:false})});
+      const body=await response.json();expect(response.status,JSON.stringify(body)).toBe(200);paymentId=body.groupPayment?.id||body.id;
+      expect(paymentId).toBeTruthy();
+      expect(await readReservationPayments(fixture.reservationId)).toHaveLength(1);
+      expect(await readReservationPayments(fixture.additionalReservationId!)).toHaveLength(0);
+      expect((await testPool!.query('SELECT id,status FROM reservations WHERE id=ANY($1::text[]) ORDER BY id',[[fixture.reservationId,fixture.additionalReservationId]])).rows).toEqual(before);
+      const cash=await readCashMovements(paymentId!);expect(cash).toHaveLength(1);expect(cash[0]).toMatchObject({payment_method:'transfer',amount:'150.00',movement_type:'income'});
+    }finally{await cleanupFixture(fixture,paymentId);}
+  },15000);
+
 });

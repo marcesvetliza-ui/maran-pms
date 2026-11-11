@@ -912,6 +912,7 @@ export default function GroupDetailPage() {
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
   const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string; retencionEnabled?: boolean; retencionTipo?: "iibb" | "ganancias"; retencionMonto?: string}>>([{method: "cash", amount: "", reference: ""}]);
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
+  const [groupPaymentTargetRoom,setGroupPaymentTargetRoom]=useState('all');
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
   const [groupPaymentCloseReservationIds, setGroupPaymentCloseReservationIds] = useState<string[]>([]);
@@ -948,6 +949,7 @@ export default function GroupDetailPage() {
     setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
     setGroupPaymentReceiptType("sin_comprobante");
     setGroupPaymentDistribution("equal");
+    setGroupPaymentTargetRoom("all");
     setGroupPaymentCloseAll(false);
     setGroupPaymentCloseReservationIds([]);
     setGroupPaymentCloseAmounts({});
@@ -1534,6 +1536,7 @@ export default function GroupDetailPage() {
         paymentRows: rowsPayload,
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
+        ...(groupPaymentTargetRoom!=="all"?{paymentReservationId:groupPaymentTargetRoom}:{}),
         closeAllRooms: groupPaymentCloseAll,
         closeReservationIds: groupPaymentCloseReservationIds,
         distributionDetail: groupPaymentCloseAll
@@ -2037,7 +2040,8 @@ export default function GroupDetailPage() {
     && groupPaymentHasCloseSelection
     && groupPaymentCloseAssignmentsValid
     && !groupPaymentConceptsMismatchPayment
-    && !groupPaymentExceedsFiscalAvailable;
+    && !groupPaymentExceedsFiscalAvailable
+    && !(groupPaymentTargetRoom!=="all"&&groupPaymentIsFiscal&&groupPaymentNonFiscalAdvances>0.009);
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -4014,7 +4018,7 @@ export default function GroupDetailPage() {
               ? groupPaymentSelectedBalance
               : requiredCollection;
             const applicationTotal = groupPaymentCloseAll ? closeCollection : rowsTotal + retentionsTotal;
-            const roomBalances = groupPaymentActiveReservations.map((reservation: any) => ({
+            const roomBalances = groupPaymentActiveReservations.filter(r=>groupPaymentTargetRoom==='all'||r.id===groupPaymentTargetRoom).map((reservation: any) => ({
               id: reservation.id,
               reservation,
               amount: Math.max(0, Number(folio?.reservations?.find((row: any) => row.reservationId === reservation.id)?.balance || 0)),
@@ -4741,8 +4745,15 @@ export default function GroupDetailPage() {
                   <div className={`grid grid-cols-1 ${!isMaster ? "sm:grid-cols-2" : ""} gap-4`}>
                     {!isMaster && (
                       <div>
+                        <Label>Aplicar el pago a</Label>
+                        <Select value={groupPaymentTargetRoom} onValueChange={value=>{setGroupPaymentTargetRoom(value);setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);setGroupPaymentCloseAmounts({});if(value!=='all'){const balance=Math.max(0,Number(folio?.reservations?.find(r=>r.reservationId===value)?.balance||0));setGroupPaymentRows(rows=>rows.length===1?[{...rows[0],amount:balance.toFixed(2)}]:rows);setGroupPaymentItems(gItemsFromSimple(buildGroupInvoiceItems((groupInvoiceSnapshot?.sources||[]).filter((source:any)=>String(source.id||'').startsWith(`reservation:${value}:`)),groupInvoiceDistribution,group?.name||groupId,balance)));}}}>
+                          <SelectTrigger data-testid="select-group-payment-target-room"><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="all">Todas las habitaciones</SelectItem>{groupPaymentActiveReservations.map(r=><SelectItem key={r.id} value={r.id}>Sólo hab. {r.room?.roomNumber||'—'} · {r.guest?.lastName||''} {r.guest?.firstName||''}</SelectItem>)}</SelectContent>
+                        </Select>
+                        {groupPaymentTargetRoom!=='all'&&groupPaymentIsFiscal&&nonFiscalAdvances>0.009&&<p role="alert" className="text-sm text-destructive">Hay anticipos grupales sin facturar. Revisá su aplicación antes de facturar esta habitación.</p>}
+                        {groupPaymentTargetRoom!=='all'&&<p className="text-sm mt-2">Se aplica únicamente a la habitación elegida. No se cierra la reserva ni se reparte entre otras habitaciones.</p>}
                         <Label>Modo automático entre habitaciones</Label>
-                        <Select value={effectiveAllocationMode} onValueChange={setGroupPaymentDistribution}>
+                        <Select value={effectiveAllocationMode} onValueChange={setGroupPaymentDistribution} disabled={groupPaymentTargetRoom!=='all'}>
                           <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
                           <SelectContent>
                             {nonFiscalAdvances <= 0 && <SelectItem value="equal">Partes iguales</SelectItem>}
@@ -4761,6 +4772,7 @@ export default function GroupDetailPage() {
                     <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
                       <Checkbox
                         id="close-all-rooms"
+                        disabled={groupPaymentTargetRoom!=='all'}
                         checked={groupPaymentCloseAll}
                         onCheckedChange={(value) => {
                           const checked = !!value;
@@ -4990,7 +5002,7 @@ export default function GroupDetailPage() {
           groupPaymentDraft={pendingGroupPaymentDraft || undefined}
           groupPaymentGroupId={pendingGroupPaymentDraft ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
-          groupInvoiceSources={groupPaymentDestino === "master" && masterFolio?.config === "accommodation"
+          groupInvoiceSources={groupPaymentTargetRoom!=="all" ? (groupInvoiceSnapshot?.sources??[]).filter((source:any)=>String(source.id||"").startsWith(`reservation:${groupPaymentTargetRoom}:`)) : groupPaymentDestino === "master" && masterFolio?.config === "accommodation"
             ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
             : groupInvoiceSnapshot?.sources}
           groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}

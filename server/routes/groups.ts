@@ -1274,7 +1274,7 @@ export function registerGroupsRoutes(app: Express) {
       const {
         paymentRows: rawPaymentRows,
         amount: legacyAmount, method: legacyMethod, reference: legacyReference,
-        receiptType, distribution, closeAllRooms, closeReservationIds: rawCloseReservationIds,
+        receiptType, distribution, paymentReservationId: rawPaymentReservationId, closeAllRooms, closeReservationIds: rawCloseReservationIds,
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
         receiverDetails, concepts, notes, invoiceData, settlementBreakdown: rawSettlementBreakdown,
@@ -1323,6 +1323,11 @@ export function registerGroupsRoutes(app: Express) {
             ? activeReservations.map((reservation: any) => reservation.id)
             : [];
       const shouldCloseReservations = requestedCloseIds.length > 0;
+      const paymentReservationId = rawPaymentReservationId == null ? '' : String(rawPaymentReservationId).trim();
+      if(paymentReservationId && (!activeIds.has(paymentReservationId)||requestedCloseIds.length)) {
+        return res.status(400).json({error:'Seleccioná una habitación activa de este grupo. El cobro individual no cierra habitaciones.'});
+      }
+
       if (requestedCloseIds.some((id) => !activeIds.has(id))) {
         return res.status(400).json({ error: "Sólo se pueden cerrar habitaciones activas de este grupo." });
       }
@@ -1333,6 +1338,7 @@ export function registerGroupsRoutes(app: Express) {
           balance: Math.max(0, Math.round((line.accommodationTotal + line.extrasTotal - line.paymentsTotal) * 100) / 100),
         }));
       const balancesById = new Map(balances.map((item) => [item.id, item.balance]));
+      if(paymentReservationId && Math.round(totalAmount*100)>Math.round((balancesById.get(paymentReservationId)||0)*100))return res.status(400).json({error:"El cobro supera el saldo de la habitación elegida."});
       const selectedBalance = requestedCloseIds.reduce((sum, id) => sum + (balancesById.get(id) || 0), 0);
       const totalBalance = Math.max(0, operational.balance);
       let nonFiscalAdvancesForAllocation = 0;
@@ -1350,6 +1356,7 @@ export function registerGroupsRoutes(app: Express) {
             error: `La factura de $${conceptsTotal.toFixed(2)} supera el disponible fiscal de $${fiscalAvailable.toFixed(2)}.`,
           });
         }
+        if(paymentReservationId && nonFiscalAdvancesForAllocation>0.009)return res.status(409).json({error:'Hay anticipos grupales sin facturar. Revisá su aplicación antes de cobrar y facturar una sola habitación.'});
         const requiredCollection = requiredGroupInvoiceCollection(
           conceptsTotal,
           nonFiscalAdvances,
@@ -1375,7 +1382,7 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: `Para cerrar las habitaciones elegidas, el pago debe coincidir exactamente con su saldo de $${selectedBalance.toFixed(2)}.` });
       }
 
-      const allocation = shouldCloseReservations
+      const allocation = paymentReservationId ? {[paymentReservationId]:Number(totalAmount.toFixed(2))} : shouldCloseReservations
         ? Object.fromEntries(requestedCloseIds
             .map((id) => ({ id, balance: balancesById.get(id) || 0 }))
             .filter((item) => item.balance > 0)
