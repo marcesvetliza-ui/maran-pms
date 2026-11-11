@@ -93,10 +93,10 @@ suite('Bajas seguras y edición del catálogo',()=>{
    await pool!.query('DELETE FROM item_categories WHERE id=$1',[category]);await pool!.query('DELETE FROM item_categories WHERE id=$1',[group]);await pool!.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplier]);
   }
  });
- it('bloquea saldos y conserva cantidades',async()=>{
+ it('archiva desde la baja con motivo aun con saldo y conserva cantidades',async()=>{
   await pool!.query('UPDATE inventory_items SET current_stock=2 WHERE id=$1',[item]);
-  const r=await request('POST',`/api/inventory/items/${item}/deactivate`,{reason:'Prueba'});expect(r.status).toBe(409);expect((await r.json()).error).toContain('saldo');
-  expect((await pool!.query('SELECT is_active,current_stock FROM inventory_items WHERE id=$1',[item])).rows[0]).toMatchObject({is_active:'true',current_stock:'2.000'});
+  const r=await request('POST',`/api/inventory/items/${item}/deactivate`,{reason:'Prueba'});expect(r.status,JSON.stringify(await r.json())).toBe(200);
+  expect((await pool!.query('SELECT is_active,current_stock FROM inventory_items WHERE id=$1',[item])).rows[0]).toMatchObject({is_active:'false',current_stock:'2.000'});
  });
  it('informa la receta que impide la baja, también desde storage',async()=>{
   await storage.createRecipeIngredient({recipeId:recipe,inventoryItemId:item,ingredientName:'Harina',quantity:'1',unit:'kg'});
@@ -159,4 +159,22 @@ suite('Bajas seguras y edición del catálogo',()=>{
   await expect(storage.updateInventoryItem(item,{isActive:false} as any)).rejects.toThrow('Estado');
  });
  it('los permisos de catálogo siguen siendo obligatorios',async()=>{role='reception';expect((await request('POST',`/api/inventory/items/${item}/deactivate`,{reason:'Prueba'})).status).toBe(403);});
+ it('el responsable de depósito puede archivar un duplicado con receta, saldo y consumo pendiente sin borrarlos',async()=>{
+  await storage.createRecipeIngredient({recipeId:recipe,inventoryItemId:item,ingredientName:'Ingrediente duplicado',quantity:'1',unit:'kg'});
+  await pool!.query('UPDATE inventory_items SET current_stock=4 WHERE id=$1',[item]);
+  await pool!.query('INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock) VALUES($1,$2,4)',[warehouse,item]);
+  await pool!.query("INSERT INTO inventory_consumption_jobs(source_type,source_id,lines,status) VALUES('restaurant_order',$1,$2,'pending')",[id,JSON.stringify([{itemId:item,warehouseId:warehouse,quantity:1}])]);
+  role='restaurant';expect((await request('POST',`/api/inventory/items/${item}/deactivate`,{reason:'Repetido'})).status).toBe(403);
+  role='resp_deposito';expect((await request('POST',`/api/inventory/items/${item}/deactivate`,{})).status).toBe(400);
+  const result=await request('POST',`/api/inventory/items/${item}/deactivate`,{reason:'Repetido'});expect(result.status,JSON.stringify(await result.json())).toBe(200);
+  expect((await pool!.query('SELECT is_active,current_stock FROM inventory_items WHERE id=$1',[item])).rows[0]).toEqual({is_active:'false',current_stock:'4.000'});
+  expect((await pool!.query('SELECT current_stock FROM warehouse_stock WHERE item_id=$1',[item])).rows[0].current_stock).toBe('4.000');
+  expect((await pool!.query('SELECT inventory_item_id FROM recipe_ingredients WHERE recipe_id=$1',[recipe])).rows[0].inventory_item_id).toBe(item);
+  expect((await pool!.query('SELECT status FROM inventory_consumption_jobs WHERE source_id=$1',[id])).rows[0].status).toBe('pending');
+  const audit=(await pool!.query("SELECT details FROM audit_logs WHERE entity_id=$1 AND description='Repetido'",[item])).rows[0];const details=typeof audit.details==='string'?JSON.parse(audit.details):audit.details;
+  expect(details).toMatchObject({quantitiesChanged:false,recipesPreserved:true,pendingOperationsPreserved:true});expect(details.dependencies).toContain('Consumo pendiente');expect(details.dependencies.some((s:string)=>s.includes('Sorrentinos'))).toBe(true);
+  expect((await request('POST',`/api/inventory/warehouses/${warehouse}/movements`,{itemId:item,movementType:'salida',quantity:1})).status).toBe(409);
+  expect((await pool!.query('SELECT current_stock FROM warehouse_stock WHERE item_id=$1',[item])).rows[0].current_stock).toBe('4.000');
+ });
+
 });
