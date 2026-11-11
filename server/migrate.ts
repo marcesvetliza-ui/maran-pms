@@ -1,3 +1,4 @@
+import { RATE_PLAN_MISSING_CURRENCY_SQL } from "./ratePlanCurrencyMigration";
 import { BILLING_OPERATION_SCHEMA_SQL } from "./billing/operationJournal";
 import { CASH_CARD_RECTIFICATIONS_SQL } from './billing/cashCardRectifications';
 import {ensureCcManualTrackingSchema} from './ccManualTracking';
@@ -2854,10 +2855,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN special_rate_reason text`)))
   );
 
-  // Fill only missing legacy values. A restart must never relabel a USD/EUR
-  // amount as pesos: doing so also invalidates Channex's currency mapping.
+  // Fill only missing legacy values. Never relabel an explicit currency.
   await withTimeout("rate_plans.fill_missing_currency", T, () =>
-    db.execute(sql`UPDATE rate_plans SET currency = 'ARS' WHERE currency IS NULL OR btrim(currency) = ''`)
+    db.execute(sql.raw(RATE_PLAN_MISSING_CURRENCY_SQL))
   );
 
   // invoice_ref en payments (anticipo con factura electrónica vinculada)
