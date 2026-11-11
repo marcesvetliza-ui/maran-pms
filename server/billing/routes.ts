@@ -1,3 +1,4 @@
+import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
@@ -485,7 +486,9 @@ async function reconcileReservationCreditSettlement(invoiceId: number, lockAlrea
       const amount = Number(lockedSettlement.amount) || 0;
       const canonicalReference = `credit-operation:${String(lockedIntent.operationId)}`;
 
-      if (amount > 0 && lockedSettlement.destination === "cuenta_corriente") {
+      if (amount > 0 && lockedSettlement.destination === "closed_correction_cc") {
+        await reconcileClosedCorrectionAccount(invoice, lockedIntent);
+      } else if (amount > 0 && lockedSettlement.destination === "cuenta_corriente") {
         const reservation = await storage.getReservation(String(invoice.reserva_id));
         if (!reservation) throw new Error("No se encontró la reserva para registrar la liquidación CC");
         // El rótulo que se ve en Caja/Reportes debe identificar a la persona u
@@ -1681,6 +1684,7 @@ export function registerBillingRoutes(app: Express) {
             ccEntityId: ccEntityId || null,
             label: String(cashLabelBody || `Anticipo ${tipoComprobante} — ${String(cliente?.razonSocial || "").trim() || "Reserva " + reservationId}`),
             status: "pending",
+            ...(res.locals.closedCorrectionAccount || {}),
           };
           if (isReservationCcSettlement &&
               Math.abs((paymentDetailByMethod.get("cuenta_corriente") || 0) - uncoveredAmount) > 0.02) {
@@ -2368,7 +2372,7 @@ export function registerBillingRoutes(app: Express) {
       await withReservationInvoiceLock(req.params.reservationId,async()=>{
         const prepared=await correctionInvoiceBody(req.params.reservationId,Number(req.params.invoiceId),req.body);
         if(prepared.existing){res.json(prepared.existing);return;}
-        req.body=prepared.body;res.locals.closedCorrectionId=Number(req.params.invoiceId);await emitInvoiceHandler(req,res);
+        req.body=prepared.body;res.locals.closedCorrectionAccount=prepared.accountSettlement;res.locals.closedCorrectionId=Number(req.params.invoiceId);await emitInvoiceHandler(req,res);
       });
     }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
   });
@@ -3236,6 +3240,7 @@ export function registerBillingRoutes(app: Express) {
       // (e.g., two separate partial credits weeks apart for the same invoice).
 
       if(req.body.closedReservationCorrection){
+        if(req.body.paymentIdsToVoid?.length||req.body.folioMovementIdsToVoid?.length)correctionError("La corrección de una reserva cerrada conserva sus cobros.",400);
         if(String(req.body.motivo||"").trim().length<3||String(req.body.motivo||"").length>1000)correctionError("Ingresá un motivo de entre 3 y 1000 caracteres.",400);
         const proof=await loadClosedCorrection(String(req.body.closedReservationCorrection),id) as ReturnType<typeof closedCorrectionProof>;
         if(!["credit","pending_credit"].includes(proof.stage))correctionError("La factura ya tiene una corrección. Actualizá la reserva.");
