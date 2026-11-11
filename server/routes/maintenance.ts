@@ -109,7 +109,7 @@ export function registerMaintenanceRoutes(app: Express) {
     }
   });
 
-  app.post("/api/maintenance/work-orders", async (req, res) => {
+  app.post("/api/maintenance/work-orders", requireAuth, async (req, res) => {
     try {
       const orderCode = storage.generateWorkOrderCode();
       const { blockRoom, blockFrom, blockTo, blockedBy, ...rest } = req.body;
@@ -125,6 +125,9 @@ export function registerMaintenanceRoutes(app: Express) {
       const order = await storage.createWorkOrder({
         ...body,
         orderCode,
+        // Creation attribution belongs to the authenticated session, never
+        // to editable form fields or a later technician assignment.
+        reportedBy: req.user!.fullName?.trim() || req.user!.username,
         reportedAt: new Date(),
       });
 
@@ -148,9 +151,11 @@ export function registerMaintenanceRoutes(app: Express) {
     }
   });
 
-  app.patch("/api/maintenance/work-orders/:id", async (req, res) => {
+  app.patch("/api/maintenance/work-orders/:id", requireAuth, async (req, res) => {
     try {
       const updates = { ...req.body };
+      delete updates.reportedBy;
+      delete updates.reportedAt;
       if (updates.status === "completed" && !updates.completedAt) {
         updates.completedAt = new Date();
       }

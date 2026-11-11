@@ -1050,6 +1050,7 @@ export default function MaintenancePage() {
       if (
         !order.title.toLowerCase().includes(q) &&
         !order.orderCode.toLowerCase().includes(q) &&
+        !(order.reportedBy || "").toLowerCase().includes(q) &&
         !loc.toLowerCase().includes(q)
       ) return false;
     }
@@ -1186,7 +1187,7 @@ export default function MaintenancePage() {
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
-                placeholder="Buscar por código, título, ubicación..."
+                placeholder="Buscar por código, título, ubicación o autor..."
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 className="pl-8 w-[260px]"
@@ -1279,7 +1280,7 @@ export default function MaintenancePage() {
                           ? format(new Date(order.reportedAt), "dd/MM/yy", { locale: es })
                           : "-"}
                       </TableCell>
-                      <TableCell className="font-medium">{order.title}</TableCell>
+                      <TableCell><div className="font-medium">{order.title}</div><div className="text-xs text-muted-foreground mt-1">Cargada por: {order.reportedBy?.trim() || "No registrado"}</div></TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           <span>{order.room ? `Hab. ${order.room.roomNumber}` : order.location || "-"}</span>
@@ -2012,6 +2013,7 @@ export default function MaintenancePage() {
                 </div>
               ) : null}
               <div className="grid grid-cols-2 gap-4">
+                <div><p className="text-sm text-muted-foreground">Cargada por</p><p className="font-medium">{selectedOrder.reportedBy?.trim() || "No registrado"}</p></div>
                 <div>
                   <p className="text-sm text-muted-foreground">Reportada</p>
                   <p className="font-medium">
