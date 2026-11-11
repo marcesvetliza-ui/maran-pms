@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS channex_inbound_revisions (
  review_code text, created_at timestamptz NOT NULL DEFAULT now(), applied_at timestamptz,
  PRIMARY KEY(connection_id,revision_id)
 );
+ALTER TABLE channex_inbound_revisions ADD COLUMN IF NOT EXISTS private_notes_encrypted text;
+ALTER TABLE channex_inbound_revisions ADD COLUMN IF NOT EXISTS source_captured boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS channex_inbound_bookings (
  connection_id varchar NOT NULL REFERENCES channex_connections(id) ON DELETE CASCADE,
  booking_id text NOT NULL, last_revision_id text, last_inserted_at timestamptz, guest_hash text, cancelled boolean NOT NULL DEFAULT false,

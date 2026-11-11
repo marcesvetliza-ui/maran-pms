@@ -101,7 +101,7 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
     if (typeof req.body?.revisionId !== "string") return res.sendStatus(400);
     try {
       const updated = await pool.query(`UPDATE channex_inbound_revisions SET status='pending',review_code=NULL WHERE connection_id=$1 AND revision_id=$2 AND status='review'
-    AND review_code NOT IN ('REVISION_ID_COLLISION','WRONG_PROPERTY','INVALID_REVISION') RETURNING revision_id`, [req.params.id, req.body.revisionId]);
+    AND review_code NOT IN ('REVISION_ID_COLLISION','WRONG_PROPERTY','INVALID_REVISION','MASKED_GUEST_DATA') RETURNING revision_id`, [req.params.id, req.body.revisionId]);
       if (!updated.rowCount) return res.status(409).json({ error: "La revisión no se puede reintentar automáticamente" });
       res.json({ ok: true });
     } catch { res.status(503).json({ error: "No se pudo reintentar la revisión" }); }

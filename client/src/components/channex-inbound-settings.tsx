@@ -9,6 +9,7 @@ import { useAuth } from "@/App";
 import { ChannexReadiness } from "./channex-readiness";
 const reasons: Record<string, string> = {
   UNLINKED_EXTERNAL_RESERVATION: "Ya existe una reserva con esta referencia externa; revisá su vínculo",
+  MASKED_GUEST_DATA: "Channex ocultó los datos de contacto antes de que pudieran guardarse; requiere revisión",
   INVALID_REVISION: "La revisión no tiene el formato esperado", INVALID_BOOKING: "Faltan datos de la reserva",
   WRONG_PROPERTY: "La revisión pertenece a otra propiedad", REVISION_ID_COLLISION: "El identificador llegó con contenido diferente",
   REVISION_ORDER_AMBIGUOUS: "No se pudo determinar el orden de las revisiones", NO_PILOT_ROOM_AVAILABLE: "No hay habitación disponible en el piso piloto",
@@ -56,7 +57,7 @@ export function ChannexInboundSettings({ connectionId }: { connectionId: string 
         <details><summary className="cursor-pointer">Referencias del canal</summary><p className="break-all">Reserva: {r.booking_id || "Sin identificar"} · Revisión: {r.revision_id}</p></details>
         <p>{({ pending: "Pendiente de aplicar", applied: "Aplicada al PMS", stale: "Anterior a la versión ya aplicada", review: "Requiere revisión" } as Record<string, string>)[r.status]} · {r.acked_at ? "Recepción confirmada a Channex" : "Confirmación pendiente"}</p>
         {r.review_code && <p>{reasons[r.review_code] || "Revisá la reserva y su configuración"}</p>}
-        {access?.bookings && r.status === "review" && !['INVALID_REVISION', 'WRONG_PROPERTY', 'REVISION_ID_COLLISION'].includes(r.review_code || '') && <Button size="sm" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ method: "POST", path: "/retry", body: { revisionId: r.revision_id } })}>Reintentar revisión</Button>}
+        {access?.bookings && r.status === "review" && !['INVALID_REVISION', 'WRONG_PROPERTY', 'REVISION_ID_COLLISION', 'MASKED_GUEST_DATA'].includes(r.review_code || '') && <Button size="sm" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ method: "POST", path: "/retry", body: { revisionId: r.revision_id } })}>Reintentar revisión</Button>}
       </div>)}</div>}
     </> : null}
     {action.error && <p role="alert" className="text-destructive">{action.error.message}</p>}

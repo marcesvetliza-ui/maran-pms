@@ -127,12 +127,15 @@ async function fetchCatalogCollection(connection: ChannexConnectionCredentials, 
  * de PMS — devuelve únicamente revisiones sin ack, ordenables por `inserted_at`,
  * y queda vacío cuando ya se confirmó todo.
  */
-export async function fetchPendingBookingRevisions(connection: ChannexConnectionCredentials, propertyId: string): Promise<any[]> {
-  const body = await channexRequest(
-    connection,
-    `/booking_revisions/feed?filter[property_id]=${encodeURIComponent(propertyId)}&order[inserted_at]=asc`,
-  );
+export async function fetchAccountBookingRevisions(connection: ChannexConnectionCredentials): Promise<any[]> {
+  const body = await channexRequest(connection, `/booking_revisions/feed?order[inserted_at]=asc`);
   return body?.data ?? [];
+}
+/** Manual previews still select one property locally; the automated receiver
+ * dispatches one account feed to all of that account's enabled properties. */
+export async function fetchPendingBookingRevisions(connection: ChannexConnectionCredentials, propertyId: string): Promise<any[]> {
+  const revisions = await fetchAccountBookingRevisions(connection);
+  return revisions.filter(revision => revision?.attributes?.property_id === propertyId);
 }
 
 export async function fetchChannexBookingRevision(connection: ChannexConnectionCredentials, revisionId: string): Promise<any | null> {

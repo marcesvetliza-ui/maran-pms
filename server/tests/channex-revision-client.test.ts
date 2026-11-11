@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { acknowledgeBookingRevision, ChannexApiError, fetchChannexBookingRevision } from "../channex/client";
+import { acknowledgeBookingRevision, fetchAccountBookingRevisions, fetchPendingBookingRevisions, ChannexApiError, fetchChannexBookingRevision } from "../channex/client";
 afterEach(()=>vi.unstubAllGlobals());
 it("uses revision resources and prevents credential-bearing redirects",async()=>{
  const fetch=vi.fn(async()=>new Response(JSON.stringify({data:{id:"rev"}}),{status:200}));vi.stubGlobal("fetch",fetch);
@@ -13,4 +13,12 @@ it("retains Retry-After even when a rate-limit response is not JSON",async()=>{
  vi.stubGlobal("fetch",vi.fn(async()=>new Response("rate limited",{status:429,headers:{"Retry-After":"120"}})));
  await expect(fetchChannexBookingRevision({baseUrl:"https://staging.channex.io/api/v1",apiKey:"fake"},"rev"))
   .rejects.toMatchObject({status:429,retryAfter:"120"});
+});
+
+it("fetches an account feed without a property filter and scopes manual previews locally",async()=>{
+ const fetch=vi.fn(async()=>new Response(JSON.stringify({data:[{id:"a",attributes:{property_id:"p1"}},{id:"b",attributes:{property_id:"p2"}}]}),{status:200}));vi.stubGlobal("fetch",fetch);
+ const credentials={baseUrl:"https://staging.channex.io/api/v1",apiKey:"chx_synthetic"};
+ expect(await fetchAccountBookingRevisions(credentials)).toHaveLength(2);
+ expect(await fetchPendingBookingRevisions(credentials,"p1")).toEqual([{id:"a",attributes:{property_id:"p1"}}]);
+ expect(fetch.mock.calls[0][0]).toBe("https://staging.channex.io/api/v1/booking_revisions/feed?order[inserted_at]=asc");
 });

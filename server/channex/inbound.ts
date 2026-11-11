@@ -9,7 +9,8 @@ import { withLodgingInventoryMutationLock } from "../inventoryMutationLock";
 import { withNightlyWriter, withReservationFinancialLocks } from "../nightlyPricingGuard";
 import { amountString } from "@shared/nightlyPricing";
 import { STAGING_URL } from "./ari";
-import { BookingReviewError, parseBookingRevision, redactBooking, revisionHash, review } from "./bookingRevision";
+import { BookingReviewError, matchesMaskedReplay, parseBookingRevision, redactBooking, revisionHash, review } from "./bookingRevision";
+import { archiveBookingNotes } from "./bookingPrivate";
 import { settleBooking } from "./settlement";
 
 export function assertInboundStaging(connection: any) {
@@ -26,10 +27,10 @@ export async function recoverStoredInboundRevisions(target: Pool) {
     WHERE r.status='review' AND r.review_code='INVALID_REVISION' AND r.acked_at IS NULL
       AND i.enabled AND a.enabled AND c.is_active AND c.environment='${environment}' AND c.base_url=$1
     ORDER BY r.created_at`, [baseUrl])).rows;
-  for (const row of rows) await persistInboundRevision(target, row.connection_id, row.payload);
+  for (const row of rows) await persistInboundRevision(target, row.connection_id, row.payload, false);
 }
 /** Immutable durable inbox. ACK is a separate post-commit action. */
-export async function persistInboundRevision(target: Pool, connectionId: string, input: unknown) {
+export async function persistInboundRevision(target: Pool, connectionId: string, input: unknown, sourceCaptured = true) {
   const payload = redactBooking(input);
   if (!payload || typeof payload.id !== "string" || payload.id.length > 160 || !payload.id.length) return review("INVALID_REVISION_ID");
   if (Buffer.byteLength(JSON.stringify(payload)) > 1024 * 1024) return review("REVISION_TOO_LARGE");
@@ -43,14 +44,20 @@ export async function persistInboundRevision(target: Pool, connectionId: string,
     catch (error) { if (!(error instanceof BookingReviewError)) throw error; code = error.code; }
     const trustedHead = code && !["INVALID_REVISION", "WRONG_PROPERTY"].includes(code);
     const hash = revisionHash(payload);
-    const inserted = await c.query(`INSERT INTO channex_inbound_revisions(connection_id,revision_id,payload,payload_hash,booking_id,inserted_at,status,review_code)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING RETURNING revision_id`,
-      [connectionId, payload.id, payload, hash, booking?.bookingId || (trustedHead ? payload.attributes.booking_id : null), booking?.insertedAt || (trustedHead ? payload.attributes.inserted_at : null), code ? "review" : "pending", code]);
+    const privateNotes = archiveBookingNotes(input, connectionId, payload.id);
+    const inserted = await c.query(`INSERT INTO channex_inbound_revisions(connection_id,revision_id,payload,payload_hash,booking_id,inserted_at,status,review_code,private_notes_encrypted,source_captured)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING revision_id`,
+      [connectionId, payload.id, payload, hash, booking?.bookingId || (trustedHead ? payload.attributes.booking_id : null), booking?.insertedAt || (trustedHead ? payload.attributes.inserted_at : null), code ? "review" : "pending", code, privateNotes, sourceCaptured]);
     if (!inserted.rowCount) {
-      const existing = (await c.query("SELECT payload_hash FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2 FOR UPDATE", [connectionId, payload.id])).rows[0];
-      if (existing.payload_hash !== hash) {
+      const existing = (await c.query("SELECT payload_hash,payload,acked_at FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2 FOR UPDATE", [connectionId, payload.id])).rows[0];
+      if (existing.payload_hash !== hash && !(existing.acked_at && matchesMaskedReplay(existing.payload, payload))) {
         await c.query("UPDATE channex_inbound_revisions SET status='review',review_code='REVISION_ID_COLLISION' WHERE connection_id=$1 AND revision_id=$2", [connectionId, payload.id]);
       } else if (booking) {
+        // Historical unacknowledged inbox rows must be fetched again to capture
+        // notes before the upcoming upstream masking. Never erase an archive.
+        await c.query(`UPDATE channex_inbound_revisions SET source_captured=source_captured OR $4,
+          private_notes_encrypted=COALESCE(private_notes_encrypted,$3)
+          WHERE connection_id=$1 AND revision_id=$2 AND acked_at IS NULL`, [connectionId,payload.id,privateNotes,sourceCaptured]);
         // Re-fetching an identical unacknowledged revision after a parser fix
         // can recover it. Keep the immutable payload/hash and all other review
         // decisions; normal application still checks scope, mapping and money.

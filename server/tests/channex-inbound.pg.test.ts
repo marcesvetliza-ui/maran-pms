@@ -346,4 +346,84 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   const row=(await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
   expect(row.review_code).toBe("REVISION_ID_COLLISION");expect(JSON.stringify(row.payload)).not.toContain("sensitive");expect(row.payload.attributes.amount).toBe("250");
  });
+ it("preserves committed contact data on masked replay and does not ACK an unknown masked revision",async()=>{
+  const f=await fixture(),r:any=revision(f.id,"booking-masked","masked-replay");
+  r.attributes.customer.mail="synthetic@example.invalid";r.attributes.customer.phone="555123";
+  await service.persistInboundRevision(pool,f.id,r);
+  await pool.query("UPDATE channex_inbound_revisions SET acked_at=now() WHERE connection_id=$1",[f.id]);
+  const masked=structuredClone(r);masked.attributes.customer.mail="***";masked.attributes.customer.phone="***";
+  await service.persistInboundRevision(pool,f.id,masked);
+  let row=(await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
+  expect(row.status).toBe("pending");expect(row.review_code).toBeNull();expect(row.payload.attributes.customer.mail).toBe("synthetic@example.invalid");
+  masked.attributes.amount="999";await service.persistInboundRevision(pool,f.id,masked);
+  row=(await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];expect(row.review_code).toBe("REVISION_ID_COLLISION");
+  masked.id="masked-new";await service.persistInboundRevision(pool,f.id,masked);
+  row=(await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2",[f.id,masked.id])).rows[0];expect(row.review_code).toBe("MASKED_GUEST_DATA");
+  await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id<>$1",[f.id]);
+  await pool.query("UPDATE channex_inbound_dispatch SET next_request_at=now()");
+  const {runInboundOnce}=await import("../channex/inboundWorker");const ack=vi.fn();
+  await runInboundOnce(pool,{enabled:true,transport:{feed:async()=>[],ack},apply:async()=>{}});
+  expect(ack).not.toHaveBeenCalled();
+ });
+ it("commits encrypted operational notes before the remote ACK",async()=>{
+  vi.stubEnv("CHANNEX_CREDENTIALS_ENCRYPTION_KEY","synthetic-archive-test-secret-at-least-32-chars");
+  try {
+   const f=await fixture(),r:any=revision(f.id,"booking-notes","notes-before-ack");r.attributes.notes="Llegada tarde";
+   await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id<>$1",[f.id]);
+   await service.persistInboundRevision(pool,f.id,r);
+   const {runInboundOnce}=await import("../channex/inboundWorker"),{readBookingNotes}=await import("../channex/bookingPrivate");
+   const ack=vi.fn(async()=>{
+    const row=(await pool.query("SELECT payload,private_notes_encrypted FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
+    expect(row.payload.attributes.notes).toBe("[redacted]");
+    expect(readBookingNotes(row.private_notes_encrypted,f.id,r.id)).toEqual({notes:"Llegada tarde"});
+   });
+   await pool.query("UPDATE channex_inbound_dispatch SET next_request_at=now()");
+   await runInboundOnce(pool,{enabled:true,transport:{feed:async()=>[],ack},apply:async()=>{}});expect(ack).toHaveBeenCalledOnce();
+  } finally {vi.unstubAllEnvs();}
+ });
+
+ it("routes one account feed across its hotels without touching another account or unknown hotels",async()=>{
+  vi.stubEnv("CHANNEX_CREDENTIALS_ENCRYPTION_KEY","synthetic-account-test-secret-at-least-32-chars");
+  try {
+   const first=await fixture(),second=await fixture(),other=await fixture();
+   await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id<>ALL($1::varchar[])",[[first.id,second.id,other.id]]);
+   await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=ANY($1::varchar[])",[[first.id,second.id,other.id]]);
+   const {encryptChannexApiKey}=await import("../channex/credentials");
+   for(const f of [first,second,other]) await pool.query("UPDATE channex_connections SET api_key_encrypted=$2 WHERE id=$1",[f.id,encryptChannexApiKey(f.id===other.id?"other-account":"shared-account")]);
+   await pool.query("UPDATE channex_inbound_settings SET enabled=true,notification_pending=false WHERE connection_id=ANY($1::varchar[])",[[first.id,second.id,other.id]]);
+   await pool.query("UPDATE channex_inbound_settings SET notification_pending=true WHERE connection_id=$1",[first.id]);
+   const {runInboundOnce}=await import("../channex/inboundWorker");
+   const feed=vi.fn(async()=>{
+    await pool.query("UPDATE channex_inbound_settings SET notification_pending=true,notification_version=notification_version+1 WHERE connection_id=$1",[second.id]);
+    return [revision(first.id,"account-a","account-a"),revision(second.id,"account-b","account-b"),revision(other.id,"other","other"),revision("unknown","unknown","unknown")];
+   });
+   await pool.query("UPDATE channex_inbound_dispatch SET next_request_at=now()");
+   await runInboundOnce(pool,{enabled:true,transport:{feed,ack:async()=>{}},apply:async()=>{}});
+   expect(feed).toHaveBeenCalledOnce();
+   const rows=(await pool.query("SELECT connection_id,revision_id FROM channex_inbound_revisions WHERE connection_id=ANY($1::varchar[]) ORDER BY revision_id",[[first.id,second.id,other.id]])).rows;
+   expect(rows).toEqual([{connection_id:first.id,revision_id:"account-a"},{connection_id:second.id,revision_id:"account-b"}]);
+   expect((await pool.query("SELECT notification_pending FROM channex_inbound_settings WHERE connection_id=$1",[second.id])).rows[0].notification_pending).toBe(true);
+  } finally {vi.unstubAllEnvs();}
+ });
+
+ it("does not ACK historical rows until a fresh source has captured their notes",async()=>{
+  vi.stubEnv("CHANNEX_CREDENTIALS_ENCRYPTION_KEY","synthetic-historical-secret-at-least-32-chars");
+  try {
+   const f=await fixture(),r:any=revision(f.id,"historical-notes","historical-notes");r.attributes.notes="Llegada nocturna";
+   await service.persistInboundRevision(pool,f.id,r);
+   await pool.query("UPDATE channex_inbound_revisions SET source_captured=false,private_notes_encrypted=NULL WHERE connection_id=$1",[f.id]);
+   // A local parser retry cannot stand in for re-fetching the original notes.
+   const {redactBooking}=await import("../channex/bookingRevision");
+   await service.persistInboundRevision(pool,f.id,redactBooking(r),false);
+   await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id<>$1",[f.id]);
+   const {runInboundOnce}=await import("../channex/inboundWorker");const ack=vi.fn();
+   await pool.query("UPDATE channex_inbound_dispatch SET next_request_at=now()");
+   await runInboundOnce(pool,{enabled:true,transport:{feed:async()=>[],ack},apply:async()=>{}});expect(ack).not.toHaveBeenCalled();
+   await service.persistInboundRevision(pool,f.id,r);
+   const {readBookingNotes}=await import("../channex/bookingPrivate");
+   const row=(await pool.query("SELECT source_captured,private_notes_encrypted FROM channex_inbound_revisions WHERE connection_id=$1",[f.id])).rows[0];
+   expect(row.source_captured).toBe(true);expect(readBookingNotes(row.private_notes_encrypted,f.id,r.id)).toEqual({notes:"Llegada nocturna"});
+  } finally {vi.unstubAllEnvs();}
+ });
+
 });
