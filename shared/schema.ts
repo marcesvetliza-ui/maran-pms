@@ -2801,6 +2801,7 @@ export const purchaseInvoices = pgTable("purchase_invoices", {
   fechaEmision: date("fecha_emision").notNull(),
   periodo: text("periodo"),
   condicionPago: text("condicion_pago").notNull().default("contado"),
+  formaPagoInformativa: text("forma_pago_informativa"),
   montoNeto: numeric("monto_neto", { precision: 14, scale: 2 }).notNull().default("0"),
   alicuotaIva: text("alicuota_iva").default("21"),
   montoIva27: numeric("monto_iva27", { precision: 14, scale: 2 }).default("0"),

@@ -74,6 +74,7 @@ async function cleanupInvoice(invoiceId?: number) {
 
 suite("PostgreSQL real: pago automático al cargar la factura de Compras", () => {
   beforeAll(async () => {
+    await pool!.query("ALTER TABLE purchase_invoices ADD COLUMN IF NOT EXISTS forma_pago_informativa text");
     // A blank CI schema seeds only base accounts; this fixture also exercises VAT.
     const vat=await pool!.query<{id:number}>("INSERT INTO accounting_accounts(codigo,nombre,tipo,activo) VALUES('1.1.4.07.01','IVA compras 21% (fixture)','activo',true) ON CONFLICT(codigo) DO NOTHING RETURNING id");
     createdVatAccountId=vat.rows[0]?.id;
@@ -215,6 +216,31 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
     }
   });
 
+  it.each([{tipoComprobante:'NC-A',formaPagoInformativa:'inexistente'},{tipoComprobante:'FACT-A',formaPagoInformativa:'efectivo'}])('rejects invalid informational metadata before creating a document: %j',async values=>{
+    const response=await request('POST','/api/purchase-invoices',{...values,numeroComprobante:'invalid-info',fechaEmision:'2026-11-11',montoNeto:'10'});
+    expect(response.status).toBe(400);expect(response.body.error).toContain('Forma de pago informativa inválida');
+  });
+  it.each(['efectivo','transferencia','cuenta_corriente'])('keeps NC payment information %s separate from settlement and money movements',async method=>{
+    if(!pool)return;const suffix=randomUUID(),supplierId=await makeSupplier(suffix);let invoiceId:number|undefined;
+    try{
+      const beforeCash=(await pool.query('SELECT count(*)::int AS n FROM cash_movements')).rows[0].n;
+      const body={tipoComprobante:'NC-A',supplierId,numeroComprobante:`NC-INFO-${suffix}`,fechaEmision:'2026-09-23',montoNeto:'30.00',montoIva21:'6.30',formaPagoInformativa:method};
+      const created=await request('POST','/api/purchase-invoices',body);
+      expect(created.status,JSON.stringify(created.body)).toBe(201);invoiceId=Number(created.body.id);
+      expect(created.body).toMatchObject({forma_pago_informativa:method,condicion_pago:'cuenta_corriente',estado:'pendiente',saldo_pendiente:'36.30'});
+      expect((await request('GET',`/api/purchase-invoices/${invoiceId}`)).body.forma_pago_informativa).toBe(method);
+      const revised=await request('PATCH',`/api/purchase-invoices/${invoiceId}`,{...body,formaPagoInformativa:'cheque'});
+      expect(revised.status,JSON.stringify(revised.body)).toBe(200);
+      expect(revised.body).toMatchObject({forma_pago_informativa:'cheque',condicion_pago:'cuenta_corriente',estado:'pendiente',saldo_pendiente:'36.30'});
+      const {formaPagoInformativa:ignored,...oldClient}=body;
+      const preserved=await request('PATCH',`/api/purchase-invoices/${invoiceId}`,oldClient);
+      expect(preserved.status,JSON.stringify(preserved.body)).toBe(200);expect(preserved.body.forma_pago_informativa).toBe('cheque');
+      expect((await pool.query('SELECT count(*)::int AS n FROM cash_movements')).rows[0].n).toBe(beforeCash);
+      expect((await pool.query('SELECT id FROM payment_order_items WHERE invoice_id=$1',[invoiceId])).rows).toHaveLength(0);
+      const accounts=await pool.query('SELECT aa.codigo FROM accounting_entry_lines l JOIN accounting_accounts aa ON aa.id=l.account_id WHERE l.entry_id=$1',[preserved.body.asiento_id]);
+      expect(accounts.rows.some(row=>String(row.codigo).startsWith('1.1.1.'))).toBe(false);
+    }finally{await cleanupInvoice(invoiceId);await pool.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplierId]);}
+  });
   it("POST /api/payment-orders (OP manual) sigue funcionando para varias facturas juntas, ahora atómico", async () => {
     if (!pool) return;
     const suffix = randomUUID();

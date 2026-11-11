@@ -1,3 +1,4 @@
+import { normalizePurchaseCreditNotePayment } from '@shared/purchase-credit-note-payment';
 import {productionEnabled} from './channex/connectionPolicy';
 import {saveBackupConfig} from './backup-config';
 import {isChannexPrepared} from './channex/runtimeState';
@@ -3108,6 +3109,7 @@ export async function registerRoutes(
         return res.status(201).json(result.rows[0]);
       }
       const body = normalizeNonFiscalPurchase(applyPurchaseAdjustments(normalizeReceivedRetentionAmounts(req.body, req.body.tipoComprobante)));
+      const formaPagoInformativa = normalizePurchaseCreditNotePayment(body.tipoComprobante, body.formaPagoInformativa);
       if (body.sourceRemitoId != null) {
         const sourceId = Number(body.sourceRemitoId);
         if (!Number.isSafeInteger(sourceId) || sourceId <= 0) return res.status(400).json({ error: "Remito de origen inválido." });
@@ -3207,7 +3209,7 @@ export async function registerRoutes(
         INSERT INTO purchase_invoices (
           tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
           punto_venta, numero_comprobante, numero_comprobante_ext,
-          fecha_emision, periodo, condicion_pago,
+          fecha_emision, periodo, condicion_pago, forma_pago_informativa,
           monto_neto, alicuota_iva, monto_iva27, monto_iva21, monto_iva105,
           monto_iva5, monto_iva25, monto_exento, monto_no_gravado,
           impuestos_internos, ley_25413, percepcion_iibb, percepcion_iva,
@@ -3217,7 +3219,7 @@ export async function registerRoutes(
         ) VALUES (
           ${body.tipoComprobante}, ${body.supplierId||null}, ${body.proveedorNombre||null}, ${body.proveedorCuit||null},
           ${body.puntoVenta||null}, ${body.numeroComprobante}, ${numeroComprobanteExt||null},
-          ${body.fechaEmision}, ${body.periodo||null}, ${condicionPago},
+          ${body.fechaEmision}, ${body.periodo||null}, ${condicionPago}, ${formaPagoInformativa},
           ${n("montoNeto")}, ${body.alicuotaIva||"21"}, ${n("montoIva27")}, ${n("montoIva21")}, ${n("montoIva105")},
           ${n("montoIva5")}, ${n("montoIva25")}, ${n("montoExento")}, ${n("montoNoGravado")},
           ${n("impuestosInternos")}, ${n("ley25413")}, ${n("percepcionIibb")}, ${n("percepcionIva")},
@@ -3360,6 +3362,7 @@ export async function registerRoutes(
       if((existing.rows[0] as any).descuento && req.body.descuentoTipo===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar o modificar el descuento de este comprobante.'});
       if((existing.rows[0] as any).envio && req.body.envioImporte===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar el envío del comprobante.'});
       const body = normalizeNonFiscalPurchase(applyPurchaseAdjustments({...normalizeReceivedRetentionAmounts(req.body, tipoComprobante),tipoComprobante}));
+      const formaPagoInformativa = normalizePurchaseCreditNotePayment(tipoComprobante, body.formaPagoInformativa);
       // Las correcciones de comprobantes históricos conservan sus retenciones;
       // uno que nunca las tuvo no puede incorporarlas desde este formulario.
       if (isSupplierPayableDocument(tipoComprobante) &&
@@ -3405,6 +3408,7 @@ export async function registerRoutes(
             saldo_pendiente = ${balance.saldo}, estado = ${balance.estado},
             cuenta_contable_id = ${body.cuentaContableId||null},
             centro_costo = ${centroCosto}, observaciones = ${body.observaciones||null},
+            forma_pago_informativa = CASE WHEN ${req.body.formaPagoInformativa !== undefined} THEN ${formaPagoInformativa} ELSE forma_pago_informativa END,
             envio = ${body.envio?JSON.stringify(body.envio):null}::jsonb,
             descuento = ${body.descuento?JSON.stringify(body.descuento):null}::jsonb,
             subtipo_retencion = ${body.subtipoRetencion||null},
