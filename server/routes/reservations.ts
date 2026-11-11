@@ -1,3 +1,4 @@
+import {assertIndividualGroupPayment} from '../billing/individualGroupFolio';
 import {groupPersonalExtrasFactsQuery} from "../groupPersonalExtrasFacts";
 import { accommodationNights } from '@shared/accommodationNights';
 import { withReservationFinancialLock } from "../nightlyPricingGuard";
@@ -2855,11 +2856,22 @@ export function registerReservationsRoutes(app: Express) {
         ? await storage.getReservation(req.body.reservationId)
         : null;
       let groupPersonalExtras = false;
+      let groupIndividualFolio = false;
       if (reservationForPayment) {
         const [groupLink] = await db.select().from(groupReservationLinks)
           .where(eq(groupReservationLinks.reservationId, reservationForPayment.id));
         const paymentPurpose = req.body.paymentPurpose;
-        if (groupLink) {
+        if(groupLink && paymentPurpose!=="personal_extras"){
+          lockedReservationId=reservationForPayment.id;
+          groupPaymentLockClient=await pool.connect();
+          await groupPaymentLockClient.query("SELECT pg_advisory_lock(hashtext($1))",[`reservation-finance:${lockedReservationId}`]);
+          await groupPaymentLockClient.query("BEGIN");groupRowTransactionOpen=true;
+          if(paymentRequest){const existing=await storage.getReservationPaymentRequest(paymentRequest);if(existing)return res.status(200).json(existing);}
+          await groupPaymentLockClient.query("SELECT id FROM groups WHERE id=$1 FOR UPDATE",[groupLink.groupId]);
+          await assertIndividualGroupPayment(groupLink.groupId,reservationForPayment.id,req.body,paymentRequest?.id);
+          groupIndividualFolio=true;
+        }
+        if (groupLink && !groupIndividualFolio) {
           if (paymentPurpose !== "personal_extras") {
             return res.status(409).json({
               error: "Los pagos de alojamiento de una reserva grupal deben registrarse desde el cobro del grupo",
