@@ -1,3 +1,4 @@
+import {reservationGroupSources} from '@shared/reservationGroupSources';
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import {
@@ -241,7 +242,7 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
       ORDER BY created_at, id
     `),
     db.execute(sql`
-      SELECT si.source_charge_amounts, si.monto_total, si.monto_acreditado,
+      SELECT si.reserva_id, si.group_id, si.source_charge_amounts, si.monto_total, si.monto_acreditado,
              COALESCE((
                SELECT jsonb_agg(nc.source_charge_amounts)
                FROM sales_invoices nc
@@ -251,7 +252,7 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
                  AND (nc.reconciliation_status IS NULL OR nc.reconciliation_status='conciliada')
              ), '[]'::jsonb) AS credit_source_charge_amounts
       FROM sales_invoices si
-      WHERE si.group_id = ${groupId}
+      WHERE (si.group_id = ${groupId} OR (si.group_id IS NULL AND si.reserva_id IN (SELECT reservation_id FROM group_reservation_links WHERE group_id=${groupId})))
         AND si.tipo_comprobante IN ('FA', 'FB', 'FC', 'FT', 'FM', 'FMB')
         AND si.estado IN ('emitida', 'parcial', 'autorizacion_pendiente')
     `),
@@ -340,7 +341,9 @@ export async function getGroupInvoiceSnapshot(groupId: string): Promise<GroupInv
 
   const invoicedBySource = new Map<string, number>();
   for (const invoice of invoiceRows.rows as any[]) {
-    for (const [sourceId, amount] of Object.entries(parseGroupInvoiceSourceAmounts(invoice))) {
+    const activeAmounts=parseGroupInvoiceSourceAmounts(invoice);
+    const groupAmounts=invoice.reserva_id&&!invoice.group_id?reservationGroupSources(String(invoice.reserva_id),activeAmounts):activeAmounts;
+    for (const [sourceId, amount] of Object.entries(groupAmounts)) {
       invoicedBySource.set(sourceId, (invoicedBySource.get(sourceId) || 0) + cents(amount));
     }
   }

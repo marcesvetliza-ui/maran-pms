@@ -1363,10 +1363,6 @@ export function PrefacturaDialog({
       void doSubmit();
       return;
     }
-    if(folio?.groupId && selectedBalance>0.009 && tipo!=="cierre_habitacion"){
-      setSubmitError('Esta reserva pertenece a un grupo. Registrá la transferencia desde el grupo y elegí «Sólo hab. '+folio.roomNumber+'». No repitas el intento individual.');
-      return;
-    }
     if (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente") {
       setSubmitError("Seleccioná al menos un cargo para facturar.");
       return;
@@ -2531,7 +2527,7 @@ export function PrefacturaDialog({
 
             {(hasPendingSubmission || serverAttempt || rejectionError) && (
               <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
-                {folio?.groupId&&<p className="text-sm">Para cobrar sólo esta habitación: abrí el grupo, ingresá a Pago grupal distribuido y elegí «Sólo hab. {folio.roomNumber}». Si este intento todavía no pidió autorización, primero usá «Corregir datos del intento». <a className="underline" href={`/groups/${folio.groupId}`} target="_blank" rel="noreferrer">Abrir grupo {folio.groupName||''}</a></p>}
+                {folio?.groupId&&<p className="text-sm">Podés completar el cobro y el cierre de esta habitación desde esta prefactura. Se conservan los datos del intento original; las otras habitaciones del grupo no se cierran.</p>}
                 <p className="text-sm">{rejectionError ? "No se pudo consultar el intento fiscal. Volvé a abrir la prefactura antes de emitir." : serverAttempt ? "Hay un intento A rechazado por la condición IVA Exento. Verificá el rechazo para recuperar los datos originales y preparar una Factura B sin emitir ni cobrar." : "Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado."}</p>
                 {pendingAttempt?.invoiceRequest && <div className="rounded border bg-background p-3 text-sm space-y-1" data-testid="billing-original-intent">
                   <p className="font-semibold">{receptionStatus?.stage === "cancelled" ? "Datos del intento anterior" : "Datos del intento que se va a completar"}</p>

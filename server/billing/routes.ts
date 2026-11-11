@@ -1,3 +1,4 @@
+import {validateIndividualGroupPlan,assertIndividualGroupInvoice} from './individualGroupFolio';
 import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
@@ -1302,6 +1303,8 @@ export function registerBillingRoutes(app: Express) {
       const paymentId = rawPaymentId === undefined || rawPaymentId === null ? "" : String(rawPaymentId).trim();
       const groupId = rawGroupId === undefined || rawGroupId === null ? "" : String(rawGroupId).trim();
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
+      let individualGroupId:string|undefined;
+      let individualGroupPayments:any[]|undefined;
       if (reservationId && !paymentId) {
         const directSettlementMethods = new Set([
           "efectivo", "cash", "tarjeta", "tarjeta_debito", "tarjeta_credito",
@@ -1327,11 +1330,14 @@ export function registerBillingRoutes(app: Express) {
         const newSettlement = Math.max(0, invoiceTotal - appliedPriorMoney);
         if (includesDirectSettlement && newSettlement > 0.009) {
           const linkedGroup = await db.execute(sql`
-            SELECT 1 FROM group_reservation_links
+            SELECT group_id FROM group_reservation_links
             WHERE reservation_id = ${reservationId}
             LIMIT 1
           `);
-          if (linkedGroup.rows.length > 0) {
+          if (linkedGroup.rows.length > 0 && ['FA','FB','FC'].includes(tipoComprobante) && req.body.prefacturaRecovery?.version===2 && !isReservationCcSettlement && !groupId && typeof creditOperationId==='string' && /^[0-9a-f-]{36}$/i.test(creditOperationId)) {
+            individualGroupId=String((linkedGroup.rows[0] as any).group_id);
+            individualGroupPayments=validateIndividualGroupPlan(reservationId,req.body.prefacturaRecovery,newSettlement);
+          } else if (linkedGroup.rows.length > 0) {
             return res.status(409).json({
               error: "No se permite una nueva cobranza directa de una reserva grupal. Registre el cobro desde el Folio Maestro/grupal; los extras personales se registran por separado.",
               code: "GROUP_RESERVATION_DIRECT_SETTLEMENT_BLOCKED",
@@ -1653,6 +1659,7 @@ export function registerBillingRoutes(app: Express) {
               `La operación ya pertenece a una factura en estado ${String(previous.estado)}`, 409,
             );
           }
+          if(individualGroupId)await assertIndividualGroupInvoice(individualGroupId,reservationId,sanitizedSourceChargeAmounts,(individualGroupPayments||[]).reduce((n,p)=>n+Number(p.amount),0));
           const activePayments = await storage.getPayments(reservationId);
           const activePaymentById = new Map(activePayments.map((payment: any) => [String(payment.id), payment]));
           for (const allocation of ordinaryAdvances) {
@@ -1691,6 +1698,11 @@ export function registerBillingRoutes(app: Express) {
                 409,
               );
             }
+          }
+          if(individualGroupPayments){
+            const expectedMethods=new Map(requiredAdvanceByMethod);
+            for(const p of individualGroupPayments){const method=normalizeToSpanishPaymentMethod(p.method);expectedMethods.set(method,(expectedMethods.get(method)||0)+Number(p.amount));}
+            for(const [method,amount] of expectedMethods){if(Math.round(amount*100)!==Math.round((paymentDetailByMethod.get(method)||0)*100))throw new FolioInvoiceValidationError('Las formas de pago de la factura no coinciden con el intento original de esta habitación.',409);}
           }
           const uncoveredAmount = getUncoveredReservationSettlement(
             invoiceTotal,
@@ -1749,6 +1761,7 @@ export function registerBillingRoutes(app: Express) {
               : {}),
           };
           creditIntent = {
+            ...(individualGroupId?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments}}:{}),
             ...(req.body.correctionOriginalInvoiceId ? {correctionOriginalInvoiceId:Number(req.body.correctionOriginalInvoiceId)} : {}),
             operationId: creditOperationId,
             ...immutableSnapshot,
@@ -2219,7 +2232,7 @@ export function registerBillingRoutes(app: Express) {
       };
 
       const factura = reservationId
-        ? await withReservationInvoiceLock(reservationId, emitInvoice)
+        ? await (individualGroupId?withGroupInvoiceLock(individualGroupId,()=>withReservationInvoiceLock(reservationId,emitInvoice)):withReservationInvoiceLock(reservationId, emitInvoice))
         : groupId
           ? await withGroupInvoiceLock(groupId, emitInvoice)
           : spaAccountId
