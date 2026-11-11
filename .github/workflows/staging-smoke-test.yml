@@ -10,11 +10,15 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke-test:
     name: Verificar sistema en staging
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout código
@@ -38,6 +42,9 @@ jobs:
           fi
           echo "staging_url=$URL" >> "$GITHUB_OUTPUT"
           echo "Staging URL: $URL"
+
+      - name: Probar verificador de despliegue
+        run: node scripts/wait-for-revision.test.js
 
       - name: Verificar revisión exacta y disponibilidad
         env:

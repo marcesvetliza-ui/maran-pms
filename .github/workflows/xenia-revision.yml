@@ -3,14 +3,21 @@ on:
   push:
     branches: [feature/xenia-channex-staging]
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   revision:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "20"
+      - name: Probar verificador de despliegue
+        run: node scripts/wait-for-revision.test.js
+
       - name: Verificar código y disponibilidad de Xenia
         run: node scripts/wait-for-revision.js https://demo.maranpms.com.ar "$GITHUB_SHA"
