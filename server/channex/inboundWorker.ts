@@ -1,6 +1,6 @@
 import {connectionUrl,operationAllowed,workerEnvironment,PRODUCTION_URL} from './connectionPolicy';
 import type { Pool } from "pg";
-import { acknowledgeBookingRevision, ChannexApiError, fetchPendingBookingRevisions } from "./client";
+import { acknowledgeBookingRevision, ChannexApiError, fetchAccountBookingRevisions } from "./client";
 import { decryptChannexApiKey } from "./credentials";
 import { retryDelay, STAGING_URL } from "./ari";
 export type InboundTransport = { feed(connection: any): Promise<any[]>; ack(connection: any, revisionId: string): Promise<void> };
@@ -9,7 +9,7 @@ function credentials(connection: any) {
   return { apiKey: decryptChannexApiKey(connection.api_key_encrypted), baseUrl: connectionUrl(connection) };
 }
 const transport: InboundTransport = {
-  feed: c => fetchPendingBookingRevisions(credentials(c), c.channex_property_id),
+  feed: c => fetchAccountBookingRevisions(credentials(c)),
   ack: (c, id) => acknowledgeBookingRevision(credentials(c), id),
 };
 export async function runInboundOnce(pool: Pool, options: { enabled?: boolean; transport?: InboundTransport; apply?: (connection: string, revision: string) => Promise<unknown> } = {}) {
@@ -28,7 +28,7 @@ export async function runInboundOnce(pool: Pool, options: { enabled?: boolean; t
     if (pending) await (options.apply || applyInboundRevision)(pending.connection_id, pending.revision_id);
     const ack = (await c.query(`SELECT r.*,x.* FROM channex_inbound_revisions r JOIN channex_connections x ON x.id=r.connection_id
       JOIN channex_inbound_settings i ON i.connection_id=x.id WHERE i.enabled AND x.is_active AND x.environment='${environment}' AND x.base_url=$1
-      AND r.acked_at IS NULL AND r.next_ack_at<=now() AND (r.review_code IS NULL OR r.review_code NOT IN ('INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION'))
+      AND r.source_captured AND r.acked_at IS NULL AND r.next_ack_at<=now() AND (r.review_code IS NULL OR r.review_code NOT IN ('INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'))
       ORDER BY r.created_at LIMIT 1`, [baseUrl])).rows[0];
     const fetch = !ack && (await c.query(`SELECT x.*,i.notification_version,i.fetch_attempts FROM channex_connections x
       JOIN channex_inbound_settings i ON i.connection_id=x.id WHERE i.enabled AND i.notification_pending AND i.next_fetch_at<=now()
@@ -50,13 +50,37 @@ export async function runInboundOnce(pool: Pool, options: { enabled?: boolean; t
       return "ack";
     }
     try {
+      // Ciphertexts use random IVs: compare decrypted credentials in memory,
+      // never persist or log an API key/fingerprint. Do not route by property alone.
+      const candidates = (await c.query(`SELECT x.*,i.notification_version FROM channex_connections x
+        JOIN channex_inbound_settings i ON i.connection_id=x.id WHERE i.enabled AND x.is_active
+        AND x.environment=$1 AND x.base_url=$2`, [fetch.environment, fetch.base_url])).rows;
+      const accountKey = fetch.api_key_encrypted ? decryptChannexApiKey(fetch.api_key_encrypted) : null;
+      const account = candidates.filter(candidate => {
+        if (candidate.id === fetch.id) return true;
+        if (!accountKey || !candidate.api_key_encrypted) return false;
+        try { return decryptChannexApiKey(candidate.api_key_encrypted) === accountKey; } catch { return false; }
+      });
       const revisions = await remote.feed(fetch);
       if (!Array.isArray(revisions) || revisions.length > 1000) throw Error("INVALID_FEED");
-      for (const revision of revisions) await persistInboundRevision(pool, fetch.id, revision);
-      // A new webhook received during the fetch must not be erased. Nonempty
-      // pages keep draining the feed after durable ACKs; no /bookings requests.
-      await c.query(`UPDATE channex_inbound_settings SET notification_pending=(notification_version<>$2 OR $3),fetch_attempts=0,
-        next_fetch_at=now()+interval '30 seconds' WHERE connection_id=$1`, [fetch.id, fetch.notification_version, revisions.length > 0]);
+      const routed = new Map(account.map(connection => [connection.channex_property_id, connection]));
+      let drain = false;
+      for (const revision of revisions) {
+        const owner = routed.get(revision?.attributes?.property_id);
+        // Unconfigured hotels on this account stay unacknowledged upstream.
+        if (!owner) continue;
+        await persistInboundRevision(pool, owner.id, revision);
+        const ackable = (await c.query(`SELECT 1 FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2
+          AND acked_at IS NULL AND (review_code IS NULL OR review_code NOT IN
+          ('INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'))`, [owner.id, revision.id])).rowCount;
+        drain ||= !!ackable;
+      }
+      // Version snapshots precede the request, preserving concurrent webhooks.
+      for (const owner of account) {
+        const version = owner.id === fetch.id ? fetch.notification_version : owner.notification_version;
+        await c.query(`UPDATE channex_inbound_settings SET notification_pending=(notification_version<>$2 OR $3),fetch_attempts=0,
+          next_fetch_at=now()+interval '30 seconds' WHERE connection_id=$1`, [owner.id, version, drain]);
+      }
     } catch (e) {
       const delay = retryDelay(fetch.fetch_attempts, e instanceof ChannexApiError ? e.retryAfter : null);
       await c.query("UPDATE channex_inbound_settings SET fetch_attempts=fetch_attempts+1,next_fetch_at=now()+($2*interval '1 millisecond') WHERE connection_id=$1", [fetch.id, delay]);

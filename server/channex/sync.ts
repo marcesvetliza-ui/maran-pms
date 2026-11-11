@@ -19,9 +19,10 @@ import {
   fetchChannexRoomTypes,
   fetchPendingBookingRevisions,
 } from "./client";
+import { hasMaskedGuestData, matchesMaskedReplay, redactBooking } from "./bookingRevision";
 import { decryptChannexApiKey } from "./credentials";
 
-const SENSITIVE_KEY_PATTERN = /card|cvv|cvc|guarantee/i;
+const SENSITIVE_KEY_PATTERN = /card|cvv|cvc|guarantee|password|token|document|passport|notes|message|special_requests/i;
 
 /** Nunca guardamos datos de tarjeta/garantía tal cual llegan de Channex. */
 function redactSensitive(value: unknown): unknown {
@@ -266,6 +267,13 @@ export async function syncBookings(connectionId: string): Promise<BookingSyncSum
   const summary: BookingSyncSummary = { fetched: revisions.length, created: 0, updated: 0 };
 
   for (const revision of revisions) {
+    if (connection.environment === "real") {
+      const { pool } = await import("../db");
+      const { persistInboundRevision } = await import("./inbound");
+      await persistInboundRevision(pool, connectionId, revision);
+    }
+    // A post-ACK response must never replace a previously saved contact with ***.
+    if (hasMaskedGuestData(revision)) continue;
     const extracted = extractBookingFields(revision);
     const [existing] = await db
       .select()
@@ -382,7 +390,15 @@ export async function confirmBookings(connectionId: string, revisionIds?: string
 
   for (const row of toConfirm) {
     try {
+      if (connection.environment === "real") {
+        const inbox = (await db.execute(sql`SELECT revision_id FROM channex_inbound_revisions
+          WHERE connection_id=${connectionId} AND revision_id=${row.channexRevisionId} AND source_captured
+          AND (review_code IS NULL OR review_code NOT IN ('INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'))`)).rows;
+        if (!inbox.length) throw new Error("La revisión debe recibirse y guardarse de nuevo antes de confirmar su recepción");
+      }
       await acknowledgeBookingRevision(credentials, row.channexRevisionId as string);
+      if (connection.environment === "real") await db.execute(sql`UPDATE channex_inbound_revisions
+        SET acked_at=COALESCE(acked_at,now()) WHERE connection_id=${connectionId} AND revision_id=${row.channexRevisionId}`);
       await db
         .update(channexBookings)
         .set({ acknowledgedRevisionId: row.channexRevisionId, acknowledgedAt: new Date(), errorMessage: null, updatedAt: new Date() })
@@ -417,6 +433,11 @@ export async function retryBooking(bookingRowId: string): Promise<ChannexBooking
   if (remote && String(remote.attributes?.booking_id) !== String(row.channexBookingId)) throw new Error("La revisión no pertenece a esta reserva");
   if (!remote) throw new Error("Channex no devolvió esa reserva");
 
+  if (hasMaskedGuestData(remote)) {
+    const prior = { id: row.channexRevisionId, attributes: row.rawPayload };
+    if (matchesMaskedReplay(redactBooking(prior), redactBooking(remote))) return row;
+    throw new Error("Channex ocultó datos de contacto; se conservan los datos locales y la revisión requiere verificación");
+  }
   const extracted = extractBookingFields(remote);
   const mapped = extracted.multiRoom
     ? false

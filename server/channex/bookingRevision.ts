@@ -12,6 +12,25 @@ export function redactBooking(value: unknown): any {
     [key, /card|cvv|cvc|guarantee|password|token|document|passport|notes|message|special_requests/i.test(key) ? "[redacted]" : redactBooking(val)]));
   return value;
 }
+const maskedCustomerFields = new Set(["mail", "phone", "address", "city", "state", "zip", "country"]);
+/** Masking is allowed only on the contact fields documented by Channex.
+ * Financial values, identity, room mapping and dates must still match exactly. */
+export function hasMaskedGuestData(raw: any): boolean {
+  return Object.entries(raw?.attributes?.customer || {}).some(([key, value]) => maskedCustomerFields.has(key) && value === "***");
+}
+export function matchesMaskedReplay(saved: any, incoming: any): boolean {
+  if (!hasMaskedGuestData(incoming)) return false;
+  const restored = structuredClone(incoming);
+  for (const field of maskedCustomerFields) {
+    if (restored.attributes?.customer?.[field] === "***") {
+      const prior = saved?.attributes?.customer?.[field];
+      // null values remain null upstream, so they cannot legitimately be masked.
+      if (typeof prior !== "string" || prior === "***") return false;
+      restored.attributes.customer[field] = prior;
+    }
+  }
+  return revisionHash(saved) === revisionHash(restored);
+}
 export const revisionHash = (value: unknown): string => {
   const canonical = (v: any): any => Array.isArray(v) ? v.map(canonical) : v && typeof v === "object"
     ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
@@ -40,6 +59,7 @@ export function parseBookingRevision(raw: any, property: string) {
   if (!head.success) return review("INVALID_REVISION");
   const { attributes: a } = head.data;
   if (a.property_id !== property) return review("WRONG_PROPERTY");
+  if (hasMaskedGuestData(raw)) return review("MASKED_GUEST_DATA");
   const base = { revisionId: head.data.id, bookingId: a.booking_id, insertedAt: a.inserted_at, status: a.status };
   if (a.status === "cancelled") return { ...base, currency: null, customer: null, arrival: null, departure: null, rooms: [] };
   const data = z.object({
