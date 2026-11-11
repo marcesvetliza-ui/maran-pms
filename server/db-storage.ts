@@ -5654,7 +5654,7 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null; conversions?:unknown }, options?:{allowUnitCorrection?:boolean}): Promise<InventoryItem | undefined> {
+  async updateInventoryItem(id: string, item: Partial<InsertInventoryItem> & { accountingSupplierIds?: number[]; preferredAccountingSupplierId?: number | null; conversions?:unknown }, options?:{allowUnitCorrection?:boolean;allowReferencedDeactivation?:boolean}): Promise<InventoryItem | undefined> {
     if ('unitCorrectionPending' in item || 'unitCorrectionNote' in item) throw Object.assign(new Error('El estado de revisión de recetas lo administra el sistema'),{statusCode:400});
     const { accountingSupplierIds, preferredAccountingSupplierId, conversions, ...itemValues } = item;
     if (accountingSupplierIds !== undefined && !Array.isArray(accountingSupplierIds)) {
@@ -5665,7 +5665,7 @@ export class DatabaseStorage implements IStorage {
     const [updated] = await db.transaction(async (tx) => {
       const current=await tx.execute(sql`SELECT unit, is_active FROM inventory_items WHERE id=${id} FOR UPDATE`);
       const unitChanged=itemValues.unit!==undefined && current.rows.length>0 && itemValues.unit!==current.rows[0].unit;
-      if (itemValues.isActive === "false" && current.rows[0]?.is_active !== "false") await protectInventoryItemDeactivation(tx, id);
+      if (itemValues.isActive === "false" && current.rows[0]?.is_active !== "false" && !options?.allowReferencedDeactivation) await protectInventoryItemDeactivation(tx, id);
       const correction=unitChanged && inventoryUnitCorrectionWindow.enabled && options?.allowUnitCorrection===true;
       if(unitChanged){
         if(!INVENTORY_UNITS.includes(itemValues.unit as any))throw Object.assign(new Error('Unidad de inventario inválida'),{statusCode:400});

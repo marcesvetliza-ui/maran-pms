@@ -18,7 +18,7 @@ export async function requireActiveInventoryReferences(tx: Executor, itemId?: st
   }
 }
 
-export async function protectInventoryItemDeactivation(tx: Executor, id: string) {
+export async function inventoryItemDeactivationDependencies(tx: Executor, id: string) {
   const rows = await tx.execute(sql`
     SELECT 'Tiene saldo de stock' AS dependency WHERE EXISTS (SELECT 1 FROM inventory_items WHERE id=${id} AND current_stock<>0)
       OR EXISTS (SELECT 1 FROM warehouse_stock WHERE item_id=${id} AND current_stock<>0)
@@ -31,7 +31,11 @@ export async function protectInventoryItemDeactivation(tx: Executor, id: string)
     UNION SELECT 'Producción pendiente' WHERE EXISTS (SELECT 1 FROM inventory_pending_productions p JOIN recipes r ON r.id=p.payload->>'recipeId'
       WHERE p.status='pending' AND (r.output_inventory_item_id=${id} OR EXISTS (SELECT 1 FROM recipe_ingredients ri WHERE ri.recipe_id=r.id AND ri.inventory_item_id=${id})))
   `);
-  reject(rows.rows.map(row => String(row.dependency)));
+  return rows.rows.map(row => String(row.dependency)).sort();
+}
+
+export async function protectInventoryItemDeactivation(tx: Executor, id: string) {
+  reject(await inventoryItemDeactivationDependencies(tx,id));
 }
 
 export async function protectWarehouseDeactivation(tx: Executor, id: string) {

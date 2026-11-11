@@ -1,7 +1,7 @@
 import {validateInventoryConversions} from "../inventoryConversionValidation";
 import { canCorrectInventoryUnit } from '../inventoryUnitCorrection';
 import { insertInventoryItemSchema } from "@shared/schema";
-import { protectWarehouseDeactivation } from "../inventoryLifecycle";
+import { protectWarehouseDeactivation, inventoryItemDeactivationDependencies } from "../inventoryLifecycle";
 import {registerInventoryHistoryRoutes} from "../inventoryHistory";
 import {registerInventoryLocationRoutes} from "../inventoryLocations";
 import {inventoryAccess,inventoryWritePermission} from "../inventoryAccess";
@@ -261,8 +261,12 @@ export function registerInventoryRoutes(app: Express) {
         await db.execute(sql`SELECT id FROM inventory_items WHERE id=${req.params.id} FOR UPDATE`);
         const before = await storage.getInventoryItem(req.params.id);
         if (!before) return null;
-        const updated = await storage.updateInventoryItem(req.params.id,{isActive:"false"});
-        await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},${String(req.body.reason)},${JSON.stringify({before,after:updated})},now())`);
+        const dependencies=await inventoryItemDeactivationDependencies(db,req.params.id);
+        const warehouseBalances=(await db.execute(sql`SELECT warehouse_id,current_stock FROM warehouse_stock WHERE item_id=${req.params.id} ORDER BY warehouse_id`)).rows;
+        // Deliberate catalog archive: preserve quantities, recipes and queued
+        // work. Stock writers still require active items and cannot consume it.
+        const updated = await storage.updateInventoryItem(req.params.id,{isActive:"false"},{allowReferencedDeactivation:true});
+        await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp) VALUES(${req.user!.id},${req.user!.username},'update','inventory','inventory_item',${req.params.id},${String(req.body.reason)},${JSON.stringify({before,after:updated,dependencies,warehouseBalances,quantitiesChanged:false,recipesPreserved:true,pendingOperationsPreserved:true})},now())`);
         return updated;
       });
       if (!item) return res.status(404).json({error:"Artículo no encontrado"});
