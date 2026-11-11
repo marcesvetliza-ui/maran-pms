@@ -63,12 +63,12 @@ suite('individual group room from its own prefactura',()=>{
   const r=await request('/api/billing/invoices',body);expect(r.status).toBe(409);
   expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(0);
  });
- it('blocks individual billing if the group already documents that room',async()=>{
+ it.each([true,false])('blocks individual billing when group coverage is known or historically ambiguous (%s)',async(mapped)=>{
   const f=await fixture();const issued=await request('/api/billing/invoices',f.invoice);expect(issued.status).toBe(201);
-  await pool.query('UPDATE sales_invoices SET group_id=$2,reserva_id=NULL,source_charge_amounts=$3 WHERE id=$1',[issued.body.id,f.group,JSON.stringify({[`reservation:${f.ids[0]}:accommodation`]:121})]);
+  await pool.query('UPDATE sales_invoices SET group_id=$2,reserva_id=NULL,source_charge_amounts=$3 WHERE id=$1',[issued.body.id,f.group,mapped?JSON.stringify({[`reservation:${f.ids[0]}:accommodation`]:121}):null]);
   const next={...f.invoice,creditOperationId:randomUUID(),prefacturaRecovery:{...f.invoice.prefacturaRecovery,payments:[{...f.payment,paymentRequestId:randomUUID()}]}};
   const blocked=await request('/api/billing/invoices',next);expect(blocked.status,JSON.stringify(blocked.body)).toBe(409);
-  expect(blocked.body.error).toMatch(/facturados desde el grupo/);
+  expect(blocked.body.error).toMatch(/facturados desde el grupo|facturación histórica/);
   await pool.query('UPDATE sales_invoices SET group_id=NULL,reserva_id=$2 WHERE id=$1',[issued.body.id,f.ids[0]]);
  });
 

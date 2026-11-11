@@ -21,6 +21,12 @@ export function validateIndividualGroupPlan(reservationId:string,recovery:any,ex
 }
 export async function assertIndividualGroupInvoice(groupId:string,reservationId:string,amounts:Record<string,number>,newMoney:number){
  await assertIndividualGroupBalance(groupId,reservationId,newMoney);
+ const historical=(await db.execute(sql`SELECT source_charge_amounts,monto_total FROM sales_invoices WHERE group_id=${groupId} AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB') AND estado IN ('emitida','parcial','autorizacion_pendiente') AND monto_total::numeric>coalesce(monto_acreditado,0)::numeric+0.009`)).rows as any[];
+ for(const invoice of historical){
+  let amounts=invoice.source_charge_amounts;try{if(typeof amounts==='string')amounts=JSON.parse(amounts);}catch{amounts=null;}
+  const values=amounts&&typeof amounts==='object'&&!Array.isArray(amounts)?Object.values(amounts).map(Number):[];
+  if(!values.length||values.some(v=>!Number.isFinite(v)||v<=0)||values.reduce((n,v)=>n+Math.round(v*100),0)!==Math.round(Number(invoice.monto_total)*100))throw fail('La facturación histórica del grupo no permite verificar qué habitación cubre. Requiere conciliación antes de emitir desde este folio.');
+ }
  const snapshot=await getGroupInvoiceSnapshot(groupId);
  const requested=reservationGroupSources(reservationId,amounts);
  for(const [id,amount] of Object.entries(requested)){
