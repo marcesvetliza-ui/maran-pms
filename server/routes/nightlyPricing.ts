@@ -1,3 +1,4 @@
+import { packageNightlyProposal, packageNotes } from "../reservationPackagePricing";
 import { accommodationNights } from '@shared/accommodationNights';
 import type { Express, Request, Response } from "express";
 import { sql } from "drizzle-orm";
@@ -19,10 +20,11 @@ const staySchema = z.object({
   kind: z.literal("stay"), checkIn: z.string(), checkOut: z.string(),
   addedRates: z.record(z.string()),
 });
+const packageSchema = z.object({kind:z.literal("package"),packageId:z.string().min(1).max(160),expectedTotalCents:z.number().int().nonnegative().optional()}).strict();
 const requestSchema = z.object({
   revision: z.number().int().nonnegative(),
   reason: z.string().max(1000).optional(),
-  edit: z.discriminatedUnion("kind", [ratesSchema, staySchema]),
+  edit: z.discriminatedUnion("kind", [ratesSchema, staySchema, packageSchema]),
   overrideTentativeGroupWarning: z.boolean().optional(),
 });
 function sendError(res: Response, error: any) {
@@ -44,7 +46,9 @@ async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
   const before = reservation.nightlyPricing;
   if (nightlyTotal(before) !== Math.round(Number(reservation.totalRoomAmount) * 100) ||
       calendarNights(reservation.checkInDate, reservation.checkOutDate).join(",") !== before.map(n => n.date).join(",")) pricingError("El detalle y el total no coinciden. Requiere revisión antes de editar.", 409);
-  const after = editNights(before, input.edit);
+  const packageProposal = input.edit.kind === "package" ? packageNightlyProposal(reservation, await storage.getPackage(input.edit.packageId), before) : null;
+  if (input.edit.kind === "package" && input.edit.expectedTotalCents !== undefined && input.edit.expectedTotalCents !== packageProposal!.packageTotalCents) pricingError("El precio del paquete cambió. Volvé a revisar la propuesta.",409);
+  const after = input.edit.kind === "package" ? packageProposal!.after : editNights(before, input.edit);
   const checkIn = input.edit.kind === "stay" ? input.edit.checkIn : reservation.checkInDate;
   const checkOut = input.edit.kind === "stay" ? input.edit.checkOut : reservation.checkOutDate;
   if (input.edit.kind === "stay") {
@@ -60,7 +64,7 @@ async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
       });
     }
   }
-  return { before, after, checkIn, checkOut, revision: reservation.pricingRevision,
+  return { before, after, checkIn, checkOut, packageProposal, revision: reservation.pricingRevision,
     previousTotalCents: nightlyTotal(before), newTotalCents: nightlyTotal(after),
     differenceCents: nightlyTotal(after) - nightlyTotal(before),
     removed: before.filter(n => !after.some(a => a.date === n.date)),
@@ -109,7 +113,8 @@ export function registerNightlyPricingRoutes(app: Express) {
       if (!input.reason?.trim() || input.reason.trim().length < 3) pricingError("Ingresá un motivo de al menos tres caracteres.");
       const updated = await withReservationFinancialLock(req.params.id, () => withDatabaseTransaction(async () => {
         const proposal = await buildProposal(req.params.id, input);
-        if (JSON.stringify(proposal.before) === JSON.stringify(proposal.after)) pricingError("La propuesta no cambia los importes ni las noches.");
+        if (input.edit.kind === "package" && input.edit.expectedTotalCents === undefined) pricingError("Revisá primero el importe del paquete antes de confirmar.");
+        if (input.edit.kind !== "package" && JSON.stringify(proposal.before) === JSON.stringify(proposal.after)) pricingError("La propuesta no cambia los importes ni las noches.");
         const patch: Record<string, any> = {
           nightlyPricing: proposal.after, totalRoomAmount: amountString(proposal.newTotalCents),
           finalRatePerNight: amountString(Math.round(proposal.newTotalCents / proposal.after.length)),
@@ -117,6 +122,10 @@ export function registerNightlyPricingRoutes(app: Express) {
           discountType: "none", discountValue: "0",
           pricingRevision: input.revision + 1, lastModifiedBy: req.user?.id,
         };
+        if (proposal.packageProposal) Object.assign(patch, {
+          ratePlanId:null, specialRateReason:proposal.packageProposal.packageTotalCents === 0 ? input.reason!.trim() : null,
+          notes:packageNotes(proposal.reservation.notes,proposal.packageProposal.packageName),
+        });
         if (input.edit.kind === "stay") Object.assign(patch, {
           checkInDate: proposal.checkIn, checkOutDate: proposal.checkOut, nights: proposal.after.length,
           _inventoryContextGroupId: (proposal.reservation as any).groupId,
@@ -125,6 +134,7 @@ export function registerNightlyPricingRoutes(app: Express) {
         const saved = await withNightlyWriter(input.revision, () => storage.updateReservation(req.params.id, patch));
         const details = { before: proposal.before, after: proposal.after, reason: input.reason!.trim(),
           previousTotal: amountString(proposal.previousTotalCents), newTotal: amountString(proposal.newTotalCents),
+          package: proposal.packageProposal ? {id:proposal.packageProposal.packageId,name:proposal.packageProposal.packageName,totalCents:proposal.packageProposal.packageTotalCents} : null,
           checkIn: proposal.checkIn, checkOut: proposal.checkOut, actorId: req.user?.id, revision: input.revision + 1 };
         await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)
           VALUES (${req.params.id},${req.user?.username || "Sistema"},${input.edit.kind === "stay" ? "fecha" : "tarifa"},

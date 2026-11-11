@@ -12,6 +12,7 @@ import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
 import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
+import { ReservationPackageChange } from "@/components/reservation-package-change";
 import { buildPackagePricingPatch } from "@/lib/reservation-package-pricing";
 import {
   formatReservationInvoiceRef,
@@ -1401,7 +1402,13 @@ export function ReservationFormDialog({
                   </Button>
                 )}
               </div>
-              <Select
+              {reservation?.pricingScheme === "nightly_v1" && <ReservationPackageChange reservationId={reservation.id} packages={activePackages} disabled={lodgingReadOnly || mutation.isPending} onApplied={(updated,packageId)=>{
+                setSelectedPackageId(packageId);
+                setFormData(previous=>({...previous,ratePlanId:updated.ratePlanId||"",specialRateReason:updated.specialRateReason||"",baseRatePerNight:updated.baseRatePerNight,finalRatePerNight:updated.finalRatePerNight,totalRoomAmount:updated.totalRoomAmount,discountType:updated.discountType,discountValue:updated.discountValue,
+                  notes:`${updated.notes?.match(/^\[Paquete:[^\]]*\]/)?.[0]||""} ${(previous.notes||"").replace(/\[Paquete:[^\]]*\]\s*/g,"").trim()}`.trim()}));
+              }}/>}
+              {reservation?.pricingScheme === "nightly_v1" && <p className="text-sm text-muted-foreground">Paquete actual: {formData.notes?.match(/\[Paquete:\s*([^\]]*)\]/)?.[1] || "Sin paquete"}</p>}
+              {reservation?.pricingScheme !== "nightly_v1" && <Select
                 value={selectedPackageId}
                 onValueChange={(val) => {
                     if (val === "__none__") {
@@ -1486,7 +1493,7 @@ export function ReservationFormDialog({
                     </SelectItem>
                   ))}
                 </SelectContent>
-              </Select>
+              </Select>}
               {!isLoadingPackages && packagesLoadFailed && (
                 <p className="text-xs text-destructive">No se pudieron cargar los paquetes. Reintentá la consulta.</p>
               )}

@@ -393,6 +393,37 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
       await applicationPool.query("DROP TRIGGER reject_nightly_test_history ON reservation_changelog; DROP FUNCTION reject_nightly_test_history()");
     }
   });
+  it("converts to a package atomically while preserving payments, cash, invoices and stay dates",async()=>{
+    const pkg=idFor("conversion-package");
+    await applicationPool.query("INSERT INTO packages(id,code,name,nights,base_price,status,created_at) VALUES($1::text,$1::text,'Synthetic Package',3,300000.01,'active',now())",[pkg]);
+    try {
+      const evidence=await moneyEvidence(),before=await saved();
+      const body={revision:0,reason:"Corregir reserva a paquete",edit:{kind:"package",packageId:pkg}};
+      const preview=await request(`${pathFor()}/preview`,body);expect(preview.status).toBe(200);expect(preview.data.newTotalCents).toBe(30000001);
+      expect((await saved()).totalRoomAmount).toBe(before.totalRoomAmount);
+      const applied=await request(`${pathFor()}/apply`,{...body,edit:{...body.edit,expectedTotalCents:30000001}});
+      expect(applied.status).toBe(200);expect(applied.data.notes).toContain("[Paquete: Synthetic Package]");
+      expect(applied.data.ratePlanId).toBeNull();expect(applied.data.pricingRevision).toBe(1);
+      expect(applied.data.checkInDate).toBe(before.checkInDate);expect(applied.data.checkOutDate).toBe(before.checkOutDate);
+      expect(nightlyTotal(applied.data.nightlyPricing)).toBe(30000001);
+      expect(await moneyEvidence()).toEqual(evidence);
+      expect((await applicationPool.query("SELECT descripcion FROM reservation_changelog WHERE reservation_id=$1 AND tipo='tarifa'",[editable])).rows.some(r=>r.descripcion.includes(pkg))).toBe(true);
+      expect((await request(`${pathFor()}/apply`,{...body,edit:{...body.edit,expectedTotalCents:30000001}})).status).toBe(409);
+      expect((await request(`${pathFor(idFor("partial"))}/preview`,body)).status).toBe(409);
+    } finally {await applicationPool.query("DELETE FROM packages WHERE id=$1",[pkg]);}
+  });
+  it("requires a reviewed package price and rejects catalog changes before applying",async()=>{
+    const pkg=idFor("changed-package");await applicationPool.query("INSERT INTO packages(id,code,name,nights,base_price,status,created_at) VALUES($1::text,$1::text,'Synthetic Changed',3,300000,'active',now())",[pkg]);
+    try {
+      const body={revision:0,reason:"Revisar paquete",edit:{kind:"package",packageId:pkg}};
+      expect((await request(`${pathFor()}/apply`,body)).status).toBe(400);
+      const preview=await request(`${pathFor()}/preview`,body);expect(preview.status).toBe(200);
+      await applicationPool.query("UPDATE packages SET base_price=400000 WHERE id=$1",[pkg]);
+      expect((await request(`${pathFor()}/apply`,{...body,edit:{...body.edit,expectedTotalCents:preview.data.newTotalCents}})).status).toBe(409);
+      expect((await saved()).pricingRevision).toBe(0);
+    } finally {await applicationPool.query("DELETE FROM packages WHERE id=$1",[pkg]);}
+  });
+
   it("serializa con el mismo bloqueo de emisión fiscal y no edita después de una nueva factura", async () => {
     const { withReservationFinancialLock } = await import("../nightlyPricingGuard");
     let release!: () => void, acquired!: () => void;
@@ -411,4 +442,5 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect((await editing).status).toBe(409);
     expect((await saved()).pricingRevision).toBe(0);
   });
+
 });

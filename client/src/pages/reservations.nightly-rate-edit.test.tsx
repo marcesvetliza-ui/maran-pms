@@ -19,10 +19,11 @@ beforeEach(()=>{
   const json=(data:any,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json'}});
   if(path.endsWith('/api/reservation-edit-permission'))return json({canEdit:allowed});
   if(path.endsWith('/nightly-pricing'))return json({reservation:saved,blocked,fiscal:{state:'pendiente',coveredCents:0,pendingCents:8500}});
-  if(path.endsWith('/nightly-pricing/preview'))return json({newTotalCents:9000000});
+  if(path.endsWith('/api/packages/active'))return json([{id:'pkg',name:'Nuevo',nights:1,status:'active'}]);
+  if(path.endsWith('/nightly-pricing/preview'))return json(JSON.parse(String(init?.body)).edit.kind==='package'?{revision:1,previousTotalCents:8500,newTotalCents:9000000,differenceCents:8991500,checkIn:original.checkInDate,checkOut:original.checkOutDate,packageProposal:{packageTotalCents:9000000}}:{newTotalCents:9000000});
   if(path.endsWith('/nightly-pricing/apply')){
    if(conflict)return json({error:'Otra persona modificó los precios.'},409);
-   saved={...saved,pricingRevision:2,nightlyPricing:[{date:'2026-11-02',rateCents:9000000,discountCents:0}],baseRatePerNight:'90000.00',finalRatePerNight:'90000.00',totalRoomAmount:'90000.00'};return json(saved);
+   saved={...saved,...(JSON.parse(String(init?.body)).edit.kind==='package'?{ratePlanId:null,notes:'[Paquete: Nuevo] Nota original'}:{}),pricingRevision:2,nightlyPricing:[{date:'2026-11-02',rateCents:9000000,discountCents:0}],baseRatePerNight:'90000.00',finalRatePerNight:'90000.00',totalRoomAmount:'90000.00'};return json(saved);
   }
   if(path.endsWith('/api/reservations/rate-edit') && method==='PATCH')return json({...saved,...JSON.parse(String(init?.body))});
   if(path.endsWith('/api/rate-plans'))return json([{id:'plan',name:'BAR',roomTypeId:'type',baseRate:'85.00',rate1pax:'85.00',isActive:true}]);
@@ -76,4 +77,23 @@ it('preserves the draft when the server rejects an outdated pricing revision',as
  await screen.findByText(/Otra persona modificó los precios/);
  expect(screen.getByRole('dialog',{name:'Editar 1 noche'})).toBeInTheDocument();
  expect(onClose).not.toHaveBeenCalled();expect(writes().filter(([,init])=>init?.method==='PATCH')).toHaveLength(0);
+});
+
+it('applies a package through the revisioned editor, keeps unsaved notes and does not restore the previous plan',async()=>{
+ mount();fireEvent.change(screen.getByTestId('input-reservation-notes'),{target:{value:'Nota sin guardar'}});
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Aplicar paquete'})).toBeEnabled());
+ fireEvent.click(screen.getByRole('button',{name:'Aplicar paquete'}));
+ const dialog=await screen.findByRole('dialog',{name:'Aplicar paquete a la reserva'});
+ await waitFor(()=>expect(within(dialog).getByRole('option',{name:'Nuevo · 1 noche(s)'})).toBeInTheDocument());
+ fireEvent.change(within(dialog).getByLabelText('Paquete a aplicar'),{target:{value:'pkg'}});
+ fireEvent.change(within(dialog).getByLabelText('Motivo del paquete'),{target:{value:'Corregir a paquete'}});
+ await waitFor(()=>expect(within(dialog).getByRole('button',{name:'Revisar importe'})).toBeEnabled());
+ fireEvent.click(within(dialog).getByRole('button',{name:'Revisar importe'}));
+ fireEvent.click(await within(dialog).findByRole('button',{name:'Confirmar paquete'}));
+ await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Aplicar paquete a la reserva'})).not.toBeInTheDocument());
+ expect(screen.getByTestId('input-reservation-notes')).toHaveValue('[Paquete: Nuevo] Nota sin guardar');
+ fireEvent.click(screen.getByTestId('button-submit-reservation'));
+ await waitFor(()=>expect(writes().some(([,init])=>init?.method==='PATCH')).toBe(true));
+ const patch=JSON.parse(String(writes().find(([,init])=>init?.method==='PATCH')![1]?.body));
+ expect(patch.ratePlanId).not.toBe('plan');expect(patch.notes).toBe('[Paquete: Nuevo] Nota sin guardar');expect(patch).not.toHaveProperty('totalRoomAmount');
 });
