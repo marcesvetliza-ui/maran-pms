@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { db } from '../db';
 import { activeSalesRecord } from '../salesArchive';
-import { getAvailableReservationAdvancePayments,parseReservationInvoiceRef } from '@shared/reservationFolio';
+import { getAvailableReservationAdvancePayments,parseReservationInvoiceRef,reservationPaymentReleasedCents } from '@shared/reservationFolio';
 import { normalizeToSpanishPaymentMethod } from '../payment-method';
 const parse=(value:any)=>typeof value==='string'?JSON.parse(value):value;
 export function correctionError(message:string,statusCode=409):never {throw Object.assign(new Error(message),{statusCode});}
@@ -69,7 +69,16 @@ export async function correctionInvoiceBody(reservationId:string,invoiceId:numbe
  if(!['FA','FB','FC'].includes(input.tipoComprobante)||String(input.reason||'').trim().length<3||String(input.reason||'').length>1000||!input.cliente?.razonSocial?.trim())correctionError('Completá el receptor, el tipo de factura y el motivo.',400);
  const payments=(await db.execute(sql`SELECT * FROM payments WHERE reservation_id=${reservationId}`)).rows as any[];
  const all=(await db.execute(sql`SELECT * FROM sales_invoices WHERE reserva_id=${reservationId}`)).rows as any[];
- const available=getAvailableReservationAdvancePayments(payments,all).filter(p=>p.releasedFromCreditedInvoice&&String(parseReservationInvoiceRef(p.invoice_ref)?.id)===String(invoiceId));
+ const available=getAvailableReservationAdvancePayments(payments,all).flatMap(p=>{
+  if(!p.releasedFromCreditedInvoice)return [];
+  const ref=parseReservationInvoiceRef(p.invoice_ref);if(!ref)return [];
+  const originalRef=String(ref.id)===String(invoiceId);
+  const application=originalRef?Number(p.amount):Number(ref.reapplications?.find((a:any)=>String(a.invoiceId)===String(invoiceId))?.amount||0);
+  if(application<=0)return [];
+  const released=reservationPaymentReleasedCents(ref,invoiceId,Math.round(application*100),1);
+  const eligibleCents=Math.min(Math.round(p.availableAdvanceAmount*100),released);
+  return eligibleCents>0?[{...p,availableAdvanceAmount:eligibleCents/100}]:[];
+ });
  let left=proof.totalCents;const allocations:any[]=[],methods=new Map<string,number>();
  for(const p of available){const cents=Math.min(left,Math.round(p.availableAdvanceAmount*100));if(cents>0){allocations.push({paymentId:String(p.id),amount:cents/100});const method=normalizeToSpanishPaymentMethod(p.method);methods.set(method,(methods.get(method)||0)+cents/100);left-=cents;}}
  // Unpaid fiscal value stays unpaid. It is not a new collection or debt transfer.
