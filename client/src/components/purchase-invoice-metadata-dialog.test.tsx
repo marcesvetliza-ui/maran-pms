@@ -20,3 +20,10 @@ it('retains the correction and displays a stale or duplicate conflict without cl
  render(<QueryClientProvider client={queryClient}><PurchaseInvoiceMetadataDialog invoice={invoice} onClose={close}/></QueryClientProvider>);const user=userEvent.setup();await user.type(screen.getByLabelText('Motivo de la corrección'),'Revisar número');await user.click(screen.getByRole('button',{name:'Guardar corrección'}));
  expect(await screen.findByRole('alert')).toHaveTextContent('El comprobante cambió');expect(close).not.toHaveBeenCalled();
 });
+
+it('preserves an unspecified informational payment method when correcting an old paid NC',async()=>{
+ let body:any;vi.stubGlobal('fetch',vi.fn(async(_url:any,options:any)=>{body=JSON.parse(options.body);return new Response('{}',{status:200});}));
+ render(<QueryClientProvider client={queryClient}><PurchaseInvoiceMetadataDialog invoice={{...invoice,tipoComprobante:'NC-A',formaPagoInformativa:null}} onClose={vi.fn()}/></QueryClientProvider>);const user=userEvent.setup();
+ expect(screen.getByRole('combobox',{name:'Forma de pago informativa'})).toHaveTextContent('Sin informar');
+ await user.type(screen.getByLabelText('Motivo de la corrección'),'Corregir observaciones');await user.click(screen.getByRole('button',{name:'Guardar corrección'}));await waitFor(()=>expect(body).toBeTruthy());expect(body.formaPagoInformativa).toBeNull();
+});
