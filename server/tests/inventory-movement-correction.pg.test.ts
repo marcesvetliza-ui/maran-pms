@@ -22,12 +22,20 @@ suite('Correcciones de inventario: stock e historial atómicos',()=>{
  it('exige motivo y cantidad válida',async()=>{await expect(correct(prefix,' ','operador')).rejects.toThrow('motivo');await expect(correct(prefix,'Error','operador',{quantity:'NaN'})).rejects.toThrow('inválida');expect(await stock()).toBe('10.000');});
  it('revierte también el depósito identificado',async()=>{await pool!.query("INSERT INTO warehouse_stock(warehouse_id,item_id,current_stock) VALUES($1,$1,10)",[prefix]);await pool!.query('UPDATE stock_movements SET warehouse_id=$1 WHERE id=$1',[prefix]);try{await correct(prefix,'Error','operador');expect((await pool!.query('SELECT current_stock FROM warehouse_stock WHERE item_id=$1',[prefix])).rows[0].current_stock).toBe('0.000');}finally{await pool!.query('DELETE FROM warehouse_stock WHERE item_id=$1',[prefix]);}});
  it('edita metadatos sin permitir cambiar cantidades directamente',async()=>{const response=await request('PATCH',`/api/inventory/items/${prefix}/metadata`,{name:'Artículo editado',sku:null,minStock:'2',costPrice:'5',isActive:'true',currentStock:'999'});expect(response.status).toBe(200);expect(await stock()).toBe('10.000');});
- it('la baja exige motivo y bloquea artículos con saldo sin modificar stock ni historial',async()=>{
+ it('la baja exige motivo y permite archivar con saldo conservando stock e historial',async()=>{
   expect((await request('POST',`/api/inventory/items/${prefix}/deactivate`,{})).status).toBe(400);
-  const response=await request('POST',`/api/inventory/items/${prefix}/deactivate`,{reason:'Discontinuado'});
-  expect(response.status).toBe(409);expect((await response.json()).error).toContain('saldo');
   expect((await pool!.query('SELECT is_active FROM inventory_items WHERE id=$1',[prefix])).rows[0].is_active).toBe('true');
-  expect(await stock()).toBe('10.000');expect((await pool!.query('SELECT id FROM stock_movements WHERE item_id=$1',[prefix])).rows).toHaveLength(1);
+  const before=(await pool!.query('SELECT * FROM stock_movements WHERE item_id=$1 ORDER BY id',[prefix])).rows;
+  const response=await request('POST',`/api/inventory/items/${prefix}/deactivate`,{reason:'Duplicado con saldo autorizado'});
+  expect(response.status,JSON.stringify(await response.json())).toBe(200);
+  expect((await pool!.query('SELECT is_active FROM inventory_items WHERE id=$1',[prefix])).rows[0].is_active).toBe('false');
+  expect(await stock()).toBe('10.000');
+  expect((await pool!.query('SELECT * FROM stock_movements WHERE item_id=$1 ORDER BY id',[prefix])).rows).toEqual(before);
+  const audit=(await pool!.query("SELECT details FROM audit_logs WHERE entity_id=$1 AND description='Duplicado con saldo autorizado'",[prefix])).rows;
+  expect(audit).toHaveLength(1);
+  const details=typeof audit[0].details==='string'?JSON.parse(audit[0].details):audit[0].details;
+  expect(details).toMatchObject({before:{isActive:'true',currentStock:'10.000'},after:{isActive:'false',currentStock:'10.000'},quantitiesChanged:false});
+  expect(details.dependencies).toContain('Tiene saldo de stock');
   expect((await request('DELETE',`/api/inventory/items/${prefix}`)).status).toBe(405);
  });
  it('permite la baja sin saldo después de anular la entrada y conserva su historial',async()=>{
