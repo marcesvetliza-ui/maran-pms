@@ -24,6 +24,8 @@ suite('Closed reservation fiscal correction · real billing routes and disposabl
   if(server)await new Promise<void>(r=>server.close(()=>r()));
   const stale=(await pool.query("SELECT id FROM reservations WHERE id LIKE 'closed-correction-%'")).rows.map((r:any)=>r.id);
   for(const id of new Set([...reservations,...stale])){
+   await pool.query("DELETE FROM account_movements WHERE reservation_id=$1",[id]);
+   await pool.query("DELETE FROM companies WHERE id LIKE $1",[id+'%']);
    await pool.query("DELETE FROM payments WHERE reservation_id=$1",[id]);await pool.query("DELETE FROM charges WHERE reservation_id=$1",[id]);
    await pool.query("DELETE FROM billing_operations WHERE owner_id=$1",[id]);
    await pool.query("DELETE FROM cash_movements WHERE source_id IN (SELECT id::text FROM sales_invoices WHERE reserva_id=$1)",[id]);
@@ -71,6 +73,43 @@ suite('Closed reservation fiscal correction · real billing routes and disposabl
   const newInvoice=await request(`${path}/${f.invoice}/reissue`,{tipoComprobante:'FB',cliente:{razonSocial:'Synthetic Dated Corrected',condicionIva:'Consumidor Final'},reason:'Reemplazo nocturno'});
   expect(newInvoice.status,JSON.stringify(newInvoice.body)).toBeLessThan(300);
   expect((await pool.query('SELECT source_charge_ids,monto_total FROM sales_invoices WHERE id=$1',[newInvoice.body.id])).rows[0]).toEqual({source_charge_ids:[f.source],monto_total:'121.00'});
+ });
+
+ it.each([121,80])('credits a proven CC cargo of %s and refactures without new payments',async(debt)=>{
+  const f=await fixture(),old=f.id+'company',target=f.id+'target';
+  await pool.query("INSERT INTO companies(id,razon_social,cuil_cuit) VALUES($1,'Original CC','30700000001'),($2,'Nueva CC','30700000002')",[old,target]);
+  await pool.query("UPDATE payments SET method='cuenta_corriente',amount=$2 WHERE id=$1",[f.payment,debt]);
+  if(debt<121)await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date,status,invoice_ref) SELECT id||'-cash',reservation_id,$2,'efectivo',date,status,invoice_ref FROM payments WHERE id=$1",[f.payment,121-debt]);
+  await pool.query("UPDATE sales_invoices SET cash_forma_pago='cuenta_corriente',cash_forma_pago_detalle=$2 WHERE id=$1",[f.invoice,JSON.stringify([{method:'cuenta_corriente',amount:debt},...(debt<121?[{method:'efectivo',amount:121-debt}]:[])])]);
+  const inv=(await pool.query('SELECT * FROM sales_invoices WHERE id=$1',[f.invoice])).rows[0];
+  const missing=await request(`/api/billing/invoices/${f.invoice}/nota-credito`,{closedReservationCorrection:f.id,motivo:'Sin cargo probado',items:[{sourceId:f.source,amount:121}]});
+  expect(missing.status).toBe(409);
+  expect(Number((await pool.query('SELECT count(*) total FROM sales_invoices WHERE nota_credito_id=$1',[f.invoice])).rows[0].total)).toBe(0);
+  await pool.query("INSERT INTO account_movements(entity_type,entity_id,date,type,description,amount,reservation_id,reference,area) VALUES('company',$1,CURRENT_DATE,'cargo','Original CC',$4,$2,$3,'recepcion')",[old,f.id,`${inv.tipo_comprobante}-${String(inv.numero).padStart(8,'0')}`,debt]);
+  const payments=(await pool.query('SELECT * FROM payments WHERE reservation_id=$1',[f.id])).rows;
+  const reservation=(await pool.query('SELECT * FROM reservations WHERE id=$1',[f.id])).rows[0];
+  const path=`/api/reservations/${f.id}/billing-corrections`;
+  expect((await request(path)).body.invoices[0].blocked).toBeNull();
+  expect((await request(path)).body.invoices[0].account.entityId).toBe(old);
+  const nc=await request(`/api/billing/invoices/${f.invoice}/nota-credito`,{closedReservationCorrection:f.id,motivo:'Cambiar empresa facturada',items:[{sourceId:f.source,amount:121}]});
+  expect(nc.status,JSON.stringify(nc.body)).toBeLessThan(300);
+  expect(Number((await pool.query('SELECT sum(amount) total FROM account_movements WHERE entity_id=$1',[old])).rows[0].total)).toBe(0);
+  const input={tipoComprobante:'FB',cliente:{razonSocial:'Nueva CC',cuit:'30700000002',condicionIva:'Exento'},reason:'Refacturación CC',accountTarget:{entityType:'company',entityId:target},confirmAccountTarget:true};
+  expect((await request(`${path}/${f.invoice}/reissue`,{...input,confirmAccountTarget:false})).status).toBe(400);
+  expect((await request(`${path}/${f.invoice}/reissue`,{...input,cliente:{...input.cliente,cuit:'30700000001'}})).status).toBe(400);
+  const first=await request(`${path}/${f.invoice}/reissue`,input);
+  expect(first.status,JSON.stringify(first.body)).toBeLessThan(300);
+  // Simulate a lost response after committing the debit but before marking settlement complete.
+  await pool.query("UPDATE sales_invoices SET credit_reapplication_intent=jsonb_set(credit_reapplication_intent,'{settlement,status}','\"pending\"') WHERE id=$1",[first.body.id]);
+  const retry=await request(`${path}/${f.invoice}/reissue`,input);expect(retry.body.id).toBe(first.body.id);
+  const finalPayments=(await pool.query('SELECT * FROM payments WHERE reservation_id=$1',[f.id])).rows;
+  const financial=(rows:any[])=>rows.map(({invoice_ref,...row})=>row).sort((a,b)=>a.id.localeCompare(b.id));
+  expect(financial(finalPayments)).toEqual(financial(payments));
+  expect(finalPayments.find((p:any)=>p.method==='cuenta_corriente').invoice_ref).toBe(payments.find((p:any)=>p.method==='cuenta_corriente').invoice_ref);
+  if(debt<121)expect(JSON.parse(finalPayments.find((p:any)=>p.method==='efectivo').invoice_ref).reapplications).toContainEqual(expect.objectContaining({invoiceId:first.body.id,amount:121-debt}));
+  expect((await pool.query('SELECT * FROM reservations WHERE id=$1',[f.id])).rows[0]).toEqual(reservation);
+  expect((await pool.query("SELECT amount FROM account_movements WHERE entity_id=$1 AND type='cargo'",[target])).rows).toEqual([{amount:debt.toFixed(2)}]);
+  expect((await pool.query("SELECT id FROM cash_movements WHERE source_id=$1 AND movement_type='income'",[String(first.body.id)])).rows).toHaveLength(0);
  });
 
 });

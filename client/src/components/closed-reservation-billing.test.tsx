@@ -21,3 +21,20 @@ it('shows a historical proof failure and leaves that invoice disabled',async()=>
  proof={...base(),blocked:'Sin vínculo seguro por concepto'};render(<QueryClientProvider client={client}><ClosedReservationBilling reservationId="closed"/></QueryClientProvider>);await userEvent.setup().click(screen.getByRole('button',{name:'Corregir facturación'}));expect(await screen.findByText('Sin vínculo seguro por concepto')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Elegir'})).toBeDisabled();expect(apiRequest).not.toHaveBeenCalled();
 });
 it('cancels without emitting any document',async()=>{const user=await mount();await user.click(screen.getByRole('button',{name:'Cerrar'}));expect(apiRequest).not.toHaveBeenCalled();});
+it('shows the CC credit and requires confirmation of the replacement account',async()=>{
+ proof={...base(),stage:'reissue',account:{entityType:'company',entityId:'company1',name:'Empresa original',amount:121},nc:{id:2,tipo_comprobante:'NCB',punto_venta:1,numero:1}};
+ client.setQueryData(['/api/companies'],[{id:'company1',razonSocial:'Empresa original',cuilCuit:'30700000001'},{id:'company2',razonSocial:'Empresa nueva',cuilCuit:'30700000002'}]);
+ client.setQueryData(['/api/agencies'],[]);
+ const user=await mount();
+ expect(screen.getByText(/La NC acredita/)).toHaveTextContent('Empresa original');
+ await user.type(screen.getByLabelText('Motivo de corrección'),'Cambiar razón social');
+ const button=screen.getByRole('button',{name:'Confirmar nueva factura'});
+ expect(button).toBeDisabled();
+ await user.selectOptions(screen.getByLabelText('Cuenta corriente destinataria'),'company2');
+ await user.click(screen.getByRole('checkbox'));
+ expect(screen.getByRole('checkbox')).toBeChecked();
+ expect(screen.getByLabelText('Cuenta corriente destinataria')).toHaveValue('company2');
+ expect(screen.getByLabelText('Motivo de corrección')).toHaveValue('Cambiar razón social');
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Confirmar nueva factura'})).toBeEnabled());await user.click(screen.getByRole('button',{name:'Confirmar nueva factura'}));
+ expect(apiRequest).toHaveBeenLastCalledWith('POST','/api/reservations/closed/billing-corrections/1/reissue',expect.objectContaining({accountTarget:{entityType:'company',entityId:'company2'},confirmAccountTarget:true}));
+});

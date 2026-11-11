@@ -1,3 +1,4 @@
+import { loadCorrectionAccount, correctionAccountOwner } from './closedCorrectionAccount';
 import { accommodationNights } from '@shared/accommodationNights';
 import { chargeUnits } from '@shared/chargeUnits';
 import { isInvoiceableReservationCharge } from '@shared/reservationFolio';
@@ -15,7 +16,8 @@ export function closedCorrectionProof(reservation:any,original:any,all:any[]) {
  if(!original||String(original.reserva_id)!==String(reservation.id)||original.group_id||reservation.groupId||reservation.group_id)correctionError('El comprobante no pertenece a una reserva individual cerrada. Revisá la facturación grupal desde el Folio Maestro.');
  if(!['FA','FB','FC'].includes(original.tipo_comprobante))correctionError('Este comprobante requiere su circuito fiscal específico; la corrección simple admite facturas A, B y C.');
  if(!['emitida','anulada'].includes(original.estado)||!Number(original.numero))correctionError('El comprobante no tiene una autorización fiscal confirmada.');
- if(original.account_charge_linked||original.cash_forma_pago==='cuenta_corriente'||(parse(original.cash_forma_pago_detalle)||[]).some((p:any)=>['cuenta_corriente','current_account'].includes(p.method)))correctionError('La factura afecta Cuenta Corriente. Requiere revisar el destino de la deuda desde Administración antes de corregirla.');
+ if(original.correctionAccountError)correctionError(original.correctionAccountError);
+ if((original.account_charge_linked||original.cash_forma_pago==='cuenta_corriente'||(parse(original.cash_forma_pago_detalle)||[]).some((p:any)=>['cuenta_corriente','current_account'].includes(p.method)))&&!original.correctionAccount)correctionError('No se pudo verificar el cargo de Cuenta Corriente. Requiere revisión administrativa.');
  const ids=parse(original.source_charge_ids),amounts=parse(original.source_charge_amounts),items=parse(original.items);
  if(!Array.isArray(ids)||!ids.length||!amounts||typeof amounts!=='object'||!Array.isArray(items)||items.length!==ids.length||new Set(ids).size!==ids.length||Object.keys(amounts).length!==ids.length)correctionError('La factura histórica no tiene un vínculo seguro por concepto. Requiere revisión administrativa.');
  if(items.some(i=>!['21','10.5','exento','no_gravado'].includes(i?.alicuotaIva)))correctionError('El detalle histórico no conserva la alícuota fiscal original. Requiere revisión.');
@@ -33,14 +35,14 @@ export function closedCorrectionProof(reservation:any,original:any,all:any[]) {
   if(!nc||nc.estado!=='emitida'||nc.reconciliation_status!=='conciliada'||Math.round(Number(nc.monto_total)*100)!==total||credited!==total||original.estado!=='anulada')correctionError('La NC total debe estar autorizada y conciliada. Las NC parciales o pendientes requieren revisión.');
   const creditedAmounts=parse(nc.source_charge_amounts);
   if(!creditedAmounts||ids.some(id=>Math.round(Number(creditedAmounts[id])*100)!==Math.round(Number(amounts[id])*100))||Object.keys(creditedAmounts).length!==ids.length)correctionError('La NC no acredita los mismos conceptos de la factura.');
-  stage=replacement?(replacement.estado==='autorizacion_pendiente'?'pending':'completed'):'reissue';
+  stage=replacement?((replacement.estado==='autorizacion_pendiente'||(replacement.estado==='emitida'&&replacement.credit_reapplication_intent?.settlement?.destination==='closed_correction_cc'&&replacement.credit_reapplication_intent?.settlement?.status!=='completed'))?'pending':'completed'):'reissue';
   }
  }
  if(['credit','reissue','pending_credit'].includes(stage)&&reservation.correctionSourceCapacities){
   const capacities=reservation.correctionSourceCapacities as Record<string,number>;
   if(ids.some(id=>!Number.isFinite(capacities[id])||Math.round(Number(amounts[id])*100)>Math.round(capacities[id]*100)))correctionError('Los conceptos originales ya no coinciden con el folio. Revisá el vínculo antes de emitir la NC.');
  }
- return {original,nc,replacement,stage,sourceAmounts:amounts as Record<string,number>,sourceIds:ids as string[],totalCents:total,
+ return {original,nc,replacement,stage,account:original.correctionAccount||null,sourceAmounts:amounts as Record<string,number>,sourceIds:ids as string[],totalCents:total,
   items:ids.map((id,index)=>({sourceId:id,descripcion:String(items[index].descripcion||id),precioUnitario:Number(amounts[id]),alicuotaIva:items[index].alicuotaIva}))};
 }
 export async function loadClosedCorrection(reservationId:string,invoiceId?:number) {
@@ -48,6 +50,11 @@ export async function loadClosedCorrection(reservationId:string,invoiceId?:numbe
  const reservation=(await db.execute(sql`SELECT r.*,gl.group_id FROM reservations r LEFT JOIN group_reservation_links gl ON gl.reservation_id=r.id WHERE r.id=${reservationId} LIMIT 1`)).rows[0] as any;
  if(!reservation)correctionError('Reserva no encontrada.',404);
  const all=(await db.execute(sql`SELECT orig.*,${originalAccountChargeLinked} AS account_charge_linked FROM sales_invoices orig WHERE orig.reserva_id=${reservationId} AND ${activeSalesRecord('invoice',sql`orig.id`)} ORDER BY orig.id DESC`)).rows as any[];
+ for(const original of all){
+  if(original.account_charge_linked||original.cash_forma_pago==='cuenta_corriente'||(parse(original.cash_forma_pago_detalle)||[]).some((p:any)=>['cuenta_corriente','current_account'].includes(p.method))){
+   try{original.correctionAccount=await loadCorrectionAccount(original);}catch(e:any){original.correctionAccountError=e.message;}
+  }
+ }
  const roomTotal=Number(reservation.total_room_amount)>0?Number(reservation.total_room_amount):Number(reservation.final_rate_per_night||0)*Number(reservation.nights||0);
  const day=(value:any)=>value instanceof Date?value.toISOString().slice(0,10):String(value).slice(0,10);
  const nights=accommodationNights({checkInDate:day(reservation.check_in_date),checkOutDate:day(reservation.check_out_date),roomTotal,nightlyPricing:reservation.nightly_pricing,pricingScheme:reservation.pricing_scheme});
@@ -62,7 +69,7 @@ export async function correctionInvoiceBody(reservationId:string,invoiceId:numbe
  if(proof.stage==='completed')return {existing:proof.replacement};
  if(proof.stage==='pending') {
   const row=proof.replacement,intent=row.credit_reapplication_intent;
-  return {body:{tipoComprobante:row.tipo_comprobante,cliente:{razonSocial:row.cliente_razon_social,cuit:row.cliente_cuit||undefined,dni:row.cliente_dni||undefined,condicionIva:row.cliente_condicion_iva,domicilio:row.cliente_domicilio||undefined},items:row.items,reservaId:reservationId,
+  return {accountSettlement:intent.settlement?.destination==='closed_correction_cc'?intent.settlement:undefined,body:{tipoComprobante:row.tipo_comprobante,cliente:{razonSocial:row.cliente_razon_social,cuit:row.cliente_cuit||undefined,dni:row.cliente_dni||undefined,condicionIva:row.cliente_condicion_iva,domicilio:row.cliente_domicilio||undefined},items:row.items,reservaId:reservationId,
    sourceChargeIds:row.source_charge_ids,sourceChargeAmounts:row.source_charge_amounts,creditReapplications:intent.payments||[],creditOperationId:intent.operationId,
    cashFormaPagoDetalle:row.cash_forma_pago_detalle,puntoVenta:row.punto_venta,correctionOriginalInvoiceId:invoiceId,observaciones:row.observaciones}};
  }
@@ -79,11 +86,22 @@ export async function correctionInvoiceBody(reservationId:string,invoiceId:numbe
   const eligibleCents=Math.min(Math.round(p.availableAdvanceAmount*100),released);
   return eligibleCents>0?[{...p,availableAdvanceAmount:eligibleCents/100}]:[];
  });
- let left=proof.totalCents;const allocations:any[]=[],methods=new Map<string,number>();
+ let accountSettlement:any;
+ if(proof.account){
+  const target=input.accountTarget;
+  if(!target?.entityType||!target?.entityId||input.confirmAccountTarget!==true)correctionError('Seleccioná y confirmá la cuenta corriente de la nueva factura.',400);
+  const owner=await correctionAccountOwner(String(target.entityType),String(target.entityId));
+  const document=String(input.cliente.cuit||input.cliente.dni||'').replace(/\D/g,'');
+  if(!owner.document||document!==owner.document)correctionError('El documento del receptor debe coincidir con la cuenta corriente seleccionada.',400);
+  accountSettlement={destination:'closed_correction_cc',amount:proof.account.amount,ccEntityType:owner.entityType,ccEntityId:owner.entityId,accountArea:proof.account.area,label:`Refacturación de ${proof.original.tipo_comprobante}-${proof.original.numero} — ${owner.name}`,status:'pending'};
+ }
+ let left=proof.totalCents-(proof.account?Math.round(proof.account.amount*100):0);const allocations:any[]=[],methods=new Map<string,number>();
  for(const p of available){const cents=Math.min(left,Math.round(p.availableAdvanceAmount*100));if(cents>0){allocations.push({paymentId:String(p.id),amount:cents/100});const method=normalizeToSpanishPaymentMethod(p.method);methods.set(method,(methods.get(method)||0)+cents/100);left-=cents;}}
  // Unpaid fiscal value stays unpaid. It is not a new collection or debt transfer.
- if(left>0)methods.set('cuenta_corriente',(methods.get('cuenta_corriente')||0)+left/100);
- return {body:{tipoComprobante:input.tipoComprobante,cliente:input.cliente,
+ if(proof.account&&left>0)correctionError('Los cobros originales no cubren la parte de contado. Revisá la conciliación antes de refacturar.');
+ if(proof.account)methods.set('cuenta_corriente',proof.account.amount);
+ else if(left>0)methods.set('cuenta_corriente',(methods.get('cuenta_corriente')||0)+left/100);
+ return {accountSettlement,body:{tipoComprobante:input.tipoComprobante,cliente:input.cliente,
   items:proof.items.map(i=>({descripcion:i.descripcion,cantidad:1,precioUnitario:i.precioUnitario,subtotal:i.precioUnitario,subtotalNeto:input.tipoComprobante==='FC'||['exento','no_gravado'].includes(i.alicuotaIva)?i.precioUnitario:Number((i.precioUnitario/(1+Number(i.alicuotaIva||21)/100)).toFixed(2)),alicuotaIva:input.tipoComprobante==='FC'?'no_gravado':i.alicuotaIva||'21'})),
   reservaId:reservationId,sourceChargeIds:proof.sourceIds,sourceChargeAmounts:proof.sourceAmounts,creditReapplications:allocations,creditOperationId:randomUUID(),
   cashFormaPagoDetalle:[...methods].map(([method,amount])=>({method,amount})),correctionOriginalInvoiceId:invoiceId,
