@@ -1,3 +1,4 @@
+import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
@@ -19,7 +20,7 @@ import { ensureGroupFiscalCashInformation } from "./groupFiscalCash";
 import { releaseReservationCredit,reclaimReservationCredit } from "./reservationCreditRelease";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice, type CheckoutDiscount } from "@shared/checkoutDiscount";
 import {creditNoteAccountMovement, originalAccountChargeLinked} from './creditNoteAccountMovement';
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 import { db, pool } from "../db";
@@ -1146,8 +1147,9 @@ export function registerBillingRoutes(app: Express) {
   registerReceptionOperationRoutes(app);
   registerCashCardRectificationRoutes(app);
 
-  app.post("/api/billing/invoices", requireAuth, async (req, res) => {
+  const emitInvoiceHandler = async (req: Request, res: Response) => {
     try {
+      if(req.body.correctionOriginalInvoiceId!==undefined && res.locals.closedCorrectionId!==Number(req.body.correctionOriginalInvoiceId))return res.status(400).json({error:"La corrección fiscal debe iniciarse desde la reserva cerrada."});
       if(typeof req.body?.tipoComprobante==='string'&&req.body.tipoComprobante.startsWith('NC'))return res.status(400).json({error:'La Nota de Crédito debe emitirse desde su factura fiscal original, no desde la emisión genérica de comprobantes.'});
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       const giftExpiryError = giftVoucherItemsExpiryError(items);
@@ -1482,6 +1484,18 @@ export function registerBillingRoutes(app: Express) {
       let reusedExistingClaim = false;
       let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
+        const correctionId=Number(req.body.correctionOriginalInvoiceId||0);
+        if(req.body.correctionOriginalInvoiceId!==undefined&&(!Number.isSafeInteger(correctionId)||correctionId<=0))correctionError("Comprobante original inválido.",400);
+        if(correctionId){
+          if(!hasPermission(String(req.user?.role||""),NC_RECONCILIATION_RESOURCE_KEY))correctionError("No autorizado para corregir facturación.",403);
+          if(!reservationId||!creditOperationId||cashArea||cashFormaPago||paymentId||groupId||spaAccountId||ordinaryAdvanceApplications?.length||req.body.checkoutDiscount)correctionError("La refacturación cerrada no admite nuevos cobros, traslados ni descuentos.",400);
+          const proof=await loadClosedCorrection(reservationId,correctionId) as ReturnType<typeof closedCorrectionProof>;
+          if(!['reissue','pending'].includes(proof.stage))correctionError("La factura ya fue reemplazada o su NC total no está conciliada.");
+          if(proof.replacement&&proof.replacement.credit_reapplication_intent?.operationId!==creditOperationId)correctionError("Ya existe un intento de refacturación pendiente. Reanudalo desde la reserva.");
+          const amountIds=Object.keys(sanitizedSourceChargeAmounts);
+          if(amountIds.length!==proof.sourceIds.length||proof.sourceIds.some(id=>Math.round(Number(sanitizedSourceChargeAmounts[id])*100)!==Math.round(Number(proof.sourceAmounts[id])*100)))correctionError("La refacturación debe conservar todos los conceptos e importes de la factura original.");
+          if(Math.round(calcularMontos(items,tipoComprobante).montoTotal*100)!==proof.totalCents)correctionError("La refacturación debe conservar el importe total original.");
+        }
         if (reservationId && (!folioId || req.body.checkoutDiscount !== undefined)) {
           const reservationFolio = await storage.getOrCreateFolio("reservation", reservationId);
           folioId = reservationFolio.id;
@@ -1696,6 +1710,7 @@ export function registerBillingRoutes(app: Express) {
               : {}),
           };
           creditIntent = {
+            ...(req.body.correctionOriginalInvoiceId ? {correctionOriginalInvoiceId:Number(req.body.correctionOriginalInvoiceId)} : {}),
             operationId: creditOperationId,
             ...immutableSnapshot,
             status: "pending",
@@ -2337,6 +2352,25 @@ export function registerBillingRoutes(app: Express) {
       }
       res.status(500).json({ error: e?.code === "23505" ? "Hay un registro fiscal en conflicto. Conservamos la operación; verificá el intento pendiente antes de volver a emitir." : e.message, ...(e.code === "23505" ? { code: "BILLING_RECORD_CONFLICT" } : {}) });
     }
+  };
+  app.post("/api/billing/invoices", requireAuth, emitInvoiceHandler);
+  app.get("/api/reservations/:reservationId/billing-corrections",requireAuth,requirePermission(NC_RECONCILIATION_RESOURCE_KEY),async(req,res)=>{
+    try {
+      const {reservation,all}=await loadClosedCorrection(req.params.reservationId) as any;
+      const invoices=all.filter((i:any)=>['FA','FB','FC','FT','FM','FMB'].includes(i.tipo_comprobante)).map((original:any)=>{
+        try {const proof=closedCorrectionProof(reservation,original,all);return {...proof,blocked:null};}
+        catch(e:any){return {original,blocked:e.message};}
+      });res.json({reservationId:reservation.id,invoices});
+    }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
+  });
+  app.post("/api/reservations/:reservationId/billing-corrections/:invoiceId/reissue",requireAuth,requirePermission(NC_RECONCILIATION_RESOURCE_KEY),async(req,res)=>{
+    try {
+      await withReservationInvoiceLock(req.params.reservationId,async()=>{
+        const prepared=await correctionInvoiceBody(req.params.reservationId,Number(req.params.invoiceId),req.body);
+        if(prepared.existing){res.json(prepared.existing);return;}
+        req.body=prepared.body;res.locals.closedCorrectionId=Number(req.params.invoiceId);await emitInvoiceHandler(req,res);
+      });
+    }catch(e:any){res.status(e.statusCode||500).json({error:e.message});}
   });
 
   // Registra un comprobante que ya se emitió fuera del sistema (p. ej. una
@@ -3201,6 +3235,13 @@ export function registerBillingRoutes(app: Express) {
       // blocked any NC when nota_credito_id was set prevented legitimate partial-NC workflows
       // (e.g., two separate partial credits weeks apart for the same invoice).
 
+      if(req.body.closedReservationCorrection){
+        if(String(req.body.motivo||"").trim().length<3||String(req.body.motivo||"").length>1000)correctionError("Ingresá un motivo de entre 3 y 1000 caracteres.",400);
+        const proof=await loadClosedCorrection(String(req.body.closedReservationCorrection),id) as ReturnType<typeof closedCorrectionProof>;
+        if(!["credit","pending_credit"].includes(proof.stage))correctionError("La factura ya tiene una corrección. Actualizá la reserva.");
+        const selected=req.body.items;
+        if(!Array.isArray(selected)||selected.length!==proof.sourceIds.length||new Set(selected.map((i:any)=>i.sourceId)).size!==proof.sourceIds.length||proof.sourceIds.some(source=>!selected.some((i:any)=>i.sourceId===source&&Math.round(Number(i.amount)*100)===Math.round(Number(proof.sourceAmounts[source])*100))))correctionError("Este circuito requiere una NC total con todos los conceptos originales.",400);
+      }
       const { motivo, items, monto, paymentIdsToVoid, folioMovementIdsToVoid } = req.body;
       const tipoNC = eligibleCreditType;
       const user = (req as any).user;
@@ -3774,7 +3815,7 @@ export function registerBillingRoutes(app: Express) {
 
       res.status(201).json({ ...nc, voidedPaymentIds, voidedFolioMovementIds });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      res.status(e.statusCode || 500).json({ error: e.message });
     } finally {
       if (creditLockClient && creditLockKey) {
         await creditLockClient.query("SELECT pg_advisory_unlock(hashtext($1))", [creditLockKey]).catch(() => undefined);
