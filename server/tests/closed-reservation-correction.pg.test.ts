@@ -48,6 +48,15 @@ suite('Closed reservation fiscal correction · real billing routes and disposabl
   expect((await pool.query("SELECT id FROM cash_movements WHERE source_id=$1 AND movement_type='income'",[String(first.body.id)])).rows).toHaveLength(0);
   const final=(await request(path)).body.invoices.find((i:any)=>i.original.id===f.invoice);expect(final.stage).toBe('completed');expect(final.nc.id).toBe(Number(nc.body.id));expect(final.replacement.id).toBe(first.body.id);
   const payment=(await pool.query('SELECT invoice_ref FROM payments WHERE id=$1',[f.payment])).rows[0];expect(JSON.parse(payment.invoice_ref).reapplications.some((a:any)=>a.invoiceId===first.body.id)).toBe(true);
+  // A correction of the replacement follows the same paid advance, even though
+  // its primary invoice_ref still names the first historical invoice.
+  const secondNc=await request(`/api/billing/invoices/${first.body.id}/nota-credito`,{closedReservationCorrection:f.id,motivo:'Segunda corrección fiscal',items:[{sourceId:'accommodation',amount:121}]});expect(secondNc.status,JSON.stringify(secondNc.body)).toBeLessThan(300);
+  const third=await request(`${path}/${first.body.id}/reissue`,{tipoComprobante:'FB',cliente:{razonSocial:'Synthetic Third Recipient',condicionIva:'Consumidor Final'},reason:'Corrección del reemplazo'});expect(third.status,JSON.stringify(third.body)).toBeLessThan(300);
+  const finalRef=JSON.parse((await pool.query('SELECT invoice_ref FROM payments WHERE id=$1',[f.payment])).rows[0].invoice_ref);
+  expect(finalRef.reapplications.find((a:any)=>a.invoiceId===third.body.id)?.amount).toBe(121);
+  expect((await request(path)).body.invoices.find((i:any)=>i.original.id===f.invoice).stage).toBe('completed');
+  expect((await pool.query('SELECT * FROM reservations WHERE id=$1',[f.id])).rows[0]).toEqual(reservation);
+
  });
  it('rejects partial correction and operators without the fiscal permission',async()=>{
   const f=await fixture();expect((await request('/api/billing/invoices',{correctionOriginalInvoiceId:f.invoice})).status).toBe(400);expect((await request(`/api/billing/invoices/${f.invoice}/nota-credito`,{closedReservationCorrection:f.id,motivo:'Partial invalid',items:[{sourceId:'accommodation',amount:20}]})).status).toBe(400);
