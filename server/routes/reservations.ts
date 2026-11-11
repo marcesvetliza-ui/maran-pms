@@ -1177,6 +1177,8 @@ export function registerReservationsRoutes(app: Express) {
       financialSummary.newCollectionNeeded = financialSummary.operationalFolioBalance;
 
       res.json({
+        groupId: (reservation as any).groupId || null,
+        groupName: (reservation as any).groupName || null,
         reservationCode: reservation.reservationCode,
         guestName: `${reservation.guest?.firstName} ${reservation.guest?.lastName}`,
         roomNumber: reservation.room?.roomNumber,

@@ -886,4 +886,20 @@ describe("POST group payment applies non-fiscal advances", () => {
       expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(100);
     });
   });
+  it('applies a transfer only to the selected active room without closing reservations',async()=>{
+    configureDirectedCloseFixture();
+    await withServer(async baseUrl=>{
+      const response=await fetch(`${baseUrl}/api/groups/${groupId}/payment`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({paymentRows:[{method:'transfer',amount:'200.00',reference:'TR-505'}],receiptType:'none',receiverDetails:{razonSocial:'AIMETTA',dni:'30123456',condicionIva:'Consumidor Final'},concepts:[{description:'Alojamiento habitación seleccionada',amount:200}],paymentReservationId:'room-b'})});
+      expect(response.status,JSON.stringify(await response.clone().json())).toBe(200);
+      expect(mocks.recordGroupPayment).toHaveBeenCalledWith(expect.objectContaining({distributionDetail:{'room-b':200},closeReservationIds:undefined,paymentRows:[expect.objectContaining({method:'transfer',reference:'TR-505'})]}));
+    });
+  });
+  it.each([{paymentReservationId:'outside'},{paymentReservationId:'room-a'},{paymentReservationId:'room-b',closeReservationIds:['room-b']}])('rejects an invalid directed room or amount before recording money: %o',async scope=>{
+    configureDirectedCloseFixture();
+    await withServer(async baseUrl=>{
+      const response=await fetch(`${baseUrl}/api/groups/${groupId}/payment`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({paymentRows:[{method:'transfer',amount:'200.00',reference:'TR-505'}],receiptType:'none',receiverDetails:{razonSocial:'AIMETTA',dni:'30123456',condicionIva:'Consumidor Final'},concepts:[{description:'Alojamiento habitación seleccionada',amount:200}],...scope})});
+      expect(response.status).toBe(400);expect(mocks.recordGroupPayment).not.toHaveBeenCalled();
+    });
+  });
+
 });

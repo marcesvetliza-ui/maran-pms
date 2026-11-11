@@ -1721,6 +1721,22 @@ export function registerBillingRoutes(app: Express) {
           };
         }
         let persistedGroupPaymentIntent = sanitizedGroupPaymentIntent;
+        const directedRoom = sanitizedGroupPaymentIntent?.body?.paymentReservationId;
+        if(directedRoom){
+          if(sanitizedGroupPaymentIntent?.endpoint!==`/api/groups/${groupId}/payment`||!normalizedSourceChargeIds.length||normalizedSourceChargeIds.some(id=>!id.startsWith(`reservation:${String(directedRoom)}:`)))throw new FolioInvoiceValidationError('La factura de este cobro debe incluir únicamente conceptos de la habitación elegida.',409);
+          const directedBody=sanitizedGroupPaymentIntent!.body;
+          if(directedBody.closeAllRooms||directedBody.closeReservationIds?.length)throw new FolioInvoiceValidationError('El cobro de una habitación no admite cerrar reservas desde este circuito.',400);
+          const directedRows=Array.isArray(directedBody.paymentRows)?directedBody.paymentRows:[];
+          const directedTotal=directedRows.reduce((sum:number,row:any)=>sum+Number(row.amount||0)+Number(row.retention?.monto||0),0);
+          const roomLedger=(await storage.getGroupReservationLedger(groupId)).find(row=>row.reservationId===String(directedRoom));
+          const roomBalance=roomLedger?Math.max(0,Number(roomLedger.accommodationTotal)+Number(roomLedger.extrasTotal)-Number(roomLedger.paymentsTotal)):0;
+          if(!Number.isFinite(directedTotal)||directedTotal<=0||Math.round(directedTotal*100)>Math.round(roomBalance*100))throw new FolioInvoiceValidationError('El cobro supera el saldo disponible de la habitación elegida.',409);
+          const directedSnapshot=await getGroupInvoiceSnapshot(groupId);
+          if(Number(directedSnapshot.financial?.nonFiscalAdvances||0)>0.009)throw new FolioInvoiceValidationError('Hay anticipos grupales sin facturar. Revisá su aplicación antes de facturar una sola habitación.',409);
+          const linked=(await db.execute(sql`SELECT 1 FROM group_reservation_links gl JOIN reservations r ON r.id=gl.reservation_id WHERE gl.group_id=${groupId} AND gl.reservation_id=${String(directedRoom)} AND r.status IN ('confirmed','checked_in') LIMIT 1`)).rows;
+          if(!linked.length)throw new FolioInvoiceValidationError('La habitación elegida no está activa en este grupo.',409);
+        }
+
         // Every reservation invoice must declare the exact folio sources it
         // consumes. Without this, an older tab could bypass the residual guard.
         if (reservationId) {

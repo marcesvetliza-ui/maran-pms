@@ -416,4 +416,16 @@ describe("Pago Grupal dialog entry-point modes", () => {
     expect(await screen.findByRole("heading", { name: "Pago Grupal" })).toBeInTheDocument();
     expect(screen.getByTestId("input-group-payment-amount-0")).toHaveValue(300);
   });
+  it('selects one room for collection, prefills only its balance and keeps checkout disabled',async()=>{
+    const user=userEvent.setup();renderPage();await screen.findByTestId('text-group-name');
+    await user.click(screen.getByTestId('button-group-payment'));
+    await user.click(screen.getByTestId('select-group-payment-target-room'));
+    await user.click(screen.getByRole('option',{name:/Sólo hab. 101/}));
+    expect(screen.getByTestId('input-group-payment-amount-0')).toHaveValue(125.5);
+    expect(document.getElementById('close-all-rooms')).toBeDisabled();
+    expect(screen.getByTestId('select-group-payment-distribution')).toBeDisabled();
+    expect(screen.getByText(/Se aplica únicamente a la habitación elegida/)).toBeInTheDocument();
+    expect(apiRequestMock).not.toHaveBeenCalledWith('POST',expect.anything(),expect.anything());
+  });
+
 });
