@@ -5,11 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   smoke-test:
     name: Verificar sistema en producción
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Checkout código
@@ -20,6 +24,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Probar verificador de despliegue
+        run: node scripts/wait-for-revision.test.js
+
       - name: Verificar revisión exacta y disponibilidad
         run: node scripts/wait-for-revision.js https://maranpms.com.ar "$GITHUB_SHA"
 
@@ -29,4 +36,4 @@ jobs:
       - name: Notificar resultado en GitHub
         if: failure()
         run: |
-          echo "::error::❌ Smoke test falló en producción — revisar maranpms.com.ar"
+          echo "::error::❌ Verificación de producción fallida. Revisar el paso anterior: puede ser espera de despliegue o smoke funcional; este aviso por sí solo no confirma una caída."
