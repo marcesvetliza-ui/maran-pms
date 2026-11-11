@@ -1,7 +1,10 @@
-/** The administration lead may correct historical documents without reopening
- * cancelled/informational records or silently discarding applied payments. */
+export function canCorrectPurchaseInvoiceMetadata(type:string,state:string):boolean {
+  return /^(FACT|NC|ND)-[ABCM]$/.test(type) && ['pagado','parcial'].includes(state);
+}
+/** Settled invoices use documentary correction only. Other historical state
+ * exceptions for the administration lead retain their existing policy. */
 export function canEditPurchaseInvoice(role: string | undefined, state: string): boolean {
-  return state === "pendiente" || role === "resp_administracion";
+  return state === "pendiente" || role === "resp_administracion" && !["pagado", "parcial"].includes(state);
 }
 export function purchaseInvoiceBalanceAfterEdit(
   invoice: { estado: string; monto_total: string | number; saldo_pendiente: string | number; condicion_pago?: string; tipo_comprobante?: string },

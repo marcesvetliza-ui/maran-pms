@@ -241,6 +241,43 @@ suite("PostgreSQL real: pago automático al cargar la factura de Compras", () =>
       expect(accounts.rows.some(row=>String(row.codigo).startsWith('1.1.1.'))).toBe(false);
     }finally{await cleanupInvoice(invoiceId);await pool.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplierId]);}
   });
+  it.each([{type:'FACT-A',partial:false},{type:'FACT-A',partial:true},{type:'NC-A',partial:false}])('corrects only documentary data and preserves settlements: %j',async({type,partial})=>{
+    if(!pool)return;const supplierId=await makeSupplier(randomUUID());let invoiceId:number|undefined,duplicateId:number|undefined;
+    try{
+      const body={tipoComprobante:type,supplierId,puntoVenta:'00219',numeroComprobante:'00300500',fechaEmision:'2026-09-23',periodo:'09/2026',montoNeto:'100.00',formasPago:type==='NC-A'?[]:[{formaPago:'efectivo',monto:partial?'40.00':'100.00'}]};
+      const created=await request('POST','/api/purchase-invoices',body);expect(created.status,JSON.stringify(created.body)).toBe(201);invoiceId=Number(created.body.id);
+      if(type==='NC-A')await pool.query("UPDATE purchase_invoices SET estado='pagado',saldo_pendiente=0 WHERE id=$1",[invoiceId]);
+      const original=(await pool.query('SELECT *,updated_at::text AS metadata_version FROM purchase_invoices WHERE id=$1',[invoiceId])).rows[0];
+      const paymentItems=(await pool.query('SELECT * FROM payment_order_items WHERE invoice_id=$1 ORDER BY id',[invoiceId])).rows;
+      const orders=(await pool.query('SELECT * FROM payment_orders WHERE id IN (SELECT payment_order_id FROM payment_order_items WHERE invoice_id=$1) ORDER BY id',[invoiceId])).rows;
+      const entry=(await pool.query('SELECT * FROM accounting_entries WHERE id=$1',[original.asiento_id])).rows;
+      const lines=(await pool.query('SELECT * FROM accounting_entry_lines WHERE entry_id=$1 ORDER BY id',[original.asiento_id])).rows;
+      const cashCount=(await pool.query('SELECT count(*)::int AS n FROM cash_movements')).rows[0].n;
+      const metadata={puntoVenta:'00021',numeroComprobante:'00000888',fechaEmision:'2026-09-24',observaciones:'Dato corregido',motivo:'Error en número y fecha de la factura',...(type==='NC-A'?{formaPagoInformativa:'transferencia'}:{}),expectedVersion:original.metadata_version};
+      for(const forbidden of ['montoNeto','montoTotal','supplierId','tipoComprobante','periodo','formasPago']){
+        expect((await request('PATCH',`/api/purchase-invoices/${invoiceId}/metadata`,{...metadata,[forbidden]:'alterado'})).status).toBe(400);
+      }
+      const corrected=await request('PATCH',`/api/purchase-invoices/${invoiceId}/metadata`,metadata);expect(corrected.status,JSON.stringify(corrected.body)).toBe(200);
+      const after=(await pool.query('SELECT * FROM purchase_invoices WHERE id=$1',[invoiceId])).rows[0];
+      const strip=(row:any)=>Object.fromEntries(Object.entries(row).filter(([key])=>!['punto_venta','numero_comprobante','numero_comprobante_ext','fecha_emision','observaciones','updated_at','metadata_version','forma_pago_informativa'].includes(key)));
+      expect(strip(after)).toEqual(strip(original));expect(after.numero_comprobante_ext).toBe('00021-00000888');expect(after.fecha_emision).toBe('2026-09-24');
+      expect((await pool.query('SELECT * FROM payment_order_items WHERE invoice_id=$1 ORDER BY id',[invoiceId])).rows).toEqual(paymentItems);
+      expect((await pool.query('SELECT * FROM payment_orders WHERE id IN (SELECT payment_order_id FROM payment_order_items WHERE invoice_id=$1) ORDER BY id',[invoiceId])).rows).toEqual(orders);
+      expect((await pool.query('SELECT * FROM accounting_entries WHERE id=$1',[original.asiento_id])).rows).toEqual(entry);
+      const currentLines=(await pool.query('SELECT * FROM accounting_entry_lines WHERE entry_id=$1 ORDER BY id',[original.asiento_id])).rows;
+      expect(currentLines).toEqual(lines.map(line=>({...line,comprobante_numero:'00021-00000888'})));
+      expect((await pool.query('SELECT count(*)::int AS n FROM cash_movements')).rows[0].n).toBe(cashCount);
+      const audit=(await pool.query("SELECT details FROM audit_logs WHERE entity_type='purchase_invoice_metadata' AND entity_id=$1",[String(invoiceId)])).rows;
+      expect(audit).toHaveLength(1);expect(JSON.parse(audit[0].details)).toMatchObject({reason:metadata.motivo,before:{numeroComprobante:'00300500'},after:{numeroComprobante:'00000888'}});
+      expect((await request('PATCH',`/api/purchase-invoices/${invoiceId}/metadata`,metadata)).status).toBe(409);
+      const duplicate=await request('POST','/api/purchase-invoices',{...body,numeroComprobante:'00000999'});expect(duplicate.status).toBe(201);duplicateId=Number(duplicate.body.id);
+      expect((await request('PATCH',`/api/purchase-invoices/${invoiceId}/metadata`,{...metadata,numeroComprobante:'00000999',puntoVenta:'00219',expectedVersion:corrected.body.metadata_version})).status).toBe(409);
+      expect((await pool.query('SELECT numero_comprobante FROM purchase_invoices WHERE id=$1',[invoiceId])).rows[0].numero_comprobante).toBe('00000888');
+    }finally{
+      if(invoiceId)await pool.query("DELETE FROM audit_logs WHERE entity_type='purchase_invoice_metadata' AND entity_id=$1",[String(invoiceId)]);
+      await cleanupInvoice(invoiceId);await cleanupInvoice(duplicateId);await pool.query('DELETE FROM accounting_suppliers WHERE id=$1',[supplierId]);
+    }
+  });
   it("POST /api/payment-orders (OP manual) sigue funcionando para varias facturas juntas, ahora atómico", async () => {
     if (!pool) return;
     const suffix = randomUUID();

@@ -1,9 +1,10 @@
+import { PurchaseInvoiceMetadataDialog } from '@/components/purchase-invoice-metadata-dialog';
 import { PURCHASE_CREDIT_NOTE_PAYMENT_METHODS } from '@shared/purchase-credit-note-payment';
 import { iibbRateFromAmount } from '@shared/iibbRate';
 import {matchesPurchaseReport,validatePurchaseReportFilters} from "@shared/purchase-invoice-report";
 import { isPurchaseRemito, purchaseDocumentLabel } from "@shared/purchase-remito";
 import { useAuth } from "@/App";
-import { canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
+import { canCorrectPurchaseInvoiceMetadata, canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
 import { matchesIssuer } from "@/lib/issuer-search";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import { formatDisplayDate } from "@shared/date-display";
@@ -72,6 +73,7 @@ interface Invoice {
   periodo?: string;
   condicionPago: string;
   formaPagoInformativa?: string | null;
+  metadataVersion?: string | null;
   envio?: PurchaseShipping|null;
   descuento?: PurchaseDiscount | null;
   montoNeto: string;
@@ -268,6 +270,7 @@ function camelInvoice(r: any): Invoice {
     periodo: r.periodo,
     condicionPago: r.condicion_pago,
     formaPagoInformativa: r.forma_pago_informativa,
+    metadataVersion: r.metadata_version,
     ...mapPurchaseInvoiceAmountFields(r),
     descuento: r.descuento,
     envio: r.envio,
@@ -2945,6 +2948,7 @@ export default function PurchaseInvoices() {
   const [newOpen, setNewOpen] = useState(false);
   const [sourceRemito, setSourceRemito] = useState<Invoice | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [metadataInvoice,setMetadataInvoice] = useState<Invoice|null>(null);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
   const [anularId, setAnularId] = useState<number | null>(null);
   const [anularError, setAnularError] = useState("");
@@ -3216,6 +3220,7 @@ export default function PurchaseInvoices() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
+                              {canCorrectPurchaseInvoiceMetadata(inv.tipoComprobante,inv.estado) && <Button variant="ghost" size="icon" title="Corregir datos" data-testid={`btn-correct-invoice-${inv.id}`} onClick={()=>setMetadataInvoice(inv)}><Pencil className="h-4 w-4 text-muted-foreground"/></Button>}
                               {(canEditPurchaseInvoice(user?.role, inv.estado) || isPurchaseRemito(inv.tipoComprobante) && inv.estado !== "anulado") && (
                                 <>
                                   <Button
@@ -3313,6 +3318,7 @@ export default function PurchaseInvoices() {
       </div>
 
       {/* Dialogs */}
+      {metadataInvoice && <PurchaseInvoiceMetadataDialog key={metadataInvoice.id} invoice={metadataInvoice} onClose={()=>setMetadataInvoice(null)}/>}
       <InvoiceDialog open={newOpen || !!editingInvoice || !!sourceRemito} onClose={() => { setNewOpen(false); setEditingInvoice(null); setSourceRemito(null); }} suppliers={suppliers} accounts={accounts} editingInvoice={editingInvoice} sourceRemito={sourceRemito} unifiedLayout={!!sourceRemito || isPurchaseRemito(editingInvoice?.tipoComprobante)} />
       <PaymentOrderDialog supplier={opSupplier} open={!!opSupplier} onClose={() => setOpSupplier(null)} />
       <InvoiceDetailDialog invoice={detailInvoice} accounts={accounts} onClose={() => setDetailInvoice(null)} />
