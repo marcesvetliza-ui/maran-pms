@@ -635,18 +635,20 @@ export default function CheckOutPage() {
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Resolver salida de la habitación</DialogTitle>
+        <DialogContent className="group-checkout-dialog flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] min-w-0 max-w-2xl flex-col overflow-y-auto p-5 sm:p-6" data-testid="group-checkout-dialog">
+          <DialogHeader className="min-w-0 pr-5 text-left">
+            <DialogTitle className="leading-snug">Resolver salida de la habitación</DialogTitle>
             <DialogDescription>
-              Elegí cobrar o facturar desde el folio de esta habitación, o registrar sólo la salida dejando los saldos pendientes en el grupo.
+              Elegí si querés cobrar o facturar esta habitación, o registrar solamente su salida.
             </DialogDescription>
           </DialogHeader>
           {selectedReservation && (
-            <div className="space-y-3 text-sm">
-              <div className="rounded-md border bg-muted/40 p-3 space-y-1">
-                <p><span className="font-medium">Reserva:</span> {selectedReservation.id}</p>
-                <p><span className="font-medium">Grupo:</span> {(selectedReservation as any).groupName || (selectedReservation as any).groupCode || (selectedReservation as any).groupId || "ID no informado"}</p>
+            <div className="min-w-0 space-y-4 text-sm">
+              <div className="min-w-0 space-y-2 rounded-md border bg-muted/40 p-4 [overflow-wrap:anywhere]">
+                <p className="text-base font-semibold">{[selectedReservation.guest?.lastName, selectedReservation.guest?.firstName].filter(Boolean).join(" ") || "Huésped sin nombre"}</p>
+                <p><span className="font-medium">Habitación:</span> {selectedReservation.room?.roomNumber || "Sin asignar"}</p>
+                <p><span className="font-medium">Grupo:</span> {(selectedReservation as any).groupName || (selectedReservation as any).groupCode || "Grupo vinculado"}</p>
+                {selectedReservation.reservationCode && <p className="text-xs text-muted-foreground">Reserva: {selectedReservation.reservationCode}</p>}
                 {(selectedReservation as any).outstandingBalance != null || (selectedReservation as any).balance != null
                   ? <p><span className="font-medium">Saldo provisional:</span> ${fmtMoney(String((selectedReservation as any).outstandingBalance ?? (selectedReservation as any).balance))}</p>
                   : <p className="font-medium">Saldo: Consultar folio grupal</p>}
@@ -654,13 +656,14 @@ export default function CheckOutPage() {
                   El saldo definitivo permanece en el folio grupal.
                 </p>
               </div>
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                Los extras personales no se cobrarán ni se modificarán con esta salida. Deben revisarse por separado en el folio personal.
+              <div className="min-w-0 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                Los saldos pendientes de alojamiento y consumos quedan en el Folio Maestro, con su detalle por habitación. La salida no genera pagos ni facturas.
               </div>
               <div className="space-y-2">
                 <label htmlFor="group-checkout-reason" className="font-medium">Motivo (opcional)</label>
                 <Textarea
                   id="group-checkout-reason"
+                  className="min-h-24 w-full min-w-0 resize-y"
                   value={groupCheckoutReason}
                   onChange={(event) => setGroupCheckoutReason(event.target.value)}
                   placeholder="Motivo de la salida grupal sin cobro"
@@ -669,16 +672,19 @@ export default function CheckOutPage() {
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setGroupCheckoutOpen(false)}>Cancelar</Button>
-            <Button variant="outline" onClick={()=>{setGroupCheckoutOpen(false);setPrefacturaOpen(true);}}>Cobrar o facturar esta habitación</Button>
+          <div className="grid min-w-0 grid-cols-1 gap-2 border-t pt-4 sm:grid-cols-2">
+            <Button className="h-auto min-h-11 w-full whitespace-normal px-3 py-3 leading-snug" variant="outline" onClick={()=>{setGroupCheckoutOpen(false);setPrefacturaOpen(true);}}>Cobrar o facturar esta habitación</Button>
             <Button
+              className="h-auto min-h-11 w-full whitespace-normal px-3 py-3 leading-snug"
               onClick={() => selectedReservation && groupCheckoutMutation.mutate({ id: selectedReservation.id, reason: groupCheckoutReason })}
               disabled={!selectedReservation || groupCheckoutMutation.isPending}
               data-testid="button-confirm-group-checkout-no-charge"
             >
               {groupCheckoutMutation.isPending ? "Registrando..." : "Confirmar salida sin cobro"}
             </Button>
+          </div>
+          <DialogFooter className="min-w-0 sm:justify-start">
+            <Button className="w-full sm:w-auto" variant="outline" onClick={() => setGroupCheckoutOpen(false)}>Cancelar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

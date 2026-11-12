@@ -329,7 +329,7 @@ textarea::placeholder {
 }
 
 /* A modal must not have its confirm action covered by the floating help launcher. */
-body:has(.operational-dialog[data-state="open"], .reservation-wide-folio[data-state="open"]) [data-testid="button-help-chat-open"] { visibility: hidden; pointer-events: none; }
+body:has(.operational-dialog[data-state="open"], .reservation-wide-folio[data-state="open"], .group-checkout-dialog[data-state="open"]) [data-testid="button-help-chat-open"] { visibility: hidden; pointer-events: none; }
 
 /* Keep the restaurant order and checkout workspaces the same size. */
 .operational-dialog.restaurant-workspace-dialog {
