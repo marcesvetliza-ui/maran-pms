@@ -2327,7 +2327,7 @@ export function ReservationDetailDialog({
   onCancel: () => void;
   onEdit?: () => void;
   currentUserRole?: string;
-  operationalActions?: React.ReactNode;
+  operationalActions?: React.ReactNode | ((actions: { onCheckout: () => void }) => React.ReactNode);
   allowCancel?: boolean;
 }) {
   const { data: liveReservation } = useQuery<ReservationWithDetails>({
@@ -2416,6 +2416,15 @@ export function ReservationDetailDialog({
     setShowFacturar(true);
   };
 
+  const requestCheckout = () => {
+    if (availableAdvancePayments.length > 0) {
+      setUninvoicedWarningAction("checkout");
+      setShowUninvoicedWarning(true);
+    } else {
+      openCheckoutWizard();
+    }
+  };
+
   const groupDepartureMutation = useMutation({
     mutationFn: async () => {
       const body: { groupDeparture: true; reason?: string } = { groupDeparture: true };
@@ -2432,6 +2441,7 @@ export function ReservationDetailDialog({
       if (groupId) queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
@@ -4917,7 +4927,9 @@ export function ReservationDetailDialog({
 
         <DialogFooter className="wf-footer shrink-0 gap-2 sm:justify-between">
           <div className="wf-footer-actions">
-            {operationalActions}
+            {typeof operationalActions === "function"
+              ? operationalActions({ onCheckout: requestCheckout })
+              : operationalActions}
             <Button
               variant="outline"
               onClick={printConfirmation}
@@ -4950,15 +4962,7 @@ export function ReservationDetailDialog({
               <Button
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
-                onClick={() => {
-                  const uninvoiced = availableAdvancePayments;
-                  if (uninvoiced.length > 0) {
-                    setUninvoicedWarningAction("checkout");
-                    setShowUninvoicedWarning(true);
-                  } else {
-                    openCheckoutWizard();
-                  }
-                }}
+                onClick={requestCheckout}
                 data-testid="button-early-checkout"
               >
                 <LogOut className="h-4 w-4 mr-2" />
@@ -5545,13 +5549,13 @@ export function ReservationDetailDialog({
           <DialogHeader>
             <DialogTitle>Resolver salida de la habitación</DialogTitle>
             <DialogDescription>
-              Reserva {reservation.id} · Grupo {(reservation as any).groupCode || (reservation as any).groupName || (reservation as any).groupId || "sin ID"}.
-              Se cerrará la habitación sin abrir Prefactura, registrar pagos ni cargar saldo a Cuenta Corriente.
+              Hab. {reservation.room?.roomNumber || "—"} · Grupo {(reservation as any).groupCode || (reservation as any).groupName || (reservation as any).groupId || "sin ID"}.
+              {" "}Elegí si querés cobrar o facturar esta habitación, o registrar sólo su salida y resolver la cuenta desde el Folio Maestro.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-              Los saldos de alojamiento quedan en el grupo. Los extras personales no se cobran ni se modifican; deben revisarse por separado en el folio personal.
+              Al confirmar la salida sin cobro, alojamiento y consumos conservan su detalle por habitación y quedan pendientes en el grupo. No se registran pagos ni facturas.
             </div>
             <div className="space-y-2">
               <label htmlFor="reservation-group-checkout-reason" className="font-medium">Motivo (opcional)</label>
@@ -5583,7 +5587,10 @@ export function ReservationDetailDialog({
         reservationId={reservation.id}
         reservation={reservation}
         mode={showFacturarMode}
-        onCheckoutComplete={() => setFacturaEmitida(true)}
+        onCheckoutComplete={() => {
+          setFacturaEmitida(true);
+          if (operationalActions) onOpenChange(false);
+        }}
       />
     </Dialog>
   );

@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { api, detail } = vi.hoisted(() => ({ api: vi.fn(), detail: vi.fn() }));
+const { api, detail, checkout } = vi.hoisted(() => ({ api: vi.fn(), detail: vi.fn(), checkout: vi.fn() }));
 vi.mock("@/pages/reservations", async () => ({
   ...(await vi.importActual("@/pages/reservations")),
   ReservationDetailDialog: (props: any) => {
@@ -12,7 +12,7 @@ vi.mock("@/pages/reservations", async () => ({
       <section aria-label="Detalle compartido">
         <button onClick={props.onEdit}>Editar datos</button>
         {props.allowCancel && <button onClick={props.onCancel}>Anular Reserva</button>}
-        {props.operationalActions}
+        {props.operationalActions({ onCheckout: checkout })}
       </section>
     );
   },
@@ -127,11 +127,11 @@ describe("Planning uses the shared detail and preserves operational actions", ()
       ),
     );
   });
-  it("opens the checkout circuit and permits reasoned cancellation for an occupied stay", async () => {
+  it("delegates checkout to the shared detail and permits reasoned cancellation for an occupied stay", async () => {
     reservation.status = "checked_in";
     mount();
     await userEvent.click(await screen.findByTestId("button-checkout-quick"));
-    expect(screen.getByText("Prefactura de checkout")).toBeInTheDocument();
+    expect(checkout).toHaveBeenCalledTimes(1);
     expect(detail.mock.lastCall?.[0].allowCancel).toBe(true);
     expect(api).not.toHaveBeenCalled();
   });

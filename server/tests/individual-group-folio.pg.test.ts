@@ -29,6 +29,7 @@ suite('individual group room from its own prefactura',()=>{
    const ids=(await pool.query('SELECT reservation_id FROM group_reservation_links WHERE group_id=$1',[group])).rows.map((r:any)=>r.reservation_id);
    await pool.query("DELETE FROM cash_movements WHERE payment_id IN(SELECT id FROM payments WHERE reservation_id=ANY($1::text[])) OR payment_id IN(SELECT id FROM group_payments WHERE group_id=$2)",[ids,group]);
    await pool.query('DELETE FROM payments WHERE reservation_id=ANY($1::text[])',[ids]);
+   await pool.query('DELETE FROM charges WHERE reservation_id=ANY($1::text[])',[ids]);
    await pool.query('DELETE FROM billing_operations WHERE owner_id=ANY($1::text[])',[ids]);
    await pool.query('DELETE FROM sales_invoices WHERE reserva_id=ANY($1::text[]) OR group_id=$2',[ids,group]);await pool.query('DELETE FROM group_payments WHERE group_id=$1',[group]);await pool.query('DELETE FROM group_account_operations WHERE group_id=$1',[group]);
    await pool.query('DELETE FROM folio_movements WHERE folio_id IN(SELECT id FROM folios WHERE entity_id=ANY($1::text[]))',[ids]);
@@ -36,7 +37,47 @@ suite('individual group room from its own prefactura',()=>{
    await pool.query('DELETE FROM group_reservation_links WHERE group_id=$1',[group]);
    await pool.query('DELETE FROM reservation_changelog WHERE reservation_id=ANY($1::text[])',[ids]);
    await pool.query('DELETE FROM reservations WHERE id=ANY($1::text[])',[ids]);await pool.query('DELETE FROM groups WHERE id=$1',[group]);
+   await pool.query('DELETE FROM housekeeping_tasks WHERE room_id=ANY($1::text[])',[ids.map((id:string)=>id+'room')]);
+   await pool.query('DELETE FROM rooms WHERE id=ANY($1::text[])',[ids.map((id:string)=>id+'room')]);
+   await pool.query('DELETE FROM room_types WHERE id=ANY($1::text[])',[ids.map((id:string)=>id+'type')]);
   }await pool.query('DELETE FROM cash_shifts WHERE id=$1',[shift]);await pool?.end();
+ });
+ it.each(['accommodation', 'all', 'none'])('checks out one room of an existing group with %s coverage, preserving all debt and fiscal sources', async config => {
+  const f = await fixture();
+  const id = f.ids[0];
+  await pool.query("UPDATE groups SET status='inhouse', master_folio_config=$2, created_at='2020-01-01', check_out_date=(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date+7 WHERE id=$1", [f.group, config]);
+  await pool.query("UPDATE reservations SET status='checked_in', created_at='2020-01-01', check_out_date=(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date WHERE id=ANY($1::text[])", [f.ids]);
+  await pool.query("INSERT INTO room_types(id,code,name) VALUES($1::text,$1::text,'Synthetic departure type')", [id+'type']);
+  await pool.query("INSERT INTO rooms(id,room_number,room_type_id,floor,status) VALUES($1,$2,$3,8,'occupied')", [id+'room', id, id+'type']);
+  await pool.query("INSERT INTO charges(id,reservation_id,description,amount,date,category,status) VALUES($1,$2,'Synthetic minibar',35,CURRENT_DATE,'minibar','active')", [id+'charge', id]);
+  const { storage } = await import('../db-storage');
+  const { getGroupInvoiceSnapshot } = await import('../billing/groupInvoiceScope');
+  const before = await getGroupInvoiceSnapshot(f.group);
+  const roomBefore = (await pool.query('SELECT * FROM reservations WHERE id=$1', [id])).rows[0];
+  const cashBefore = (await pool.query('SELECT count(*) FROM cash_movements WHERE shift_id=$1', [shift])).rows;
+
+  const result = await request(`/api/reservations/${id}/check-out`, { groupDeparture: true, reason: 'Guest leaves before the rest of the group' });
+  expect(result.status, JSON.stringify(result.body)).toBe(200);
+
+  const roomAfter = (await pool.query('SELECT * FROM reservations WHERE id=$1', [id])).rows[0];
+  expect(roomAfter.status).toBe('checked_out');
+  expect(roomAfter.checked_out_at).not.toBeNull();
+  for (const field of ['check_in_date', 'check_out_date', 'nights', 'total_room_amount', 'final_rate_per_night']) {
+   expect(roomAfter[field]).toEqual(roomBefore[field]);
+  }
+  expect((await pool.query('SELECT status FROM rooms WHERE id=$1', [id+'room'])).rows[0].status).toBe('dirty');
+  expect((await pool.query('SELECT status FROM reservations WHERE id=$1', [f.ids[1]])).rows[0].status).toBe('checked_in');
+  expect((await pool.query('SELECT status FROM groups WHERE id=$1', [f.group])).rows[0].status).toBe('inhouse');
+  expect((await pool.query('SELECT id FROM payments WHERE reservation_id=ANY($1::text[])', [f.ids])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=ANY($1::text[]) OR group_id=$2', [f.ids,f.group])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT id FROM account_movements WHERE reservation_id=ANY($1::text[])', [f.ids])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT count(*) FROM cash_movements WHERE shift_id=$1', [shift])).rows).toEqual(cashBefore);
+  const ledger = await storage.getGroupReservationLedger(f.group);
+  expect(ledger.find(line => line.reservationId===id)).toMatchObject({ status:'checked_out', accommodationTotal:121, extrasTotal:35, paymentsTotal:0 });
+  const after = await getGroupInvoiceSnapshot(f.group);
+  expect(after.financial).toEqual(before.financial);
+  expect(after.sources).toEqual(before.sources);
+  expect(after.financial.operationalBalance).toBe(277);
  });
  it('issues, collects and retries from the room, with fiscal coverage reflected in its group',async()=>{
   const f=await fixture();

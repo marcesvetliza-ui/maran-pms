@@ -18,7 +18,6 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
 import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
 import type { ReservationWithDetails } from "@shared/schema";
-import { PrefacturaDialog } from "@/components/PrefacturaDialog";
 
 export function ReservationDetailModal({
   open,
@@ -39,7 +38,6 @@ export function ReservationDetailModal({
   const [retroDialogOpen, setRetroDialogOpen] = useState(false);
   const [retroMotivo, setRetroMotivo] = useState("");
   const [dirtyRoomDialogOpen, setDirtyRoomDialogOpen] = useState(false);
-  const [prefacturaOpen, setPrefacturaOpen] = useState(false);
 
   const { data: reservation, isLoading } = useQuery<ReservationWithDetails>({
     queryKey: ["/api/reservations", reservationId],
@@ -50,8 +48,6 @@ export function ReservationDetailModal({
     },
     enabled: !!reservationId && open,
   });
-
-  const startCheckout = () => setPrefacturaOpen(true);
 
   const checkInMutation = useMutation({
     mutationFn: async ({ motivo }: { motivo?: string } = {}) =>
@@ -224,7 +220,7 @@ export function ReservationDetailModal({
               : undefined
           }
           onCancel={() => setCancelReservation(reservation)}
-          operationalActions={
+          operationalActions={({ onCheckout }) => (
             <>
               {reservation.isGroup && reservation.groupId && (
                 <Button
@@ -263,7 +259,7 @@ export function ReservationDetailModal({
               )}
               {canCheckOut && (
                 <Button
-                  onClick={startCheckout}
+                  onClick={onCheckout}
                   variant="secondary"
                   className="w-full sm:w-auto"
                   data-testid="button-checkout-quick"
@@ -319,7 +315,7 @@ export function ReservationDetailModal({
                 </Button>
               )}
             </>
-          }
+          )}
         />
       ) : (
         <Dialog open={open && !cancelReservation} onOpenChange={onOpenChange}>
@@ -441,19 +437,6 @@ export function ReservationDetailModal({
         </DialogContent>
       </Dialog>
 
-      {reservationId && (
-        <PrefacturaDialog
-          open={prefacturaOpen}
-          onClose={() => setPrefacturaOpen(false)}
-          reservationId={reservationId}
-          reservation={reservation as any}
-          mode="checkout"
-          onCheckoutComplete={() => {
-            setPrefacturaOpen(false);
-            onOpenChange(false);
-          }}
-        />
-      )}
     </>
   );
 }
