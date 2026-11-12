@@ -84,6 +84,10 @@ function formatARS(value: number): string {
   );
 }
 
+function formatOccupancyPercentage(value: number): string {
+  return `${Number(value).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
 function formatDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -461,7 +465,7 @@ export default function ReportsPage() {
         if (occupancy.data) {
           exportCSV(
             ["Fecha", "Hab. Disponibles", "Hab. Ocupadas", "% Ocupación"],
-            occupancy.data.map((r) => [formatDisplayDate(r.date), String(r.available), String(r.occupied), `${r.occupancy}%`]),
+            occupancy.data.map((r) => [formatDisplayDate(r.date), String(r.available), String(r.occupied), formatOccupancyPercentage(r.occupancy)]),
             "ocupacion"
           );
         }
@@ -677,7 +681,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {['occupancy','revenue-type','channel'].includes(activeTab)&&!currentReport?.isError&&<LodgingNotice report={{advertencias:(currentReport?.data as any)?.[0]?.lodgingWarnings}} />}
+      {['occupancy','revenue-type','channel'].includes(activeTab)&&!currentReport?.isError&&<LodgingNotice showExplanation={activeTab !== "occupancy"} report={{advertencias:(currentReport?.data as any)?.[0]?.lodgingWarnings}} />}
       <Tabs value={activeTab} onValueChange={setActiveTab} data-testid="tabs-reports">
         {activeArea === "hoteleria" && (
           <TabsList className="flex flex-wrap h-auto gap-1">
@@ -809,8 +813,8 @@ export default function ReportsPage() {
                       <LineChart data={occupancy.data}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} tickFormatter={formatDisplayDate} />
-                        <YAxis unit="%" />
-                        <Tooltip labelFormatter={formatDisplayDate} formatter={(v: number) => [`${v}%`, "Ocupación"]} />
+                        <YAxis tickFormatter={formatOccupancyPercentage} />
+                        <Tooltip labelFormatter={formatDisplayDate} formatter={(v: number) => [formatOccupancyPercentage(v), "Ocupación"]} />
                         <Legend />
                         <Line type="monotone" dataKey="occupancy" name="% Ocupación" stroke={COLORS[0]} strokeWidth={2} dot={false} />
                       </LineChart>
@@ -832,7 +836,7 @@ export default function ReportsPage() {
                             <TableCell>{formatDisplayDate(row.date)}</TableCell>
                             <TableCell className="text-right">{row.available}</TableCell>
                             <TableCell className="text-right">{row.occupied}</TableCell><TableCell className="text-right">{row.forecast ?? 0}</TableCell>
-                            <TableCell className="text-right">{row.occupancy}%</TableCell>
+                            <TableCell className="text-right">{formatOccupancyPercentage(row.occupancy)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
