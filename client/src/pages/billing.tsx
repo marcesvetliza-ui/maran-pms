@@ -222,6 +222,20 @@ export default function BillingPage() {
   const [showEdit, setShowEdit] = useState<number | null>(null);
   const [retryingCenterInvoiceId, setRetryingCenterInvoiceId] = useState<number | null>(null);
   const [centerRecoveryTarget, setCenterRecoveryTarget] = useState<any>(null);
+  const [centerCorrectionTarget, setCenterCorrectionTarget] = useState<any>(null);
+  async function correctCenterRejection(invoice: any) {
+    setRetryingCenterInvoiceId(invoice.id);
+    try {
+      await apiRequest("POST", `/api/billing/invoices/${invoice.id}/correct-rejected-center`);
+      await queryClient.invalidateQueries({ queryKey:["/api/billing/invoices"] });
+      setCenterCorrectionTarget(null);
+      toast({ title:"Intento rechazado cerrado", description:"ARCA confirmó que no está autorizado. Se conservó el historial, sin emitir ni registrar dinero o deuda. Revisá los datos del receptor antes de volver a emitir." });
+    } catch (error: any) {
+      toast({ title:"El intento se conserva", description:parseApiError(error), variant:"destructive" });
+    } finally {
+      setRetryingCenterInvoiceId(null);
+    }
+  }
   async function retryCenterSettlement(invoice: any, recoverAuthorization = false) {
     const invoiceId = invoice.id;
     const creditOnly = isCenterCreditOnly(invoice);
@@ -595,7 +609,7 @@ export default function BillingPage() {
                                   </div>
                                 ) : f.estado === "autorizacion_pendiente" ? (
                                   <div>
-                                    <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Autorización ARCA pendiente</Badge>
+                                    <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">{f.center_rejection_correctable ? "Rechazado por ARCA" : "Autorización ARCA pendiente"}</Badge>
                                     {getReconciliationError(f) && <div className="text-[10px] text-amber-700 dark:text-amber-300">{getReconciliationError(f)}</div>}
                                   </div>
                                 ) : f.center_settlement_status === "pending" ? (
@@ -620,8 +634,11 @@ export default function BillingPage() {
                                 {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1">
-                                  {f.estado === "autorizacion_pendiente" && f.center_settlement_area && ["FA", "FB", "FM", "FMB"].includes(f.tipo_comprobante) && (
+                                  {f.estado === "autorizacion_pendiente" && !f.center_rejection_correctable && f.center_settlement_area && ["FA", "FB", "FM", "FMB"].includes(f.tipo_comprobante) && (
                                     <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => setCenterRecoveryTarget(f)} data-testid={`btn-recover-center-${f.id}`}>Recuperar autorización</Button>
+                                  )}
+                                  {f.center_rejection_correctable === true && (
+                                    <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => setCenterCorrectionTarget(f)} data-testid={`btn-correct-center-${f.id}`}>Verificar rechazo y cerrar intento</Button>
                                   )}
                                   {f.center_settlement_status === "pending" && f.estado === "emitida" && (
                                     <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f)} data-testid={`btn-retry-center-${f.id}`}>{isCenterCreditOnly(f) ? "Registrar en Cuenta Corriente" : "Completar registro del cobro"}</Button>
@@ -747,6 +764,21 @@ export default function BillingPage() {
           <DialogFooter>
             <Button variant="outline" disabled={retryingCenterInvoiceId !== null} onClick={() => setCenterRecoveryTarget(null)}>Cancelar</Button>
             <Button disabled={retryingCenterInvoiceId !== null} onClick={() => retryCenterSettlement(centerRecoveryTarget, true)}>Confirmar recuperación</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!centerCorrectionTarget} onOpenChange={open => { if (!open && retryingCenterInvoiceId === null) setCenterCorrectionTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verificar rechazo y cerrar intento</DialogTitle>
+            <DialogDescription>Se consultará el comprobante en ARCA. Sólo si confirma que no está autorizado y no hay movimientos vinculados se cerrará este borrador, conservando su historial. No se emitirá otra factura ni se registrarán pagos o deuda.</DialogDescription>
+          </DialogHeader>
+          {centerCorrectionTarget && <p>{centerCorrectionTarget.tipo_comprobante} {padNum(centerCorrectionTarget.punto_venta,4)}-{padNum(centerCorrectionTarget.numero,8)} · {centerCorrectionTarget.cliente_razon_social} · ${fPeso(centerCorrectionTarget.monto_total)}</p>}
+          <p className="text-sm">Revisá el CUIT y los datos fiscales del receptor antes de volver a emitir. La numeración siguiente seguirá siendo la que indique ARCA.</p>
+          <DialogFooter>
+            <Button variant="outline" disabled={retryingCenterInvoiceId !== null} onClick={() => setCenterCorrectionTarget(null)}>Cancelar</Button>
+            <Button disabled={retryingCenterInvoiceId !== null} onClick={() => correctCenterRejection(centerCorrectionTarget)}>Verificar en ARCA y cerrar intento</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

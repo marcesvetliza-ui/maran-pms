@@ -19,7 +19,7 @@ describe("center invoice authorization and CC are separate states", () => {
       center_settlement_area:"recepcion", center_settlement_status:"pending", cash_forma_pago:"cuenta_corriente", cash_forma_pago_detalle:[{method:"cuenta_corriente",amount:2406000}], reconciliation_status:"pendiente", reconciliation_error:"ARCA: respuesta no recibida" };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.startsWith("/api/billing/invoices?")) return Response.json([invoice]);
+      if (url.startsWith("/api/billing/invoices?")) return Response.json([invoice].filter(Boolean));
       if (url === "/api/billing/config") return Response.json({ arcaAmbiente:"homologacion" });
       if (init?.method === "POST" && url === "/api/billing/invoices/245/recover-center") {
         if (rejectRecovery) return Response.json({error:"ARCA rechazó el intento original: fecha inválida"},{status:409});
@@ -29,6 +29,9 @@ describe("center invoice authorization and CC are separate states", () => {
       if (init?.method === "POST" && url === "/api/billing/invoices/245/settle-center") {
         invoice = {...invoice,center_settlement_status:"settled",reconciliation_status:"conciliada",reconciliation_error:null};
         return Response.json({ok:true,invoiceId:245});
+      }
+      if (init?.method === "POST" && url === "/api/billing/invoices/245/correct-rejected-center") {
+        invoice=null;return Response.json({corrected:true,invoiceId:245});
       }
       return Response.json([]);
     }));
@@ -70,5 +73,16 @@ describe("center invoice authorization and CC are separate states", () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({description:"ARCA rechazó el intento original: fecha inválida",variant:"destructive"})));
     expect((fetch as any).mock.calls.filter(([,init]:any)=>init?.method==="POST")).toHaveLength(1);
     expect(invoice.estado).toBe("autorizacion_pendiente");
+  });
+  it('requires explicit confirmation to verify and close a rejected draft, without issuing or recording money',async()=>{
+    invoice.center_rejection_correctable=true;invoice.reconciliation_error='10015: receptor no registrado en el padrón';renderPage();
+    expect(await screen.findByText('Rechazado por ARCA')).toBeInTheDocument();
+    expect(screen.queryByTestId('btn-recover-center-245')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('btn-correct-center-245'));
+    expect((fetch as any).mock.calls.filter(([,init]:any)=>init?.method==='POST')).toHaveLength(0);
+    await userEvent.click(screen.getByRole('button',{name:'Verificar en ARCA y cerrar intento'}));
+    await waitFor(()=>expect(toast).toHaveBeenCalledWith(expect.objectContaining({title:'Intento rechazado cerrado'})));
+    const writes=(fetch as any).mock.calls.filter(([,init]:any)=>init?.method==='POST');
+    expect(writes).toHaveLength(1);expect(writes[0][0]).toBe('/api/billing/invoices/245/correct-rejected-center');
   });
 });

@@ -5,6 +5,7 @@ import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
 import { centerInvoiceRecoveryRequest } from "./centerInvoiceRecovery";
+import { correctRejectedCenterInvoice } from "./correctRejectedCenterInvoice";
 import { operationForInvoice } from "./operationJournal";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { discardInvalidCreditDraft, isInvalidOriginalDraft } from './discardInvalidCreditDraft';
@@ -2439,6 +2440,15 @@ export function registerBillingRoutes(app: Express) {
     }
   };
   app.post("/api/billing/invoices", requireAuth, emitInvoiceHandler);
+  app.post("/api/billing/invoices/:id/correct-rejected-center", requireAuth, requireActiveInvoice, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error:"Factura inválida" });
+    try {
+      return res.json(await correctRejectedCenterInvoice(id, { id:req.user?.id, name:req.user?.fullName || req.user?.username, role:req.user?.role || "", ip:req.ip }));
+    } catch (error: any) {
+      return res.status(error?.statusCode || 502).json({ error:error?.message || "No se pudo verificar el rechazo; se conserva el intento." });
+    }
+  });
   app.post("/api/billing/invoices/:id/recover-center", requireAuth, requireActiveInvoice, async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Factura inválida" });

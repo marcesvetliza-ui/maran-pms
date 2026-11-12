@@ -43,6 +43,9 @@ export function exposeInvoiceReconciliation(invoice: any) {
 
   return {
     ...publicInvoice,
+    center_rejection_correctable: Boolean(invoice.center_settlement_area && invoice.estado === "autorizacion_pendiente" && !invoice.cae && invoice.modo_ficticio === false
+      && directProof?.ownerType === "direct" && directProof?.ownerId === "direct" && Number(directProof?.invoiceId) === Number(invoice.id)
+      && directProof?.stage === "rejected" && directProof?.errorCode === "ARCA_AUTHORIZATION_REJECTED"),
     reconciliation_status: status,
     reconciliationStatus: status,
     reconciliation_error: visibleError,

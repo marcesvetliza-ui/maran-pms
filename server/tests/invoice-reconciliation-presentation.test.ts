@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { exposeInvoiceReconciliation } from "../billing/reconciliationPresentation";
 
 describe("estado visible de conciliación de facturas", () => {
+  it('offers correction only for a journal-proven rejected center draft',()=>{
+    const draft={id:245,center_settlement_area:'recepcion',estado:'autorizacion_pendiente',modo_ficticio:false,cae:null,
+      _direct_invoice_operation:{invoiceId:245,ownerType:'direct',ownerId:'direct',stage:'rejected',errorCode:'ARCA_AUTHORIZATION_REJECTED'}};
+    expect(exposeInvoiceReconciliation(draft).center_rejection_correctable).toBe(true);
+    for(const change of [{cae:'71234567890123'},{modo_ficticio:true},{estado:'emitida'},{_direct_invoice_operation:{...draft._direct_invoice_operation,stage:'uncertain'}}]){
+      expect(exposeInvoiceReconciliation({...draft,...change}).center_rejection_correctable).toBe(false);
+    }
+  });
   it("recognizes the center's committed CC registration, retaining unresolved fiscal and settlement states", () => {
     const completed = { tipo_comprobante:"FB", estado:"emitida", cae:"71234567890123", center_settlement_area:"recepcion", center_settlement_status:"settled", reconciliation_status:"pendiente", reconciliation_error:"Error histórico" };
     expect(exposeInvoiceReconciliation(completed)).toMatchObject({ reconciliation_status:"conciliada", reconciliation_error:null });
