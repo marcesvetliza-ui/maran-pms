@@ -452,6 +452,7 @@ export interface IStorage {
   deleteGroupCharge(id: string): Promise<boolean>;
   createGroupPayment(payment: InsertGroupPayment): Promise<GroupPayment>;
   recordGroupPayment(input: {
+    paymentRequest?: import("./reservationPaymentRequest").ReservationPaymentRequest;
     groupId: string;
     destination: GroupPaymentDestination;
     paymentRows: Array<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } | null }>;

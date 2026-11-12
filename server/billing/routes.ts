@@ -1296,7 +1296,7 @@ export function registerBillingRoutes(app: Express) {
       const reservationId = reservaId === undefined || reservaId === null
         ? ""
         : String(reservaId).trim();
-      if (reservationId) {
+      if (reservationId && req.body.groupDocumentationOnly!==true) {
         const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
         validateReservationInvoicePaymentDetail(normalizedCashFormaPagoDetalle, invoiceTotal);
       }
@@ -1305,7 +1305,14 @@ export function registerBillingRoutes(app: Express) {
       const groupPaymentId = rawGroupPaymentId === undefined || rawGroupPaymentId === null ? "" : String(rawGroupPaymentId).trim();
       let individualGroupId:string|undefined;
       let individualGroupPayments:any[]|undefined;
-      if (reservationId && !paymentId) {
+      const groupDocumentationOnly=req.body.groupDocumentationOnly===true;
+      if(groupDocumentationOnly){
+        if(!reservationId||groupId||!['FA','FB','FC','FM','FMB'].includes(tipoComprobante)||req.body.prefacturaRecovery?.version!==2||req.body.prefacturaRecovery.payments?.length||rawPaymentId||cashArea||cashFormaPago||reservationSettlementMethod||normalizedCashFormaPagoDetalle?.length||!creditOperationId||creditReapplications?.length||ordinaryAdvanceApplications?.length)throw new FolioInvoiceValidationError('La documentación grupal no admite cobros, aplicaciones de crédito ni traslados de deuda.',400);
+        const membership=(await db.execute(sql`SELECT group_id FROM group_reservation_links WHERE reservation_id=${reservationId}`)).rows as any[];
+        if(membership.length!==1)throw new FolioInvoiceValidationError('La reserva debe pertenecer a un único grupo.',409);
+        individualGroupId=String(membership[0].group_id);individualGroupPayments=[];
+      }
+      if (reservationId && !paymentId && !groupDocumentationOnly) {
         const directSettlementMethods = new Set([
           "efectivo", "cash", "tarjeta", "tarjeta_debito", "tarjeta_credito",
           "debito", "transferencia", "mercadopago", "cheque", "echeq",
@@ -1336,7 +1343,7 @@ export function registerBillingRoutes(app: Express) {
           `);
           if (linkedGroup.rows.length > 0 && ['FA','FB','FC'].includes(tipoComprobante) && req.body.prefacturaRecovery?.version===2 && !isReservationCcSettlement && !groupId && typeof creditOperationId==='string' && /^[0-9a-f-]{36}$/i.test(creditOperationId)) {
             individualGroupId=String((linkedGroup.rows[0] as any).group_id);
-            individualGroupPayments=validateIndividualGroupPlan(reservationId,req.body.prefacturaRecovery,newSettlement);
+            individualGroupPayments=groupDocumentationOnly?[]:validateIndividualGroupPlan(reservationId,req.body.prefacturaRecovery,newSettlement);
           } else if (linkedGroup.rows.length > 0) {
             return res.status(409).json({
               error: "No se permite una nueva cobranza directa de una reserva grupal. Registre el cobro desde el Folio Maestro/grupal; los extras personales se registran por separado.",
@@ -1699,7 +1706,7 @@ export function registerBillingRoutes(app: Express) {
               );
             }
           }
-          if(individualGroupPayments){
+          if(individualGroupPayments&&!groupDocumentationOnly){
             const expectedMethods=new Map(requiredAdvanceByMethod);
             for(const p of individualGroupPayments){const method=normalizeToSpanishPaymentMethod(p.method);expectedMethods.set(method,(expectedMethods.get(method)||0)+Number(p.amount));}
             for(const [method,amount] of expectedMethods){if(Math.round(amount*100)!==Math.round((paymentDetailByMethod.get(method)||0)*100))throw new FolioInvoiceValidationError('Las formas de pago de la factura no coinciden con el intento original de esta habitación.',409);}
@@ -1761,7 +1768,8 @@ export function registerBillingRoutes(app: Express) {
               : {}),
           };
           creditIntent = {
-            ...(individualGroupId?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments}}:{}),
+            ...(groupDocumentationOnly?{groupDocumentationOnly:true}:{}),
+            ...(individualGroupId&&!groupDocumentationOnly?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments}}:{}),
             ...(req.body.correctionOriginalInvoiceId ? {correctionOriginalInvoiceId:Number(req.body.correctionOriginalInvoiceId)} : {}),
             operationId: creditOperationId,
             ...immutableSnapshot,
@@ -1806,6 +1814,13 @@ export function registerBillingRoutes(app: Express) {
 
           const reservation = await storage.getReservation(reservationId);
           if (!reservation) throw new FolioInvoiceValidationError("Reserva no encontrada", 404);
+          // The same source guard also applies to fully paid invoices and old
+          // clients that do not prepare a new collection in this request.
+          const linkedGroupId=(reservation as any).groupId;
+          if(linkedGroupId){
+            if(paymentId&&!paymentRecoveryInvoiceId)throw new FolioInvoiceValidationError('Para facturar una habitación grupal, elegí los conceptos pendientes desde su folio; no emitas otro comprobante aislado por el pago.',409);
+            if(!paymentId&&!individualGroupId)await assertIndividualGroupInvoice(String(linkedGroupId),reservationId,sanitizedSourceChargeAmounts,0);
+          }
           const charges = await storage.getCharges(reservationId);
         const savedRoomTotal = parseFloat((reservation as any).totalRoomAmount || "0");
         const accommodationTotal = savedRoomTotal > 0

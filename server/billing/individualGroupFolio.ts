@@ -1,17 +1,16 @@
+import {groupAccountSnapshot} from './groupAccount';
 import {sql} from 'drizzle-orm';
 import {db} from '../db';
-import {storage} from '../db-storage';
 import {getGroupInvoiceSnapshot} from './groupInvoiceScope';
 import {reservationGroupSources} from '@shared/reservationGroupSources';
 const fail=(message:string)=>Object.assign(new Error(message),{statusCode:409,code:'GROUP_INDIVIDUAL_FOLIO_REVIEW'});
-export async function assertIndividualGroupBalance(groupId:string,reservationId:string,amount:number){
- // Unassigned master money cannot be attributed to one room without a choice.
- const master=(await db.execute(sql`SELECT r.status,(SELECT coalesce(sum(gp.amount::numeric),0) FROM group_payments gp WHERE gp.group_id=${groupId} AND gp.destination='master_folio') amount FROM reservations r JOIN group_reservation_links gl ON gl.reservation_id=r.id WHERE r.id=${reservationId} AND gl.group_id=${groupId} LIMIT 1`)).rows[0] as any;
- if(!['confirmed','checked_in'].includes(String(master?.status)))throw fail('La reserva no está activa en este grupo. Actualizá el folio.');
- if(Number(master?.amount)>0.009)throw fail('El Folio Maestro ya tiene cobros sin asignación a esta habitación. Revisá su aplicación antes de cobrarla otra vez.');
- const line=(await storage.getGroupReservationLedger(groupId)).find(r=>r.reservationId===reservationId);
- const balance=line?Math.max(0,Number(line.accommodationTotal)+Number(line.extrasTotal)-Number(line.paymentsTotal)):0;
- if(!line||!Number.isFinite(amount)||amount<=0||Math.round(amount*100)>Math.round(balance*100))throw fail('El pago supera el saldo pendiente verificado de esta habitación. Actualizá el folio.');
+export async function assertIndividualGroupBalance(groupId:string,reservationId:string,amount:number,verifiedAccount?:Awaited<ReturnType<typeof groupAccountSnapshot>>){
+ // A master receipt already applied to another room is not a reason to
+ // block this room. Only money with no verified destination needs a choice.
+ const account=verifiedAccount||await groupAccountSnapshot(reservationId);
+ if(account.groupId!==groupId||!['confirmed','checked_in','checked_out'].includes(account.status))throw fail('La reserva no tiene un saldo verificable en este grupo. Actualizá el folio.');
+ if(account.unassigned>0.009||account.reviewReceipts.length)throw fail('Hay anticipos grupales sin asignar o pendientes de revisión. Aplicá el anticipo o registrá explícitamente dinero nuevo desde la cuenta de la habitación.');
+ if(!Number.isFinite(amount)||amount<=0||Math.round(amount*100)>Math.round(account.balance*100))throw fail('El pago supera el saldo pendiente verificado de esta habitación. Actualizá el folio.');
 }
 export function validateIndividualGroupPlan(reservationId:string,recovery:any,expectedAmount:number){
  const payments=recovery?.version===2&&Array.isArray(recovery.payments)?recovery.payments:[];
@@ -20,13 +19,9 @@ export function validateIndividualGroupPlan(reservationId:string,recovery:any,ex
  return payments;
 }
 export async function assertIndividualGroupInvoice(groupId:string,reservationId:string,amounts:Record<string,number>,newMoney:number){
- await assertIndividualGroupBalance(groupId,reservationId,newMoney);
- const historical=(await db.execute(sql`SELECT source_charge_amounts,monto_total FROM sales_invoices WHERE group_id=${groupId} AND tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB') AND estado IN ('emitida','parcial','autorizacion_pendiente') AND monto_total::numeric>coalesce(monto_acreditado,0)::numeric+0.009`)).rows as any[];
- for(const invoice of historical){
-  let amounts=invoice.source_charge_amounts;try{if(typeof amounts==='string')amounts=JSON.parse(amounts);}catch{amounts=null;}
-  const values=amounts&&typeof amounts==='object'&&!Array.isArray(amounts)?Object.values(amounts).map(Number):[];
-  if(!values.length||values.some(v=>!Number.isFinite(v)||v<=0)||values.reduce((n,v)=>n+Math.round(v*100),0)!==Math.round(Number(invoice.monto_total)*100))throw fail('La facturación histórica del grupo no permite verificar qué habitación cubre. Requiere conciliación antes de emitir desde este folio.');
- }
+ const account=await groupAccountSnapshot(reservationId);
+ if(account.groupId!==groupId||account.fiscalRequiresReview)throw fail('La facturación histórica del grupo no permite verificar qué habitación o conceptos cubre. Requiere conciliación antes de emitir desde este folio.');
+ if(newMoney>0)await assertIndividualGroupBalance(groupId,reservationId,newMoney,account);
  const snapshot=await getGroupInvoiceSnapshot(groupId);
  const requested=reservationGroupSources(reservationId,amounts);
  for(const [id,amount] of Object.entries(requested)){

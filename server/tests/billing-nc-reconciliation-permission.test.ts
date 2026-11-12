@@ -28,8 +28,10 @@ vi.mock("../permissions", () => ({
   hasPermission: (role: string, resourceKey: string) => permissionsState.granted.has(`${role}:${resourceKey}`),
 }));
 
+// Load the route fixture before timing individual authorization requests.
+const { registerBillingRoutes } = await import("../billing/routes");
+
 async function startApp(role: string) {
-  const { registerBillingRoutes } = await import("../billing/routes");
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {

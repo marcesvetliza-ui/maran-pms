@@ -1,3 +1,4 @@
+import {GroupRoomAccount} from './group-room-account';
 import { chargeUnits, expandChargeUnitCoverage, unitParent } from '@shared/chargeUnits';
 import { expandAccommodationCoverage, isAccommodationSource, type AccommodationNight } from '@shared/accommodationNights';
 import { PrefacturaNightEdit } from './prefactura-night-edit';
@@ -8,7 +9,7 @@ import { nonFiscalCollectionError, isCashMethod } from "@shared/cash-document-cl
 import { CompanySelector } from "@/components/entity-selector";
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
-import { useState, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
@@ -711,7 +712,12 @@ export function PrefacturaDialog({
     },
     enabled: open && !!reservationId,
   });
+  const previousGroupAttempt=submission.current!.pending(reservationId);
+  const groupDocumentationOnly=!!folio?.groupId && ['FA','FB','FC','FM','FMB'].includes(tipo) && (!previousGroupAttempt || previousGroupAttempt.invoiceRequest?.groupDocumentationOnly===true);
   const safeEmittedInvoices = Array.isArray(emittedInvoices) ? emittedInvoices : [];
+  const groupAccount=useQuery<any>({queryKey:['group-room-account',String(reservationId)],enabled:open&&!!folio?.groupId,queryFn:async()=>(await apiRequest('GET',`/api/reservations/${reservationId}/group-account`)).json()});
+  const coverageInvoices=useMemo(()=>{const amounts=groupAccount.data?.groupCoverage||{};return Object.keys(amounts).length?[...safeEmittedInvoices,{id:'group-coverage',tipo_comprobante:'FB',estado:'emitida',monto_total:Object.values(amounts).reduce((n:number,v:any)=>n+Number(v),0),source_charge_ids:Object.keys(amounts),source_charge_amounts:amounts}]:safeEmittedInvoices;},[emittedInvoices,groupAccount.data]);
+
   const { data: emittedCreditNotes = [], refetch: refetchEmittedCreditNotes } = useQuery<any[]>({
     queryKey: ["/api/reservations", String(reservationId), "credit-notes"],
     queryFn: async () => {
@@ -1144,7 +1150,7 @@ export function PrefacturaDialog({
   const originalBillableItems = folio
     ? getAllBillableFolioItems(folio, itemDescriptions)
     : [];
-  const invoicedAmountsByCharge = expandChargeUnitCoverage(expandAccommodationCoverage(getInvoicedAmountsByCharge(safeEmittedInvoices),folio?.accommodationNights||[]), (folio?.charges||[]).flatMap(chargeUnits));
+  const invoicedAmountsByCharge = expandChargeUnitCoverage(expandAccommodationCoverage(getInvoicedAmountsByCharge(coverageInvoices),folio?.accommodationNights||[]), (folio?.charges||[]).flatMap(chargeUnits));
   const remainingAmountsByCharge = getRemainingChargeAmounts(
     originalBillableItems,
     invoicedAmountsByCharge,
@@ -1164,7 +1170,7 @@ export function PrefacturaDialog({
   const allBillableItems = applyFacturaTNetAmount(folio
     ? getAllBillableFolioItems(folio, itemDescriptions, remainingAmountsByCharge)
     : []);
-  const availableAdvancePayments = getAvailableReservationAdvancePayments(
+  const availableAdvancePayments = groupDocumentationOnly?[]:getAvailableReservationAdvancePayments(
     folio?.payments || [],
     safeEmittedInvoices,
   );
@@ -1188,7 +1194,7 @@ export function PrefacturaDialog({
     .reduce((sum, application) => sum + application.amount, 0)
     .toFixed(2));
   const appliedCreditForSelection = selectedAlreadyPaid;
-  const selectedBalance = Number(Math.max(0, totalSelected - selectedAlreadyPaid).toFixed(2));
+  const selectedBalance = groupDocumentationOnly?0:Number(Math.max(0, totalSelected - selectedAlreadyPaid).toFixed(2));
   const selectedSourceIds = selectedItems.map(item => item.id);
   // Uninvoiced advances are linked after emission. Advances released by an NC
   // keep the original invoice reference as immutable fiscal history.
@@ -1210,7 +1216,7 @@ export function PrefacturaDialog({
 
   const totalPayments = selectedBalance > 0.01 ? preparedPayments : 0;
   const saldoRestante = selectedBalance - totalPayments;
-  const invoiceAmount = saleCondition === "cuenta_corriente"
+  const invoiceAmount = groupDocumentationOnly ? totalSelected : saleCondition === "cuenta_corriente"
     ? totalSelected
     : Math.min(totalSelected, selectedAlreadyPaid + totalPayments);
   const invoiceItemsToEmit = projectItemsToInvoiceAmount(selectedItems, invoiceAmount);
@@ -1297,7 +1303,7 @@ export function PrefacturaDialog({
   // emittedInvoices is the stable query result; fullyInvoicedChargeIds is rebuilt
   // on each render and must not itself be used as an effect dependency.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, safeEmittedInvoices]);
+  }, [open, emittedInvoices, groupAccount.data]);
 
   // El desplegable de PV nunca debe quedar sin opciones: si no hay pos_configs
   // activas para este hotel (lo normal, es una feature opcional de multi-POR-área),
@@ -1330,7 +1336,7 @@ export function PrefacturaDialog({
     && !isArgentineNationality(nationality, nationalityCode);
   // Comprobante availability is based on the recipient.
   const filteredTipoOptions = TIPO_OPTIONS.filter(opt => {
-    if (opt.value === "cierre_habitacion") return true; // always available as fallback
+    if (opt.value === "cierre_habitacion") return !folio?.groupId || !!previousGroupAttempt;
     if (opt.value === "FT") return canOfferFacturaT;
     if (condicionIva === "Responsable Inscripto") return ["FA", "FM"].includes(opt.value);
     return ["FB", "FMB"].includes(opt.value);
@@ -1406,7 +1412,7 @@ export function PrefacturaDialog({
     if (!retrying && (discoveringOperation || operationDiscoveryError)) { setSubmitError("Estamos verificando si hay una operación anterior. Volvé a intentar cuando termine la consulta."); return; }
     if (correctReceptionAttempt.isPending) return;
     if (retrying && pointError && !alreadyPaidAndInvoiced) { setSubmitError(pointError); return; }
-    const isCcPayment = saleCondition === "cuenta_corriente";
+    const isCcPayment = !groupDocumentationOnly && saleCondition === "cuenta_corriente";
     const appliedPaymentDetails = buildAppliedPaymentMethodDetails(
       applyReleasedCredit ? availableAdvancePayments : [],
       selectedAlreadyPaid,
@@ -1472,7 +1478,7 @@ export function PrefacturaDialog({
       const originalRequest = submission.current!.pending(reservationId)?.invoiceRequest;
       const recoveryOperationId = originalRequest?.creditOperationId || creditOperationId;
       const originalCc = originalRequest?.reservationSettlementMethod === "cuenta_corriente" || originalRequest?.cashFormaPago === "cuenta_corriente";
-      if ((!retrying && saleCondition === "cuenta_corriente" || retrying && originalCc && !submission.current!.pending(reservationId)?.invoice) && recoveryOperationId) {
+      if ((!retrying && !groupDocumentationOnly && saleCondition === "cuenta_corriente" || retrying && originalCc && !submission.current!.pending(reservationId)?.invoice) && recoveryOperationId) {
         let recoveryRes = await fetch(
           `/api/billing/reservations/${reservationId}/operations/${recoveryOperationId}/recover`,
           { method: "POST", headers: { "Content-Type": "application/json" } },
@@ -1642,6 +1648,7 @@ export function PrefacturaDialog({
             hasAccommodation: hasSelectedAccommodation,
           },
           ...invoicePaymentMethods,
+          ...(groupDocumentationOnly?{groupDocumentationOnly:true,cashFormaPago:undefined,cashFormaPagoDetalle:undefined,reservationSettlementMethod:undefined}:{}),
           ...(usesCcEntity ? {
             ccEntityType: billingTarget,
             ccEntityId: billingEntityId,
@@ -1666,7 +1673,7 @@ export function PrefacturaDialog({
       // using creditOperationId. Posting that same row here would duplicate the
       // account movement. Split payments remain row-based because the invoice
       // is classified as pago_dividido and does not settle their CC row.
-      const paymentRowsToRegister = saleCondition === "contado" && selectedBalance > 0.01
+      const paymentRowsToRegister = !groupDocumentationOnly&&saleCondition === "contado" && selectedBalance > 0.01
         ? paymentRows.filter(row => !(invoiceSettlesCcPayment && row.method === "cuenta_corriente"))
         : [];
       for (const row of paymentRowsToRegister) {
@@ -1754,6 +1761,9 @@ export function PrefacturaDialog({
         }
       }
 
+      queryClient.invalidateQueries({queryKey:['group-room-account']});
+      queryClient.invalidateQueries({queryKey:['group-advance-availability']});
+      queryClient.invalidateQueries({queryKey:['/api/groups']});
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       queryClient.invalidateQueries({ queryKey: ["/api/payments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/reservations", String(reservationId), "folio"] });
@@ -1982,6 +1992,8 @@ export function PrefacturaDialog({
               </div>
             )}
 
+            {folio?.groupId&&<GroupRoomAccount key={String(reservationId)} reservationId={String(reservationId)} disabled={hasPendingSubmission||isSubmitting} onSaved={async()=>{await refetchFolio();await refetchEmittedInvoices();}}/>}
+            {groupDocumentationOnly&&<p className="rounded border p-3 text-sm">Facturación de conceptos pendientes del grupo. Esta acción no registra dinero nuevo ni traslada deuda a otra cuenta. Para cobrar o aplicar un anticipo, usá las acciones de la cuenta de arriba.</p>}
             <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={`space-y-4 ${hasPendingSubmission ? "pointer-events-none opacity-70" : ""}`} data-testid="prefactura-editable-fields">
             <section className="rounded-lg border bg-card/50 px-4 py-3" aria-label="Identidad y comprobante">
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identidad y comprobante</h2>
@@ -2036,12 +2048,12 @@ export function PrefacturaDialog({
                   {pointError && <p role="status" data-testid="billing-point-error" className="mt-1 text-xs text-amber-700 dark:text-amber-400">{pointError}</p>}
                 </div>
                 <div>
-                  <Label className="mb-1 block text-[11px] text-muted-foreground">Condición de venta</Label>
-                  <Select value={saleCondition} onValueChange={(value) => { setSubmitError(null); setSaleCondition(value as SaleCondition); }}>
+                  <Label className="mb-1 block text-[11px] text-muted-foreground">{groupDocumentationOnly?"Registro económico":"Condición de venta"}</Label>
+                  {groupDocumentationOnly?<Input readOnly value="Solo facturación; conserva los pagos" className="h-8 text-sm"/>:<Select disabled={groupDocumentationOnly} value={groupDocumentationOnly?"contado":saleCondition} onValueChange={(value) => { setSubmitError(null); setSaleCondition(value as SaleCondition); }}>
                     <SelectTrigger className="h-8 text-sm" data-testid="select-sale-condition"><SelectValue /></SelectTrigger>
                     <SelectContent><SelectItem value="contado">{SALE_CONDITION_LABELS.contado}</SelectItem><SelectItem value="cuenta_corriente" disabled={!billingEntityId}>{SALE_CONDITION_LABELS.cuenta_corriente}</SelectItem></SelectContent>
-                  </Select>
-                  {saleCondition === "cuenta_corriente" && <p className="mt-1 text-xs text-muted-foreground">Se registra como cargo a la cuenta de la entidad; no genera cobro de caja.</p>}
+                  </Select>}
+                  {!groupDocumentationOnly && saleCondition === "cuenta_corriente" && <p className="mt-1 text-xs text-muted-foreground">Se registra como cargo a la cuenta de la entidad; no genera cobro de caja.</p>}
                 </div>
               </div>
               {isFiscalTipo && ambiente === "ficticio" && <p className="mt-2 flex items-center gap-1 text-xs text-yellow-700"><AlertTriangle className="h-3 w-3" />Modo ficticio — CAE simulado</p>}
@@ -2252,14 +2264,14 @@ export function PrefacturaDialog({
                   </TableHeader>
                   <TableBody>
                     {folio.accommodationNights?.some(n=>n.derived) && <TableRow><TableCell colSpan={5} className="text-xs text-muted-foreground">Reserva anterior: detalle distribuido desde el total contratado; no representa tarifas históricas por fecha.</TableCell></TableRow>}
-                    {!!folio.accommodationNights?.length && (getInvoicedAmountsByCharge(safeEmittedInvoices).accommodation||0)>0 && <TableRow><TableCell colSpan={5} className="text-xs text-muted-foreground">Facturación anterior agrupada: la cobertura se aplica por orden de fechas para calcular el saldo disponible. No acredita qué noche se facturó históricamente; la edición de importes permanece bloqueada.</TableCell></TableRow>}
+                    {!!folio.accommodationNights?.length && (getInvoicedAmountsByCharge(coverageInvoices).accommodation||0)>0 && <TableRow><TableCell colSpan={5} className="text-xs text-muted-foreground">Facturación anterior agrupada: la cobertura se aplica por orden de fechas para calcular el saldo disponible. No acredita qué noche se facturó históricamente; la edición de importes permanece bloqueada.</TableCell></TableRow>}
                     {!!folio.accommodationNights?.length && folio.accommodationNights.map(night=>{
                       const item={id:night.id,originalAmount:night.amount,description:itemDescriptions[night.id]||`Alojamiento Hab. ${folio.roomNumber} · noche ${night.date.split('-').reverse().join('/')}`};
                       return <ChargeRow key={item.id} selectionDisabled={night.amount<=0} id={item.id} amount={item.originalAmount} description={item.description}
                         alreadyPaid={Math.max(0,item.originalAmount-(remainingAmountsByCharge[item.id]??item.originalAmount))} alreadyInvoiced={fullyInvoicedChargeIds.has(item.id)} selected={selectedIds.has(item.id)}
                         onToggle={()=>{if(fullyInvoicedChargeIds.has(item.id))return;setSelectedIds(prev=>{const next=new Set(prev);next.has(item.id)?next.delete(item.id):next.add(item.id);return next;});}}
                         editing={editingId===item.id} editingValue={editingValue} onStartEdit={()=>startEdit(item.id,item.description)} onEditChange={setEditingValue} onSaveEdit={saveEdit} onCancelEdit={()=>setEditingId(null)}
-                        editAction={<PrefacturaNightEdit reservationId={String(reservationId)} date={night.date} amount={night.amount} total={folio.roomTotal} revision={folio.pricingRevision||0} disabled={isSubmitting||hasPendingSubmission||!!serverAttempt||discoveringOperation||!!operationDiscoveryError||(getInvoicedAmountsByCharge(safeEmittedInvoices).accommodation||0)>0.005||(invoicedAmountsByCharge[item.id]||0)>0.005} onSaved={async()=>{await refetchFolio();await refetchEmittedInvoices();setItemDescriptions(prev=>{const next={...prev};delete next[item.id];return next;});}}/>}/>;
+                        editAction={<PrefacturaNightEdit reservationId={String(reservationId)} date={night.date} amount={night.amount} total={folio.roomTotal} revision={folio.pricingRevision||0} disabled={isSubmitting||hasPendingSubmission||!!serverAttempt||discoveringOperation||!!operationDiscoveryError||(getInvoicedAmountsByCharge(coverageInvoices).accommodation||0)>0.005||(invoicedAmountsByCharge[item.id]||0)>0.005} onSaved={async()=>{await refetchFolio();await refetchEmittedInvoices();setItemDescriptions(prev=>{const next={...prev};delete next[item.id];return next;});}}/>}/>;
                     })}
                     {/* Accommodation row */}
                     {folio.roomTotal > 0 && !folio.accommodationNights?.length && (
@@ -2280,7 +2292,7 @@ export function PrefacturaDialog({
                         onTransfer={() => { setTransferCharge({ id: "accommodation", description: `Alojamiento Hab. ${folio.roomNumber}`, maxAmount: transferRemaining?.accommodation ?? folio.roomTotal, originalAmount: folio.roomTotal }); setTransferDialogOpen(true); }}
                       />
                     )}
-                    {(folio.charges || []).some((charge:any)=>chargeUnits(charge).length>1 && (getInvoicedAmountsByCharge(safeEmittedInvoices)[String(charge.id)]||0)>0.005) && <TableRow><TableCell colSpan={6} className="text-sm text-muted-foreground">Los importes facturados antes de separar unidades se distribuyen sobre las unidades disponibles, conservando el saldo pendiente del cargo original.</TableCell></TableRow>}
+                    {(folio.charges || []).some((charge:any)=>chargeUnits(charge).length>1 && (getInvoicedAmountsByCharge(coverageInvoices)[String(charge.id)]||0)>0.005) && <TableRow><TableCell colSpan={6} className="text-sm text-muted-foreground">Los importes facturados antes de separar unidades se distribuyen sobre las unidades disponibles, conservando el saldo pendiente del cargo original.</TableCell></TableRow>}
                     {/* Extra charges */}
                     {(() => {
                       // Build set of already-reversed charge IDs by scanning [rev:X] tags
@@ -2392,7 +2404,7 @@ export function PrefacturaDialog({
           <div className="space-y-0">
             <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={hasPendingSubmission ? "pointer-events-none opacity-70" : ""}>
             {/* Zero-balance notice: no new payment required */}
-            {totalSelected > 0.01 && selectedBalance <= 0.01 && (
+            {!groupDocumentationOnly && totalSelected > 0.01 && selectedBalance <= 0.01 && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
                 <CircleCheck className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
                 <p className="text-sm text-green-800 dark:text-green-300">
@@ -2602,7 +2614,7 @@ export function PrefacturaDialog({
               {!alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
                 <Button
                   onClick={handleSubmit}
-                  disabled={discoveringOperation || operationDiscoveryError || (!!pointError && saleCondition !== "cuenta_corriente" && !alreadyPaidAndInvoiced) || hasPendingSubmission || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
+                  disabled={(!!folio?.groupId&&(groupAccount.isPending||groupAccount.isError||groupAccount.data?.fiscalRequiresReview))||discoveringOperation || operationDiscoveryError || (!!pointError && saleCondition !== "cuenta_corriente" && !alreadyPaidAndInvoiced) || hasPendingSubmission || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && saleCondition !== "cuenta_corriente")}
                   data-testid="button-registrar-emitir"
                 >
                   {isSubmitting ? (
