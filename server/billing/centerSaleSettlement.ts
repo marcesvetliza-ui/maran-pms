@@ -67,7 +67,7 @@ export async function settleCenterSaleInvoice(invoiceId: number, operator?: stri
         registered.rows.some((record: any) => record.payment_method === row.method && cents(Number(record.amount)) === cents(row.amount)));
       const matchingAccount = cc ? account.rows.length === 1 && cents(Number((account.rows[0] as any).amount)) === cents(cc.amount) : account.rows.length === 0;
       if (matchingCash && matchingAccount) {
-        await tx.execute(sql`UPDATE sales_invoices SET center_settlement_status = 'settled' WHERE id = ${invoiceId}`);
+        await tx.execute(sql`UPDATE sales_invoices SET center_settlement_status = 'settled', reconciliation_status = 'conciliada', reconciliation_error = NULL, reconciliation_updated_at = now() WHERE id = ${invoiceId}`);
         return;
       }
       throw Object.assign(new Error("El cobro de esta factura tiene movimientos incompletos o distintos; requiere revisión manual"), { statusCode: 409 });
@@ -86,7 +86,7 @@ export async function settleCenterSaleInvoice(invoiceId: number, operator?: stri
         VALUES (${randomUUID()}, ${invoice.recipient_entity_type}, ${invoice.recipient_entity_id}, ${getArgentinaToday()},
           'cargo', ${`${label} — ${invoice.cliente_razon_social}`}, ${money(cents(cc.amount))}, ${label}, 'cuenta_corriente', ${ACCOUNT_AREAS[area]}, ${operator || null})`);
     }
-    await tx.execute(sql`UPDATE sales_invoices SET center_settlement_status = 'settled' WHERE id = ${invoiceId}`);
+    await tx.execute(sql`UPDATE sales_invoices SET center_settlement_status = 'settled', reconciliation_status = 'conciliada', reconciliation_error = NULL, reconciliation_updated_at = now() WHERE id = ${invoiceId}`);
   });
 }
 

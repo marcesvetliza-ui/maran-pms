@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {fiscalDocumentCode} from '../../shared/fiscal-document-types';
 import { assertBillingPoint, BillingPreflightError, fiscalRecipientError } from "./preflight";
-import { beginBillingOperation, billingOperationStage, billingOperationNumber, operationForInvoice, payloadHash, type BillingOperation, type FiscalIdentity } from "./operationJournal";
+import { beginBillingOperation, billingOperationStage, billingOperationNumber, operationForInvoice, operationSnapshot, payloadHash, type BillingOperation, type FiscalIdentity } from "./operationJournal";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { FiscalNumberLookupError, readLastAuthorizedNumber } from "./lastAuthorizedNumber";
@@ -353,6 +353,18 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
       if(pending.rowCount) throw Object.assign(new Error("La serie fiscal tiene una operación de financiación pendiente. Recuperá esa misma operación."),{statusCode:409});
     }
     const database = drizzle(c,{schema});
+    if (data.centerSettlementArea && !data.recoveryInvoiceId) {
+      const fingerprint = payloadHash(operationSnapshot(data.requestSnapshot || data));
+      const prior = await database.execute(sql`
+        SELECT bo.invoice_id FROM billing_operations bo JOIN sales_invoices si ON si.id=bo.invoice_id
+        WHERE bo.owner_type='direct' AND bo.owner_id='direct' AND bo.payload_hash=${fingerprint}
+          AND bo.fiscal_identity=${JSON.stringify(identity)}::jsonb AND bo.operation_id<>${data.operationId!}
+          AND si.center_settlement_area=${data.centerSettlementArea} AND si.estado='autorizacion_pendiente'
+        LIMIT 1`);
+      if (prior.rows.length) throw Object.assign(new Error("Ya existe un intento de esta misma factura pendiente de autorización. Recuperalo desde Facturación; no prepares otra emisión."), {
+        statusCode: 409, code: "BILLING_CENTER_RECOVERY_REQUIRED", conflictInvoiceId: (prior.rows[0] as any).invoice_id,
+      });
+    }
     let operation: BillingOperation | undefined;
     if (data.recoveryInvoiceId) {
       operation = await operationForInvoice(database, data.recoveryInvoiceId);

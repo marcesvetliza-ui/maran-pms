@@ -4,6 +4,8 @@ import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, cor
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
+import { centerInvoiceRecoveryRequest } from "./centerInvoiceRecovery";
+import { operationForInvoice } from "./operationJournal";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { discardInvalidCreditDraft, isInvalidOriginalDraft } from './discardInvalidCreditDraft';
 import { chargeUnits, expandChargeUnitCoverage, groupedChargeCoverage, unitParent } from '@shared/chargeUnits';
@@ -2437,6 +2439,25 @@ export function registerBillingRoutes(app: Express) {
     }
   };
   app.post("/api/billing/invoices", requireAuth, emitInvoiceHandler);
+  app.post("/api/billing/invoices/:id/recover-center", requireAuth, requireActiveInvoice, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: "Factura inválida" });
+    try {
+      const invoice = (await db.execute(sql`SELECT * FROM sales_invoices WHERE id=${id}`)).rows[0] as any;
+      if (!invoice) return res.status(404).json({ error: "Comprobante no encontrado" });
+      if (!["recepcion", "restaurant", "spa"].includes(invoice.center_settlement_area)
+        || !hasPermission(req.user?.role || "", `api:emitir-comprobante:${invoice.center_settlement_area}`)) {
+        return res.status(403).json({ error: "No autorizado para recuperar comprobantes de esta área" });
+      }
+      const operation = await operationForInvoice(db, id);
+      req.body = centerInvoiceRecoveryRequest(invoice, operation);
+      // The ordinary path verifies the frozen recipient/catalog, resumes the
+      // same journal/number and commits settlement once. No caller fields.
+      return await emitInvoiceHandler(req, res);
+    } catch (error: any) {
+      return res.status(error?.statusCode || 409).json({ error: error?.message || "No se pudo recuperar el intento original" });
+    }
+  });
   app.get("/api/reservations/:reservationId/billing-corrections",requireAuth,requirePermission(NC_RECONCILIATION_RESOURCE_KEY),async(req,res)=>{
     try {
       const {reservation,all}=await loadClosedCorrection(req.params.reservationId) as any;
@@ -3039,6 +3060,9 @@ export function registerBillingRoutes(app: Express) {
       const row = await db.execute(sql`SELECT * FROM sales_invoices WHERE id = ${id}`);
       if (!row.rows.length) return res.status(404).json({ error: "Factura no encontrada" });
       const factura = row.rows[0] as any;
+      if (factura.estado === "autorizacion_pendiente" && !isNonFiscalTipo(factura.tipo_comprobante)) {
+        return res.status(409).json({ error: "La autorización de ARCA está pendiente. Recuperá el intento original antes de descargar la factura." });
+      }
       const config = await getBillingConfig();
       const tipo = factura.tipo_comprobante ?? "F";
 
