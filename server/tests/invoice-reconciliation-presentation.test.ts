@@ -5,7 +5,7 @@ describe("estado visible de conciliación de facturas", () => {
   it("recognizes the center's committed CC registration, retaining unresolved fiscal and settlement states", () => {
     const completed = { tipo_comprobante:"FB", estado:"emitida", cae:"71234567890123", center_settlement_area:"recepcion", center_settlement_status:"settled", reconciliation_status:"pendiente", reconciliation_error:"Error histórico" };
     expect(exposeInvoiceReconciliation(completed)).toMatchObject({ reconciliation_status:"conciliada", reconciliation_error:null });
-    for (const change of [{estado:"autorizacion_pendiente"},{center_settlement_status:"pending"},{cae:null},{tipo_comprobante:"NCB"}]) {
+    for (const change of [{estado:"autorizacion_pendiente"},{estado:"parcial"},{nota_credito_id:123},{center_settlement_status:"pending"},{cae:null},{tipo_comprobante:"NCB"},{group_id:"group-review"}]) {
       expect(exposeInvoiceReconciliation({...completed,...change}).reconciliation_status).toBe("pendiente");
     }
   });
