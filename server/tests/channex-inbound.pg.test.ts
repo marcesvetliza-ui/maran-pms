@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ensureChannexInboundSchema } from "../channex/inboundSchema";
 import { ensureChannexAriSchema } from "../channex/ariSchema";
-import { buildAriValues, STAGING_URL } from "../channex/ari";
+import { addDays, buildAriValues, STAGING_URL } from "../channex/ari";
 import { getChannexReadiness } from "../channex/readiness";
 import { saveSettlementRate } from "../channex/settlementConfig";
 const allowed = ["postgresql://postgres@127.0.0.1:55448/rate_calendar_boot_20261029", "postgresql://postgres@127.0.0.1:55448/channex_inbound_test"].includes(process.env.DATABASE_URL || "") ||
@@ -10,9 +10,10 @@ const allowed = ["postgresql://postgres@127.0.0.1:55448/rate_calendar_boot_20261
 const suite=allowed?describe:describe.skip;
 let pool:import("pg").Pool, service:typeof import("../channex/inbound"), storage:typeof import("../db-storage").storage;
 const owners:string[]=[], types:string[]=[], guestIds=new Set<string>();
+let databaseToday:string,arrival:string,secondNight:string,departure:string,extendedDeparture:string;
 function revision(property:string, bookingId:string, id:string, status="new",stamp="2026-10-29T23:00:00Z",rooms=1){return {id,attributes:{property_id:property,booking_id:bookingId,inserted_at:stamp,status,
- arrival_date:"2026-11-10",departure_date:"2026-11-12",amount:String(rooms*250),currency:"ARS",customer:{name:"Channel",surname:"Test"},
- rooms:Array.from({length:rooms},(_,i)=>({id:`remote-${i}`,room_type_id:"remote-type",rate_plan_id:"remote-plan",occupancy:{adults:2},days:{"2026-11-10":"100.00","2026-11-11":"150.00"}}))}};}
+ arrival_date:arrival,departure_date:departure,amount:String(rooms*250),currency:"ARS",customer:{name:"Channel",surname:"Test"},
+ rooms:Array.from({length:rooms},(_,i)=>({id:`remote-${i}`,room_type_id:"remote-type",rate_plan_id:"remote-plan",occupancy:{adults:2},days:{[arrival]:"100.00",[secondNight]:"150.00"}}))}};}
 async function fixture(rooms=2,extraPlan=false){
  const id=randomUUID(),type=randomUUID(),plan=randomUUID();owners.push(id);types.push(type);
  await pool.query("INSERT INTO room_types(id,code,name) VALUES($1,$2,$3)",[type,type,type]);
@@ -29,7 +30,12 @@ async function fixture(rooms=2,extraPlan=false){
 async function apply(f:{id:string},r:any){await service.persistInboundRevision(pool,f.id,r);await service.applyInboundRevision(f.id,r.id);return (await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2",[f.id,r.id])).rows[0];}
 async function linked(f:{id:string}){return (await pool.query("SELECT r.* FROM reservations r JOIN channex_inbound_rooms l ON l.reservation_id=r.id WHERE l.connection_id=$1 ORDER BY l.remote_room_id",[f.id])).rows;}
 suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
- beforeAll(async()=>{pool=(await import("../db")).pool;service=await import("../channex/inbound");storage=(await import("../db-storage")).storage;await ensureChannexAriSchema(pool);await ensureChannexInboundSchema(pool);await ensureChannexInboundSchema(pool);});
+ beforeAll(async()=>{pool=(await import("../db")).pool;
+  // PostgreSQL's real Argentine date drives the ARI triggers. A JS fake clock
+  // cannot keep a fixed stay inside their current/future availability window.
+  databaseToday=(await pool.query("SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS day")).rows[0].day;
+  arrival=addDays(databaseToday,7);secondNight=addDays(arrival,1);departure=addDays(arrival,2);extendedDeparture=addDays(arrival,3);
+  service=await import("../channex/inbound");storage=(await import("../db-storage")).storage;await ensureChannexAriSchema(pool);await ensureChannexInboundSchema(pool);await ensureChannexInboundSchema(pool);});
  afterAll(async()=>{
   for(const id of owners){
    const rows=await linked({id});rows.forEach(r=>guestIds.add(r.guest_id));
@@ -59,10 +65,22 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  it("creates two rooms atomically with exact nightly prices and no cash or invoice",async()=>{
   const f=await fixture();expect((await apply(f,revision(f.id,"booking-multi","new-multi","new",undefined,2))).status).toBe("applied");
   const rows=await linked(f);expect(rows).toHaveLength(2);expect(new Set(rows.map(r=>r.room_id)).size).toBe(2);
-  expect(rows[0].nightly_pricing).toEqual([{date:"2026-11-10",rateCents:10000,discountCents:0},{date:"2026-11-11",rateCents:15000,discountCents:0}]);
-  expect((await pool.query("SELECT * FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows.length).toBeGreaterThan(0);
+  expect(rows[0].nightly_pricing).toEqual([{date:arrival,rateCents:10000,discountCents:0},{date:secondNight,rateCents:15000,discountCents:0}]);
+  const events=(await pool.query("SELECT kind,date_from::text,date_to::text,reason FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows;
+  expect(events.length).toBeGreaterThan(0);
+  expect(events.every(event=>event.kind==='availability'&&event.date_from===arrival&&event.date_to===secondNight&&event.reason==='reservations:insert')).toBe(true);
   expect((await pool.query("SELECT id FROM payments WHERE reservation_id=ANY($1::varchar[])",[rows.map(r=>r.id)])).rows).toHaveLength(0);
   expect((await pool.query("SELECT id FROM sales_invoices WHERE reserva_id=ANY($1::varchar[])",[rows.map(r=>r.id)])).rows).toHaveLength(0);
+ });
+ it("imports a past stay without queuing expired availability",async()=>{
+  const f=await fixture(),pastArrival=addDays(databaseToday,-3),pastSecondNight=addDays(databaseToday,-2),pastDeparture=addDays(databaseToday,-1);
+  const past=revision(f.id,"booking-past","new-past","new",undefined,2);
+  past.attributes.arrival_date=pastArrival;past.attributes.departure_date=pastDeparture;
+  for(const room of past.attributes.rooms)room.days={[pastArrival]:"100.00",[pastSecondNight]:"150.00"};
+  expect((await apply(f,past)).status).toBe('applied');
+  const rows=await linked(f);expect(rows).toHaveLength(2);
+  expect(rows[0].nightly_pricing).toEqual([{date:pastArrival,rateCents:10000,discountCents:0},{date:pastSecondNight,rateCents:15000,discountCents:0}]);
+  expect((await pool.query('SELECT id FROM channex_ari_outbox WHERE connection_id=$1',[f.id])).rows).toHaveLength(0);
  });
  it("replays a revision and concurrent application without duplicate reservations",async()=>{
   const f=await fixture(),r=revision(f.id,"booking-replay","replay");await service.persistInboundRevision(pool,f.id,r);
@@ -85,17 +103,17 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  });
  it("modifies nightly prices and ignores an older revision",async()=>{
   const f=await fixture();await apply(f,revision(f.id,"booking-mod","mod-original"));
-  const change=revision(f.id,"booking-mod","mod-new","modified","2026-10-30T01:00:00Z");change.attributes.rooms[0].days["2026-11-11"]="200.00";change.attributes.amount="300";
+  const change=revision(f.id,"booking-mod","mod-new","modified","2026-10-30T01:00:00Z");change.attributes.rooms[0].days[secondNight]="200.00";change.attributes.amount="300";
   expect((await apply(f,change)).status).toBe("applied");expect(Number((await linked(f))[0].total_room_amount)).toBe(300);
   expect((await apply(f,revision(f.id,"booking-mod","mod-old","modified","2026-10-30T00:00:00Z"))).status).toBe("stale");expect(Number((await linked(f))[0].total_room_amount)).toBe(300);
  });
  it("preserves one local reservation when a modified single room regenerates its UUID",async()=>{
   const f=await fixture();await apply(f,revision(f.id,"booking-identity","identity-original"));const [original]=await linked(f);
   const change=revision(f.id,"booking-identity","identity-change","modified","2026-10-30T01:00:00Z");
-  change.attributes.rooms[0].id="regenerated-room";change.attributes.departure_date="2026-11-13";
-  (change.attributes.rooms[0].days as any)["2026-11-12"]="120.00";change.attributes.amount="370";
+  change.attributes.rooms[0].id="regenerated-room";change.attributes.departure_date=extendedDeparture;
+  (change.attributes.rooms[0].days as any)[departure]="120.00";change.attributes.amount="370";
   expect((await apply(f,change)).status).toBe("applied");await apply(f,change);
-  const rows=await linked(f);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({id:original.id,reservation_code:original.reservation_code,status:"confirmed",check_out_date:"2026-11-13",total_room_amount:"370.00"});
+  const rows=await linked(f);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({id:original.id,reservation_code:original.reservation_code,status:"confirmed",check_out_date:extendedDeparture,total_room_amount:"370.00"});
   expect((await pool.query("SELECT remote_room_id FROM channex_inbound_rooms WHERE connection_id=$1",[f.id])).rows[0].remote_room_id).toBe("regenerated-room");
   expect((await pool.query("SELECT remote_room_id FROM channex_inbound_settlements WHERE connection_id=$1 AND revision_id='identity-original'",[f.id])).rows[0].remote_room_id).toBe("remote-0");
   expect((await pool.query("SELECT * FROM reservation_changelog WHERE reservation_id=$1",[original.id])).rows).toHaveLength(2);
@@ -197,7 +215,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   await saveSettlementRate(pool,f.id,{rate:null,reason:"Pausar cotización para futuras reservas"},"Test operator");
   const modified=revision(f.id,"booking-fx","fx-mod","modified","2026-10-30T01:00:00Z");modified.attributes.currency="USD";
   modified.attributes.rooms[0].id="fx-regenerated-room";
-  modified.attributes.amount="270";modified.attributes.rooms[0].days["2026-11-11"]="170.00";
+  modified.attributes.amount="270";modified.attributes.rooms[0].days[secondNight]="170.00";
   expect((await apply(f,modified)).status).toBe("applied");
   expect((await pool.query("SELECT total_room_amount FROM reservations WHERE id=$1",[r.id])).rows[0].total_room_amount).toBe("337533.33");
   expect((await pool.query("SELECT exchange_rate FROM channex_inbound_settlements WHERE connection_id=$1 AND revision_id='fx-mod'",[f.id])).rows[0].exchange_rate).toBe("1250.123456");
@@ -326,7 +344,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  it("does not duplicate an external reference already entered in the PMS",async()=>{
   const f=await fixture(),guest=await storage.createGuest({firstName:"Manual",lastName:"External"});guestIds.add(guest.id);
   const r=await storage.createReservation({reservationCode:randomUUID(),guestId:guest.id,roomTypeId:f.type,roomId:`${f.id}-0`,
-   checkInDate:"2026-11-10",checkOutDate:"2026-11-12",nights:2,totalRoomAmount:"250",baseRatePerNight:"125",finalRatePerNight:"125",createdAt:new Date(),status:"confirmed",source:"ota",externalReservationId:`manual-${f.id}`});
+   checkInDate:arrival,checkOutDate:departure,nights:2,totalRoomAmount:"250",baseRatePerNight:"125",finalRatePerNight:"125",createdAt:new Date(),status:"confirmed",source:"ota",externalReservationId:`manual-${f.id}`});
   try {
    expect((await apply(f,revision(f.id,`manual-${f.id}`,"external-duplicate"))).review_code).toBe("UNLINKED_EXTERNAL_RESERVATION");
    expect((await pool.query("SELECT id FROM reservations WHERE external_reservation_id=$1",[`manual-${f.id}`])).rows).toHaveLength(1);
