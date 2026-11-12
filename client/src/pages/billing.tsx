@@ -83,6 +83,13 @@ function getReconciliationError(invoice: any): string | null {
   return invoice?.reconciliation_error ?? invoice?.reconciliationError ?? null;
 }
 
+function isCenterCreditOnly(invoice: any): boolean {
+  const detail = invoice.cash_forma_pago_detalle;
+  return Array.isArray(detail) && detail.length > 0
+    ? detail.every((row: any) => row.method === "cuenta_corriente")
+    : invoice.cash_forma_pago === "cuenta_corriente";
+}
+
 export const CONDICION_IVA_OPTIONS = [
   "Responsable Inscripto", "Consumidor Final", "Monotributista", "Exento", "No Categorizado",
 ];
@@ -214,19 +221,26 @@ export default function BillingPage() {
   const [showNC, setShowNC] = useState<number | null>(null);
   const [showEdit, setShowEdit] = useState<number | null>(null);
   const [retryingCenterInvoiceId, setRetryingCenterInvoiceId] = useState<number | null>(null);
-  async function retryCenterSettlement(invoiceId: number) {
+  const [centerRecoveryTarget, setCenterRecoveryTarget] = useState<any>(null);
+  async function retryCenterSettlement(invoice: any, recoverAuthorization = false) {
+    const invoiceId = invoice.id;
+    const creditOnly = isCenterCreditOnly(invoice);
     setRetryingCenterInvoiceId(invoiceId);
     try {
-      await apiRequest("POST", `/api/billing/invoices/${invoiceId}/settle-center`);
+      const response = await apiRequest("POST", `/api/billing/invoices/${invoiceId}/${recoverAuthorization ? "recover-center" : "settle-center"}`);
+      const result = await response.json();
+      if (result.cashMovementError) throw new Error(result.cashMovementError);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/account-movements"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] }),
       ]);
-      toast({ title: "Cobro registrado", description: "Caja y Cuenta Corriente quedaron conciliadas con la factura." });
+      setCenterRecoveryTarget(null);
+      toast({ title: creditOnly ? "Deuda registrada en Cuenta Corriente" : "Registro completado", description: creditOnly ? "Se conserva la factura original. No se registró dinero recibido." : "Se completó la operación original sin emitir otra factura." });
     } catch (error: any) {
-      toast({ title: "El cobro sigue pendiente", description: parseApiError(error), variant: "destructive" });
+      toast({ title: recoverAuthorization ? "La autorización requiere revisión" : "El registro sigue pendiente", description: parseApiError(error), variant: "destructive" });
     } finally {
+      await queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
       setRetryingCenterInvoiceId(null);
     }
   }
@@ -579,8 +593,13 @@ export default function BillingPage() {
                                     <div className="text-xs text-muted-foreground">{f.non_fiscal_annulment.reason}</div>
                                     <div className="text-[10px] text-muted-foreground">{f.non_fiscal_annulment.actor}</div>
                                   </div>
+                                ) : f.estado === "autorizacion_pendiente" ? (
+                                  <div>
+                                    <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Autorización ARCA pendiente</Badge>
+                                    {getReconciliationError(f) && <div className="text-[10px] text-amber-700 dark:text-amber-300">{getReconciliationError(f)}</div>}
+                                  </div>
                                 ) : f.center_settlement_status === "pending" ? (
-                                  <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">Cobro pendiente</Badge>
+                                  <Badge variant="outline" className="text-xs text-amber-800 border-amber-400">{isCenterCreditOnly(f) ? "Registro en Cuenta Corriente pendiente" : "Registro del cobro pendiente"}</Badge>
                                 ) : isInvoiceReconciliationPending(f) ? (
                                   <div>
                                     <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
@@ -601,13 +620,16 @@ export default function BillingPage() {
                                 {f.estado === "parcial" && <div className="text-[10px] text-amber-700 dark:text-amber-300">Saldo pendiente</div>}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1">
-                                  {f.center_settlement_status === "pending" && (
-                                    <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f.id)} data-testid={`btn-retry-center-${f.id}`}>Completar cobro</Button>
+                                  {f.estado === "autorizacion_pendiente" && f.center_settlement_area && ["FA", "FB", "FM", "FMB"].includes(f.tipo_comprobante) && (
+                                    <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => setCenterRecoveryTarget(f)} data-testid={`btn-recover-center-${f.id}`}>Recuperar autorización</Button>
                                   )}
-                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Ver / descargar comprobante" aria-label="Ver / descargar comprobante" data-testid={`btn-pdf-${f.id}`}>
+                                  {f.center_settlement_status === "pending" && f.estado === "emitida" && (
+                                    <Button variant="outline" size="sm" disabled={retryingCenterInvoiceId === f.id} onClick={() => retryCenterSettlement(f)} data-testid={`btn-retry-center-${f.id}`}>{isCenterCreditOnly(f) ? "Registrar en Cuenta Corriente" : "Completar registro del cobro"}</Button>
+                                  )}
+                                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" disabled={f.estado === "autorizacion_pendiente"} onClick={() => window.open(`/api/billing/invoices/${f.id}/pdf`, "_blank")} title="Ver / descargar comprobante" aria-label="Ver / descargar comprobante" data-testid={`btn-pdf-${f.id}`}>
                                     <Eye className="w-3.5 h-3.5" />
                                   </Button>
-                                  {f.estado !== "anulada" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
+                                  {f.estado !== "anulada" && f.estado !== "autorizacion_pendiente" && !f.tipo_comprobante?.startsWith("NC") && !f.tipo_comprobante?.startsWith("ND") && (
                                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowEdit(f.id)} title="Editar comprobante" aria-label="Editar comprobante" data-testid={`btn-editar-${f.id}`}>
                                       <Pencil className="w-3.5 h-3.5" />
                                     </Button>
@@ -711,6 +733,21 @@ export default function BillingPage() {
               })}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!centerRecoveryTarget} onOpenChange={open => { if (!open && retryingCenterInvoiceId === null) setCenterRecoveryTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Recuperar autorización del intento original</DialogTitle>
+            <DialogDescription>Se consultará ARCA por este mismo número. Si ya está autorizado, se recuperará su CAE; si ARCA confirma que no existe y el intento admite reintento, se completará su autorización original.</DialogDescription>
+          </DialogHeader>
+          {centerRecoveryTarget && <p>{centerRecoveryTarget.tipo_comprobante} {padNum(centerRecoveryTarget.punto_venta, 4)}-{padNum(centerRecoveryTarget.numero, 8)} · {centerRecoveryTarget.cliente_razon_social} · ${fPeso(centerRecoveryTarget.monto_total)}</p>}
+          <p className="text-sm">Se conservarán cliente, importe y formas de pago. {centerRecoveryTarget && isCenterCreditOnly(centerRecoveryTarget) ? "Al autorizarse, se registrará la deuda en Cuenta Corriente, sin ingresar dinero en Caja." : "Al autorizarse, se completará el registro de los medios de cobro originales."}</p>
+          <DialogFooter>
+            <Button variant="outline" disabled={retryingCenterInvoiceId !== null} onClick={() => setCenterRecoveryTarget(null)}>Cancelar</Button>
+            <Button disabled={retryingCenterInvoiceId !== null} onClick={() => retryCenterSettlement(centerRecoveryTarget, true)}>Confirmar recuperación</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -917,6 +954,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 }) {
   const { toast } = useToast();
   const tipos = allowedTipos && allowedTipos.length > 0 ? allowedTipos : ["FA", "FB"];
+  const centerAttemptRef = useRef<{ request: string; operationId: string } | null>(null);
   const [tipo, setTipo] = useState<string>(tipos.includes("FB") ? "FB" : tipos[0]);
   const [cashFormaPago, setCashFormaPago] = useState("efectivo");
   const [centerPaymentRows, setCenterPaymentRows] = useState([{ id: 1, method: "efectivo", amount: "" }]);
@@ -1598,10 +1636,14 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         onClose(); resetForm();
       }
     },
-    onError: (e: any) => toast({ title: "Error", description: parseApiError(e), variant: "destructive" }),
+    onError: async (e: any) => {
+      toast({ title: "Error", description: parseApiError(e), variant: "destructive" });
+      if (requireLinkedRecipient) await queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+    },
   });
 
   function resetForm() {
+    centerAttemptRef.current = null;
     // Respect a caller-restricted tipo list (e.g. the Centro de Comprobantes
     // locking a single tipo already chosen in its selector) instead of always
     // forcing FB — FB may not even be an allowed option, which left the
@@ -1820,7 +1862,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       ...centerPaymentRows.map(row => ({ method: row.method, amount: Number(row.amount || (totalPreview - centerRetention).toFixed(2)) })),
       ...(centerRetention > 0 ? [{ method: retencionTipo === "iibb" ? "retencion_iibb" : "retencion_ganancias", amount: centerRetention }] : []),
     ] : [];
-    mutation.mutate({
+    const requestBody = {
       tipoComprobante: tipo,
       cliente: { razonSocial, cuit: cuit || undefined, dni: dni || undefined, condicionIva, domicilio: domicilio || undefined },
       ...(requireLinkedRecipient ? { recipientMode: "centro_comprobantes", recipientConsumerFinal: manualConsumerFinal } : {}),
@@ -1863,7 +1905,18 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                    : {}),
           }
         : {}),
-    });
+    };
+    if (requireLinkedRecipient && !NON_FISCAL_TIPOS_SET.has(tipo)) {
+      const request = JSON.stringify(requestBody);
+      if (centerAttemptRef.current && centerAttemptRef.current.request !== request) {
+        toast({ title: "Hay un intento anterior", description: "Revisá su autorización en Facturación antes de modificar la operación. El reintento conserva los datos originales.", variant: "destructive" });
+        return;
+      }
+      centerAttemptRef.current ||= { request, operationId: crypto.randomUUID() };
+      mutation.mutate({ ...requestBody, operationId: centerAttemptRef.current.operationId });
+    } else {
+      mutation.mutate(requestBody);
+    }
   }
 
   const groupCompositionPreview = (() => {
