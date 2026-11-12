@@ -107,16 +107,24 @@ async function withReservationInvoiceLock<T>(
   action: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
+  let groupKey:string|undefined, roomLocked=false;
   try {
-    await client.query("SELECT pg_advisory_lock(hashtext($1))", [`folio-invoice:${reservationId}`]);
+    const links=await client.query('SELECT group_id FROM group_reservation_links WHERE reservation_id=$1',[reservationId]);
+    if(links.rows.length>1)throw actionError(409,'La reserva tiene más de un vínculo grupal; requiere revisión.');
+    if(links.rows[0]?.group_id){groupKey=`group-invoice:${links.rows[0].group_id}`;await client.query('SELECT pg_advisory_lock(hashtext($1))',[groupKey]);}
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [`folio-invoice:${reservationId}`]);roomLocked=true;
     return await action(client);
   } finally {
-    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [`folio-invoice:${reservationId}`]).catch(() => undefined);
+    if(roomLocked)await client.query("SELECT pg_advisory_unlock(hashtext($1))", [`folio-invoice:${reservationId}`]).catch(() => undefined);
+    if(groupKey)await client.query('SELECT pg_advisory_unlock(hashtext($1))',[groupKey]).catch(()=>undefined);
     client.release();
   }
 }
 
 async function getReservation(client: PoolClient, reservationId: string) {
+  // Group receipts take the group row before room/folio rows. Use that order too.
+  await client.query('SELECT g.id FROM groups g JOIN group_reservation_links gl ON gl.group_id=g.id WHERE gl.reservation_id=$1 ORDER BY g.id FOR UPDATE OF g',[reservationId]);
+
   const result = await client.query(
     `SELECT r.id, r.status, f.status AS folio_status, f.closed_at AS folio_closed_at
        FROM reservations r

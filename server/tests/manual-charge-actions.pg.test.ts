@@ -303,10 +303,45 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     await testPool.query("UPDATE folios SET status = 'closed' WHERE id = $1", [folioClosed.folioId]);
     expect((await voidRestaurant(folioClosed)).status).toBe(403);
     const group = await restaurantFixture();
-    await testPool.query("INSERT INTO group_reservation_links VALUES ($1, $2)", [randomUUID(), group.reservationId]);
+    await testPool.query("INSERT INTO group_reservation_links(id,reservation_id) VALUES ($1, $2)", [randomUUID(), group.reservationId]);
     expect((await voidRestaurant(group)).status).toBe(409);
   });
 
+
+  async function groupRestaurantFixture(){
+    const f=await restaurantFixture();const groupId=randomUUID();
+    await testPool.query('DELETE FROM payments WHERE reservation_id=$1',[f.reservationId]);
+    await testPool.query("INSERT INTO groups(id,status) VALUES($1,'inhouse')",[groupId]);
+    await testPool.query('INSERT INTO group_reservation_links(id,reservation_id,group_id) VALUES($1,$2,$3)',[randomUUID(),f.reservationId,groupId]);
+    return {...f,groupId};
+  }
+  it('annuls an unfunded, unbilled Restaurant charge in an active group and preserves its sale',async()=>{
+    const f=await groupRestaurantFixture(),before=await restaurantSnapshot();
+    const results=await Promise.all([voidRestaurant(f),voidRestaurant(f,'jefe_recepcion')]);
+    for(const result of results)expect(result.status,JSON.stringify(result.body)).toBe(200);
+    expect((await testPool.query("SELECT id FROM folio_movements WHERE source_type='restaurant_room_charge_void' AND source_id=$1",[f.chargeId])).rows).toHaveLength(1);
+    expect(await restaurantSnapshot()).toEqual(before);
+    expect((await testPool.query('SELECT status FROM charges WHERE id=$1',[f.chargeId])).rows[0].status).toBe('anulado');
+    expect((await testPool.query('SELECT balance::text FROM folios WHERE id=$1',[f.folioId])).rows[0].balance).toBe('0.00');
+    expect((await voidRestaurant(f)).body.alreadyAnulado).toBe(true);
+  });
+  it.each(['room-payment','master-payment','room-distribution','fiscal-source','unknown-invoice','unknown-allocation','finished-group'])('keeps a covered or ambiguous group charge unchanged (%s)',async mode=>{
+    const f=await groupRestaurantFixture();
+    if(mode==='room-payment')await testPool.query('INSERT INTO payments(id,reservation_id,amount)VALUES($1,$2,10)',[randomUUID(),f.reservationId]);
+    if(mode==='master-payment'||mode==='room-distribution')await testPool.query("INSERT INTO group_payments(id,group_id,amount,destination,distribution_detail)VALUES($1,$2,10,$3,$4)",[randomUUID(),f.groupId,mode==='master-payment'?'master_folio':'group_distribution',JSON.stringify({[f.reservationId]:10})]);
+    if(mode==='fiscal-source'||mode==='unknown-invoice')await testPool.query("INSERT INTO sales_invoices(group_id,estado,source_charge_amounts)VALUES($1,'emitida',$2)",[f.groupId,mode==='fiscal-source'?JSON.stringify({[`reservation:${f.reservationId}:charge:${f.chargeId}`]:300.50}):null]);
+    if(mode==='unknown-allocation')await testPool.query("INSERT INTO group_payments(id,group_id,amount,destination)VALUES($1,$2,10,'group_distribution')",[randomUUID(),f.groupId]);
+    if(mode==='finished-group')await testPool.query("UPDATE groups SET status='finished' WHERE id=$1",[f.groupId]);
+    const before=await restaurantSnapshot();const result=await voidRestaurant(f);expect(result.status,JSON.stringify(result.body)).toBe(409);
+    expect((await testPool.query('SELECT status FROM charges WHERE id=$1',[f.chargeId])).rows[0].status).toBe('active');
+    expect(await restaurantSnapshot()).toEqual(before);
+  });
+  it('allows this room when other rooms alone have explicit payments and invoices',async()=>{
+    const f=await groupRestaurantFixture();
+    await testPool.query("INSERT INTO group_payments(id,group_id,amount,destination,distribution_detail)VALUES($1,$2,10,'group_distribution',$3)",[randomUUID(),f.groupId,JSON.stringify({'another-reservation':10})]);
+    await testPool.query("INSERT INTO sales_invoices(group_id,estado,source_charge_amounts)VALUES($1,'emitida',$2)",[f.groupId,JSON.stringify({'reservation:another-reservation:accommodation':10})]);
+    expect((await voidRestaurant(f)).status).toBe(200);
+  });
   it("does not guess unlinked or transferred financial movements", async () => {
     const unlinked = await restaurantFixture(true);
     await testPool.query(
@@ -345,7 +380,7 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     testPool = new pg.Pool({ connectionString: testDatabaseUrl, max: 6 });
     await testPool.query(`
       DROP TABLE IF EXISTS audit_logs, sales_invoices, folio_movements, charges, folios, reservations,
-        group_reservation_links, restaurant_orders, order_items, inventory_items, payments, cash_movements CASCADE;
+        group_reservation_links, groups, group_payments, restaurant_orders, order_items, inventory_items, payments, cash_movements CASCADE;
       CREATE TABLE reservations (id varchar PRIMARY KEY, status text NOT NULL, early_check_in boolean, early_check_in_time text, early_check_in_charge numeric(10,2), late_check_out boolean, late_check_out_time text, late_check_out_charge numeric(10,2));
       CREATE SEQUENCE IF NOT EXISTS folio_seq_reservation;
       CREATE TABLE folios (
@@ -397,6 +432,7 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
         tipo_comprobante text NOT NULL DEFAULT 'FA',
         estado text,
         reserva_id varchar,
+        group_id varchar,
         folio_id varchar,
         source_charge_ids jsonb,
         source_charge_amounts jsonb,
@@ -418,11 +454,13 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
         ip_address text,
         timestamp timestamp NOT NULL
       );
-      CREATE TABLE group_reservation_links (id varchar PRIMARY KEY, reservation_id varchar NOT NULL);
+      CREATE TABLE groups (id varchar PRIMARY KEY,status text);
+      CREATE TABLE group_reservation_links (id varchar PRIMARY KEY, reservation_id varchar NOT NULL,group_id varchar);
+      CREATE TABLE group_payments (id varchar PRIMARY KEY,group_id varchar,amount numeric,destination text,distribution text,distribution_detail jsonb);
       CREATE TABLE restaurant_orders (id varchar PRIMARY KEY, order_number text, status text, total numeric, charged_to_room text);
       CREATE TABLE order_items (id varchar PRIMARY KEY, order_id varchar, quantity integer, status text);
       CREATE TABLE inventory_items (id varchar PRIMARY KEY, stock numeric);
-      CREATE TABLE payments (id varchar PRIMARY KEY, reservation_id varchar, amount numeric);
+      CREATE TABLE payments (id varchar PRIMARY KEY, reservation_id varchar, amount numeric,status text DEFAULT 'active');
       CREATE TABLE cash_movements (id varchar PRIMARY KEY, amount numeric);
     `);
     await startApp();
