@@ -1,3 +1,4 @@
+import { GroupRoomAdvanceInvoice } from '@/components/group-room-advance-invoice';
 import {GroupRoomAccount} from '@/components/group-room-account';
 import { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
 import {ReservationChannexSettlement} from '@/components/channex-settlement';
@@ -3431,11 +3432,11 @@ export function ReservationDetailDialog({
             </div>
 
             {reservation.reservationCode?.startsWith("CHX-") && <ReservationChannexSettlement reservationId={reservation.id} open={open}/> }
-            {(reservation.notes || reservation.groupNotes) && (
+            {(reservation.notes || reservation.groupNotes || reservation.groupMasterFolioConfig) && (
               <div className="p-3 border rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">Observaciones</p>
                 <div className="text-sm">
-                  <GroupRoomObservations groupNotes={reservation.groupNotes} roomNotes={reservation.notes} />
+                  <GroupRoomObservations groupNotes={reservation.groupNotes} roomNotes={reservation.notes} groupMasterFolioConfig={reservation.groupMasterFolioConfig} />
                 </div>
               </div>
             )}
@@ -4544,6 +4545,7 @@ export function ReservationDetailDialog({
                       : target?.type === "company" && exactCompany
                         ? { type: "company" as const, id: exactCompany.id, razonSocial: exactCompany.razonSocial || exactCompany.nombreFantasia || "", cuit: exactCompany.cuilCuit || "", condicionIva: exactCompany.condicionIva || "Consumidor Final", domicilio: exactCompany.domicilio || exactCompany.direccion || "" }
                         : null;
+                const AdvanceInvoiceDialog = isGroupReservation ? GroupRoomAdvanceInvoice : EmitirFacturaDialog;
                 const advanceInitial: EmitirFacturaInitialValues = {
                   razonSocial: associatedRecipient?.razonSocial || (g ? `${g.lastName} ${g.firstName}` : ""),
                   cuit: associatedRecipient?.cuit || guestFiscal?.cuit || guestFiscal?.cuilCuit || undefined,
@@ -4573,7 +4575,7 @@ export function ReservationDetailDialog({
                       </p>
                     )}
                     {showAdvanceFacturar && target && associatedRecipient && (
-                      <EmitirFacturaDialog
+                      <AdvanceInvoiceDialog
                         open={showAdvanceFacturar}
                         onClose={() => setShowAdvanceFacturar(false)}
                         config={billingConfig}
@@ -4600,6 +4602,8 @@ export function ReservationDetailDialog({
                             : undefined}
                         onSuccess={() => {
                           refetchPayments();
+                          void queryClient.invalidateQueries({queryKey:['group-room-account',String(reservation.id)]});
+                          void queryClient.invalidateQueries({queryKey:["/api/billing/invoices"]});
                           setInvoicingPaymentId(null);
                           setShowAdvanceFacturar(false);
                           toast({ title: "Factura vinculada", description: "La factura electrónica fue vinculada al anticipo." });

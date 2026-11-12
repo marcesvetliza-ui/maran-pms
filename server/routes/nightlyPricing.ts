@@ -110,9 +110,11 @@ export function registerNightlyPricingRoutes(app: Express) {
   app.post("/api/reservations/:id/nightly-pricing/apply", ...writeMiddleware, async (req: Request, res: Response) => {
     try {
       const input = requestSchema.parse(req.body);
-      if (!input.reason?.trim() || input.reason.trim().length < 3) pricingError("Ingresá un motivo de al menos tres caracteres.");
       const updated = await withReservationFinancialLock(req.params.id, () => withDatabaseTransaction(async () => {
         const proposal = await buildProposal(req.params.id, input);
+        const optionalReason = input.edit.kind === "rates" && !!(proposal.reservation as any).groupId;
+        const reason = input.reason?.trim() || "";
+        if (!optionalReason && reason.length < 3) pricingError("Ingresá un motivo de al menos tres caracteres.");
         if (input.edit.kind === "package" && input.edit.expectedTotalCents === undefined) pricingError("Revisá primero el importe del paquete antes de confirmar.");
         if (input.edit.kind !== "package" && JSON.stringify(proposal.before) === JSON.stringify(proposal.after)) pricingError("La propuesta no cambia los importes ni las noches.");
         const patch: Record<string, any> = {
@@ -132,13 +134,13 @@ export function registerNightlyPricingRoutes(app: Express) {
           _inventoryOverrideTentativeGroupWarning: input.overrideTentativeGroupWarning,
         });
         const saved = await withNightlyWriter(input.revision, () => storage.updateReservation(req.params.id, patch));
-        const details = { before: proposal.before, after: proposal.after, reason: input.reason!.trim(),
+        const details = { before: proposal.before, after: proposal.after, reason: reason || null,
           previousTotal: amountString(proposal.previousTotalCents), newTotal: amountString(proposal.newTotalCents),
           package: proposal.packageProposal ? {id:proposal.packageProposal.packageId,name:proposal.packageProposal.packageName,totalCents:proposal.packageProposal.packageTotalCents} : null,
           checkIn: proposal.checkIn, checkOut: proposal.checkOut, actorId: req.user?.id, revision: input.revision + 1 };
         await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)
           VALUES (${req.params.id},${req.user?.username || "Sistema"},${input.edit.kind === "stay" ? "fecha" : "tarifa"},
-          ${`Alojamiento por noche: $${details.previousTotal} → $${details.newTotal}. Motivo: ${details.reason}. Detalle: ${JSON.stringify(details)}`})`);
+          ${`Alojamiento por noche: $${details.previousTotal} → $${details.newTotal}. ${details.reason ? `Motivo: ${details.reason}. ` : ""}Detalle: ${JSON.stringify(details)}`})`);
         return saved;
       }));
       res.json(updated);

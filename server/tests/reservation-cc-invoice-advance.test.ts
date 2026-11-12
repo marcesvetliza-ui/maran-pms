@@ -193,6 +193,19 @@ describe("advance Cuenta Corriente invoice route", () => {
     });
   });
 
+  it.each(['transfer', 'cash', 'credit_card', 'debit_card'])("accepts an original %s alias without changing the payment or collecting again", async method => {
+    state.payment = { ...state.payment, method };
+    const normalized = ({transfer:'transferencia',cash:'efectivo',credit_card:'tarjeta_credito',debit_card:'tarjeta_debito'} as Record<string,string>)[method];
+    await withServer(async url => {
+      const result = await post(url, body({cashFormaPago:method,cashFormaPagoDetalle:[{method:normalized,amount:144000}],ccEntityType:undefined,ccEntityId:undefined}));
+      expect(result.status,JSON.stringify(result.body)).toBe(201);
+      expect(emitirFactura).toHaveBeenCalledWith(expect.objectContaining({cashFormaPago:normalized,cashFormaPagoDetalle:[{method:normalized,amount:144000}]}));
+      expect(state.payment.method).toBe(method);
+      expect(createReservationPaymentWithLedger).not.toHaveBeenCalled();
+      expect(registerCashMovement).not.toHaveBeenCalled();
+    });
+  });
+
   it("issues against the existing CC advance, links it server-side, and retry is idempotent", async () => {
     await withServer(async url => {
       const first = await post(url, body());

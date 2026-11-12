@@ -1,3 +1,5 @@
+import { GroupCommercialAgreement } from '@/components/group-commercial-agreement';
+import { groupCommercialAgreement } from '@shared/groupCommercialAgreement';
 import {GroupAdvanceAllocation} from '@/components/group-advance-allocation';
 import { ReservationNightlyPricing } from "@/components/reservation-nightly-pricing";
 import { GroupOccupantDialog } from "@/components/group-occupant-dialog";
@@ -1701,7 +1703,9 @@ export default function GroupDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
-      toast({ title: "Configuración del Folio Maestro actualizada" });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+      toast({ title: "Acuerdo con el organizador actualizado" });
     },
     onError: (e: any) => toast({ title: "Error al actualizar configuración", description: parseApiError(e), variant: "destructive" }),
   });
@@ -1886,12 +1890,12 @@ export default function GroupDetailPage() {
     </div>
   </div>
   ` : ""}
-  ${group.notes ? `
   <div class="notes-box">
     <p class="info-label" style="margin:0 0 6px 0;">Notas de la estadía</p>
-    <p style="margin:0;white-space:pre-wrap;">${escapeNote(group.notes)}</p>
+    <p style="margin:0 0 6px;"><strong>Acuerdo con el organizador:</strong> ${escapeNote(groupCommercialAgreement(group.masterFolioConfig))}</p>
+    <p style="margin:0 0 6px;">Referencia operativa. Recepción puede cobrar, facturar o dar salida por habitación.</p>
+    ${group.notes ? `<p style="margin:0;white-space:pre-wrap;">${escapeNote(group.notes)}</p>` : ""}
   </div>
-  ` : ""}
   <table>
     <colgroup>
       <col class="col-idx" /><col class="col-room" /><col class="col-bed" /><col class="col-guest" />
@@ -2322,13 +2326,12 @@ export default function GroupDetailPage() {
         </Card>
       )}
 
-      {group.notes && (
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-sm text-muted-foreground">{group.notes}</p>
+      <Card>
+          <CardContent className="pt-4 space-y-2">
+            <GroupCommercialAgreement config={group.masterFolioConfig} />
+            {group.notes && <p className="text-sm text-muted-foreground">{group.notes}</p>}
           </CardContent>
-        </Card>
-      )}
+      </Card>
 
       <Tabs defaultValue="blocks" className="w-full">
         <TabsList>
@@ -3766,12 +3769,11 @@ export default function GroupDetailPage() {
               </div>
             </div>
 
-            {group.notes?.trim() && (
               <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900 rounded-md text-sm" data-testid="rooming-list-group-notes">
                 <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">Notas de la estadía</p>
-                <p className="whitespace-pre-wrap break-words">{group.notes}</p>
+                <GroupCommercialAgreement config={group.masterFolioConfig} />
+                {group.notes?.trim() && <p className="whitespace-pre-wrap break-words mt-2">{group.notes}</p>}
               </div>
-            )}
 
             {group.reservations.length > 0 ? (
               <Table>

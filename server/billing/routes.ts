@@ -1,3 +1,4 @@
+import { groupRoomAdvanceInvoicePreview } from './groupRoomAdvanceInvoice';
 import {validateIndividualGroupPlan,assertIndividualGroupInvoice} from './individualGroupFolio';
 import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
@@ -1154,6 +1155,11 @@ export function registerBillingRoutes(app: Express) {
   registerReceptionOperationRoutes(app);
   registerCashCardRectificationRoutes(app);
 
+  app.get('/api/reservations/:id/payments/:paymentId/invoice-preview', requireAuth, requirePermission('sidebar:/reservations'), async (req, res) => {
+    try { res.json(await groupRoomAdvanceInvoicePreview(req.params.id, req.params.paymentId)); }
+    catch (error: any) { res.status(error.statusCode || 500).json({ error: error.message }); }
+  });
+
   const emitInvoiceHandler = async (req: Request, res: Response) => {
     try {
       if(req.body.correctionOriginalInvoiceId!==undefined && res.locals.closedCorrectionId!==Number(req.body.correctionOriginalInvoiceId))return res.status(400).json({error:"La corrección fiscal debe iniciarse desde la reserva cerrada."});
@@ -1320,6 +1326,7 @@ export function registerBillingRoutes(app: Express) {
           }
         }
       }
+      let groupRoomAdvance = false;
       let existingCcPayment = false;
       let existingPaymentAmount: number | null = null;
       const allowedGroupIntentEndpoints = new Set([
@@ -1339,23 +1346,33 @@ export function registerBillingRoutes(app: Express) {
         return res.status(400).json({ error: "groupPaymentId requiere un groupId del mismo cobro grupal" });
       }
       if (paymentId) {
-        const payment = await db.execute(sql`SELECT id, reservation_id, amount, method, billing_target, company_id, agency_id
+        const payment = await db.execute(sql`SELECT id, reservation_id, amount, method, billing_target, company_id, agency_id, status, invoice_ref
           FROM payments WHERE id = ${paymentId} LIMIT 1`);
         if (!payment.rows.length) return res.status(404).json({ error: "Pago no encontrado" });
         if (!reservationId || String((payment.rows[0] as any).reservation_id) !== reservationId) {
           return res.status(409).json({ error: "El pago no pertenece a la reserva facturada" });
         }
         const existing = payment.rows[0] as any;
-        if (String(existing.method) !== String(cashFormaPago || "")) {
+        if (existing.status === 'anulado') return res.status(409).json({ error: 'El anticipo fue anulado. Actualizá el folio.' });
+        const existingMethod = normalizeToSpanishPaymentMethod(existing.method);
+        cashFormaPago = normalizeToSpanishPaymentMethod(cashFormaPago);
+        const membership = (await db.execute(sql`SELECT group_id FROM group_reservation_links WHERE reservation_id=${reservationId}`)).rows as any[];
+        if (membership.length > 1) throw new FolioInvoiceValidationError('La reserva debe pertenecer a un único grupo.',409);
+        if (membership.length === 1) {
+          if (groupId || groupPaymentId || spaAccountId || creditOperationId || creditReapplications?.length || ordinaryAdvanceApplications?.length || req.body.prefacturaRecovery || recipientMode === 'centro_comprobantes' || !['FA','FB','FC','FM','FMB'].includes(tipoComprobante)) throw new FolioInvoiceValidationError('La factura del anticipo grupal conserva únicamente el pago y los conceptos de esta habitación.',400);
+          individualGroupId = String(membership[0].group_id);
+          groupRoomAdvance = true;
+        }
+        if (existingMethod !== cashFormaPago) {
           return res.status(409).json({ error: "La forma de pago no coincide con el pago existente" });
         }
-        existingCcPayment = String(existing.method) === "cuenta_corriente";
+        existingCcPayment = existingMethod === "cuenta_corriente";
         existingPaymentAmount = Number(existing.amount);
         if (Math.abs(existingPaymentAmount - calcularMontos(items, tipoComprobante).montoTotal) > 0.02) {
           return res.status(409).json({ error: "El total de la factura debe coincidir con el anticipo" });
         }
         if (normalizedCashFormaPagoDetalle?.length !== 1 ||
-            normalizedCashFormaPagoDetalle[0].method !== String(existing.method) ||
+            normalizedCashFormaPagoDetalle[0].method !== existingMethod ||
             Math.abs(normalizedCashFormaPagoDetalle[0].amount - existingPaymentAmount) > 0.02) {
           return res.status(409).json({ error: "El desglose de pago debe coincidir con el anticipo registrado" });
         }
@@ -1404,7 +1421,7 @@ export function registerBillingRoutes(app: Express) {
             .map(([id, amount]) => [id, Number(amount)])
         )
         : {};
-      if (paymentId && existingPaymentAmount !== null) {
+      if (paymentId && existingPaymentAmount !== null && !groupRoomAdvance) {
         // An advance is its own fiscal source. Ignore stale room-charge
         // selections from the browser, but retain the exact locked amount.
         normalizedSourceChargeIds = [`payment:${paymentId}`];
@@ -1503,6 +1520,38 @@ export function registerBillingRoutes(app: Express) {
       let reusedExistingClaim = false;
       let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
+        if (groupRoomAdvance) {
+          // Recover the receipt's exact document before recalculating mutable
+          // capacity. Pending drafts already reserve their original sources.
+          const claimed = (await db.execute(sql`SELECT * FROM sales_invoices WHERE payment_id=${paymentId} ORDER BY id DESC LIMIT 1`)).rows[0] as any;
+          if (claimed) {
+            if (claimed.reserva_id !== reservationId) throw new FolioInvoiceValidationError('El comprobante no pertenece a esta habitación.',409);
+            if (claimed.estado === 'emitida') {
+              reusedExistingClaim = true;
+              return { ...claimed, tipoComprobante: claimed.tipo_comprobante, puntoVenta: claimed.punto_venta, montoTotal: claimed.monto_total };
+            }
+            if (claimed.estado !== 'autorizacion_pendiente') throw new FolioInvoiceValidationError('El anticipo ya tiene un comprobante fiscal. Revisalo desde la factura original.',409);
+            const resumed = await emitirFactura({
+              tipoComprobante: claimed.tipo_comprobante, reservaId: reservationId, paymentId,
+              cliente: { razonSocial: claimed.cliente_razon_social, cuit: claimed.cliente_cuit || undefined, dni: claimed.cliente_dni || undefined, condicionIva: claimed.cliente_condicion_iva, domicilio: claimed.cliente_domicilio || undefined },
+              items: claimed.items, puntoVentaOverride: Number(claimed.punto_venta),
+              sourceChargeIds: claimed.source_charge_ids, sourceChargeAmounts: claimed.source_charge_amounts,
+              cashFormaPago: claimed.cash_forma_pago, cashFormaPagoDetalle: claimed.cash_forma_pago_detalle,
+              recoveryInvoiceId: Number(claimed.id),
+            } as NewInvoiceData);
+            reusedExistingClaim = true;
+            return resumed;
+          }
+          const proposal = await groupRoomAdvanceInvoicePreview(reservationId, paymentId);
+          if (proposal.groupId !== individualGroupId) throw new FolioInvoiceValidationError('La habitación cambió de grupo. Actualizá el folio.',409);
+          // Older open tabs omit the map. New clients show and submit the
+          // proposal; both paths use the same shared room/group source guard.
+          if (!normalizedSourceChargeIds.length && !Object.keys(sanitizedSourceChargeAmounts).length) {
+            sanitizedSourceChargeAmounts = proposal.sourceChargeAmounts;
+            normalizedSourceChargeIds = Object.keys(sanitizedSourceChargeAmounts);
+          }
+          await assertIndividualGroupInvoice(individualGroupId!, reservationId, sanitizedSourceChargeAmounts, 0);
+        }
         const correctionId=Number(req.body.correctionOriginalInvoiceId||0);
         if(req.body.correctionOriginalInvoiceId!==undefined&&(!Number.isSafeInteger(correctionId)||correctionId<=0))correctionError("Comprobante original inválido.",400);
         if(correctionId){
@@ -1786,7 +1835,7 @@ export function registerBillingRoutes(app: Express) {
           // clients that do not prepare a new collection in this request.
           const linkedGroupId=(reservation as any).groupId;
           if(linkedGroupId){
-            if(paymentId&&!paymentRecoveryInvoiceId)throw new FolioInvoiceValidationError('Para facturar una habitación grupal, elegí los conceptos pendientes desde su folio; no emitas otro comprobante aislado por el pago.',409);
+            if(paymentId&&!paymentRecoveryInvoiceId&&!groupRoomAdvance)throw new FolioInvoiceValidationError('Para facturar una habitación grupal, elegí los conceptos pendientes desde su folio; no emitas otro comprobante aislado por el pago.',409);
             if(!paymentId&&!individualGroupId)await assertIndividualGroupInvoice(String(linkedGroupId),reservationId,sanitizedSourceChargeAmounts,0);
           }
           const charges = await storage.getCharges(reservationId);
@@ -2251,11 +2300,10 @@ export function registerBillingRoutes(app: Express) {
         invoiceTotalForSettlement,
         reservationId && Array.isArray(creditReapplications) ? creditReapplications : [],
       );
-      // An advance paid through Cuenta Corriente already has its cargo and
-      // payment row. Link that exact row server-side as part of issuance so a
-      // lost client response cannot leave a successfully emitted invoice
-      // orphaned (the PATCH link remains an idempotent recovery endpoint).
-      if (existingCcPayment && paymentId) {
+      // The original CC debt or group collection already owns this receipt.
+      // Link it server-side so a lost response cannot orphan the document;
+      // the later PATCH is only an idempotent confirmation.
+      if ((existingCcPayment || groupRoomAdvance) && paymentId) {
         await db.execute(sql`
           UPDATE payments
           SET invoice_ref = ${JSON.stringify({

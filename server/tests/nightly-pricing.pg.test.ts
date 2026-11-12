@@ -298,6 +298,24 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect((await request(`${pathFor()}/apply`, invalid)).status).toBe(400);
     expect((await saved()).pricingRevision).toBe(0);
   });
+  it("permite observación opcional sólo para tarifas de una habitación grupal y conserva la auditoría", async () => {
+    const group=idFor('optional-reason-group');
+    await applicationPool.query("INSERT INTO groups(id,group_code,name,check_in_date,check_out_date,status,created_at) VALUES ($1::text,$1::text,'Synthetic optional reason','2090-01-01','2090-01-04','confirmed',now())",[group]);
+    try {
+      await applicationPool.query('INSERT INTO group_reservation_links(id,group_id,reservation_id) VALUES($1,$2,$3)',[group+'-link',group,editable]);
+      const moneyBefore=await moneyEvidence();
+      const result=await request(`${pathFor()}/apply`,rateBody({reason:''}));
+      expect(result.status,JSON.stringify(result.data)).toBe(200);
+      const changed=await saved();expect(changed.pricingRevision).toBe(1);expect(changed.totalRoomAmount).toBe('270000.00');
+      const log=(await applicationPool.query("SELECT operador,descripcion FROM reservation_changelog WHERE reservation_id=$1 AND tipo='tarifa'",[editable])).rows[0];
+      expect(log.operador).toBe('Demo Actor');expect(log.descripcion).toContain('285000.00 → $270000.00');
+      const detail=JSON.parse(log.descripcion.split('Detalle: ')[1]);expect(detail).toMatchObject({reason:null,actorId:idFor('admin'),revision:1});expect(detail.before).toHaveLength(3);expect(detail.after).toHaveLength(3);
+      expect(await moneyEvidence()).toEqual(moneyBefore);
+      const stay=await request(`${pathFor()}/apply`,{revision:1,reason:'',edit:{kind:'stay',checkIn:'2090-01-01',checkOut:'2090-01-03',addedRates:{}}});expect(stay.status).toBe(400);
+    } finally {
+      await applicationPool.query('DELETE FROM group_reservation_links WHERE group_id=$1',[group]);await applicationPool.query('DELETE FROM groups WHERE id=$1',[group]);
+    }
+  });
   it("serializa dos operadores: uno guarda y el otro recibe conflicto", async () => {
     const replies = await Promise.all([
       request(`${pathFor()}/apply`, rateBody()),

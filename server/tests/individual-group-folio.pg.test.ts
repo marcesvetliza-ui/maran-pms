@@ -147,6 +147,64 @@ suite('individual group room from its own prefactura',()=>{
   const rejected=await request('/api/billing/invoices',bypass);expect(rejected.status,JSON.stringify(rejected.body)).toBe(409);
   expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(0);
  });
+ it.each(['transfer', 'credit_card'])('invoices a recorded group-room advance using %s, preserving cash and shared fiscal capacity',async method=>{
+  const f=await fixture();const id=f.ids[0];
+  await pool.query("UPDATE reservations SET total_room_amount=201000,base_rate_per_night=201000,final_rate_per_night=201000 WHERE id=$1",[id]);
+  const collected=await request('/api/payments',{...f.payment,amount:'166000.00',method,paymentPurpose:'group_room_collection',receiptType:'none'});expect(collected.status,JSON.stringify(collected.body)).toBe(201);
+  const paymentId=collected.body.id;
+  const paymentBefore=(await pool.query('SELECT * FROM payments WHERE id=$1',[paymentId])).rows[0];
+  const cashBefore=(await pool.query('SELECT * FROM cash_movements WHERE payment_id=$1 ORDER BY id',[paymentId])).rows;
+  const preview=await(await fetch(url+`/api/reservations/${id}/payments/${paymentId}/invoice-preview`)).json();
+  expect(preview).toMatchObject({amount:166000,method:method==='transfer'?'transferencia':'tarjeta_credito',sourceChargeAmounts:{accommodation:166000}});
+  const invoice={tipoComprobante:'FB',cliente:f.invoice.cliente,reservaId:id,paymentId,items:[{descripcion:'Anticipo registrado',cantidad:1,precioUnitario:166000,subtotal:166000,alicuotaIva:'21'}],cashFormaPago:method,cashFormaPagoDetalle:[{method:preview.method,amount:166000}],sourceChargeIds:Object.keys(preview.sourceChargeAmounts),sourceChargeAmounts:preview.sourceChargeAmounts};
+  const [first,retry]=await Promise.all([request('/api/billing/invoices',invoice),request('/api/billing/invoices',invoice)]);
+  expect(first.status,JSON.stringify(first.body)).toBe(201);expect(retry.status,JSON.stringify(retry.body)).toBe(201);expect(retry.body.id).toBe(first.body.id);
+  const paymentAfter=(await pool.query('SELECT * FROM payments WHERE id=$1',[paymentId])).rows[0];
+  expect(JSON.parse(paymentAfter.invoice_ref).id).toBe(first.body.id);
+  expect({...paymentAfter,invoice_ref:null}).toEqual({...paymentBefore,invoice_ref:null});
+  expect((await pool.query('SELECT * FROM cash_movements WHERE payment_id=$1 ORDER BY id',[paymentId])).rows).toEqual(cashBefore);
+  expect((await pool.query('SELECT id FROM payments WHERE reservation_id=$1',[id])).rows).toHaveLength(1);
+  expect((await pool.query('SELECT id FROM account_movements WHERE reservation_id=$1',[id])).rows).toHaveLength(0);
+  const account=await(await import('../billing/groupAccount')).groupAccountSnapshot(id);expect(account).toMatchObject({paid:166000,balance:35000,pendingInvoice:35000,fiscalRequiresReview:false});
+  const snapshot=await(await import('../billing/groupInvoiceScope')).getGroupInvoiceSnapshot(f.group);
+  expect(snapshot.sources.find(s=>s.id===`reservation:${id}:accommodation`)).toMatchObject({invoiced:166000,available:35000});
+  expect((await pool.query('SELECT id FROM sales_invoices WHERE payment_id=$1',[paymentId])).rows).toHaveLength(1);
+  // A lost authorization response must resume this exact claim, not consume
+  // the now-smaller residual capacity or create another receipt.
+  await pool.query("UPDATE sales_invoices SET estado='autorizacion_pendiente' WHERE id=$1",[first.body.id]);
+  expect((await request('/api/billing/invoices',invoice)).body.id).toBe(first.body.id);
+ });
+ it('rejects an advance whose sources were already invoiced by the group, and does not reuse a void receipt',async()=>{
+  const f=await fixture();const id=f.ids[0];
+  const issued=await request('/api/billing/invoices',{...f.invoice,groupDocumentationOnly:true,cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});expect(issued.status).toBe(201);
+  await pool.query('UPDATE sales_invoices SET reserva_id=NULL,group_id=$2,source_charge_ids=$3,source_charge_amounts=$4 WHERE id=$1',[issued.body.id,f.group,JSON.stringify([`reservation:${id}:accommodation`]),JSON.stringify({[`reservation:${id}:accommodation`]:121})]);
+  const paid=await request('/api/payments',{...f.payment,paymentPurpose:'group_room_collection',receiptType:'none'});expect(paid.status).toBe(201);
+  const invoice={tipoComprobante:'FB',cliente:f.invoice.cliente,reservaId:id,paymentId:paid.body.id,items:f.invoice.items,cashFormaPago:'transferencia',cashFormaPagoDetalle:[{method:'transferencia',amount:121}]};
+  const denied=await request('/api/billing/invoices',invoice);expect(denied.status,JSON.stringify(denied.body)).toBe(409);expect(denied.body.error).toMatch(/pendientes de facturar/);
+  await pool.query("UPDATE payments SET status='anulado' WHERE id=$1",[paid.body.id]);
+  expect((await request('/api/billing/invoices',invoice)).status).toBe(409);
+  expect((await pool.query('SELECT id FROM sales_invoices WHERE payment_id=$1',[paid.body.id])).rows).toHaveLength(0);
+ });
+ it('serializes separate advance invoices that compete for the same room and group sources',async()=>{
+  const f=await fixture();const id=f.ids[0];
+  const payments=[randomUUID(),randomUUID()];
+  for(const paymentId of payments)await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date,status) VALUES($1,$2,'80.00','transfer','2026-11-12','active')",[paymentId,id]);
+  const attempts=payments.map(paymentId=>({tipoComprobante:'FB',cliente:f.invoice.cliente,reservaId:id,paymentId,items:[{descripcion:'Anticipo',cantidad:1,precioUnitario:80,subtotal:80,alicuotaIva:'21'}],cashFormaPago:'transfer',cashFormaPagoDetalle:[{method:'transferencia',amount:80}]}));
+  const results=await Promise.all(attempts.map(body=>request('/api/billing/invoices',body)));
+  expect(results.map(r=>r.status).sort(),JSON.stringify(results)).toEqual([201,409]);
+  expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1',[id])).rows).toHaveLength(1);
+  expect(await(await import('../billing/groupAccount')).groupAccountSnapshot(id)).toMatchObject({paid:160,pendingInvoice:41});
+  expect((await pool.query('SELECT id FROM cash_movements WHERE payment_id=ANY($1::text[])',[payments])).rows).toHaveLength(0);
+ });
+ it('shares fiscal sources when invoicing a child allocation of an existing group receipt',async()=>{
+  const f=await fixture();const id=f.ids[0];
+  const parent=await request(`/api/groups/${f.group}/payment`,{paymentRequestId:randomUUID(),distribution:'manual',distributionDetail:{[id]:100},paymentRows:[{method:'transfer',amount:'100.00',reference:'synthetic bank receipt'}],receiptType:'none',receiverDetails:{razonSocial:'Synthetic group',dni:'30123456'},concepts:[{description:'Anticipo',amount:100}]});expect(parent.status,JSON.stringify(parent.body)).toBe(200);
+  const p=(await pool.query('SELECT * FROM payments WHERE group_payment_id=$1',[parent.body.groupPaymentId])).rows[0];
+  const cashBefore=(await pool.query('SELECT * FROM cash_movements WHERE payment_id=$1 ORDER BY id',[parent.body.groupPaymentId])).rows;
+  const issued=await request('/api/billing/invoices',{tipoComprobante:'FB',cliente:f.invoice.cliente,reservaId:id,paymentId:p.id,items:[{descripcion:'Anticipo',cantidad:1,precioUnitario:100,subtotal:100,alicuotaIva:'21'}],cashFormaPago:p.method,cashFormaPagoDetalle:[{method:p.method,amount:100}]});expect(issued.status,JSON.stringify(issued.body)).toBe(201);
+  expect((await pool.query('SELECT * FROM cash_movements WHERE payment_id=$1 ORDER BY id',[parent.body.groupPaymentId])).rows).toEqual(cashBefore);
+  expect(await(await import('../billing/groupAccount')).groupAccountSnapshot(id)).toMatchObject({paid:100,balance:21,pendingInvoice:21});
+ });
  it('does not attribute an old fiscal payment source to room charges automatically',async()=>{
   const f=await fixture();const issued=await request('/api/billing/invoices',f.invoice);expect(issued.status).toBe(201);
   await pool.query('UPDATE sales_invoices SET source_charge_amounts=$2,source_charge_ids=$3 WHERE id=$1',[issued.body.id,JSON.stringify({'payment:legacy':121}),JSON.stringify(['payment:legacy'])]);
