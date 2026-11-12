@@ -48,6 +48,7 @@ it('documents pending sources of a group room without preparing a second payment
  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><PrefacturaDialog open onClose={vi.fn()} reservationId={id} reservation={{id,groupId:'g-doc',guestId:'g',status:'checked_in',guest:{id:'g',firstName:'Synthetic',lastName:'Guest',condicionIva:'Consumidor Final'},room:{roomNumber:'506'}} as any} mode="billing"/></QueryClientProvider>);
  expect(await screen.findByDisplayValue('Solo facturación; conserva los pagos')).toBeInTheDocument();
  const button=await screen.findByTestId('button-registrar-emitir');await waitFor(()=>expect(button).toBeEnabled());
+ expect(button).toHaveTextContent('Emitir factura sin cobrar');
  await userEvent.setup().click(button);
  await waitFor(()=>expect(writes.some(w=>w.path==='/api/billing/invoices')).toBe(true));
  expect(writes).toHaveLength(1);expect(writes[0].body).toMatchObject({reservaId:id,groupDocumentationOnly:true,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});

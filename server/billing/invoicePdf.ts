@@ -6,6 +6,7 @@ import type { GroupInvoiceComposition } from "@shared/groupInvoiceComposition";
 import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
 import { applyPilotPdfWatermark } from "../utils/pilotPdfWatermark";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { normalizeToSpanishPaymentMethod } from '../payment-method';
 
 const $n = (v: any) => parseFloat(String(v ?? 0)) || 0;
 
@@ -22,6 +23,7 @@ const INVOICE_PAYMENT_GRID_METHODS = [
 ] as const;
 
 function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METHODS[number] | null {
+  method = normalizeToSpanishPaymentMethod(method);
   return method === "tarjeta" || method === "tarjeta_credito" ? "tarjeta"
     : method === "debito" || method === "tarjeta_debito" ? "debito"
     : method === "cheque" || method === "echeq" ? "cheque"
@@ -35,6 +37,22 @@ function invoicePaymentGridKey(method: string): typeof INVOICE_PAYMENT_GRID_METH
     // nunca debe contarse como efectivo/transferencia/etc.
     : method.startsWith("retencion_") ? "retencion"
     : null;
+}
+
+/** Fiscal authorization does not prove a collection or its instrument. */
+export function getInvoiceSaleCondition(factura: any): string {
+  const method = normalizeToSpanishPaymentMethod(factura.cash_forma_pago ?? factura.cashFormaPago);
+  const labels: Record<string, string> = {
+    efectivo: 'Contado/Efectivo', transferencia: 'Transferencia Bancaria',
+    tarjeta: 'Tarjeta de Crédito', tarjeta_credito: 'Tarjeta de Crédito',
+    debito: 'Tarjeta de Débito', tarjeta_debito: 'Tarjeta de Débito',
+    cheque: 'Cheque', echeq: 'eCheq', cuenta_corriente: 'Cuenta Corriente',
+    mercadopago: 'Mercado Pago', adelanto: 'Adelanto', pago_dividido: 'Pago Mixto',
+  };
+  if (method) return labels[method] || method;
+  let intent = factura.credit_reapplication_intent ?? factura.creditReapplicationIntent;
+  try { if (typeof intent === 'string') intent = JSON.parse(intent); } catch { intent = null; }
+  return intent?.groupDocumentationOnly === true ? 'Sin cobro nuevo' : 'No informada';
 }
 
 export function getInvoicePaymentAmounts(
@@ -758,15 +776,7 @@ export async function generarFacturaPDF(
     // ══════════════════════════════════════════════════════════════════════════
     if (y > 780) { doc.addPage(); y = 40; }
 
-    // Condición de venta
-    const COND_LABELS: Record<string, string> = {
-      efectivo: "Contado/Efectivo", transferencia: "Transferencia Bancaria",
-      tarjeta: "Tarjeta de Crédito", tarjeta_credito: "Tarjeta de Crédito",
-      debito: "Tarjeta de Débito", tarjeta_debito: "Tarjeta de Débito",
-      cheque: "Cheque", echeq: "eCheq", cuenta_corriente: "Cuenta Corriente",
-      mercadopago: "Mercado Pago", adelanto: "Adelanto", pago_dividido: "Pago Mixto",
-    };
-    const condVenta = cashFormaPago ? (COND_LABELS[cashFormaPago] ?? cashFormaPago) : "Contado";
+    const condVenta = getInvoiceSaleCondition(factura);
 
     // CAE box (two-column: left = ARCA info, right = Condición de Venta)
     const caeH = 64;

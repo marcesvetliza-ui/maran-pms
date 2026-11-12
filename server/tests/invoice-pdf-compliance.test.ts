@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildArcaQrUrl, getInvoicePaymentAmounts, getInvoiceRecipientDocument } from "../billing/invoicePdf";
+import { buildArcaQrUrl, getInvoicePaymentAmounts, getInvoiceRecipientDocument, getInvoiceSaleCondition } from "../billing/invoicePdf";
 import { isUnsupportedSaleType } from "../billing/invoiceService";
 import { resolveFiscalRecipientDocument } from "../billing/fiscalDocument";
 import { buildIvaBlock } from "../billing/wsfevClient";
@@ -12,6 +12,19 @@ function decodeQrPayload(url: string) {
 }
 
 describe("ARCA invoice PDF compliance", () => {
+  it('does not label an authorized invoice as cash-paid without a recorded instrument', () => {
+    const invoice = { tipo_comprobante: 'FB', punto_venta: 5, numero: 245, monto_total: 7500, cae: '86461068099795', cash_forma_pago: null };
+    expect(getInvoiceSaleCondition(invoice)).toBe('No informada');
+    expect(Object.values(getInvoicePaymentAmounts(null, null, 7500)).every(amount => amount === 0)).toBe(true);
+    expect(getInvoiceSaleCondition({ ...invoice, credit_reapplication_intent: { groupDocumentationOnly: true } })).toBe('Sin cobro nuevo');
+    expect(getInvoiceSaleCondition({ ...invoice, credit_reapplication_intent: JSON.stringify({ groupDocumentationOnly: true }) })).toBe('Sin cobro nuevo');
+    expect(getInvoiceSaleCondition({ ...invoice, credit_reapplication_intent: '{invalid' })).toBe('No informada');
+  });
+  it.each([['transfer','Transferencia Bancaria','transferencia'], ['cash','Contado/Efectivo','efectivo'], ['credit_card','Tarjeta de Crédito','tarjeta']])('uses the original %s alias consistently in the condition and payment grid', (method,label,key) => {
+    expect(getInvoiceSaleCondition({ cash_forma_pago: method })).toBe(label);
+    expect(getInvoicePaymentAmounts(method,null,7500)[key]).toBe(7500);
+    expect(getInvoicePaymentAmounts(null,[{method,amount:7500}],7500)[key]).toBe(7500);
+  });
   it("builds the official QR payload for Factura B with CUIT recipient", () => {
     const url = buildArcaQrUrl({
       tipo_comprobante: "FB",

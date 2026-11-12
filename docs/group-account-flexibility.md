@@ -12,7 +12,9 @@ puede registrar un cobro o emitir su factura ordinaria.
   ya esté facturada al organizador. No emite otro comprobante fiscal. Si hay
   anticipos pendientes de asignar, exige confirmar que se trata de dinero nuevo.
 - La emisión individual ordinaria (A/B/C/MiPyme) documenta las fuentes pendientes,
-  sin registrar dinero nuevo ni crear deuda en Cuenta Corriente. El receptor se
+  sin registrar dinero nuevo ni crear deuda en Cuenta Corriente. El botón indica
+  «Emitir factura sin cobrar» y el PDF indica «Sin cobro nuevo». Una autorización
+  fiscal por sí sola no acredita un cobro de Caja. El receptor se
   elige en el selector existente. La cobertura se comparte con la factura grupal.
 - Al dar salida a una reserva grupal, Recepción puede abrir la cuenta de la
   habitación o confirmar la salida física dejando el saldo dentro del grupo.
