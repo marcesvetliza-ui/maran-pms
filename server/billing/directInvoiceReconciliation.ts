@@ -5,7 +5,7 @@ import { payloadHash } from './operationJournal';
 // The journal proves what was requested; absence of a payment on an invoice
 // alone never proves that its settlement is complete.
 export const directInvoiceOperationProof = sql`(SELECT jsonb_build_object(
-  'invoiceId',bo.invoice_id,'ownerType',bo.owner_type,'ownerId',bo.owner_id,'stage',bo.stage,
+  'invoiceId',bo.invoice_id,'ownerType',bo.owner_type,'ownerId',bo.owner_id,'stage',bo.stage,'errorCode',bo.error_code,
   'identity',bo.fiscal_identity,'request',bo.request_snapshot)
   FROM billing_operations bo WHERE bo.operation_id=si.fiscal_identity->>'operationId'
   AND bo.invoice_id=si.id LIMIT 1)`;

@@ -4,7 +4,7 @@ const fail = (message: string) => Object.assign(new Error(message), { statusCode
 
 /** Recover this invoice's immutable request, never the current form or a row
  * that merely shares its number. The normal emitter resumes its own draft. */
-export function centerInvoiceRecoveryRequest(invoice: any, operation: BillingOperation | undefined) {
+function centerInvoiceRequestProof(invoice: any, operation: BillingOperation | undefined) {
   if (!invoice?.center_settlement_area || !["FA", "FB", "FM", "FMB"].includes(invoice.tipo_comprobante)
     || !["autorizacion_pendiente", "emitida"].includes(invoice.estado)
     || invoice.modo_ficticio !== false
@@ -30,7 +30,21 @@ export function centerInvoiceRecoveryRequest(invoice: any, operation: BillingOpe
       String(request.cliente?.[key] || "") !== String(invoice[["cliente_razon_social", "cliente_cuit", "cliente_dni", "cliente_document_type", "cliente_condicion_iva", "cliente_domicilio"][i]] || ""))) {
     throw fail("El intento no tiene evidencia suficiente o sus datos cambiaron. Se conserva para revisión; no se emite ni se cobra.");
   }
-  if (operation.stage === "rejected") throw fail(`ARCA rechazó el intento original: ${invoice.reconciliation_error || "Revisá los datos fiscales antes de corregirlo."}`);
-  if (!["prepared", "numbered", "submitting", "uncertain", "authorized"].includes(operation.stage)) throw fail("El intento necesita una corrección verificada antes de continuar.");
   return { ...request, operationId: operation.operation_id };
+}
+
+export function centerInvoiceRecoveryRequest(invoice: any, operation: BillingOperation | undefined) {
+  const request = centerInvoiceRequestProof(invoice, operation);
+  if (operation!.stage === "rejected") throw fail(`ARCA rechazó el intento original: ${invoice.reconciliation_error || "Revisá los datos fiscales antes de corregirlo."}`);
+  if (!["prepared", "numbered", "submitting", "uncertain", "authorized"].includes(operation!.stage)) throw fail("El intento necesita una corrección verificada antes de continuar.");
+  return request;
+}
+
+export function centerRejectedInvoiceRequest(invoice: any, operation: BillingOperation | undefined) {
+  const request = centerInvoiceRequestProof(invoice, operation);
+  if (operation!.stage !== "rejected" || operation!.error_code !== "ARCA_AUTHORIZATION_REJECTED"
+    || invoice.estado !== "autorizacion_pendiente" || invoice.cae || invoice.center_settlement_status !== "pending") {
+    throw fail("Sólo se puede cerrar un intento expresamente rechazado por ARCA, sin autorización ni registro económico.");
+  }
+  return request;
 }
