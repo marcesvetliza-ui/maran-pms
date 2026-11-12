@@ -32,8 +32,8 @@ export function exposeInvoiceReconciliation(invoice: any) {
   // cash and CC row. Preserve older completed receipts without inventing debt.
   const centerCompleted = Boolean(invoiceValue(invoice, "center_settlement_area", "centerSettlementArea"))
     && invoiceValue(invoice, "center_settlement_status", "centerSettlementStatus") === "settled"
-    && !["reserva_id", "payment_id", "group_id", "group_payment_id", "group_payment_intent", "credit_reapplication_intent", "spa_account_id", "restaurant_order_id", "folio_id"].some(key => invoice[key] != null)
-    && ["emitida", "parcial"].includes(invoice.estado)
+    && !["reserva_id", "payment_id", "group_id", "group_payment_id", "group_payment_intent", "credit_reapplication_intent", "spa_account_id", "restaurant_order_id", "folio_id", "nota_credito_id"].some(key => invoice[key] != null)
+    && invoice.estado === "emitida"
     && ["FA", "FB", "FM", "FMB", "ticket", "cierre_habitacion"].includes(String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante")))
     && (/^\d{14}$/.test(String(invoice.cae || "")) || invoiceValue(invoice, "modo_ficticio", "modoFicticio") === true || ["ticket", "cierre_habitacion"].includes(String(invoiceValue(invoice, "tipo_comprobante", "tipoComprobante"))));
   const status = storedStatus === "pendiente" && (centerCompleted || directCompleted || (hasGroupIntent && groupLinkCompleted) || (isDirectGroupInvoice && directLinkCompleted))
