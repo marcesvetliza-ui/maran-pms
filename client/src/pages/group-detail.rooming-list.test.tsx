@@ -314,6 +314,18 @@ describe("Grupos — Rooming List (preview y datos)", () => {
     return capturedHtml;
   }
 
+  it.each([
+    ['accommodation','El organizador paga alojamiento; cada huésped paga sus consumos.'],
+    ['all','El organizador paga alojamiento y consumos.'],
+    ['none','Cada huésped paga su alojamiento y sus consumos.'],
+  ])('muestra e imprime el acuerdo %s incluso sin notas manuales',async(config,expected)=>{
+    groupFixture=buildGroup({masterFolioConfig:config,notes:''});stubFetch();
+    const html=await printAndCapture();
+    expect(screen.getByTestId('rooming-list-group-notes')).toHaveTextContent(expected);
+    expect(html).toContain(expected);
+    expect(html).toContain('Referencia operativa. Recepción puede cobrar, facturar o dar salida por habitación.');
+  });
+
   it("imprime en orden 207, 301, 302, 1001, 1002, 1203", async () => {
     groupFixture = buildGroup({
       reservations: ["1203", "207", "1001", "1002", "301", "302"].map((roomNumber, i) =>

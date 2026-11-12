@@ -65,5 +65,28 @@ concurrencia, reintentos, anulación seguida de reintento tardío, exceso de sal
 habitaciones ajenas. Las pruebas de interfaz cubren las opciones de salida y los
 reintentos después de recargar la página.
 
-La emisión aislada por un pago de habitación grupal se reemplaza por la selección
-de conceptos pendientes en el folio; así conserva una cobertura fiscal común.
+## Anticipo ya registrado
+
+«Emitir» sobre un pago de habitación grupal muestra una propuesta obtenida del
+recibo original: importe y medio bloqueados, con el detalle de conceptos pendientes
+que se van a documentar. Se propone primero alojamiento y después consumos hasta
+completar el anticipo. La factura conserva `payment_id`, pero consume fuentes reales
+de la habitación, compartidas con el grupo; nunca una fuente aislada `payment:*`.
+No registra otro pago, movimiento de Caja ni deuda en Cuenta Corriente. Si el pago
+proviene de un recibo grupal, se verifica su pertenencia y distribución original.
+
+El servidor vuelve a comprobar la cobertura bajo el bloqueo del grupo y la
+habitación. Un reintento recupera la factura o autorización original antes de
+recalcular lo disponible. Un pago anulado, una cobertura histórica ambigua o un
+importe que ya fue facturado se conserva para revisión, sin emitir duplicados.
+
+## Referencias para la operatoria
+
+El acuerdo vigente con el organizador aparece automáticamente junto a las
+observaciones del grupo y de sus habitaciones, en el rooming y en su impresión.
+No se copia dentro de las notas libres ni se utiliza como autorización de cobro.
+
+Al editar tarifas nocturnas de una habitación con vínculo grupal real, la
+observación es opcional. Se siguen guardando usuario, revisión, noches, valores
+anteriores y nuevos. Los cambios de estadía y paquete, las reservas individuales,
+los permisos y los controles de cobertura fiscal conservan sus reglas.

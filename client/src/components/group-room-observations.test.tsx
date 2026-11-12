@@ -20,4 +20,13 @@ describe("observaciones de habitaciones grupales", () => {
     expect(screen.getByTestId("group-room-observations-group")).toHaveTextContent("Desayuno temprano");
     expect(screen.queryByTestId("group-room-observations-room")).not.toBeInTheDocument();
   });
+  it("shows the current commercial agreement independently of editable notes", () => {
+    const {rerender}=render(<GroupRoomObservations groupMasterFolioConfig="accommodation" groupNotes="Llegan en combi" roomNotes="Cama extra"/>);
+    expect(screen.getByTestId('group-commercial-agreement')).toHaveTextContent('El organizador paga alojamiento; cada huésped paga sus consumos.');
+    rerender(<GroupRoomObservations groupMasterFolioConfig="none" groupNotes="Llegan en combi" roomNotes="Cama extra"/>);
+    expect(screen.getByTestId('group-commercial-agreement')).toHaveTextContent('Cada huésped paga su alojamiento y sus consumos.');
+    expect(screen.getByTestId('group-room-observations-group')).toHaveTextContent(/^Llegan en combi$/);
+    expect(screen.getByTestId('group-room-observations-room')).toHaveTextContent('Habitación: Cama extra');
+  });
+
 });

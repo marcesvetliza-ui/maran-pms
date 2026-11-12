@@ -503,6 +503,7 @@ export type ReservationWithDetails = Reservation & {
   groupName?: string;
   groupCode?: string;
   groupNotes?: string | null;
+  groupMasterFolioConfig?: string | null;
   isGroup?: boolean;
   contactName?: string;
   contactPhone?: string;

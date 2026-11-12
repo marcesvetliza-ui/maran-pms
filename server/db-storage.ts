@@ -906,7 +906,7 @@ export class DatabaseStorage implements IStorage {
     ]);
     const [roomType] = room ? await db.select().from(roomTypes).where(eq(roomTypes.id, room.roomTypeId)) : [undefined];
     const groupLink = groupLinkResult[0];
-    const [groupRow] = groupLink ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode, notes: groups.notes }).from(groups).where(eq(groups.id, groupLink.groupId)) : [undefined];
+    const [groupRow] = groupLink ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode, notes: groups.notes, masterFolioConfig: groups.masterFolioConfig }).from(groups).where(eq(groups.id, groupLink.groupId)) : [undefined];
     return {
       ...reservation,
       guest: guest!,
@@ -920,6 +920,7 @@ export class DatabaseStorage implements IStorage {
       groupName: groupRow?.name,
       groupCode: groupRow?.groupCode,
       groupNotes: groupRow?.notes,
+      groupMasterFolioConfig: groupRow ? groupRow.masterFolioConfig || "accommodation" : undefined,
     } as any;
   }
 
@@ -949,7 +950,7 @@ export class DatabaseStorage implements IStorage {
     // Build group map: reservationId → {groupId, groupName, groupCode}
     const groupLinkMap = new Map<string, string>((groupLinkList as any[]).map((l: any) => [l.reservationId, l.groupId]));
     const groupIds = [...new Set((groupLinkList as any[]).map((l: any) => l.groupId))];
-    const groupList = groupIds.length ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode, notes: groups.notes }).from(groups).where(inArray(groups.id, groupIds)) : [];
+    const groupList = groupIds.length ? await db.select({ id: groups.id, name: groups.name, groupCode: groups.groupCode, notes: groups.notes, masterFolioConfig: groups.masterFolioConfig }).from(groups).where(inArray(groups.id, groupIds)) : [];
     const groupMap = new Map(groupList.map((g: any) => [g.id, g]));
 
     const guestMap = new Map(guestList.map((g: any) => [g.id, g]));
@@ -987,6 +988,7 @@ export class DatabaseStorage implements IStorage {
         groupName: group?.name,
         groupCode: group?.groupCode,
         groupNotes: group?.notes,
+        groupMasterFolioConfig: group ? group.masterFolioConfig || "accommodation" : undefined,
       };
     });
   }

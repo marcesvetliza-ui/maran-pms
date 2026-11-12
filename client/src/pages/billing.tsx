@@ -912,7 +912,7 @@ function FacturaFormShell({ embedded, open, onOpenChange, title, children }: {
   );
 }
 
-export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded, requireLinkedRecipient = false }: {
+export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, initialValues, onSuccess, allowedTipos, cashArea, showPaymentMethod, allowCuentaCorriente = true, requiresEmission, paymentId, reservationId, reservationAdvancePreview, spaAccountId, groupId, groupPaymentId, groupPaymentGroupId, groupPaymentDraft, groupInvoiceSources, groupPaymentDestinations, groupFolioContext, lockCondicionIva, hideAddItems, lockItems, billingEntityType, billingEntityId, recipientProfile, compactMode, skipReview, operationKey, embedded, requireLinkedRecipient = false }: {
   open: boolean;
   onClose: () => void;
   /** Return a compact group confirmation to its originating payment draft. */
@@ -929,6 +929,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   paymentId?: string;
   /** Reservation owner required for a payment-linked fiscal claim. */
   reservationId?: string;
+  /** Verified original receipt and shared room/group fiscal sources. */
+  reservationAdvancePreview?: { amount: number; method: string; sourceChargeAmounts: Record<string, number>; sources: Array<{id: string; label: string; amount: number}> };
   /** SPA folio that must be closed and linked after invoice emission. */
   spaAccountId?: string;
   /** When set, the emitted invoice will be automatically linked to the group folio (for invoices emitted from the Resumen del Grupo without a payment) */
@@ -1902,6 +1904,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
       items,
       ...(paymentId ? { paymentId } : {}),
       ...(reservationId ? { reservaId: reservationId } : {}),
+      ...(reservationAdvancePreview ? { sourceChargeIds: Object.keys(reservationAdvancePreview.sourceChargeAmounts), sourceChargeAmounts: reservationAdvancePreview.sourceChargeAmounts } : {}),
       puntoVenta: effectivePuntoVentaNum ? parseInt(effectivePuntoVentaNum) : undefined,
       ...(resolvedGroupId ? {
         groupId: resolvedGroupId,
@@ -2455,6 +2458,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
 
         <Separator />
 
+        {reservationAdvancePreview && <div className="rounded-md border bg-blue-50/60 dark:bg-blue-950/20 p-3 text-sm space-y-2" data-testid="group-advance-invoice-preview">
+          <p>Se facturan ${fPeso(reservationAdvancePreview.amount)} del anticipo ya registrado. No se vuelve a cobrar.</p>
+          <ul>{reservationAdvancePreview.sources.map(source => <li key={source.id}>{source.label}: ${fPeso(source.amount)}</li>)}</ul>
+          <p className="text-xs text-muted-foreground">Estos importes descuentan lo pendiente de facturar en la habitación y en el grupo.</p>
+        </div>}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Ítems</Label>
@@ -2698,7 +2706,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
           </div>
         )}
 
-        {(cashArea || showPaymentMethod) && (requireLinkedRecipient || cashFormaPago !== "cuenta_corriente") && (
+        {!paymentId && (cashArea || showPaymentMethod) && (requireLinkedRecipient || cashFormaPago !== "cuenta_corriente") && (
           <div className="space-y-1">
             <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-800 p-2 space-y-2">
               <div className="flex items-center justify-between">
