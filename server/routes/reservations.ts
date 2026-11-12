@@ -1,3 +1,4 @@
+import {registerGroupAccountRoutes,groupAccountSnapshot} from '../billing/groupAccount';
 import {assertIndividualGroupPayment} from '../billing/individualGroupFolio';
 import {groupPersonalExtrasFactsQuery} from "../groupPersonalExtrasFacts";
 import { accommodationNights } from '@shared/accommodationNights';
@@ -123,6 +124,7 @@ function nightCount(checkIn: string, checkOut: string): number {
 const normalizeDate = (date: string) => date;
 
 export function registerReservationsRoutes(app: Express) {
+  registerGroupAccountRoutes(app);
   // Release counters are server-owned; relinking preserves persisted values.
   app.use("/api/payments",(req,_res,next)=>{
     if(req.body&&typeof req.body==='object')for(const field of ['invoiceData','invoiceRef']){
@@ -2840,7 +2842,7 @@ export function registerReservationsRoutes(app: Express) {
       }
       if (req.body.reservationId) {
         const reservation = await storage.getReservation(req.body.reservationId);
-        if (reservation && isReservationLocked(reservation)) {
+        if (reservation && isReservationLocked(reservation) && req.body.paymentPurpose!=='group_room_collection' && !((reservation as any).groupId&&req.body.paymentPurpose!=='personal_extras'&&req.body.invoiceRef)) {
           return res.status(403).json({ error: "No se puede agregar pagos a una reserva cerrada de días anteriores" });
         }
       }
@@ -2868,7 +2870,16 @@ export function registerReservationsRoutes(app: Express) {
           await groupPaymentLockClient.query("BEGIN");groupRowTransactionOpen=true;
           if(paymentRequest){const existing=await storage.getReservationPaymentRequest(paymentRequest);if(existing)return res.status(200).json(existing);}
           await groupPaymentLockClient.query("SELECT id FROM groups WHERE id=$1 FOR UPDATE",[groupLink.groupId]);
-          await assertIndividualGroupPayment(groupLink.groupId,reservationForPayment.id,req.body,paymentRequest?.id);
+          if(paymentPurpose==='group_room_collection'){
+            if(!paymentRequest||!['efectivo','cash','transferencia','transfer','tarjeta_debito','debit_card','tarjeta_credito','credit_card','mercadopago'].includes(String(req.body.method)))return res.status(400).json({error:'El cobro necesita una clave de operación y un medio de pago directo.'});
+            const account=await groupAccountSnapshot(reservationForPayment.id);
+            if((account.unassigned>0.009||account.reviewReceipts.length)&&req.body.acknowledgeUnassignedAdvance!==true)return res.status(409).json({notApplied:true,error:'Hay anticipos del grupo sin asignar. Elegí aplicarlos o confirmá que este es un cobro nuevo.'});
+            if(!['confirmed','checked_in','checked_out'].includes(account.status)||!Number.isFinite(Number(req.body.amount))||Number(req.body.amount)<=0||Number(req.body.amount)>account.balance+0.009)return res.status(409).json({notApplied:true,error:'El cobro supera el saldo pendiente de esta habitación.'});
+            req.body.receiptType='none';delete req.body.invoiceRef;delete req.body.invoiceLinkFailed;
+          }else {
+            if(!req.body.invoiceRef)return res.status(409).json({error:'Para cobrar esta habitación sin emitir otra factura, usá Registrar pago sin facturar desde su folio.',code:'GROUP_PAYMENT_REQUIRED'});
+            await assertIndividualGroupPayment(groupLink.groupId,reservationForPayment.id,req.body,paymentRequest?.id);
+          }
           groupIndividualFolio=true;
         }
         if (groupLink && !groupIndividualFolio) {
@@ -2940,6 +2951,7 @@ export function registerReservationsRoutes(app: Express) {
               cap,
             });
           }
+        } else if(paymentPurpose==='group_room_collection'&&!groupLink){return res.status(400).json({error:'La reserva no pertenece a un grupo.'});
         } else if (paymentPurpose === "personal_extras") {
           return res.status(400).json({ error: "personal_extras solo se permite en reservas vinculadas a un grupo" });
         }

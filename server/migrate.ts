@@ -1,3 +1,4 @@
+import {GROUP_PAYMENT_REQUEST_SCHEMA_SQL} from './groupPaymentRequest';
 import { RATE_PLAN_MISSING_CURRENCY_SQL } from "./ratePlanCurrencyMigration";
 import { BILLING_OPERATION_SCHEMA_SQL } from "./billing/operationJournal";
 import { CASH_CARD_RECTIFICATIONS_SQL } from './billing/cashCardRectifications';
@@ -1266,6 +1267,7 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "voided_by",
       "void_reason",
     ],
+    group_account_operations: ["id","fingerprint","group_id","group_payment_id","created_at"],
     group_payments: [
       "id",
       "group_id",
@@ -1641,7 +1643,7 @@ export async function runMigrations() {
     addColumnWithoutRerunNotice("reservations", "nightly_pricing", "jsonb"),
   ].join(";\n"))));
   await withTimeout("payments.request_identity", T, () =>
-    pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL)
+    pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL + GROUP_PAYMENT_REQUEST_SCHEMA_SQL)
   );
   await withTimeout("lost_found_items.shipping_details", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("lost_found_items", "shipping_details", "jsonb")))

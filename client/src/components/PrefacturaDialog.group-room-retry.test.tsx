@@ -30,3 +30,26 @@ it('retries the original group room transfer and closes only its reservation fro
  expect(writes.map(([url])=>String(url))).toEqual(['/api/billing/invoices','/api/payments','/api/reservations/room505/check-out']);
  const body=JSON.parse(String(writes[1][1]?.body));expect(body).toMatchObject({reservationId:id,method:'transferencia',amount:'796500.00',paymentRequestId:payment.paymentRequestId});
 });
+it('documents pending sources of a group room without preparing a second payment or a CC transfer',async()=>{
+ const id='room-doc-only';const writes:any[]=[];
+ const fetcher=vi.fn(async(url:any,options?:RequestInit)=>{
+  const path=String(url);
+  if(options?.method==='POST'){
+   writes.push({path,body:JSON.parse(String(options.body||'{}'))});
+   if(path==='/api/billing/invoices')return Response.json({id:506,tipoComprobante:'FB',puntoVenta:5,numero:506,montoTotal:'121.00'});
+  }
+  if(path.endsWith('/group-account'))return Response.json({groupId:'g-doc',balance:121,charges:121,paid:0,pendingInvoice:121,groupCoverage:{},advances:[],reviewReceipts:[],unassigned:0});
+  if(path.endsWith('/reception-status'))return Response.json({stage:'none'});
+  if(path.endsWith('/pending-operation'))return Response.json({pending:null});
+  if(path.endsWith('/folio'))return Response.json({groupId:'g-doc',reservationCode:'RES506',guestName:'Synthetic Guest',roomNumber:'506',nights:1,roomRate:'121',roomTotal:121,charges:[],payments:[],grandTotal:121,totalCharges:0,totalPayments:0,balance:121});
+  if(path==='/api/billing/config')return Response.json({puntoVenta:5,arcaAmbiente:'ficticio'});
+  return Response.json([]);
+ });vi.stubGlobal('fetch',fetcher);
+ render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><PrefacturaDialog open onClose={vi.fn()} reservationId={id} reservation={{id,groupId:'g-doc',guestId:'g',status:'checked_in',guest:{id:'g',firstName:'Synthetic',lastName:'Guest',condicionIva:'Consumidor Final'},room:{roomNumber:'506'}} as any} mode="billing"/></QueryClientProvider>);
+ expect(await screen.findByDisplayValue('Solo facturación; conserva los pagos')).toBeInTheDocument();
+ const button=await screen.findByTestId('button-registrar-emitir');await waitFor(()=>expect(button).toBeEnabled());
+ await userEvent.setup().click(button);
+ await waitFor(()=>expect(writes.some(w=>w.path==='/api/billing/invoices')).toBe(true));
+ expect(writes).toHaveLength(1);expect(writes[0].body).toMatchObject({reservaId:id,groupDocumentationOnly:true,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});
+ expect(writes[0].body.cashFormaPago).toBeUndefined();expect(writes[0].body.cashFormaPagoDetalle).toBeUndefined();expect(writes[0].body.reservationSettlementMethod).toBeUndefined();
+});

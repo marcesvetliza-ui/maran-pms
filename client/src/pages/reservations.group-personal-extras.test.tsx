@@ -25,7 +25,7 @@ const GROUP_RESERVATION = {
 };
 let previousPayments:any[]=[];
 
-describe("Reservation detail — group personal extras payment", () => {
+describe("Reservation detail — independent group room collection", () => {
   beforeEach(() => {
     previousPayments=[];
     queryClient.clear();
@@ -36,6 +36,7 @@ describe("Reservation detail — group personal extras payment", () => {
           status: 200, headers: { "Content-Type": "application/json" },
         });
       }
+      if(url.endsWith('/group-account'))return Response.json({groupId:GROUP_RESERVATION.groupId,reservationId:GROUP_RESERVATION.id,charges:90075,paid:previousPayments.reduce((n,p)=>n+Number(p.amount),0),balance:90075-previousPayments.reduce((n,p)=>n+Number(p.amount),0),pendingInvoice:90075,groupCoverage:{},advances:[],reviewReceipts:[],unassigned:0});
       if (url === "/api/reservation-edit-permission") {
         return new Response(JSON.stringify({ canEdit: false }), {
           status: 200, headers: { "Content-Type": "application/json" },
@@ -61,9 +62,10 @@ describe("Reservation detail — group personal extras payment", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    sessionStorage.clear();
   });
 
-  it("offers only direct personal-extra collection and tags the payment purpose", async () => {
+  it("records direct room money from the same folio without forcing group navigation or an invoice", async () => {
     const user = userEvent.setup();
     render(
       <QueryClientProvider client={queryClient}>
@@ -71,15 +73,11 @@ describe("Reservation detail — group personal extras payment", () => {
       </QueryClientProvider>,
     );
     await user.click(await screen.findByTestId("tab-folio"));
-    expect(await screen.findByTestId("group-personal-extras-warning")).toHaveTextContent("no se aceptan pagos de alojamiento");
+    expect(await screen.findByTestId("group-personal-extras-warning")).toHaveTextContent("acciones independientes");
     expect(fetch).toHaveBeenCalledWith(`/api/reservations/${GROUP_RESERVATION.id}`, { credentials: "include" });
-    await user.click(screen.getByTestId("button-add-payment"));
-    expect(screen.getByTestId("input-payment-amount-0")).toHaveValue(75);
-
-    await user.click(screen.getByTestId("select-payment-method-0"));
-    expect(screen.queryByText("Cta. Cte.")).not.toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByTestId("button-confirm-payment"));
+    await user.type(await screen.findByLabelText('Importe para la cuenta grupal'),'75');
+    expect(screen.getByRole('combobox',{name:'Medio del nuevo cobro'})).not.toHaveTextContent('Cuenta Corriente');
+    await user.click(screen.getByRole('button',{name:'Registrar pago sin facturar'}));
 
     await waitFor(() => {
       const request = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(([url, init]) =>
@@ -87,9 +85,9 @@ describe("Reservation detail — group personal extras payment", () => {
       expect(request).toBeDefined();
       expect(JSON.parse(String(request?.[1]?.body))).toEqual(expect.objectContaining({
         reservationId: GROUP_RESERVATION.id,
-        amount: "75.00",
-        billingTarget: "guest",
-        paymentPurpose: "personal_extras",
+        amount: "75",
+        receiptType: "none",
+        paymentPurpose: "group_room_collection",
       }));
       expect(JSON.parse(String(request?.[1]?.body)).method).not.toBe("cuenta_corriente");
     });
@@ -99,7 +97,9 @@ describe("Reservation detail — group personal extras payment", () => {
     const user=userEvent.setup();
     render(<QueryClientProvider client={queryClient}><ReservationDetailDialog reservation={GROUP_RESERVATION as any} open onOpenChange={vi.fn()} onCancel={vi.fn()}/></QueryClientProvider>);
     await user.click(await screen.findByTestId('tab-folio'));
-    await user.click(await screen.findByTestId('button-add-payment'));
-    expect(screen.getByTestId('input-payment-amount-0')).toHaveValue(50);
+    const section=await screen.findByRole('region',{name:'Cuenta de la habitación en el grupo'});
+    expect(section).toHaveTextContent('50,00');
+    await user.type(screen.getByLabelText('Importe para la cuenta grupal'),'50');
+    expect(screen.getByRole('button',{name:'Registrar pago sin facturar'})).toBeEnabled();
   });
 });

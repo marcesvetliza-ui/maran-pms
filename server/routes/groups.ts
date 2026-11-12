@@ -1,3 +1,7 @@
+import {normalizeToSpanishPaymentMethod} from '../payment-method';
+import {parseReservationPaymentRequest} from '../reservationPaymentRequest';
+import {getGroupPaymentRequest,replayGroupPayment} from '../groupPaymentRequest';
+import {allocateGroupMoney} from '@shared/groupAccount';
 import { registerGroupOccupantRoutes } from "./group-occupant";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
@@ -948,8 +952,8 @@ export function registerGroupsRoutes(app: Express) {
         (r: any) => r.status !== "cancelled" && r.status !== "checked_out"
       ).length;
       if (activeAssigned >= group.totalRooms) {
-        return res.status(400).json({ 
-          error: `El grupo ya tiene todas sus habitaciones asignadas (${group.totalRooms}). Para agregar más, primero agregue un bloque adicional.` 
+        return res.status(400).json({
+          error: `El grupo ya tiene todas sus habitaciones asignadas (${group.totalRooms}). Para agregar más, primero agregue un bloque adicional.`
         });
       }
       const reservation = await storage.assignRoomToGroup(
@@ -1267,6 +1271,8 @@ export function registerGroupsRoutes(app: Express) {
 
   app.post("/api/groups/:groupId/payment", requireAuth, async (req, res) => {
     try {
+      const paymentRequest=parseReservationPaymentRequest({...req.body,groupId:req.params.groupId,endpoint:req.path},String(req.user?.id||req.user?.username||''));
+      if(paymentRequest){const previous=await getGroupPaymentRequest(paymentRequest,req.params.groupId);if(previous)return res.json(replayGroupPayment(previous));}
       const group = await storage.getGroup(req.params.groupId);
       if (!group) {
         return res.status(404).json({ error: "Grupo no encontrado" });
@@ -1275,7 +1281,7 @@ export function registerGroupsRoutes(app: Express) {
       const {
         paymentRows: rawPaymentRows,
         amount: legacyAmount, method: legacyMethod, reference: legacyReference,
-        receiptType, distribution, paymentReservationId: rawPaymentReservationId, closeAllRooms, closeReservationIds: rawCloseReservationIds,
+        receiptType, distribution, distributionDetail:rawAllocation, paymentReservationId: rawPaymentReservationId, closeAllRooms, closeReservationIds: rawCloseReservationIds,
         ccEntityType: legacyCcEntityType, ccEntityId: legacyCcEntityId,
         billingEntityType: rawBillingEntityType, billingEntityId: rawBillingEntityId,
         receiverDetails, concepts, notes, invoiceData, settlementBreakdown: rawSettlementBreakdown,
@@ -1383,7 +1389,14 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: `Para cerrar las habitaciones elegidas, el pago debe coincidir exactamente con su saldo de $${selectedBalance.toFixed(2)}.` });
       }
 
-      const allocation = paymentReservationId ? {[paymentReservationId]:Number(totalAmount.toFixed(2))} : shouldCloseReservations
+      if(distribution==='manual'&&(shouldCloseReservations||paymentReservationId))return res.status(400).json({error:'El reparto manual se confirma por habitación, sin cerrar reservas ni combinarlo con otro destino.'});
+      let manualAllocation:Record<string,number>|undefined;
+      if(distribution==='manual'&&!shouldCloseReservations&&!paymentReservationId){
+        const cents=allocateGroupMoney(rawAllocation);
+        if(Object.values(cents).reduce((n,v)=>n+v,0)!==Math.round(totalAmount*100)||Object.entries(cents).some(([id,v])=>!activeIds.has(id)||v>Math.round((balancesById.get(id)||0)*100)))return res.status(400).json({error:'La distribución debe coincidir con el cobro y respetar los saldos de las habitaciones elegidas.'});
+        manualAllocation=Object.fromEntries(Object.entries(cents).map(([id,v])=>[id,v/100]));
+      }
+      const allocation = manualAllocation ? manualAllocation : paymentReservationId ? {[paymentReservationId]:Number(totalAmount.toFixed(2))} : shouldCloseReservations
         ? Object.fromEntries(requestedCloseIds
             .map((id) => ({ id, balance: balancesById.get(id) || 0 }))
             .filter((item) => item.balance > 0)
@@ -1396,7 +1409,7 @@ export function registerGroupsRoutes(app: Express) {
             // directed credit to other rooms.
             balances.map((item) => ({ id: item.id, balance: item.balance })),
             distribution,
-            nonFiscalAdvancesForAllocation > 0,
+            req.body.explicitAllocation!==true && nonFiscalAdvancesForAllocation > 0,
           ).allocations;
       const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
         destination: "group_distribution",
@@ -1418,6 +1431,7 @@ export function registerGroupsRoutes(app: Express) {
         supplied: rawSettlementBreakdown,
       });
       const recorded = await storage.recordGroupPayment({
+        paymentRequest,
         groupId: req.params.groupId,
         destination: "group_distribution",
         paymentRows,
@@ -2020,7 +2034,6 @@ export function registerGroupsRoutes(app: Express) {
       let masterExtras = 0;
       let masterTransferred = 0;
        let directAllPaid = 0;
-       let directAccommodationPaid = 0;
 
       for (const line of ledgerLines) {
         const accommodation = line.accommodationTotal;
@@ -2033,12 +2046,11 @@ export function registerGroupsRoutes(app: Express) {
           + (distributedParentAllocations.get(line.reservationId) || 0);
 
         masterAccommodation += accommodation;
-        if (config === "all") masterExtras += extras;
+        masterExtras += extras;
          directAllPaid += directPaid;
          // Direct room receipts have an explicit extras-first scope. This
          // keeps a payment for extras from reducing an accommodation-only
          // master folio while still preventing duplicate room collection.
-         directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
 
         const roomSourcePrefix = `reservation:${line.reservationId}:`;
         const roomSources = billing.sources.filter((source) => source.id.startsWith(roomSourcePrefix));
@@ -2077,11 +2089,7 @@ export function registerGroupsRoutes(app: Express) {
           })),
           financial,
           // balance that remains on the individual folio
-          individualBalance: config === "accommodation"
-            ? Math.max(0, extras - directPaid) // master allocations cover accommodation, not room extras
-            : config === "all"
-              ? 0 // everything covered by master
-              : financial.operationalBalance, // nothing covered by master
+          individualBalance: financial.operationalBalance,
         });
       }
 
@@ -2092,7 +2100,7 @@ export function registerGroupsRoutes(app: Express) {
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal + masterTransferred;
 
       const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
-      const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
+      const masterPaid = masterParentPaid + directAllPaid;
       const masterBalance = masterTotal - masterPaid;
 
       res.json({
@@ -2117,6 +2125,8 @@ export function registerGroupsRoutes(app: Express) {
   // POST master payment — pays the master folio, distributes to individual rooms
   app.post("/api/groups/:groupId/master-payment", requireAuth, async (req, res) => {
     try {
+      const paymentRequest=parseReservationPaymentRequest({...req.body,groupId:req.params.groupId,endpoint:req.path},String(req.user?.id||req.user?.username||''));
+      if(paymentRequest){const previous=await getGroupPaymentRequest(paymentRequest,req.params.groupId);if(previous)return res.json(replayGroupPayment(previous));}
       assertFinancialSchemaReady();
       const group = await storage.getGroup(req.params.groupId);
       if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
@@ -2127,7 +2137,7 @@ export function registerGroupsRoutes(app: Express) {
         paymentRows, amount, method, date, reference, notes, receiptType,
         billingEntityType, billingEntityId, receiverDetails, concepts, invoiceData,
         settlementBreakdown: rawSettlementBreakdown,
-        closeReservationIds: rawCloseReservationIds, distributionDetail: rawDistributionDetail,
+        closeReservationIds: rawCloseReservationIds, distributionDetail: rawDistributionDetail, leaveUnassigned,
       } = req.body;
       const rows = validateAndNormalizePaymentRows<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } }>(
         Array.isArray(paymentRows) && paymentRows.length > 0
@@ -2188,23 +2198,18 @@ export function registerGroupsRoutes(app: Express) {
       let masterAccommodation = 0;
       let masterExtras = 0;
       let directAllPaid = 0;
-      let directAccommodationPaid = 0;
       for (const line of ledgerLines) {
         const accommodation = line.accommodationTotal;
         masterAccommodation += accommodation;
         const extras = line.extrasTotal;
-        let roomAmount = accommodation;
-        if (config === "all") {
-          masterExtras += extras;
-          roomAmount += extras;
-        }
+        masterExtras += extras;
+        const roomAmount = accommodation + extras;
         const unparentedPaid = line.payments
           .filter((payment: any) => !payment.groupPaymentId || !allParentPaymentIds.has(payment.groupPaymentId))
           .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
         const alreadyApplied = unparentedPaid + (allParentAllocations.get(line.reservationId) || 0);
         const directPaid = unparentedPaid + (distributedParentAllocations.get(line.reservationId) || 0);
         directAllPaid += directPaid;
-        directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
         // Use the actual remaining room saldo for a new master distribution.
         roomAmounts.set(line.reservationId, Math.max(0, roomAmount - alreadyApplied));
       }
@@ -2214,7 +2219,7 @@ export function registerGroupsRoutes(app: Express) {
       const masterParentPaid = allGroupPayments
         .filter((payment: any) => masterPaymentIds.has(payment.id))
         .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
-      const masterBalance = masterTotal - masterParentPaid - (config === "all" ? directAllPaid : directAccommodationPaid);
+      const masterBalance = masterTotal - masterParentPaid - directAllPaid;
       if (closeReservationIds.length === 0 && totalAmount > masterBalance + 0.009) {
         return res.status(400).json({
           error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo del Folio Maestro de $${Math.max(0, masterBalance).toFixed(2)}.`,
@@ -2276,7 +2281,9 @@ export function registerGroupsRoutes(app: Express) {
          allocationEntries.push({ id: "__master_balance__", weight: historicalMasterBalance });
        }
        if (allocationEntries.length === 0) allocationEntries.push({ id: "__master_balance__", weight: 1 });
-      const allocation = confirmedAllocation
+      if(leaveUnassigned&&rows.some(row=>!['efectivo','transferencia','tarjeta_debito','tarjeta_credito','mercadopago'].includes(normalizeToSpanishPaymentMethod(row.method))||Number(row.retention?.monto||0)>0))return res.status(400).json({error:'Para dejar un anticipo sin asignar, usá efectivo, transferencia o tarjeta sin retenciones. Las liquidaciones con retención o cuenta corriente requieren indicar su destino.'});
+      if(leaveUnassigned&&(closeReservationIds.length||isFiscalGroupReceipt(evidence.receiptType)))return res.status(400).json({error:'El anticipo sin asignar no cierra habitaciones ni emite una factura.'});
+      const allocation = leaveUnassigned ? {'__unassigned__':totalAmount} : confirmedAllocation
         ?? distributeCents(Math.round(totalAmount * 100), allocationEntries);
       const destination = closeReservationIds.length > 0 ? "group_distribution" : "master_folio";
       const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
@@ -2297,6 +2304,7 @@ export function registerGroupsRoutes(app: Express) {
       });
 
       const recorded = await storage.recordGroupPayment({
+        paymentRequest,
         groupId: req.params.groupId,
         // A directed checkout is launched from the Master Folio UI, but its
         // explicit room allocations are operational room payments. Keeping
@@ -2616,7 +2624,6 @@ export function registerGroupsRoutes(app: Express) {
       let masterAccommodation = 0;
       let masterExtras = 0;
       let directAllPaid = 0;
-      let directAccommodationPaid = 0;
       const roomRows: any[] = [];
 
       for (const line of ledgerLines) {
@@ -2629,9 +2636,8 @@ export function registerGroupsRoutes(app: Express) {
           + (distributedParentAllocations.get(line.reservationId) || 0);
 
         masterAccommodation += accommodation;
-        if (config === "all") masterExtras += extras;
+        masterExtras += extras;
         directAllPaid += directPaid;
-        directAccommodationPaid += Math.min(accommodation, Math.max(0, directPaid - extras));
 
         const individualPayments = line.payments.map((p: any) => ({
           amount: parseFloat(p.amount),
@@ -2657,10 +2663,10 @@ export function registerGroupsRoutes(app: Express) {
       const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
       // Same formula as the on-screen master folio: master-destined group
-      // payments plus each room's direct payment (extras-first offset when
-      // the config only covers accommodation).
+      // payments plus each room's direct payment, independently of the
+      // commercial agreement with the organizer.
       const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
-      const masterPaid = masterParentPaid + (config === "all" ? directAllPaid : directAccommodationPaid);
+      const masterPaid = masterParentPaid + directAllPaid;
       const masterBalance = masterTotal - masterPaid;
       const roomRetentionsTotal = roomRows.reduce((sum: number, row: any) =>
         sum + row.individualPayments.reduce((s: number, p: any) => s + (p.retention?.monto || 0), 0), 0);
@@ -2695,7 +2701,7 @@ export function registerGroupsRoutes(app: Express) {
 
       doc.fontSize(14).font("Helvetica-Bold").text("DETALLE DE CUENTA", 40, 90);
       doc.fontSize(9).font("Helvetica").fillColor("#555555");
-      const coverageLabel = config === "accommodation" ? "Cubre: Solo Alojamiento" : config === "all" ? "Cubre: Alojamiento + Extras" : "Sin cobertura grupal";
+      const coverageLabel = "Cuenta consolidada · pagos aplicados por habitación";
       const configLabel = billingEntityName ? `${coverageLabel} | Factura: ${billingEntityName}` : coverageLabel;
       doc.text(configLabel, 40, 108);
       doc.fillColor("#000000");
@@ -2725,7 +2731,7 @@ export function registerGroupsRoutes(app: Express) {
       y += 12;
 
       // Room breakdown table header
-      const extrasColLabel = config === "none" ? "EXTRAS (directo)" : "EXTRAS";
+      const extrasColLabel = "EXTRAS";
       doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555")
         .text("HAB.", 40, y)
         .text("HUÉSPED", 80, y)
@@ -2844,16 +2850,7 @@ export function registerGroupsRoutes(app: Express) {
 
       // Coverage legend note below room table
       {
-        let legendText: string;
-        const entityRef = billingEntityName ? billingEntityName : "el organizador";
-        if (config === "none") {
-          legendText = `(*) Columna EXTRAS (directo): cargos facturados al huésped, no cubiertos por ${entityRef}.`;
-        } else if (config === "accommodation") {
-          legendText = `(*) Columna EXTRAS: cargos adicionales facturados directamente al huésped. Solo el alojamiento está cubierto por ${entityRef}.`;
-        } else {
-          // "all"
-          legendText = `(*) Columna EXTRAS: alojamiento y extras cubiertos por ${entityRef}. Sin cargos directos al huésped por estas columnas.`;
-        }
+        const legendText = "Alojamiento y consumos conservan su habitación de origen. Los pagos aplicados reducen su saldo; la facturación se controla por separado.";
         if (y > 740) { doc.addPage(); y = 40; }
         doc.fontSize(7.5).font("Helvetica").fillColor("#666666").text(legendText, 40, y, { width: 515 });
         y += 14;
@@ -2892,7 +2889,7 @@ export function registerGroupsRoutes(app: Express) {
       // Totals
       const totals = [
         ["Total alojamiento", `$${masterAccommodation.toLocaleString("es-AR")}`],
-        ...(config === "all" ? [["Extras (habitaciones)", `$${masterExtras.toLocaleString("es-AR")}`]] : []),
+        ["Extras (habitaciones)", `$${masterExtras.toLocaleString("es-AR")}`],
         ...(groupChargesTotal > 0 ? [["Cargos grupales", `$${groupChargesTotal.toLocaleString("es-AR")}`]] : []),
         ["TOTAL DETALLE DE CUENTA", `$${masterTotal.toLocaleString("es-AR")}`],
         ["Pagado", `$${masterPaid.toLocaleString("es-AR")}`],

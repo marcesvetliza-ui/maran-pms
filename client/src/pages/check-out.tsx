@@ -462,9 +462,7 @@ export default function CheckOutPage() {
                           data-testid={`button-checkout-${reservation.id}`}
                         >
                           <LogOut className="mr-2 h-4 w-4" />
-                          {((reservation as any).groupId || (reservation as any).isGroup)
-                            ? "Check-out grupal sin cobro"
-                            : "Realizar Check-out"}
+                          Realizar Check-out
                         </Button>
                       </div>
                     </CardContent>
@@ -639,9 +637,9 @@ export default function CheckOutPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Check-out grupal sin cobro</DialogTitle>
+            <DialogTitle>Resolver salida de la habitación</DialogTitle>
             <DialogDescription>
-              Confirme la salida operativa de esta habitación. Este proceso no abre Prefactura ni registra pagos o facturas.
+              Elegí cobrar o facturar desde el folio de esta habitación, o registrar sólo la salida dejando los saldos pendientes en el grupo.
             </DialogDescription>
           </DialogHeader>
           {selectedReservation && (
@@ -673,6 +671,7 @@ export default function CheckOutPage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setGroupCheckoutOpen(false)}>Cancelar</Button>
+            <Button variant="outline" onClick={()=>{setGroupCheckoutOpen(false);setPrefacturaOpen(true);}}>Cobrar o facturar esta habitación</Button>
             <Button
               onClick={() => selectedReservation && groupCheckoutMutation.mutate({ id: selectedReservation.id, reason: groupCheckoutReason })}
               disabled={!selectedReservation || groupCheckoutMutation.isPending}

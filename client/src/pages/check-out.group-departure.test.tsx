@@ -42,6 +42,13 @@ describe("CheckOutPage — group departure", () => {
     vi.unstubAllGlobals();
   });
 
+  it("offers collection and invoicing from the room instead of forcing departure without collection",async()=>{
+    const user=userEvent.setup();render(<QueryClientProvider client={queryClient}><CheckOutPage /></QueryClientProvider>);
+    await user.click(await screen.findByTestId("button-checkout-res-group-1"));
+    await user.click(screen.getByRole('button',{name:'Cobrar o facturar esta habitación'}));
+    expect(await screen.findByTestId('prefactura-open')).toBeInTheDocument();
+    expect((fetch as any).mock.calls.some(([,init]:any)=>init?.method==='POST')).toBe(false);
+  });
   it("confirms group departure without opening Prefactura and posts the explicit no-charge flag", async () => {
     const user = userEvent.setup();
     const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
@@ -49,7 +56,7 @@ describe("CheckOutPage — group departure", () => {
 
     expect(await screen.findByTestId("badge-group-res-group-1")).toHaveTextContent("Congreso de Derecho Administrativo · GR-042");
     await user.click(screen.getByTestId("button-checkout-res-group-1"));
-    expect(await screen.findByRole("heading", { name: "Check-out grupal sin cobro" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Resolver salida de la habitación" })).toBeInTheDocument();
     expect(screen.getAllByText(/GR-042/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Consultar folio grupal/)).toBeInTheDocument();
     expect(screen.queryByText(/Saldo provisional de habitación/)).not.toBeInTheDocument();

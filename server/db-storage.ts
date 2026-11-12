@@ -1,3 +1,4 @@
+import {getGroupPaymentRequest} from './groupPaymentRequest';
 import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
 import {withLodgingInventoryMutationLock} from './inventoryMutationLock';
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
@@ -3295,6 +3296,7 @@ export class DatabaseStorage implements IStorage {
    * payments are traceable allocations and must never be added again to a total.
    */
   async recordGroupPayment(input: {
+    paymentRequest?: import("./reservationPaymentRequest").ReservationPaymentRequest;
     groupId: string;
     destination: GroupPaymentDestination;
     paymentRows: Array<{ method: string; amount: string; reference?: string; retention?: { tipo: string; monto: number } | null }>;
@@ -3336,6 +3338,11 @@ export class DatabaseStorage implements IStorage {
     };
 
     return db.transaction(async (tx) => {
+      if(input.paymentRequest){
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`group-account-request:${input.paymentRequest.id}`}))`);
+        const previous=await getGroupPaymentRequest(input.paymentRequest,input.groupId,tx);
+        if(previous)return previous;
+      }
       // Serialize all collection attempts for the same group before validating
       // balances. This is what prevents two open dialogs from accepting the
       // same remaining saldo.
@@ -3656,13 +3663,10 @@ export class DatabaseStorage implements IStorage {
         `);
         const totals = master.rows[0] as any;
         const masterTotalCents = cents(totals.accommodation) + cents(totals.group_charges)
-          + (totals.config === "all" ? cents(totals.extras) : 0);
-        // Direct room payments are deterministically scoped extras-first. In
-        // an accommodation-only master folio, a payment that only covers room
-        // extras must not make the remaining accommodation unavailable.
-        const scopedDirectCents = totals.config === "all"
-          ? cents(totals.direct_all_paid)
-          : cents(totals.direct_accommodation_paid);
+          + cents(totals.extras);
+        // Parent receipts and independent room payments each reduce the
+        // consolidated account once; their room allocations are not new money.
+        const scopedDirectCents = cents(totals.direct_all_paid);
         const totalReceivedCents = cents(totals.master_parent_paid) + scopedDirectCents;
         const availableCents = masterTotalCents - totalReceivedCents;
         if (receivedCents > availableCents) {
@@ -3879,6 +3883,8 @@ export class DatabaseStorage implements IStorage {
         invoiceId: linkedInvoice ? Number(linkedInvoice.id) : null,
         invoiceRef: linkedInvoice ? JSON.stringify(input.invoiceData) : null,
       } as any).returning();
+
+      if(input.paymentRequest)await tx.execute(sql`INSERT INTO group_account_operations(id,fingerprint,group_id,group_payment_id) VALUES(${input.paymentRequest.id},${input.paymentRequest.fingerprint},${input.groupId},${groupPayment.id})`);
 
       if (linkedInvoice) {
         const reconciliationUpdate = linkedInvoice.group_payment_intent

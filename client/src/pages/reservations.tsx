@@ -1,3 +1,4 @@
+import {GroupRoomAccount} from '@/components/group-room-account';
 import { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
 import {ReservationChannexSettlement} from '@/components/channex-settlement';
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
@@ -2766,6 +2767,7 @@ export function ReservationDetailDialog({
 
   // Always-loaded for billing fallback (guest's default company/agency)
 
+  const detailGroupAccount=useQuery<any>({queryKey:['group-room-account',String(reservation.id)],enabled:open&&isGroupReservation,queryFn:async()=>(await apiRequest('GET',`/api/reservations/${reservation.id}/group-account`)).json()});
   // Invoices linked to this reservation (for timeline)
   const { data: folioInvoices = [] } = useQuery<any[]>({
     queryKey: ["/api/billing/invoices", "reserva", reservation.id],
@@ -3180,12 +3182,13 @@ export function ReservationDetailDialog({
   const totalNdAmount = folioNdMovements.reduce((sum: number, m: any) => sum + parseFloat(m.amount || "0"), 0);
   const totalToPay = subtotalRoom + totalConsumptions + totalNdAmount;
   const balance = totalToPay - totalPayments;
-  const availableAdvancePayments = getAvailableReservationAdvancePayments(safePayments, folioInvoices || []);
-  const paidPendingInvoice = getAvailableReservationAdvanceTotal(safePayments, folioInvoices || []);
+  const availableAdvancePayments = isGroupReservation?[]:getAvailableReservationAdvancePayments(safePayments, folioInvoices || []);
   const pendingCollection = Math.max(0, totalToPay - totalPayments);
-  const totalDocumented = getNetReservationDocumentedTotal(folioInvoices || []);
+  const groupFiscalKnown=!isGroupReservation || typeof detailGroupAccount.data?.pendingInvoice==='number';
+  const totalDocumented = isGroupReservation&&groupFiscalKnown ? Math.max(0,totalToPay-Number(detailGroupAccount.data.pendingInvoice)) : getNetReservationDocumentedTotal(folioInvoices || []);
   const hasRoomVoucher = (folioInvoices || []).some((invoice: any) => invoice.tipo_comprobante === "cierre_habitacion" && invoice.estado !== "anulada");
   const pendingBilling = Math.max(0, totalToPay - totalDocumented);
+  const paidPendingInvoice = isGroupReservation&&groupFiscalKnown?Math.max(0,totalPayments-totalDocumented):getAvailableReservationAdvanceTotal(safePayments, folioInvoices || []);
   const grossFolioBalance = Math.max(0, totalToPay);
 
   return (
@@ -4128,12 +4131,14 @@ export function ReservationDetailDialog({
               </DialogContent>
             </Dialog>
 
+            {isGroupReservation&&<GroupRoomAccount key={reservation.id} reservationId={String(reservation.id)} onSaved={async()=>{await refetchPayments();await refetchCharges();}}/>}
             <div className="border rounded-lg">
               <div className="wf-panel-heading compact">
-                <div><p className="wf-section-kicker">COBROS</p><h3>{isGroupReservation ? "Extras personales" : "Pagos registrados"}</h3></div>
+                <div><p className="wf-section-kicker">COBROS</p><h3>{isGroupReservation ? "Pagos aplicados" : "Pagos registrados"}</h3></div>
                 <div className="wf-heading-end"><span className="wf-paid-tag">${fmtMoney(totalPayments)} recibidos</span>
                 {!isLocked && (
                 <Button size="sm" variant="outline" onClick={() => {
+                  if(isGroupReservation){setShowFacturarMode('billing');setShowFacturar(true);return;}
                   if (!showAddPayment) {
                     const amt = isGroupReservation
                       ? (groupPersonalExtrasBalance > 0 ? groupPersonalExtrasBalance.toFixed(2) : "")
@@ -4142,9 +4147,9 @@ export function ReservationDetailDialog({
                     setPaymentRows([{ amount: amt, method: "efectivo", reference: "", billingTarget: "guest" }]);
                   }
                   setShowAddPayment(!showAddPayment);
-                }} data-testid="button-add-payment" disabled={isConfirmingPayment || (isGroupReservation && groupPersonalExtrasBalance <= 0.009)}>
+                }} data-testid="button-add-payment" disabled={isConfirmingPayment}>
                   <Plus className="h-4 w-4 mr-1" />
-                  {isGroupReservation ? "Cobrar extras personales" : "Registrar pago"}
+                  {isGroupReservation ? "Facturar o resolver cuenta" : "Registrar pago"}
                 </Button>
                 )}
                 </div>
@@ -4152,7 +4157,7 @@ export function ReservationDetailDialog({
 
               {isGroupReservation && (
                 <div className="mx-3 mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200" data-testid="group-personal-extras-warning">
-                  Esta reserva pertenece a un grupo. Aquí solo se cobran extras personales pendientes (estimado: ${fmtMoney(String(groupPersonalExtrasBalance))}); no se aceptan pagos de alojamiento, Cuenta Corriente ni pagos a empresa/agencia. El saldo grupal de alojamiento se gestiona en el folio del grupo.
+                  Los pagos y las aplicaciones de anticipos actualizan esta habitación y el grupo. Facturar, cobrar y registrar la salida son acciones independientes.
                 </div>
               )}
 
@@ -4596,9 +4601,9 @@ export function ReservationDetailDialog({
               })()}
 
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 p-3 border-t text-sm">
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">{hasRoomVoucher ? "Comprobantes emitidos (neto)" : "Facturado neto"}</span><span>${fmtMoney(totalDocumented)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">{hasRoomVoucher ? "Comprobantes emitidos (neto)" : "Facturado neto"}</span><span>{groupFiscalKnown?`$${fmtMoney(totalDocumented)}`:"Consultar cobertura grupal"}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-muted-foreground">Cobros registrados</span><span className="text-green-600" data-testid="text-total-payments">${fmtMoney(totalPayments)}</span></div>
-                <div className="flex justify-between gap-2"><span className="text-muted-foreground">{hasRoomVoucher ? "Pendiente de comprobante" : "Pendiente de facturación"}</span><span className="text-blue-700 dark:text-blue-300">${fmtMoney(pendingBilling)}</span></div>
+                <div className="flex justify-between gap-2"><span className="text-muted-foreground">{hasRoomVoucher ? "Pendiente de comprobante" : "Pendiente de facturación"}</span><span className="text-blue-700 dark:text-blue-300">{groupFiscalKnown?`$${fmtMoney(pendingBilling)}`:"Consultar cobertura grupal"}</span></div>
                 <div className="flex justify-between gap-2"><span className="text-muted-foreground">Anticipos disponibles</span><span className="text-amber-600">${fmtMoney(paidPendingInvoice)}</span></div>
               </div>
             </div>
@@ -4653,7 +4658,7 @@ export function ReservationDetailDialog({
                 </div>
                 <div className={`flex justify-between mt-2 rounded-md border border-blue-200 bg-blue-50/70 px-3 py-2 text-blue-800 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-200 ${pendingBilling > 0.01 ? "font-bold text-lg" : "font-medium text-sm"}`}>
                   <span>{hasRoomVoucher ? "PENDIENTE DE COMPROBANTE" : "PENDIENTE DE FACTURACIÓN"}</span>
-                  <span>${fmtMoney(pendingBilling)}</span>
+                  <span>{groupFiscalKnown?`$${fmtMoney(pendingBilling)}`:"Consultar cobertura grupal"}</span>
                 </div>
                 {pendingBilling > 0.01 && !showAddPayment && !isLocked && (
                   <div className="flex flex-col gap-2 mt-2">
@@ -4870,7 +4875,7 @@ export function ReservationDetailDialog({
               );
             })()}
             </div>
-            <ReservationFolioSummary lodging={subtotalRoom} consumptions={totalConsumptions + totalNdAmount} payments={totalPayments} total={totalToPay} pendingCollection={pendingCollection} pendingBilling={pendingBilling} hasRoomVoucher={hasRoomVoucher} nights={reservation.nights} chargesCount={activeConsumptionCharges.length + folioNdMovements.length} />
+            <ReservationFolioSummary lodging={subtotalRoom} consumptions={totalConsumptions + totalNdAmount} payments={totalPayments} total={totalToPay} pendingCollection={pendingCollection} pendingBillingKnown={groupFiscalKnown} pendingBilling={pendingBilling} hasRoomVoucher={hasRoomVoucher} nights={reservation.nights} chargesCount={activeConsumptionCharges.length + folioNdMovements.length} />
             </div>
           </TabsContent>
 
@@ -5538,7 +5543,7 @@ export function ReservationDetailDialog({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Check-out grupal sin cobro</DialogTitle>
+            <DialogTitle>Resolver salida de la habitación</DialogTitle>
             <DialogDescription>
               Reserva {reservation.id} · Grupo {(reservation as any).groupCode || (reservation as any).groupName || (reservation as any).groupId || "sin ID"}.
               Se cerrará la habitación sin abrir Prefactura, registrar pagos ni cargar saldo a Cuenta Corriente.
@@ -5559,6 +5564,7 @@ export function ReservationDetailDialog({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setGroupDepartureConfirmOpen(false)}>Cancelar</Button>
+            <Button variant="outline" onClick={()=>{setGroupDepartureConfirmOpen(false);setShowFacturarMode("checkout");setShowFacturar(true);}}>Cobrar o facturar esta habitación</Button>
             <Button
               onClick={() => groupDepartureMutation.mutate()}
               disabled={groupDepartureMutation.isPending}
@@ -7008,7 +7014,7 @@ export default function ReservationsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Check-out grupal sin cobro</DialogTitle>
+            <DialogTitle>Resolver salida de la habitación</DialogTitle>
             <DialogDescription>
               Reserva {listGroupCheckoutReservation?.id} · Grupo {(listGroupCheckoutReservation as any)?.groupCode || (listGroupCheckoutReservation as any)?.groupName || (listGroupCheckoutReservation as any)?.groupId || "sin ID"}.
             </DialogDescription>

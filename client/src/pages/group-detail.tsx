@@ -1,3 +1,4 @@
+import {GroupAdvanceAllocation} from '@/components/group-advance-allocation';
 import { ReservationNightlyPricing } from "@/components/reservation-nightly-pricing";
 import { GroupOccupantDialog } from "@/components/group-occupant-dialog";
 import { useState, useEffect, useRef } from "react";
@@ -912,6 +913,8 @@ export default function GroupDetailPage() {
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
   const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string; retencionEnabled?: boolean; retencionTipo?: "iibb" | "ganancias"; retencionMonto?: string}>>([{method: "cash", amount: "", reference: ""}]);
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
+  const [groupPaymentManualAmounts,setGroupPaymentManualAmounts]=useState<Record<string,string>>({});
+  const [groupPaymentLeaveUnassigned,setGroupPaymentLeaveUnassigned]=useState(false);
   const [groupPaymentTargetRoom,setGroupPaymentTargetRoom]=useState('all');
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
@@ -936,6 +939,9 @@ export default function GroupDetailPage() {
   const [groupPaymentDomicilio, setGroupPaymentDomicilio] = useState("");
   const [groupPaymentItems, setGroupPaymentItems] = useState<GItem[]>([gNewItem()]);
   const [showGroupFacturaDialog, setShowGroupFacturaDialog] = useState(false);
+  const receiptOperationKey=`group-receipt-operation:${groupId}`;
+  const [pendingReceipt,setPendingReceipt]=useState<{endpoint:string;body:Record<string,any>}|null>(()=>{try{return JSON.parse(sessionStorage.getItem(receiptOperationKey)||'null');}catch{return null;}});
+  useEffect(()=>{try{setPendingReceipt(JSON.parse(sessionStorage.getItem(receiptOperationKey)||'null'));}catch{setPendingReceipt(null);}},[receiptOperationKey]);
   const [pendingGroupPaymentDraft, setPendingGroupPaymentDraft] = useState<{ endpoint: string; body: Record<string, any> } | null>(null);
   const [groupFacturaFromResumen, setGroupFacturaFromResumen] = useState(false);
   const [groupInvoiceDistribution, setGroupInvoiceDistribution] = useState<"none" | "totalizados" | "detallados">("detallados");
@@ -949,6 +955,8 @@ export default function GroupDetailPage() {
     setGroupPaymentRows([{method: "cash", amount: "", reference: ""}]);
     setGroupPaymentReceiptType("sin_comprobante");
     setGroupPaymentDistribution("equal");
+    setGroupPaymentManualAmounts({});
+    setGroupPaymentLeaveUnassigned(false);
     setGroupPaymentTargetRoom("all");
     setGroupPaymentCloseAll(false);
     setGroupPaymentCloseReservationIds([]);
@@ -1225,6 +1233,8 @@ export default function GroupDetailPage() {
 
   const refreshGroupBillingState = async () => {
     await Promise.all([
+      queryClient.invalidateQueries({queryKey:['group-room-account']}),
+      queryClient.invalidateQueries({queryKey:['group-advance-availability',groupId]}),
       queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "invoice-snapshot"], exact: true }),
       queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "folio"], exact: true }),
       queryClient.refetchQueries({ queryKey: ["/api/groups", groupId, "master-folio"], exact: true }),
@@ -1521,6 +1531,7 @@ export default function GroupDetailPage() {
         return { endpoint: `/api/groups/${groupId}/master-payment`, body: {
           paymentRows: rowsPayload,
           receiptType: groupPaymentReceiptType === "sin_comprobante" ? "none" : groupPaymentReceiptType,
+          leaveUnassigned:groupPaymentLeaveUnassigned,
           closeReservationIds: groupPaymentCloseAll ? groupPaymentCloseReservationIds : [],
           distributionDetail: groupPaymentCloseAll
             ? Object.fromEntries(groupPaymentCloseReservationIds.map((id) => [id, Number(groupPaymentCloseAmounts[id] || 0)]))
@@ -1536,10 +1547,11 @@ export default function GroupDetailPage() {
         paymentRows: rowsPayload,
         receiptType: groupPaymentReceiptType,
         distribution: groupPaymentDistribution,
+        explicitAllocation:true,
         ...(groupPaymentTargetRoom!=="all"?{paymentReservationId:groupPaymentTargetRoom}:{}),
         closeAllRooms: groupPaymentCloseAll,
         closeReservationIds: groupPaymentCloseReservationIds,
-        distributionDetail: groupPaymentCloseAll
+        distributionDetail: groupPaymentDistribution==='manual' ? Object.fromEntries(Object.entries(groupPaymentManualAmounts).filter(([,v])=>Number(v)>0).map(([id,v])=>[id,Number(v)])) : groupPaymentCloseAll
           ? Object.fromEntries(groupPaymentCloseReservationIds.map((id) => [id, Number(groupPaymentCloseAmounts[id] || 0)]))
           : undefined,
         billingEntityType: groupPaymentCcEntityType,
@@ -1552,11 +1564,15 @@ export default function GroupDetailPage() {
 
   const groupPaymentMutation = useMutation({
     mutationFn: async () => {
-      const draft = buildGroupPaymentDraft();
+      const draft:{endpoint:string;body:Record<string,any>} = pendingReceipt || buildGroupPaymentDraft();
+      if(!pendingReceipt){draft.body.paymentRequestId=crypto.randomUUID();sessionStorage.setItem(receiptOperationKey,JSON.stringify(draft));setPendingReceipt(draft);}
       return apiRequest("POST", draft.endpoint, draft.body);
     },
     onSuccess: async (res) => {
       const data = await res.json().catch(() => ({}));
+      sessionStorage.removeItem(receiptOperationKey);setPendingReceipt(null);
+      queryClient.invalidateQueries({queryKey:['group-advance-availability',groupId]});
+      queryClient.invalidateQueries({queryKey:['group-room-account']});
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
@@ -1570,7 +1586,9 @@ export default function GroupDetailPage() {
 
       const isMaster = groupPaymentDestino === "master";
 
-      if (groupPaymentCloseAll) {
+      if(data.replayed){
+        toast({title:"La operación ya estaba registrada",description:"Se actualizó el estado del grupo sin repetir cobros."});
+      } else if (groupPaymentCloseAll) {
         if (data.balanceDiff && Math.abs(data.balanceDiff) > 0.01) {
           toast({
             title: "Pago registrado con diferencia",
@@ -1593,6 +1611,7 @@ export default function GroupDetailPage() {
       }
     },
     onError: (e: any) => {
+      if(/^(400|409):/.test(String(e?.message))){sessionStorage.removeItem(receiptOperationKey);setPendingReceipt(null);}
       toast({ title: "Error al registrar pago grupal", description: parseApiError(e), variant: "destructive" });
     },
   });
@@ -2029,7 +2048,8 @@ export default function GroupDetailPage() {
   const groupPaymentHasRequiredReferences = groupPaymentIsFiscal || groupPaymentRows
     .filter(r => parseFloat(r.amount || "0") > 0)
     .every(r => !!r.reference.trim());
-  const groupPaymentCanSubmit = !groupPaymentMutation.isPending
+  const manualValid=groupPaymentDistribution!=='manual'||(Math.round(Object.values(groupPaymentManualAmounts).reduce((n,v)=>n+Number(v||0),0)*100)===Math.round(groupPaymentGrossPaymentTotal*100)&&Object.entries(groupPaymentManualAmounts).every(([id,v])=>Number(v||0)>=0&&Number(v||0)<=Number(folio?.reservations?.find(r=>r.reservationId===id)?.balance||0)+0.009));
+  const groupPaymentCanSubmit = !pendingReceipt&&manualValid&& !groupPaymentMutation.isPending
     && groupPaymentHasRequiredPaymentSum
     && (!groupPaymentIsFiscal || groupPaymentFiscalAvailable > 0)
     // A receiver is never optional, including an Anticipo.
@@ -2613,13 +2633,15 @@ export default function GroupDetailPage() {
           ) : masterFolio ? (
             <div className="space-y-5">
 
+              {pendingReceipt&&<div role="status" className="rounded border p-3 text-sm">Hay un cobro pendiente de confirmar. Conservamos sus importes y distribución. <Button disabled={groupPaymentMutation.isPending} onClick={()=>groupPaymentMutation.mutate()}>Reintentar cobro pendiente</Button></div>}
+              <GroupAdvanceAllocation key={groupId} groupId={groupId} onSaved={async()=>{await refreshGroupBillingState();}}/>
               {/* ── Configuración del Folio Maestro ── */}
               <Card>
                 <CardContent className="pt-4 pb-3">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                     <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                       <Settings2 className="h-4 w-4" />
-                      <span>¿Qué cubre el organizador?</span>
+                      <span>Acuerdo con el organizador (informativo)</span>
                     </div>
                     <div className="flex gap-2 flex-wrap">
                       {(["accommodation", "all", "none"] as MasterFolioConfig[]).map((cfg) => {
@@ -2643,15 +2665,7 @@ export default function GroupDetailPage() {
                         );
                       })}
                     </div>
-                    {masterFolio.config === "accommodation" && (
-                      <span className="text-xs text-muted-foreground">El organizador paga el alojamiento + cargos grupales. Los consumos individuales van a cada habitación.</span>
-                    )}
-                    {masterFolio.config === "all" && (
-                      <span className="text-xs text-muted-foreground">El organizador paga todo. Los extras de cada hab. también van al Folio Maestro.</span>
-                    )}
-                    {masterFolio.config === "none" && (
-                      <span className="text-xs text-muted-foreground">Cada habitación lleva su cuenta. Si todas salieron con deuda, el saldo pendiente puede conciliarse y cobrarse desde el grupo sin reabrir habitaciones.</span>
-                    )}
+                    <span className="text-xs text-muted-foreground">Sirve como referencia. Cada habitación puede cobrar o facturar su saldo; los pagos se asignan explícitamente.</span>
                   </div>
                 </CardContent>
               </Card>
@@ -2695,7 +2709,7 @@ export default function GroupDetailPage() {
               {/* ══════════════════════════════════════════════════ */}
               {/* FOLIO MAESTRO — solo cuando config !== "none"      */}
               {/* ══════════════════════════════════════════════════ */}
-              {masterFolio.config !== "none" && (
+              {masterFolio && (
                 <Card className="border-2 border-primary/20">
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between flex-wrap gap-3">
@@ -2704,10 +2718,10 @@ export default function GroupDetailPage() {
                           <Building2 className="h-5 w-5 text-primary" />
                           Folio Maestro
                           <Badge variant="outline" className="text-xs font-normal ml-1">
-                            {masterFolio.config === "accommodation" ? "Alojamiento + Cargos grupales" : "Todo incluido"}
+                            Cuenta consolidada
                           </Badge>
                         </CardTitle>
-                          <CardDescription>Asignación operativa de cargos y cobros del organizador; no modifica el total fiscal del comprobante.</CardDescription>
+                          <CardDescription>Alojamiento, consumos y pagos del grupo. El cobro y la facturación se controlan por separado.</CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
                         <Button
@@ -2742,7 +2756,7 @@ export default function GroupDetailPage() {
                         <p className="text-xs text-muted-foreground mb-1">Alojamiento</p>
                         <p className="text-lg font-bold text-blue-700 dark:text-blue-400">${masterFolio.masterAccommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
-                      {masterFolio.config === "all" && (
+                      {masterFolio && (
                         <div className="rounded-lg bg-purple-50 dark:bg-purple-950/30 p-3 border border-purple-200 dark:border-purple-800">
                           <p className="text-xs text-muted-foreground mb-1">Extras (hab.)</p>
                           <p className="text-lg font-bold text-purple-700 dark:text-purple-400">${masterFolio.masterExtras.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
@@ -3035,8 +3049,8 @@ export default function GroupDetailPage() {
                   {masterFolio.config !== "none" && (
                     <CardDescription>
                       {masterFolio.config === "accommodation"
-                        ? "El alojamiento está cubierto por el Folio Maestro. Aquí se ven los consumos individuales de cada habitación."
-                        : "El Folio Maestro cubre todo. Las cuentas individuales deberían quedar en cero."}
+                        ? "El folio consolida alojamiento, consumos y pagos aplicados por habitación."
+                        : "Cada habitación conserva su saldo; los cobros y comprobantes actualizan el total del grupo."}
                     </CardDescription>
                   )}
                 </CardHeader>
@@ -3097,7 +3111,7 @@ export default function GroupDetailPage() {
                                     <Badge className="bg-primary/10 text-primary text-xs border-0">Folio Maestro</Badge>
                                   )}
                                 </div>
-                                <span className={`font-medium ${masterFolio.config !== "none" ? "text-muted-foreground line-through" : ""}`}>
+                                <span className="font-medium">
                                   ${r.accommodation.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                                 </span>
                               </div>
@@ -3107,7 +3121,7 @@ export default function GroupDetailPage() {
                                 <div>
                                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
                                     Consumos individuales
-                                    {masterFolio.config === "all" && <span className="ml-2 text-muted-foreground font-normal normal-case">(cubiertos por Folio Maestro)</span>}
+                                    {masterFolio.config === "all" && <span className="ml-2 text-muted-foreground font-normal normal-case">(incluidos en el total del grupo)</span>}
                                   </p>
                                   <div className="space-y-1">
                                     {r.charges.map((c: any) => (
@@ -3129,11 +3143,11 @@ export default function GroupDetailPage() {
                                               className="h-6 text-xs px-2"
                                               onClick={() => transferChargeMutation.mutate({ chargeId: c.id })}
                                               disabled={transferChargeMutation.isPending}
-                                              title="Mover al Folio Maestro"
+                                              title="Mover el cargo fuera de esta habitación al grupo"
                                               data-testid={`button-transfer-charge-${c.id}`}
                                             >
                                               <ArrowRight className="h-3 w-3 mr-1" />
-                                              Al maestro
+                                              Mover al grupo
                                             </Button>
                                           )}
                                         </div>
@@ -3196,9 +3210,7 @@ export default function GroupDetailPage() {
                               {/* Saldo individual */}
                               <div className={`flex items-center justify-between text-sm font-semibold rounded p-2 ${hasDebt ? "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400" : "bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"}`}>
                                 <span>
-                                  {masterFolio.config === "none" ? "Saldo total pendiente" :
-                                   masterFolio.config === "accommodation" ? "Saldo en consumos individuales" :
-                                   "Saldo individual (debe ser $0)"}
+                                  Saldo pendiente de esta habitación
                                 </span>
                                 <span>${indivBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
                               </div>
@@ -3971,13 +3983,7 @@ export default function GroupDetailPage() {
             const retentionsTotal = groupPaymentRows.reduce((s, r) => s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
             const cajaToday = calculateGroupCajaToday(groupPaymentRows);
             // The master folio remains collectible after every room has checked out.
-            const masterAvailable = !!masterFolio && (
-              masterFolio.config !== "none" ||
-              (group.reservations.length > 0 &&
-                group.reservations.every((reservation: any) =>
-                  reservation.status === "checked_out" || reservation.status === "cancelled") &&
-                Number(masterFolio.masterBalance || 0) > 0.01)
-            );
+            const masterAvailable = !!masterFolio;
             const isMaster = groupPaymentDestino === "master";
             const priorBalance = isMaster ? (masterFolio?.masterBalance ?? 0) : (folio?.totals.balance ?? 0);
             const isRI = groupPaymentCondicionIva === "Responsable Inscripto";
@@ -4025,17 +4031,17 @@ export default function GroupDetailPage() {
             }));
             const effectiveAllocationMode = resolveAutomaticGroupRoomAllocationMode(
               groupPaymentDistribution,
-              nonFiscalAdvances > 0,
+              false,
             );
             const cappedApplications = allocateBalanceCappedGroupRooms(
               applicationTotal,
               roomBalances.map((row) => ({ id: row.id, balance: row.amount })),
               groupPaymentDistribution,
-              nonFiscalAdvances > 0,
+              false,
             );
             const roomApplicationPreview = roomBalances.map((row, index) => ({
               ...row,
-              applied: cappedApplications.allocations[row.id] || 0,
+              applied: groupPaymentDistribution==='manual'?Number(groupPaymentManualAmounts[row.id]||0):cappedApplications.allocations[row.id] || 0,
             }));
             const exceedsFiscalAvailable = isFiscal && exceedsGroupInvoiceAvailable(itemsTotal, fiscalAvailable);
             const conceptsMismatchPayment = isFiscal
@@ -4739,6 +4745,7 @@ export default function GroupDetailPage() {
                   </div>
                 )}
 
+                {isMaster&&!isFiscal&&<label className="flex gap-2 text-sm"><Checkbox checked={groupPaymentLeaveUnassigned} onCheckedChange={v=>{setGroupPaymentLeaveUnassigned(v===true);setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);}}/>Dejar este anticipo sin asignar a habitaciones</label>}
                 {/* 7. DISTRIBUCIÓN + CIERRE DIRIGIDO */}
                 <>
                   <div className="border-t" />
@@ -4746,19 +4753,21 @@ export default function GroupDetailPage() {
                     {!isMaster && (
                       <div>
                         <Label>Aplicar el pago a</Label>
-                        <Select value={groupPaymentTargetRoom} onValueChange={value=>{setGroupPaymentTargetRoom(value);setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);setGroupPaymentCloseAmounts({});if(value!=='all'){const balance=Math.max(0,Number(folio?.reservations?.find(r=>r.reservationId===value)?.balance||0));setGroupPaymentRows(rows=>rows.length===1?[{...rows[0],amount:balance.toFixed(2)}]:rows);setGroupPaymentItems(gItemsFromSimple(buildGroupInvoiceItems((groupInvoiceSnapshot?.sources||[]).filter((source:any)=>String(source.id||'').startsWith(`reservation:${value}:`)),groupInvoiceDistribution,group?.name||groupId,balance)));}}}>
+                        <Select value={groupPaymentTargetRoom} onValueChange={value=>{setGroupPaymentTargetRoom(value);setGroupPaymentDistribution('equal');setGroupPaymentManualAmounts({});setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);setGroupPaymentCloseAmounts({});if(value!=='all'){const balance=Math.max(0,Number(folio?.reservations?.find(r=>r.reservationId===value)?.balance||0));setGroupPaymentRows(rows=>rows.length===1?[{...rows[0],amount:balance.toFixed(2)}]:rows);setGroupPaymentItems(gItemsFromSimple(buildGroupInvoiceItems((groupInvoiceSnapshot?.sources||[]).filter((source:any)=>String(source.id||'').startsWith(`reservation:${value}:`)),groupInvoiceDistribution,group?.name||groupId,balance)));}}}>
                           <SelectTrigger data-testid="select-group-payment-target-room"><SelectValue /></SelectTrigger>
                           <SelectContent><SelectItem value="all">Todas las habitaciones</SelectItem>{groupPaymentActiveReservations.map(r=><SelectItem key={r.id} value={r.id}>Sólo hab. {r.room?.roomNumber||'—'} · {r.guest?.lastName||''} {r.guest?.firstName||''}</SelectItem>)}</SelectContent>
                         </Select>
+                        {groupPaymentDistribution==='manual'&&<div className="space-y-2">{groupPaymentActiveReservations.map(r=><label key={r.id} className="flex gap-2 text-sm">Hab. {r.room?.roomNumber||'—'}<Input aria-label={`Asignar cobro a ${r.room?.roomNumber||r.id}`} type="number" min="0" step="0.01" value={groupPaymentManualAmounts[r.id]||''} onChange={e=>setGroupPaymentManualAmounts({...groupPaymentManualAmounts,[r.id]:e.target.value})}/></label>)}{!manualValid&&<p className="text-destructive">La asignación debe coincidir con el importe cobrado y respetar los saldos.</p>}</div>}
                         {groupPaymentTargetRoom!=='all'&&groupPaymentIsFiscal&&nonFiscalAdvances>0.009&&<p role="alert" className="text-sm text-destructive">Hay anticipos grupales sin facturar. Revisá su aplicación antes de facturar esta habitación.</p>}
                         {groupPaymentTargetRoom!=='all'&&<p className="text-sm mt-2">Se aplica únicamente a la habitación elegida. No se cierra la reserva ni se reparte entre otras habitaciones.</p>}
                         <Label>Modo automático entre habitaciones</Label>
-                        <Select value={effectiveAllocationMode} onValueChange={setGroupPaymentDistribution} disabled={groupPaymentTargetRoom!=='all'}>
+                        <Select value={groupPaymentDistribution==='manual'?'manual':effectiveAllocationMode} onValueChange={value=>{setGroupPaymentDistribution(value);if(value==='manual'){setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);}}} disabled={groupPaymentTargetRoom!=='all'}>
                           <SelectTrigger data-testid="select-group-payment-distribution"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {nonFiscalAdvances <= 0 && <SelectItem value="equal">Partes iguales</SelectItem>}
+                            <SelectItem value="manual">Asignar importes por habitación</SelectItem>
+                            <SelectItem value="equal">Partes iguales, hasta el saldo de cada habitación</SelectItem>
                             <SelectItem value="proportional">
-                              {nonFiscalAdvances > 0 ? "Proporcional al saldo restante (por anticipo previo)" : "Proporcional al saldo"}
+                              Proporcional al saldo
                             </SelectItem>
                           </SelectContent>
                         </Select>
@@ -4772,7 +4781,7 @@ export default function GroupDetailPage() {
                     <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
                       <Checkbox
                         id="close-all-rooms"
-                        disabled={groupPaymentTargetRoom!=='all'}
+                        disabled={groupPaymentLeaveUnassigned||groupPaymentTargetRoom!=='all'||groupPaymentDistribution==='manual'}
                         checked={groupPaymentCloseAll}
                         onCheckedChange={(value) => {
                           const checked = !!value;
@@ -5002,7 +5011,7 @@ export default function GroupDetailPage() {
           groupPaymentDraft={pendingGroupPaymentDraft || undefined}
           groupPaymentGroupId={pendingGroupPaymentDraft ? groupId : undefined}
           groupId={groupFacturaFromResumen ? groupId : undefined}
-          groupInvoiceSources={groupPaymentTargetRoom!=="all" ? (groupInvoiceSnapshot?.sources??[]).filter((source:any)=>String(source.id||"").startsWith(`reservation:${groupPaymentTargetRoom}:`)) : groupPaymentDestino === "master" && masterFolio?.config === "accommodation"
+          groupInvoiceSources={groupPaymentTargetRoom!=="all" ? (groupInvoiceSnapshot?.sources??[]).filter((source:any)=>String(source.id||"").startsWith(`reservation:${groupPaymentTargetRoom}:`)) : groupPaymentReceiptType === "factura_t"
             ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
             : groupInvoiceSnapshot?.sources}
           groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
@@ -5081,7 +5090,7 @@ export default function GroupDetailPage() {
             }}
             groupPaymentDraft={pendingGroupPaymentDraft || undefined}
             groupPaymentGroupId={pendingGroupPaymentDraft ? groupId : undefined}
-            groupInvoiceSources={masterFolio?.config === "accommodation"
+            groupInvoiceSources={groupPaymentReceiptType === "factura_t"
               ? (groupInvoiceSnapshot?.sources ?? []).filter((source: any) => String(source.id || "").endsWith(":accommodation"))
               : groupInvoiceSnapshot?.sources}
             groupPaymentDestinations={groupInvoiceSnapshot?.paymentDestinations}
