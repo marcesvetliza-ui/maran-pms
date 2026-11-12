@@ -17,6 +17,10 @@ puede registrar un cobro o emitir su factura ordinaria.
 - Al dar salida a una reserva grupal, Recepción puede abrir la cuenta de la
   habitación o confirmar la salida física dejando el saldo dentro del grupo.
   Se conserva el registro de quién autoriza la salida con deuda y su motivo.
+  El acceso desde Planning usa este mismo recorrido, también para grupos
+  anteriores: «Check-out» → «Confirmar salida sin cobro». Alojamiento y consumos
+  permanecen en el Folio Maestro con su habitación de origen, sin pagos ni facturas;
+  las demás habitaciones y el grupo siguen abiertos.
 - Pago Grupal permite un reparto igual con tope en los saldos, proporcional, por
   una habitación o con importes manuales. El anticipo también puede dejarse sin
   asignar; después se aplica desde el grupo a varias habitaciones o desde una
