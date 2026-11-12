@@ -2620,7 +2620,7 @@ export function PrefacturaDialog({
                   {isSubmitting ? (
                     <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Procesando...</>
                   ) : (
-                    <><Receipt className="h-4 w-4 mr-1" />Registrar y emitir</>
+                    <><Receipt className="h-4 w-4 mr-1" />{groupDocumentationOnly ? 'Emitir factura sin cobrar' : 'Registrar y emitir'}</>
                   )}
                 </Button>
               )}
