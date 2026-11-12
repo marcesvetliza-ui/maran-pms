@@ -3,7 +3,7 @@ import { expect,it } from 'vitest';
 import { prepareSimulatedChange, prepareReviewedProposal, decideSimulatedChange, invalidateChange } from '../../services/programming-assistant/change-workflow';
 import type { SupportTicket } from '../../shared/programming-support';
 const revision='a'.repeat(40);
-function realProposal(){const ticket={id:randomUUID(),version:revision,status:'proposal_ready',reportId:randomUUID(),report:{summary:'Corrección: Problema real',certainty:'sustentado_en_codigo',validationStatus:'complete',cause:'Causa leída',proposal:'Mostrar el detalle',proposedTests:['Verificar el mensaje'],questions:[],limitations:[],dataRepair:':null',evidence:[{path:'server/example.ts',start:1,end:2,explanation:'Validación'}]}} as SupportTicket;ticket.changeCandidate=prepareReviewedProposal(ticket);return ticket;}
+function realProposal(){const ticket={id:randomUUID(),version:revision,status:'proposal_ready',reportId:randomUUID(),report:{summary:'Corrección: Problema real',certainty:'sustentado_en_codigo',recommendedAction:'code_change',validationStatus:'complete',cause:'Causa leída',proposal:'Mostrar el detalle',proposedTests:['Verificar el mensaje'],questions:[],limitations:[],dataRepair:':null',evidence:[{path:'server/example.ts',start:1,end:2,explanation:'Validación'}]}} as SupportTicket;ticket.changeCandidate=prepareReviewedProposal(ticket);return ticket;}
 it('approves preparation of a real proposal without claiming a patch, test run or resolution',()=>{
  const ticket=realProposal(),body=decision(ticket);
  expect(ticket.changeCandidate!.tests[0].result).toBe('planned');
@@ -49,4 +49,11 @@ it.each(['diff','revision','report','digest','candidate','new_message'])('reject
 it('new information invalidates approval while retaining its audit',()=>{
  const ticket=fixture();decideSimulatedChange(ticket,decision(ticket),'marcelo',revision);invalidateChange(ticket,'owner');
  expect(ticket.changeCandidate!.status).toBe('invalidated');expect(ticket.workflowEvents!.map(event=>event.kind)).toEqual(['approve','invalidated']);
+});
+
+it.each(['no_change','verification',undefined])('does not prepare or approve a code change from a %s conclusion',recommendedAction=>{
+ const ticket=realProposal(),body=decision(ticket);ticket.report!.recommendedAction=recommendedAction as any;
+ expect(()=>prepareReviewedProposal(ticket)).toThrow();
+ expect(()=>decideSimulatedChange(ticket,body,'reviewer',revision,'proposal')).toThrow();
+ expect(ticket.changeCandidate!.status).toBe('awaiting_review');
 });

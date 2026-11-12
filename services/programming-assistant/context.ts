@@ -4,7 +4,14 @@ import type { SupportTicket } from "../../shared/programming-support";
 // A previous diagnosis is an output, not new evidence. Keep the user's inputs.
 export function investigationCase(ticket: SupportTicket) {
   const { title, module, actual, expected, steps, reference, page, version, messages } = ticket;
-  return { title, module, actual, expected, steps, reference, page, version, messages };
+  // Decisions live outside messages. Omitting them made the next investigation
+  // forget the user's requested adjustments while retaining only the old case.
+  // Include human comments, never prior diagnoses or automatic workflow text.
+  const reviewFeedback = (ticket.workflowEvents || [])
+    .filter(event => ['approve', 'reject', 'revise'].includes(event.kind) && event.comment?.trim())
+    .slice(-5)
+    .map(event => ({ decision: event.kind, comment: event.comment.trim().slice(0, 2000), at: event.at }));
+  return { title, module, actual, expected, steps, reference, page, version, messages, reviewFeedback };
 }
 
 export function compactContext(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {

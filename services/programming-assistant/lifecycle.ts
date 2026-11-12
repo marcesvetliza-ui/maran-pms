@@ -80,7 +80,7 @@ export function safeStageEvents(input: unknown): StageEvent[] {
      ...(numeric(e.reservedTokens)?{reservedTokens:e.reservedTokens}:{}),
      ...(numeric(e.availableTokens)?{availableTokens:e.availableTokens}:{}),
     ...(numeric(e.issueCount)?{issueCount:e.issueCount}:{}),
-    ...(Array.isArray(e.issueStatements)?{issueStatements:e.issueStatements.slice(0,4).filter((id:unknown)=>typeof id==="string" && /^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/.test(id))}:{}),
+    ...(Array.isArray(e.issueStatements)?{issueStatements:e.issueStatements.slice(0,4).filter((id:unknown)=>typeof id==="string" && /^(summary|cause|proposal|certainty|recommendedAction|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/.test(id))}:{}),
     ...(reasons.includes(e.reason)?{reason:e.reason}:{}),
   }));
 }

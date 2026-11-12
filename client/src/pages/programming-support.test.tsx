@@ -117,3 +117,19 @@ it('presents an operational question without a diagnosis and requires a saved re
  expect(screen.getByRole('button',{name:'Continuar con la información agregada'})).toBeEnabled();
  expect(state.request).not.toHaveBeenCalled();
 });
+
+it.each([
+ ['no_change','Sin cambios necesarios'],['verification','Comprobación pendiente'],
+])('presents %s as a conclusion without asking for code approval or a paid retry',async(recommendedAction,label)=>{
+ const user=userEvent.setup();
+ state.cases=[{id:'case-conclusion',title:'Revisión concluida',status:'proposal_ready',version:'a'.repeat(40),reportId:'report-conclusion',
+  report:{summary:'El detalle del error ya se muestra.',recommendedAction,certainty:'sustentado_en_codigo',validationStatus:'complete',cause:'El catch conserva el detalle.',proposal:'',proposedTests:[],questions:[],dataRepair:'',limitations:['Inspección de código'],evidence:[]},
+  actual:'Mensaje genérico',expected:'Ver detalle',updatedAt:'2026-11-12',messages:[],
+  changeCandidate:{kind:'proposal',status:'invalidated',id:'old'},workflowEvents:[]}];
+ render(<ProgrammingSupport/>);await user.click(screen.getByRole('button',{name:/Revisión concluida/}));
+ expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+ expect(screen.getByRole('heading',{name:'Resultado de la investigación'})).toBeInTheDocument();
+ expect(screen.queryByText('Solución propuesta')).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Aprobar preparación del cambio'})).not.toBeInTheDocument();
+ expect(state.request).not.toHaveBeenCalled();
+});

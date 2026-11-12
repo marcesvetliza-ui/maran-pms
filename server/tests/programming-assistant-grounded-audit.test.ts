@@ -8,6 +8,7 @@ import {RequestBudget,requestCost,correctionCycleCost,fits} from "../../services
 import {financialConsistencyIssues} from "../../services/programming-assistant/consistency";
 import {buildCoverageReview} from "../../services/programming-assistant/review";
 import type {SupportDiagnosis,SupportTicket} from "../../shared/programming-support";
+import {sourceRange} from './helpers/assistantSourceEvidence';
 
 const version="a".repeat(40);
 const ticket={version,title:"Dos operadores facturan",actual:"El cargo ya no tiene saldo suficiente para facturar.",expected:"Qué significa y qué comprobar.",module:"facturacion",messages:[]} as SupportTicket;
@@ -123,13 +124,14 @@ it("keeps the archived 50,372-token draft safe when current code changes its rev
 it("does not retransmit test lines that are already in cited evidence, while retaining mock setup and partial flags",async()=>{
  const source=new CodeSource(process.cwd(),version);
  await source.read("server/tests/folio-invoice-concurrency.test.ts",1,80);
- await source.read("server/tests/folio-invoice-concurrency.test.ts",219,249);
- const r=report();r.evidence=[{path:"server/tests/folio-invoice-concurrency.test.ts",start:219,end:249,explanation:"Test con mocks, no ejecutado."}];
+ const ref=sourceRange('server/tests/folio-invoice-concurrency.test.ts','allows only one of two simultaneous invoices',0,22);
+ await source.read(ref.path,ref.start,ref.end);
+ const r=report();r.evidence=[{...ref,explanation:"Test con mocks, no ejecutado."}];
  const review=await buildCoverageReview(r,source);
  const all=review.citedCode.map(c=>c.content).join("\n");
  const tests=review.operationalTestsConsulted;
  expect(tests.some(test=>test.start===1 && test.content.includes("1:"))).toBe(true);
- const duplicate=tests.find(test=>test.start===219)!;
+ const duplicate=tests.find(test=>test.start===ref.start)!;
  expect(duplicate.content).toBe("");expect(duplicate.partial).toBe(false);
  expect(duplicate.duplicatesInCitedCode).toBe(true);
  expect(all).toContain("expect([first.status, second.status].sort()).toEqual([201, 409])");

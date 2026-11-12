@@ -50,7 +50,7 @@ it("supplies source-backed decision paths even when the author omits the helper 
   expect(packet.checks.map((c:any)=>c.id)).toEqual(["capacity","discard","identity","collection"]);
   expect(packet.checks.every((c:any)=>c.evidence && !c.missing)).toBe(true);
   const code=packet.readings.map((r:any)=>r.content).join("\n");
-  for(const symbol of ["autorizacion_pendiente","Number(amount)","pending + 0.02","4(?:00|03|09)","attempt.invoice","creditOperationId","hasClaim(operationId)","if (discarded)","nextOperationId","preserve the original operation","attempt.payments"])
+  for(const symbol of ["autorizacion_pendiente","Number(amount)","pending + 0.02","invoice.cae","lookup(invoice)","original.invoiceRequest?.creditOperationId","result?.discarded","newSettlementOperationId()","attempt.invoice = await post","attempt.payments"])
     expect(code,symbol).toContain(symbol);
   for(const read of packet.readings)expect(s.validates(read)).toBe(true);
   expect(packet.readings.every((r:any)=>!r.incomplete)).toBe(true);
@@ -141,7 +141,7 @@ describe("offline replay contracts — provider verdicts are simulated, NOT meas
   });
   it("sends a complete concise replacement through the same evidence and an independent re-audit",async()=>{
     const bad=reviewCases[2],good=reviewCases[3],s=source();
-    for(const ref of bad.report.evidence)await s.read(ref.path,ref.start,ref.end);
+    for(const ref of [...bad.report.evidence,...good.report.evidence])await s.read(ref.path,ref.start,ref.end);
     let authors=0,audits=0;
     const client={chat:{completions:{create:async(request:any)=>{
       if(request.response_format.json_schema.name==="maran_diagnosis_audit"){

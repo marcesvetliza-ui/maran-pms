@@ -124,7 +124,7 @@ it('completes coverage in the mandatory audit without another expensive author p
  const client={chat:{completions:{create:async(request:any)=>{
   if(request.response_format.json_schema.name==='maran_diagnosis_audit'){audits++;return response({approved:true,issues:[]});}
   writer++;
-  if(writer===1)return {...response(safe,40000),usage:{total_tokens:40000,prompt_tokens:22000}};
+  if(writer===1)return {...response(safe,30000),usage:{total_tokens:30000,prompt_tokens:22000}};
   expect(request.messages.filter((m:any)=>m.role==='tool')).toHaveLength(0);
   expect(request.messages.filter((m:any)=>m.role==='user')).toHaveLength(1);
   const payload=JSON.parse(request.messages[1].content);
@@ -139,7 +139,7 @@ it('completes coverage in the mandatory audit without another expensive author p
  const result=await diagnose(ticket,source,{apiKey:'unused',model:'mock'},client as any);
  expect(result.report.proposal,JSON.stringify(result.stages)).toBe(safe.proposal);
  expect(result.partialReason).toBeUndefined();
- expect(result.tokens).toBe(40500);expect(writer).toBe(1);expect(audits).toBe(1);
+ expect(result.tokens).toBe(30500);expect(writer).toBe(1);expect(audits).toBe(1);
 });
 it('sends the same string limits to OpenAI that the local validator enforces',async()=>{
  const source=await setup();const draft=report();draft.summary='x'.repeat(800);

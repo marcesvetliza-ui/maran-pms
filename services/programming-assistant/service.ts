@@ -1,3 +1,4 @@
+import {permitsCodeProposal} from '../../shared/support-recommendation';
 import { investigateWithCodex } from "./codex-investigator";
 import { supportDecisionSchema } from "../../shared/support-change-workflow";
 import { simulateInvestigation, prepareSimulatedChange, prepareReviewedProposal, decideSimulatedChange, invalidateChange, appendWorkflowEvent } from "./change-workflow";
@@ -377,7 +378,7 @@ export async function createService(
             if (config.workflowSimulation && ticket.status === "proposal_ready") {
               ticket.changeCandidate = prepareSimulatedChange(ticket);
               appendWorkflowEvent(ticket, 'prepared', 'simulator', 'Cambio ficticio para comprobar el circuito. No autoriza publicación.');
-            } else if(config.proposalReview&&ticket.status==='proposal_ready'&&ticket.report.validationStatus==='complete'&&ticket.report.certainty==='sustentado_en_codigo'&&ticket.report.proposal.trim()) {
+            } else if(config.proposalReview&&ticket.status==='proposal_ready'&&ticket.report.validationStatus==='complete'&&ticket.report.certainty==='sustentado_en_codigo'&&ticket.report.proposal.trim()&&permitsCodeProposal(ticket.report)) {
               ticket.changeCandidate=prepareReviewedProposal(ticket);
               appendWorkflowEvent(ticket,'prepared','investigator','Propuesta pendiente de revisión. Aprobarla habilita preparar un cambio; todavía no hay código aplicado ni pruebas ejecutadas.');
             }

@@ -1,0 +1,17 @@
+{
+  "revision": "128de60c5f8689a5f75266466049c429d50d634a",
+  "title": "Consumo Interno oculta el motivo del error al cargar una receta",
+  "actual": "Al cargar una receta que usa un ingrediente en cajas sin una equivalencia configurada aparece Error al cargar receta.",
+  "expected": "Mostrar el motivo específico del error y respetar los ajustes solicitados; no proponer cambios sin demostrar una falla pendiente.",
+  "reviewComment": "La corrección original ya está implementada. Separá ese hallazgo de cualquier hipótesis sobre un error actual. Quitá sólo se pierde y no propongas nuevos cambios sin demostrar una falla pendiente. Si el problema persiste, pedí únicamente el resultado observable necesario para investigarlo.",
+  "receivedReport": {
+    "summary": "En la versión revisada, el detalle de equivalencia faltante sí se construye en backend y se intenta mostrar en Consumo Interno; el toast genérico queda sólo como fallback cuando el error no llega en JSON parseable.",
+    "certainty": "sustentado_en_codigo",
+    "cause": "El backend lanza Falta equivalencia explícita y lo propaga como error. La pantalla intenta mostrar exactamente ese error. Por código, ese detalle no se pierde en esa cadena nominal. El mensaje genérico aparece cuando parseApiErrorPayload no puede parsear Error.message.",
+    "proposal": "Mantener la ruta actual para errores JSON y reforzar el fallback en loadFromRecipe: si parseApiErrorPayload(error)?.error no existe, mostrar una descripción alternativa (parseApiError(error) o error.message sanitizado) en lugar de dejar sólo el título.",
+    "proposedTests": ["Receta sin equivalencia: conservar el mensaje específico sin agregar ingredientes ni mover stock."],
+    "questions": [], "dataRepair": "",
+    "limitations": ["Análisis estático; no se leyó evidencia de runtime del incidente."],
+    "evidence": []
+  }
+}

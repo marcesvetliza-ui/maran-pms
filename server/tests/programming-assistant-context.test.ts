@@ -49,3 +49,26 @@ it('compacts overlapping reads while keeping every new line and citation range',
   expect(second.content).not.toContain('2: shared');
   expect(messages[1]).toHaveProperty('tool_call_id','second');
 });
+
+
+it('delivers human review adjustments to the next author and auditor without treating the old report as evidence',()=>{
+ const ticket={title:'Consumo Interno',actual:'Mensaje genérico',expected:'Ver el detalle',
+  workflowEvents:[
+   {kind:'prepared',comment:'AUTOMATIC_NOT_A_REQUIREMENT'},
+   {kind:'approve',comment:'Conservar el mensaje genérico si no se interpreta el error.',at:'2026-11-09'},
+   {kind:'invalidated',comment:'AUTOMATIC_INVALIDATION'},
+   {kind:'revise',comment:'La corrección original ya está implementada. No proponer cambios sin demostrar una falla pendiente.',at:'2026-11-12'},
+  ],report:{summary:'PRIOR_MODEL_OUTPUT'},rejectedReviews:[{draft:{summary:'REJECTED_MODEL_OUTPUT'}}]} as unknown as SupportTicket;
+ const result=investigationCase(ticket);
+ expect(result.reviewFeedback).toEqual([
+  {decision:'approve',comment:'Conservar el mensaje genérico si no se interpreta el error.',at:'2026-11-09'},
+  {decision:'revise',comment:'La corrección original ya está implementada. No proponer cambios sin demostrar una falla pendiente.',at:'2026-11-12'},
+ ]);
+ expect(JSON.stringify(result)).not.toMatch(/AUTOMATIC|PRIOR_MODEL_OUTPUT|REJECTED_MODEL_OUTPUT/);
+});
+it('bounds human review history while retaining the most recent correction',()=>{
+ const ticket={workflowEvents:Array.from({length:9},(_,i)=>({kind:'revise',comment:String(i)+'x'.repeat(3000),at:String(i)}))} as unknown as SupportTicket;
+ const result=investigationCase(ticket);expect(result.reviewFeedback).toHaveLength(5);
+ expect(result.reviewFeedback[0].at).toBe('4');expect(result.reviewFeedback.at(-1)?.at).toBe('8');
+ expect(result.reviewFeedback.every(item=>item.comment.length<=2000)).toBe(true);
+});

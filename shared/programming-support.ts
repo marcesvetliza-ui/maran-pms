@@ -47,6 +47,8 @@ export const diagnosisSchema = z
       "sustentado_en_codigo",
       "falta_informacion",
     ]),
+    // Optional only for historical reports. New model output requires a choice.
+    recommendedAction: z.enum(['code_change', 'verification', 'no_change']).optional(),
     cause: z.string().max(5000),
     proposal: z.string().max(5000),
     proposedTests: z.array(z.string().max(1000)).max(12),
@@ -73,13 +75,13 @@ export const diagnosisSchema = z
   .strict();
 export type SupportDiagnosis = z.infer<typeof diagnosisSchema>;
 const reviewIssueSchema=z.object({
-  statementId:z.string().regex(/^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/),
+  statementId:z.string().regex(/^(summary|cause|proposal|certainty|recommendedAction|limitations|proposedTests|questions|dataRepair|evidence)_[1-9]\d{0,2}_[1-9]\d{0,2}$/),
   problem:z.string().min(1).max(600),correction:z.string().min(1).max(600),
 }).strict();
 const rejectedReviewSchema=z.object({audit:z.number().int().min(1).max(2),draft:diagnosisSchema,issues:z.array(reviewIssueSchema).min(1).max(4)}).strict();
 export type RejectedReview=z.infer<typeof rejectedReviewSchema>;
 export function rejectedStatementText(draft:SupportDiagnosis,statementId:string):string|undefined {
-  const match=statementId.match(/^(summary|cause|proposal|certainty|limitations|proposedTests|questions|dataRepair|evidence)_([1-9]\d{0,2})_([1-9]\d{0,2})$/);
+  const match=statementId.match(/^(summary|cause|proposal|certainty|recommendedAction|limitations|proposedTests|questions|dataRepair|evidence)_([1-9]\d{0,2})_([1-9]\d{0,2})$/);
   if(!match)return undefined;
   const value=match[1]==='evidence'?draft.evidence.map(ref=>ref.explanation):draft[match[1] as keyof SupportDiagnosis];
   const text=Array.isArray(value)?value[Number(match[2])-1]:Number(match[2])===1?value:undefined;

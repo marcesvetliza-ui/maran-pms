@@ -58,7 +58,7 @@ export async function orientInvestigation(
   // Read actual definitions/call sites beyond imports in long files.
   const anchors = purchases && discount
     ? [{path:"client/src/pages/purchase-invoices.tsx",term:"restorePurchaseDiscount(editingInvoice)"},
-       {path:"server/routes.ts",term:"const body = applyPurchaseDiscount"}]
+       {path:"server/routes.ts",term:"normalizeNonFiscalPurchase(applyPurchaseAdjustments("}]
     : production
       ? [{path:"server/production.ts",term:"export async function registerProductionRun"}]
       : [];

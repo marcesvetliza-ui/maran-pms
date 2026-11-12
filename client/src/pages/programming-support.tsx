@@ -1,3 +1,4 @@
+import {supportTicketLabel,recommendationDescription} from '@shared/support-recommendation';
 import {supportReportText} from "@shared/support-report-presentation";
 import { SupportChangeReview } from "@/components/support-change-review";
 import {citedScreens} from "@shared/programming-support-scope";
@@ -11,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { supportLabels, type SupportTicket } from "@shared/programming-support";
+import { type SupportTicket } from "@shared/programming-support";
 import { Code2, Plus, RefreshCw } from "lucide-react";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 
@@ -242,7 +243,7 @@ export default function ProgrammingSupport() {
               <span className="block font-medium">{c.title}</span>
               {c.changeCandidate?.kind==='proposal'&&c.changeCandidate.status==='awaiting_review'&&<span className="block text-sm text-blue-700 dark:text-blue-300">Pendiente de revisión</span>}
               <Badge variant="secondary" className="my-2">
-                {supportLabels[c.status]}
+                {supportTicketLabel(c)}
               </Badge>
               <span className="block text-xs text-muted-foreground">
                 {formatHotelDateTime(c.updatedAt)}
@@ -260,7 +261,7 @@ export default function ProgrammingSupport() {
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle>{ticket.title}</CardTitle>
-                <Badge>{supportLabels[ticket.status]}</Badge>
+                <Badge>{supportTicketLabel(ticket)}</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -297,17 +298,18 @@ export default function ProgrammingSupport() {
               {ticket.report && (
                 <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
                   <h2 className="text-lg font-semibold">
-                    Diagnóstico y propuesta
+                    {ticket.report.recommendedAction && ticket.report.recommendedAction !== "code_change" ? "Resultado de la investigación" : "Diagnóstico y propuesta"}
                   </h2>
                   <Badge variant="outline">
                     {ticket.report.validationStatus === "incomplete" ? "Validación inconclusa" : ticket.report.certainty.replaceAll("_", " ")}
                   </Badge>
+                  {recommendationDescription(ticket.report) && <p role="status" className="text-sm">{recommendationDescription(ticket.report)}</p>}
                   {citedScreens(ticket.report).length>0 && <p className="text-sm text-muted-foreground">Interfaz con evidencia citada: {citedScreens(ticket.report).join(', ')}.</p>}
                   {(
                     [
                       ["Problema", supportReportText(ticket.report.summary)],
                       [ticket.report.certainty === "sustentado_en_codigo" ? "Causa identificada en el código" : "Causa posible", supportReportText(ticket.report.cause)],
-                      ["Solución propuesta", supportReportText(ticket.report.proposal)],
+                      [ticket.report.recommendedAction && ticket.report.recommendedAction !== "code_change" ? "Próximo paso" : "Solución propuesta", supportReportText(ticket.report.proposal)],
                       ["Correcciones de datos propuestas", supportReportText(ticket.report.dataRepair)],
                     ] as const
                   ).map(

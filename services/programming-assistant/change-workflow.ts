@@ -1,3 +1,4 @@
+import {permitsCodeProposal} from '../../shared/support-recommendation';
 import { createHash, randomUUID } from 'node:crypto';
 import type { SupportTicket } from '../../shared/programming-support';
 import type { SupportChangeCandidate, SupportDecision, SupportWorkflowEvent } from '../../shared/support-change-workflow';
@@ -26,7 +27,7 @@ function canonical(value:unknown):unknown {
 }
 const reportDigest=(ticket:SupportTicket)=>createHash('sha256').update(JSON.stringify(canonical(ticket.report))).digest('hex');
 export function prepareReviewedProposal(ticket:SupportTicket):SupportChangeCandidate {
-  if(!ticket.reportId||!ticket.report||ticket.status!=='proposal_ready'||ticket.report.validationStatus!=='complete'||ticket.report.certainty!=='sustentado_en_codigo'||!supportReportText(ticket.report.proposal))throw Error('Falta un diagnóstico sustentado y revisado');
+  if(!ticket.reportId||!ticket.report||ticket.status!=='proposal_ready'||ticket.report.validationStatus!=='complete'||ticket.report.certainty!=='sustentado_en_codigo'||!supportReportText(ticket.report.proposal)||!permitsCodeProposal(ticket.report))throw Error('Falta un diagnóstico sustentado y revisado');
   const report=ticket.report,fields={kind:'proposal' as const,target:'xenia-pilot' as const,baseRevision:ticket.version,reportId:ticket.reportId,reportDigest:reportDigest(ticket),
     diff:`Problema: ${supportReportText(report.summary)}\n\nCausa: ${supportReportText(report.cause)}\n\nPropuesta: ${supportReportText(report.proposal)}`,
     tests:report.proposedTests.map(name=>({name,result:'planned' as const}))};
@@ -55,7 +56,7 @@ export function decideSimulatedChange(ticket: SupportTicket, decision: SupportDe
     return;
   }
   const candidate=ticket.changeCandidate;
-  if(ticket.status!=='proposal_ready'||!candidate||candidate.kind!==expectedKind||candidate.status!=='awaiting_review'||candidate.id!==decision.candidateId||candidate.reportId!==decision.reportId||ticket.reportId!==decision.reportId||candidate.digest!==decision.digest||candidateDigest(candidate)!==candidate.digest||candidate.baseRevision!==currentRevision||ticket.version!==currentRevision||(candidate.kind==='proposal'&&candidate.reportDigest!==reportDigest(ticket)))throw Error('La propuesta cambió o ya no admite aprobación; actualizá el caso');
+  if((expectedKind==='proposal'&&!permitsCodeProposal(ticket.report))||ticket.status!=='proposal_ready'||!candidate||candidate.kind!==expectedKind||candidate.status!=='awaiting_review'||candidate.id!==decision.candidateId||candidate.reportId!==decision.reportId||ticket.reportId!==decision.reportId||candidate.digest!==decision.digest||candidateDigest(candidate)!==candidate.digest||candidate.baseRevision!==currentRevision||ticket.version!==currentRevision||(candidate.kind==='proposal'&&candidate.reportDigest!==reportDigest(ticket)))throw Error('La propuesta cambió o ya no admite aprobación; actualizá el caso');
   candidate.status=decision.decision==='approve'?(candidate.kind==='simulation'?'approved_simulation':'approved_for_preparation'):decision.decision==='reject'?'rejected':'changes_requested';
   appendWorkflowEvent(ticket,decision.decision,actor,decision.comment,decision.requestId);
   // A simulation is never a deployment authorization, even after approval.
