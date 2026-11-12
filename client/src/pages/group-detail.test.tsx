@@ -121,6 +121,7 @@ describe("Pago Grupal dialog entry-point modes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    sessionStorage.clear();
     pendingFiscalCollections = [];
     groupFixtureForTest = GROUP_FIXTURE;
 
@@ -156,6 +157,17 @@ describe("Pago Grupal dialog entry-point modes", () => {
     apiRequestMock.mockImplementation(async () => jsonResponse({ success: true }));
   });
 
+  it('retries a preserved group receipt inside the payment dialog, without preparing a new collection',async()=>{
+    const body={paymentRequestId:'a7952612-2178-44c9-b2ed-8fa71e2bc65b',paymentRows:[{method:'transfer',amount:'50.00',reference:'original-transfer'}],receiptType:'none',distribution:'manual',distributionDetail:{[RESERVATION_ID]:50}};
+    sessionStorage.setItem(`group-receipt-operation:${GROUP_ID}`,JSON.stringify({endpoint:`/api/groups/${GROUP_ID}/payment`,body}));
+    const user=userEvent.setup();renderPage();
+    await user.click(await screen.findByTestId('button-group-payment'));
+    expect(screen.getByText(/original-transfer/)).toBeInTheDocument();
+    expect(screen.getByTestId('input-group-payment-amount-0')).toBeDisabled();
+    await user.click(screen.getByRole('button',{name:'Reintentar este mismo cobro'}));
+    await waitFor(()=>expect(apiRequestMock).toHaveBeenCalledWith('POST',`/api/groups/${GROUP_ID}/payment`,body));
+    await waitFor(()=>expect(sessionStorage.getItem(`group-receipt-operation:${GROUP_ID}`)).toBeNull());
+  });
   it("uses the nightly editor from Groups and saves only schedules through the legacy route", async () => {
     groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0],
       pricingScheme: "nightly_v1", finalRatePerNight: "92500.00", totalRoomAmount: "185000.00", pricingRevision: 0,

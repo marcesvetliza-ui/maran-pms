@@ -3970,6 +3970,12 @@ export default function GroupDetailPage() {
             </DialogDescription>
           </DialogHeader>
 
+          {pendingReceipt&&<div role="status" className="rounded border p-3 text-sm space-y-2">
+            <p>Hay un cobro pendiente de confirmar. El reintento conserva sus importes, medios y distribución originales.</p>
+            <p>{(pendingReceipt.body.paymentRows||[]).map((row:any)=>`${PAYMENT_METHOD_LABELS[row.method]||row.method}: ${fmtMoney(Number(row.amount))}${row.reference?` · ${row.reference}`:''}`).join(' + ')}</p>
+            <Button type="button" disabled={groupPaymentMutation.isPending} onClick={()=>groupPaymentMutation.mutate()}>Reintentar este mismo cobro</Button>
+          </div>}
+          <fieldset disabled={!!pendingReceipt||groupPaymentMutation.isPending}>
           {(() => {
             const isFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
             const isMipyme = (groupPaymentReceiptType === "factura_mipyme_a" || groupPaymentReceiptType === "factura_mipyme_b");
@@ -4927,6 +4933,7 @@ export default function GroupDetailPage() {
               </div>
             );
           })()}
+          </fieldset>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => {
