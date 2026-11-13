@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+
+beforeEach(() => window.sessionStorage.clear());
 
 afterEach(() => {
   cleanup();

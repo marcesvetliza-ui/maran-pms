@@ -11,6 +11,7 @@ import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
+import { readPrefacturaSelection, savePrefacturaSelection, retainedPrefacturaSelection, pendingPrefacturaSourceIds, originalPrefacturaLines } from "@/lib/prefactura-selection";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError, parseApiErrorPayload } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -520,7 +521,27 @@ export function PrefacturaDialog({
   const [step, setStep] = useState(1);
 
   // Step 1: which items to include & descriptions
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectionState] = useState<Set<string>>(new Set());
+  const selectionValue = useRef(new Set<string>());
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const viewScope = useRef({ id: String(reservationId), open, version: 0 });
+  if (viewScope.current.id !== String(reservationId) || viewScope.current.open !== open) {
+    viewScope.current = { id: String(reservationId), open, version: viewScope.current.version + 1 };
+  }
+  useEffect(() => {
+    viewScope.current.open = open;
+    return () => { viewScope.current.open = false; viewScope.current.version++; };
+  }, []);
+  function setSelectedIds(update: Set<string> | ((previous: Set<string>) => Set<string>)) {
+    if (viewScope.current.id !== String(reservationId) || !viewScope.current.open) return;
+    const next = typeof update === "function" ? update(selectionValue.current) : update;
+    selectionValue.current = next;
+    setSelectionState(next);
+    try {
+      savePrefacturaSelection(window.sessionStorage, reservationId, next);
+      setSelectionError(null);
+    } catch (error) { setSelectionError((error as Error).message); }
+  }
   const [chargesOpen, setChargesOpen] = useState(false);
   const [itemDescriptions, setItemDescriptions] = useState<Record<string, string>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -654,15 +675,19 @@ export function PrefacturaDialog({
     const remote = discoveredOperation?.pending;
     if (!open || !remote?.attempt || !submission.current!.restore(reservationId, remote.attempt)) return;
     setHasPendingSubmission(true); setCreditOperationId(remote.operationId);
+    const sources = pendingPrefacturaSourceIds(remote.attempt);
+    if (sources !== null) setSelectedIds(new Set(sources));
     if (remote.attempt.invoiceRequest?.tipoComprobante) setTipo(remote.attempt.invoiceRequest.tipoComprobante);
   }, [open, reservationId, discoveredOperation]);
   const correctReceptionAttempt = useMutation({
+    onMutate: () => ({ version: viewScope.current.version }),
     mutationFn: async () => {
       const id = submission.current!.pending(reservationId)?.invoiceRequest?.creditOperationId;
       if (!id) throw new Error("No hay una operación para corregir.");
       return (await apiRequest("POST", `/api/billing/reservations/${reservationId}/operations/${id}/correct-reception`, {})).json();
     },
-    onSuccess: async (result: any) => {
+    onSuccess: async (result: any, _variables, context) => {
+      if (context?.version !== viewScope.current.version) return;
       if (result.recovered) {
         setSubmitError(null); await refetchReceptionStatus();
         toast({ title: "Factura autorizada verificada", description: "No se volvió a emitir. Completá la operación pendiente para terminar su registro." }); return;
@@ -692,7 +717,9 @@ export function PrefacturaDialog({
       await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
       toast({ title: "Podés corregir los datos", description: "No se emitió ni cobró nada. Revisá el receptor y el comprobante antes de confirmar nuevamente." });
     },
-    onError: (error: any) => setSubmitError(parseApiError(error)),
+    onError: (error: any, _variables, context) => {
+      if (context?.version === viewScope.current.version) setSubmitError(parseApiError(error));
+    },
   });
   const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"], queryFn: async () => (await apiRequest("GET", "/api/billing/config")).json(), enabled: open });
   const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], queryFn: async () => (await apiRequest("GET", "/api/pos-configs")).json(), enabled: open });
@@ -764,8 +791,11 @@ export function PrefacturaDialog({
       setCheckoutFailed(false);
       setRecoveryPendingWork(null);
       setPaymentRegistered(false);
+      setIsSubmitting(false);
       setSubmitError(null);
-      setSelectedIds(new Set());
+      selectionValue.current = new Set();
+      setSelectionState(new Set());
+      setSelectionError(null);
       setChargesOpen(false);
       setItemDescriptions({});
       setEditingId(null);
@@ -811,8 +841,18 @@ export function PrefacturaDialog({
       // ── Initial load ────────────────────────────────────────────────────────
       folioInitializedRef.current = true;
 
-      const allIds = new Set(getAllBillableFolioItems(folio).map(item => item.id));
-      setSelectedIds(allIds);
+      const eligibleIds = getAllBillableFolioItems(folio).map(item => item.id);
+      let allIds: Set<string>;
+      try {
+        const frozen = pendingPrefacturaSourceIds(submission.current!.pending(reservationId));
+        const saved = readPrefacturaSelection(window.sessionStorage, reservationId);
+        allIds = frozen !== null ? new Set(frozen)
+          : retainedPrefacturaSelection(saved ?? eligibleIds, eligibleIds);
+        setSelectedIds(allIds);
+      } catch (error) {
+        setSelectionError((error as Error).message);
+        return;
+      }
 
       const initialItems = getSelectedFolioItems(allIds, folio);
       const initialBalance = getSelectedFolioBalance(
@@ -1033,6 +1073,7 @@ export function PrefacturaDialog({
   });
 
   const correctExemptRejection = useMutation({
+    onMutate: () => ({ version: viewScope.current.version }),
     mutationFn: async () => {
       if (!submission.current!.acquire()) throw new Error("Hay otra operación en curso");
       try {
@@ -1044,7 +1085,8 @@ export function PrefacturaDialog({
         return await (await apiRequest("POST", `/api/billing/reservations/${reservationId}/operations/${operationId}/correct-exempt-rejection`, { serverRecovery: !attempt })).json();
       } finally { submission.current!.release(); }
     },
-    onSuccess: async result => {
+    onSuccess: async (result, _variables, context) => {
+      if (context?.version !== viewScope.current.version) return;
       if (result?.discarded !== true) return;
       const original = submission.current!.pending(reservationId);
       if (original && original.invoiceRequest?.creditOperationId !== result.operationId && result.operationId) throw new Error("La operación pendiente cambió. Actualizá el folio.");
@@ -1068,7 +1110,9 @@ export function PrefacturaDialog({
       await queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservationId] });
       toast({ title: "Rechazo verificado: revisar Factura B", description: "ARCA no autorizó el intento A. Se conserva el historial; no se emitió ni cobró. Revisá los datos antes de confirmar." });
     },
-    onError: (error: Error) => setSubmitError(parseApiError(error)),
+    onError: (error: Error, _variables, context) => {
+      if (context?.version === viewScope.current.version) setSubmitError(parseApiError(error));
+    },
   });
   const pendingFiscalAttempt = hasPendingSubmission ? submission.current!.pending(reservationId) : null;
   const canCorrectExemptRejection = !pendingFiscalAttempt?.invoice &&
@@ -1096,14 +1140,20 @@ export function PrefacturaDialog({
     }
     setIsAddingCharge(true);
     try {
-      await apiRequest("POST", "/api/charges", {
+      const scope = viewScope.current.version;
+      const response = await apiRequest("POST", "/api/charges", {
         description: addChargeDescription.trim(),
         amount: addChargeAmount,
         category: addChargeCategory,
         reservationId,
         date: getLocalToday(),
       });
+      const created = await response.json();
+      if (scope !== viewScope.current.version) return;
+      if (!created?.id) throw new Error("El cargo se guardó, pero no se pudo identificar. Actualizá el folio antes de continuar.");
+      setSelectedIds(previous => new Set([...previous, String(created.id)]));
       await refetchFolio();
+      if (scope !== viewScope.current.version) return;
       toast({ title: "Cargo agregado", description: "Se sumó al folio de esta habitación." });
       setShowAddCharge(false);
       setAddChargePresetId("manual");
@@ -1272,17 +1322,20 @@ export function PrefacturaDialog({
   const checkoutBalance = Number(folio?.financialSummary?.operationalFolioBalance ?? folio?.balance);
   const canCheckoutWithoutCollection = mode === "checkout" && !!folio && Number.isFinite(checkoutBalance) && checkoutBalance <= 0.01;
   const checkoutOnly = useMutation({
+    onMutate: () => ({ version: viewScope.current.version }),
     mutationFn: async () => {
       if (!canCheckoutWithoutCollection) throw new Error("Actualizá el saldo del folio antes de cerrar la estadía.");
       return (await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {requireSettled:true})).json();
     },
-    onSuccess: async () => {
+    onSuccess: async (_result, _variables, context) => {
       await Promise.all(["/api/reservations","/api/reservations/check-out","/api/dashboard/departures","/api/rooms","/api/rooms/in-house","/api/dashboard/stats","/api/planning","/api/housekeeping"].map(key=>queryClient.invalidateQueries({queryKey:[key]})));
+      if (context?.version !== viewScope.current.version) return;
       onCheckoutComplete?.();
       onClose();
       toast({title:"Check-out realizado",description:"La estadía se cerró sin emitir comprobantes ni registrar nuevos cobros."});
     },
-    onError: error => {
+    onError: (error, _variables, context) => {
+      if (context?.version !== viewScope.current.version) return;
       setSubmitError(parseApiError(error));
       void queryClient.invalidateQueries({queryKey:["/api/reservations",String(reservationId),"folio"]});
     },
@@ -1303,15 +1356,16 @@ export function PrefacturaDialog({
   // An invoice query may resolve after the folio query. Remove its source
   // charges from the default selection instead of re-offering them on reload.
   useEffect(() => {
-    if (!open || fullyInvoicedChargeIds.size === 0) return;
+    if (!open || !folio || !folioInitializedRef.current || submission.current!.pending(reservationId)) return;
     setSelectedIds(previous => {
-      const next = new Set(Array.from(previous).filter(id => !fullyInvoicedChargeIds.has(id)));
+      const eligible = new Set(originalBillableItems.map(item => item.id));
+      const next = new Set(Array.from(previous).filter(id => eligible.has(id) && !fullyInvoicedChargeIds.has(id)));
       return next.size === previous.size ? previous : next;
     });
   // emittedInvoices is the stable query result; fullyInvoicedChargeIds is rebuilt
   // on each render and must not itself be used as an effect dependency.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, emittedInvoices, groupAccount.data]);
+  }, [open, emittedInvoices, groupAccount.data, folio]);
 
   // El desplegable de PV nunca debe quedar sin opciones: si no hay pos_configs
   // activas para este hotel (lo normal, es una feature opcional de multi-POR-área),
@@ -1414,9 +1468,19 @@ export function PrefacturaDialog({
   }
 
   async function doSubmit() {
+    const scope = viewScope.current.version;
+    const isCurrentView = () => viewScope.current.version === scope && viewScope.current.open;
+    const assertCurrentView = () => {
+      if (!isCurrentView()) throw new Error("La reserva abierta cambió. La operación original queda disponible para recuperarla.");
+    };
     if (correctExemptRejection.isPending || serverAttempt || rejectionLoading || rejectionError) return;
     if (submission.current!.isBusy()) return;
     const retrying = !!submission.current!.pending(reservationId);
+    try {
+      savePrefacturaSelection(window.sessionStorage, reservationId,
+        pendingPrefacturaSourceIds(submission.current!.pending(reservationId)) ?? selectedIds);
+      setSelectionError(null);
+    } catch (error) { setSelectionError((error as Error).message); return; }
     if (!retrying && (discoveringOperation || operationDiscoveryError)) { setSubmitError("Estamos verificando si hay una operación anterior. Volvé a intentar cuando termine la consulta."); return; }
     if (correctReceptionAttempt.isPending) return;
     if (retrying && pointError && !alreadyPaidAndInvoiced) { setSubmitError(pointError); return; }
@@ -1492,6 +1556,7 @@ export function PrefacturaDialog({
           { method: "POST", headers: { "Content-Type": "application/json" } },
         );
         if (recoveryRes.status === 404) {
+          assertCurrentView();
           recoveryRes = await fetch(
             `/api/billing/reservations/${reservationId}/legacy-cc/recover`,
             { method: "POST", headers: { "Content-Type": "application/json" } },
@@ -1499,6 +1564,7 @@ export function PrefacturaDialog({
         }
         if (recoveryRes.ok) {
           const recovered = await recoveryRes.json();
+          assertCurrentView();
           const recoveredInvoice = recovered.invoice
             ? {
                 ...recovered.invoice,
@@ -1510,6 +1576,7 @@ export function PrefacturaDialog({
             : null;
           setEmittedInvoice(recoveredInvoice);
           const [recoveredFolio] = await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
+          assertCurrentView();
           const financialSummary = recoveredFolio.data?.financialSummary;
           const pendingInvoiceAmount = Math.max(
             Number(financialSummary?.pendingGrossInvoice || 0),
@@ -1539,9 +1606,11 @@ export function PrefacturaDialog({
             let checkoutSucceeded = false;
             try {
               await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+              assertCurrentView();
               checkoutSucceeded = true;
               setCheckoutDone(true);
             } catch {
+              if (!isCurrentView()) return;
               // The recovered invoice/settlement is already persistent. Keep
               // the operation ID so another attempt can safely retry checkout.
               setCheckoutFailed(true);
@@ -1732,14 +1801,18 @@ export function PrefacturaDialog({
         if (Array.isArray(status.acknowledgedPaymentIds)) submission.current!.acknowledge(reservationId, status.acknowledgedPaymentIds);
         if (status.attempt?.invoice) submission.current!.acceptInvoice(reservationId, status.attempt.invoice);
       }
+      const submittedAttempt = submission.current!.pending(reservationId)!;
+      const submittedSourceIds = pendingPrefacturaSourceIds(submittedAttempt) ?? [...selectedIds];
       const completed = await submission.current!.run(reservationId, async (url, body) => {
+        assertCurrentView();
         const response = await apiRequest("POST", url, body);
         return response.json();
-      });
+      }, assertCurrentView);
+      assertCurrentView();
       invoiceData = completed.invoice;
       if (completed.paymentCount > 0) setPaymentRegistered(true);
       if (invoiceData) {
-        setTimeout(() => window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"), 300);
+        setTimeout(() => { if (isCurrentView()) window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"); }, 300);
       }
 
       // 3. Checkout if applicable
@@ -1749,6 +1822,7 @@ export function PrefacturaDialog({
       if (completed.checkoutRequested) {
         try {
           const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+          assertCurrentView();
           if (!coRes.ok) {
             const coBody = await coRes.json().catch(() => ({}));
             throw new Error(coBody?.error || "Error al realizar check-out");
@@ -1762,6 +1836,7 @@ export function PrefacturaDialog({
           queryClient.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey[0] === "/api/planning" });
           queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
         } catch (coErr: any) {
+          if (!isCurrentView()) return;
           // Payment and invoice already persisted — do NOT re-throw.
           // Advance to step 3 with a warning so staff know to fix checkout manually.
           // checkoutSucceeded remains false, so onCheckoutComplete will NOT fire.
@@ -1782,6 +1857,7 @@ export function PrefacturaDialog({
 
       const refreshed = await refetchFolio();
       const [refreshedInvoices] = await Promise.all([refetchEmittedInvoices(), refetchTransferRemaining()]);
+      assertCurrentView();
       if (refreshed.error || refreshedInvoices.error) {
         throw new Error("El cobro se guardó, pero no se pudo actualizar el folio. Reintentá completar la misma operación.");
       }
@@ -1812,13 +1888,18 @@ export function PrefacturaDialog({
       const freshFolio = refreshed.data;
       const nextSelection = new Set<string>();
       const freshInvoicedAmounts = getInvoicedAmountsByCharge(refreshedInvoices.data || []);
+      let hasRemainingConcepts = false;
       if (freshFolio) {
         const items=getAllBillableFolioItems(freshFolio,itemDescriptions);
         const remaining=getRemainingChargeAmounts(items,freshInvoicedAmounts);
-        for(const item of items)if(remaining[item.id]>0.01)nextSelection.add(item.id);
+        for (const item of items) if (remaining[item.id] > 0.01) {
+          hasRemainingConcepts = true;
+          if (submittedSourceIds.includes(item.id)) nextSelection.add(item.id);
+        }
       }
+      setSelectedIds(nextSelection);
 
-      if (nextSelection.size > 0) {
+      if (hasRemainingConcepts) {
         const freshOriginalItems = getAllBillableFolioItems(freshFolio!, itemDescriptions);
         const freshRemainingAmounts = getRemainingChargeAmounts(
           freshOriginalItems,
@@ -1866,6 +1947,7 @@ export function PrefacturaDialog({
       onClose();
 
     } catch (err: any) {
+      if (!isCurrentView()) return;
       const payload=parseApiErrorPayload(err) as any;
       if(payload?.code==='GROUP_BILLING_ACTION_REQUIRED'&&payload.safeToReset===true&&!submission.current!.pending(reservationId)?.invoice){
         submission.current!.complete(reservationId);setHasPendingSubmission(false);
@@ -1875,7 +1957,7 @@ export function PrefacturaDialog({
       setSubmitError(parseApiError(err));
     } finally {
       submission.current!.release();
-      setIsSubmitting(false);
+      if (isCurrentView()) setIsSubmitting(false);
     }
   }
 
@@ -2400,7 +2482,10 @@ export function PrefacturaDialog({
                     )}
                   </TableBody>
                 </Table>
-                <div className="border-t px-4 py-2 flex justify-end">
+                <div className="border-t px-4 py-2 flex justify-end gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+                    Desmarcar todos
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -2567,6 +2652,12 @@ export function PrefacturaDialog({
                 {pendingAttempt?.invoiceRequest && <div className="rounded border bg-background p-3 text-sm space-y-1" data-testid="billing-original-intent">
                   <p className="font-semibold">{receptionStatus?.stage === "cancelled" ? "Datos del intento anterior" : "Datos del intento que se va a completar"}</p>
                   <p>{pendingAttempt.invoiceRequest.cliente?.razonSocial || "Receptor original"} · {pendingAttempt.invoiceRequest.tipoComprobante} · PV {pendingAttempt.invoiceRequest.puntoVentaOverride ?? "original"}</p>
+                  <ul aria-label="Conceptos del intento original">
+                    {originalPrefacturaLines(pendingAttempt).map((line, index) => <li key={index}>{line.description}: ${fmtMoney(line.amount)}</li>)}
+                  </ul>
+                  <p className="font-semibold" data-testid="billing-original-total">
+                    Total fiscal original: ${fmtMoney(originalPrefacturaLines(pendingAttempt).reduce((sum, line) => sum + line.amount, 0))}
+                  </p>
                   <p>{pendingAttempt.invoiceRequest.reservationSettlementMethod === "cuenta_corriente" || pendingAttempt.invoiceRequest.cashFormaPago === "cuenta_corriente" ? "Cargo a Cuenta Corriente; sin cobro de caja." : pendingAttempt.payments.length ? pendingAttempt.payments.map(payment => `${PAYMENT_METHOD_LABELS[payment.method] || (String(payment.method).startsWith("retencion_") ? "Retención" : payment.method)}: $${fmtMoney(payment.amount)}`).join(" · ") : "Sin cobro nuevo preparado."}</p>
                   <p className="text-muted-foreground">Para cambiar estos datos, usá la acción de corrección cuando esté habilitada. El reintento conserva el pedido original.</p>
                 </div>}
@@ -2583,6 +2674,7 @@ export function PrefacturaDialog({
                 </Button>}
               </div>
             )}
+            {selectionError && <p role="alert" className="text-sm text-destructive" data-testid="prefactura-selection-error">{selectionError}</p>}
             {submitError && (
               <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 px-4 py-3 flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />

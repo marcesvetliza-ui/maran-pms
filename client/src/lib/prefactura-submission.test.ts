@@ -3,6 +3,40 @@ import { createPrefacturaSubmission } from "./prefactura-submission";
 
 describe("Prefactura persisted payment intent", () => {
   beforeEach(() => sessionStorage.clear());
+  it("rechaza solicitudes y pagos de otra reserva antes de escribir", () => {
+    const submission = createPrefacturaSubmission(sessionStorage);
+    expect(() => submission.prepare("202", { reservaId: "706" }, [])).toThrow("otra reserva");
+    expect(() => submission.prepare("202", { reservaId: "202" }, [{ reservationId: "706" }])).toThrow("otra reserva");
+    expect(submission.pending("202")).toBeNull();
+  });
+  it("detiene los pagos si la respuesta fiscal pertenece a otra reserva", async () => {
+    const submission = createPrefacturaSubmission(sessionStorage);
+    submission.prepare("202", { reservaId: "202" }, [{ reservationId: "202", amount: "1000" }]);
+    const posts: string[] = [];
+    await expect(submission.run("202", async url => { posts.push(url); return { id: 248, reserva_id: "706" }; })).rejects.toThrow("otra reserva");
+    expect(posts).toEqual(["/api/billing/invoices"]);
+    expect(submission.pending("202")!.invoice).toBeNull();
+    expect(() => submission.acceptInvoice("202", { id: 248, reservaId: "706" })).toThrow("otra reserva");
+  });
+  it("conserva la factura de la reserva original pero no cobra si cambió la vista", async () => {
+    const submission = createPrefacturaSubmission(sessionStorage);
+    submission.prepare("202", { reservaId: "202" }, [{ reservationId: "202", amount: "1000" }]);
+    let active = true;
+    const posts: string[] = [];
+    await expect(submission.run("202", async url => {
+      posts.push(url); active = false; return { id: 248, reservaId: "202" };
+    }, () => { if (!active) throw Error("vista anterior"); })).rejects.toThrow("vista anterior");
+    expect(posts).toEqual(["/api/billing/invoices"]);
+    expect(submission.pending("202")!.invoice).toMatchObject({ id: 248 });
+  });
+  it("mantiene las líneas y total de un intento pendiente aunque cambie la selección", () => {
+    const submission = createPrefacturaSubmission(sessionStorage);
+    const items = [{ descripcion: "Noche", subtotal: 150000 }, { descripcion: "Extra", subtotal: 1000 }];
+    const original = submission.prepare("202", { reservaId: "202", items }, []);
+    const retry = submission.prepare("202", { reservaId: "202", items: [items[1]] }, []);
+    expect(retry).toEqual(original);
+    expect(retry.invoiceRequest!.items).toEqual(items);
+  });
   it("locks synchronously and never resets a pending operation on reopen", () => {
     const submission = createPrefacturaSubmission(sessionStorage);
     expect(submission.acquire()).toBe(true);
