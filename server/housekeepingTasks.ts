@@ -138,12 +138,20 @@ export function registerHousekeepingTaskRoutes(app: Express) {
           ? req.query.assignedTo
           : undefined
         : req.user!.id;
-      res.json(
-        await storage.getHousekeepingTasks(
+      const tasks = await storage.getHousekeepingTasks(
           req.query.date as string | undefined,
           assigned,
-        ),
-      );
+        );
+      // The daily board must also expose unfinished work from earlier days.
+      // Otherwise it offers Start while an invisible task still holds the room.
+      if (req.query.includeActive === "true" && req.query.date) {
+        const active = await db.execute(sql`SELECT id FROM housekeeping_tasks
+          WHERE status='in_progress' AND scheduled_date<>${req.query.date as string}
+          ${assigned ? sql`AND assigned_to=${assigned}` : sql``}`);
+        const extra = await Promise.all(active.rows.map(row => storage.getHousekeepingTask(String(row.id))));
+        tasks.unshift(...extra.filter((task): task is NonNullable<typeof task> => !!task));
+      }
+      res.json(tasks);
     } catch (e) {
       error(res, e);
     }
@@ -310,8 +318,8 @@ export function registerHousekeepingTaskRoutes(app: Express) {
             "inspected",
           ])
           .parse(req.body?.status);
-        const reason = z.string().trim().min(1, "Indicá el motivo de la corrección.").max(500).safeParse(req.body?.reason);
-        if (!reason.success) return res.status(400).json({error:"Indicá un motivo de entre 1 y 500 caracteres."});
+        const reason = z.string().trim().max(500).optional().safeParse(req.body?.reason);
+        if (!reason.success) return res.status(400).json({error:"El motivo opcional debe tener hasta 500 caracteres."});
         const saved = await withDatabaseTransaction(async () => {
           const before = await lockRoom(req.params.roomId);
           if (req.body.expectedStatus !== undefined && req.body.expectedStatus !== before.status)
@@ -345,7 +353,8 @@ export function registerHousekeepingTaskRoutes(app: Express) {
           await audit(req, before.id, "room_status", {
             before: before.status,
             after: finalStatus,
-            reason: reason.data,
+            reason: reason.data || null,
+            source: "housekeeping_status",
           });
           return room;
         });
