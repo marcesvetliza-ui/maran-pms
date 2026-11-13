@@ -6,6 +6,7 @@ import { storage, getArgentinaToday } from "./db-storage";
 import { requireAuth, requirePermission } from "./auth";
 import { hasPermission } from "./permissions";
 import { validCalendarDate } from "./stayEligibility";
+import {registerHousekeepingStaff,validateShiftAssignee} from "./housekeepingStaff";
 
 const supervisor = (req: Request) =>
   hasPermission(req.user!.role, "api:housekeeping:supervisor-view");
@@ -43,13 +44,6 @@ function error(res: Response, e: any) {
           ? e.message
           : "No se pudo guardar la operación de Housekeeping.",
   });
-}
-async function assignee(id: string | null | undefined) {
-  if (!id) return;
-  const found = await db.execute(
-    sql`SELECT id FROM system_users WHERE id=${id} AND role='housekeeping' AND is_active='true'`,
-  );
-  if (!found.rows.length) fail("Elegí una mucama activa.", 400);
 }
 async function audit(req: Request, id: string, action: string, details: any) {
   await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
@@ -91,7 +85,7 @@ async function createTasks(
   data: z.infer<typeof creation>,
 ) {
   return withDatabaseTransaction(async () => {
-    await assignee(data.assignedTo);
+    await validateShiftAssignee(data.assignedTo,data.scheduledDate);
     for (const id of [...ids].sort()) await lockRoom(id);
     // Reject the whole selection, never partially create a batch.
     const duplicate =
@@ -120,6 +114,7 @@ async function createTasks(
   });
 }
 export function registerHousekeepingTaskRoutes(app: Express) {
+  registerHousekeepingStaff(app);
   const access = [requireAuth, requirePermission("sidebar:/housekeeping")];
   const manage = [
     ...access,
@@ -145,29 +140,17 @@ export function registerHousekeepingTaskRoutes(app: Express) {
       // The daily board must also expose unfinished work from earlier days.
       // Otherwise it offers Start while an invisible task still holds the room.
       if (req.query.includeActive === "true" && req.query.date) {
-        const active = await db.execute(sql`SELECT id FROM housekeeping_tasks
-          WHERE status='in_progress' AND scheduled_date<>${req.query.date as string}
-          ${assigned ? sql`AND assigned_to=${assigned}` : sql``}`);
+        const active = await db.execute(sql`SELECT t.id FROM housekeeping_tasks t
+          LEFT JOIN housekeeping_operational_staff s ON s.id=t.assigned_to
+          WHERE t.scheduled_date<>${req.query.date as string} AND
+          (t.status='in_progress' OR
+            (t.status='pending' AND t.scheduled_date<${req.query.date as string}
+             AND s.kind='extra' AND s.service_date<${req.query.date as string}))
+          ${assigned ? sql`AND t.assigned_to=${assigned}` : sql``}`);
         const extra = await Promise.all(active.rows.map(row => storage.getHousekeepingTask(String(row.id))));
         tasks.unshift(...extra.filter((task): task is NonNullable<typeof task> => !!task));
       }
       res.json(tasks);
-    } catch (e) {
-      error(res, e);
-    }
-  });
-  app.get("/api/housekeeping/staff", ...manage, async (_req, res) => {
-    try {
-      res.json(
-        (await storage.getSystemUsers())
-          .filter((u) => u.role === "housekeeping" && u.isActive === "true")
-          .map(({ id, fullName, role, username }) => ({
-            id,
-            fullName,
-            role,
-            username,
-          })),
-      );
     } catch (e) {
       error(res, e);
     }
@@ -212,7 +195,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
         .parse(req.body);
       const result = await withDatabaseTransaction(async () => {
         await lockRoom(data.roomId);
-        await assignee(data.assignedTo);
+        await validateShiftAssignee(data.assignedTo,data.date);
         const tasks = await storage.getHousekeepingTasks(data.date);
         const pending = tasks.filter(
           (t) => t.roomId === data.roomId && t.status === "pending",
@@ -237,6 +220,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
           });
           return updated;
         }
+        if(!data.assignedTo)return {unassigned:true};
         return (
           await createTasks(req, [data.roomId], {
             taskType: "checkout_clean",
@@ -269,7 +253,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
         const { task } = await lockTask(req, req.params.id);
         if (task.status !== "pending")
           fail("Sólo se editan tareas pendientes.");
-        await assignee(patch.assignedTo);
+        await validateShiftAssignee(patch.assignedTo !== undefined ? patch.assignedTo : task.assigned_to,patch.scheduledDate ?? task.scheduled_date);
         const date = patch.scheduledDate || task.scheduled_date,
           type = patch.taskType || task.task_type;
         const duplicate = await db.execute(
@@ -364,13 +348,21 @@ export function registerHousekeepingTaskRoutes(app: Express) {
       }
     },
   );
-  for (const action of ["start", "complete", "inspect"] as const)
+  for (const action of ["start", "complete", "inspect", "finish-turn"] as const)
     app.post(`/api/housekeeping/:id/${action}`, ...access, async (req, res) => {
       try {
         if (action === "inspect" && !supervisor(req))
           fail("La verificación corresponde a supervisión.", 403);
+        if(action==="finish-turn" && !supervisor(req))
+          fail("La finalización desde Turno corresponde a supervisión.",403);
         const saved = await withDatabaseTransaction(async () => {
           const { task, room } = await lockTask(req, req.params.id);
+          if(action==="finish-turn"){
+            const expected=z.object({expectedAssignedTo:z.string().min(1)}).strict().parse(req.body);
+            if(!task.assigned_to||task.assigned_to!==expected.expectedAssignedTo)
+              fail("La asignación cambió. Actualizá el turno antes de terminar la habitación.");
+            if(!cleanTask(task.task_type))fail("Esta tarea no es de limpieza. Finalizala desde la gestión de tareas.");
+          }
           if (
             task.scheduled_date > getArgentinaToday() ||
             (action === "start" && task.scheduled_date !== getArgentinaToday())
@@ -382,6 +374,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
             start: "in_progress",
             complete: "completed",
             inspect: "inspected",
+            "finish-turn": "completed",
           }[action];
           if (task.status === wanted)
             return storage.getHousekeepingTask(task.id);
@@ -389,6 +382,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
             start: "pending",
             complete: "in_progress",
             inspect: "completed",
+            "finish-turn": task.status === "pending" ? "pending" : "in_progress",
           }[action];
           if (task.status !== previous)
             fail("La tarea cambió de estado. Actualizá la lista.");
@@ -396,6 +390,11 @@ export function registerHousekeepingTaskRoutes(app: Express) {
             fail(
               "La habitación está bloqueada. Revisá el bloqueo antes de continuar.",
             );
+          if(action==="finish-turn"){
+            if(room.status==="no_molestar")fail("La habitación tiene No molestar. Revisá la situación antes de registrar la limpieza.");
+            const other=await db.execute(sql`SELECT id FROM housekeeping_tasks WHERE room_id=${room.id} AND status='in_progress' AND id<>${task.id} LIMIT 1`);
+            if(other.rows.length)fail("Hay otra tarea en curso en esta habitación. Finalizala antes de registrar la limpieza.");
+          }
           if (action === "inspect") {
             const active = await db.execute(
               sql`SELECT id FROM housekeeping_tasks WHERE room_id=${room.id} AND status='in_progress' LIMIT 1`,
@@ -418,7 +417,7 @@ export function registerHousekeepingTaskRoutes(app: Express) {
           }
           const patch: any = { status: wanted };
           if (action === "start") patch.startedAt = new Date();
-          if (action === "complete") patch.completedAt = new Date();
+          if (action === "complete" || action === "finish-turn") patch.completedAt = new Date();
           if (action === "inspect") {
             patch.inspectedAt = new Date();
             patch.inspectedBy = req.user!.id;

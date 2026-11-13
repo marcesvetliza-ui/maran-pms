@@ -19,6 +19,7 @@ import {
   type StaffAvailability,
 } from "@shared/housekeepingAvailability";
 import { Button } from "@/components/ui/button";
+import { AddShiftStaff } from "@/components/add-shift-staff";
 import {
   Dialog,
   DialogContent,
@@ -33,12 +34,26 @@ export function useStaffAvailability(date: string) {
       (
         await apiRequest("GET", `/api/housekeeping/availability?date=${date}`)
       ).json(),
+    refetchInterval: 30000,
   });
 }
-export function HousekeepingStaffAvailability() {
-  const [date, setDate] = useState(getArgentinaToday),
+type HousekeepingStaffAvailabilityProps = {
+  date?: string;
+  onDateChange?: (date: string) => void;
+};
+export function HousekeepingStaffAvailability({
+  date: controlledDate,
+  onDateChange,
+}: HousekeepingStaffAvailabilityProps = {}) {
+  const [internalDate, setInternalDate] = useState(getArgentinaToday),
     [editing, setEditing] = useState<StaffAvailability | null>(null),
     [message, setMessage] = useState("");
+  const date = controlledDate ?? internalDate;
+  const [editingDate,setEditingDate]=useState(date);
+  const updateDate = (nextDate: string) => {
+    if (controlledDate === undefined) setInternalDate(nextDate);
+    onDateChange?.(nextDate);
+  };
   const [form, setForm] = useState({
     status: "working",
     shift: "",
@@ -57,7 +72,7 @@ export function HousekeepingStaffAvailability() {
     mutationFn: async () =>
       apiRequest(
         "PUT",
-        `/api/housekeeping/availability/${editing!.userId}/${date}`,
+        `/api/housekeeping/availability/${editing!.userId}/${editingDate}`,
         payload,
       ),
     onSuccess: () => {
@@ -69,6 +84,7 @@ export function HousekeepingStaffAvailability() {
     onError: (e) => setMessage(parseApiError(e)),
   });
   function edit(row: StaffAvailability) {
+    setEditingDate(date);
     setMessage("");
     setForm({
       status: row.status || "working",
@@ -81,16 +97,21 @@ export function HousekeepingStaffAvailability() {
   }
   return (
     <section className="space-y-4 mt-4">
-      <div className="flex items-center gap-3">
-        <span className="rounded-xl bg-primary/10 p-3 text-primary">
-          <Users className="h-5 w-5" />
-        </span>
-        <div>
-          <h3 className="text-lg font-semibold">Disponibilidad del personal</h3>
-          <p className="text-sm text-muted-foreground">
-            Organizá el equipo y los horarios de cada jornada.
-          </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="rounded-xl bg-primary/10 p-3 text-primary">
+            <Users className="h-5 w-5" />
+          </span>
+          <div>
+            <h3 className="text-lg font-semibold">
+              Disponibilidad del personal
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Organizá el equipo y los horarios de cada jornada.
+            </p>
+          </div>
         </div>
+        <AddShiftStaff date={date} />
       </div>
       <p className="text-sm text-muted-foreground">
         Completá quién trabaja cada día. Cambiar la disponibilidad no modifica
@@ -103,7 +124,7 @@ export function HousekeepingStaffAvailability() {
           className={input}
           type="date"
           value={date}
-          onChange={(e) => setDate(e.target.value)}
+          onChange={(e) => updateDate(e.target.value)}
         />
       </label>
       {data.isLoading && <p>Cargando disponibilidad…</p>}

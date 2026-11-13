@@ -100,6 +100,7 @@ describe.skipIf(!enabled)(
         } as any;
         next();
       });
+      (await import("../housekeepingAvailability")).registerHousekeepingAvailability(app);
       (await import("../housekeepingTasks")).registerHousekeepingTaskRoutes(
         app,
       );
@@ -112,6 +113,8 @@ describe.skipIf(!enabled)(
       await pool.query("DELETE FROM housekeeping_tasks WHERE room_id=ANY($1)", [
         [id("room"), id("second")],
       ]);
+      await pool.query("DELETE FROM housekeeping_operational_availability WHERE user_id IN (SELECT id FROM housekeeping_operational_staff WHERE created_by=$1)",[id("admin")]);
+      await pool.query("DELETE FROM housekeeping_operational_staff WHERE created_by=$1",[id("admin")]);
       await pool.query("DELETE FROM reservations WHERE id=$1", [
         id("reservation"),
       ]);
@@ -130,6 +133,8 @@ describe.skipIf(!enabled)(
           "DELETE FROM housekeeping_tasks WHERE room_id=ANY($1)",
           [[id("room"), id("second")]],
         );
+        await pool.query("DELETE FROM housekeeping_operational_availability WHERE user_id IN (SELECT id FROM housekeeping_operational_staff WHERE created_by=$1)",[id("admin")]);
+        await pool.query("DELETE FROM housekeeping_operational_staff WHERE created_by=$1",[id("admin")]);
         await pool.query("DELETE FROM reservations WHERE id=$1", [
           id("reservation"),
         ]);
@@ -151,6 +156,8 @@ describe.skipIf(!enabled)(
       actor = "none";
       expect((await api("GET", "/api/housekeeping")).status).toBe(401);
       actor = "worker";
+      expect((await api("POST","/api/housekeeping/staff",{fullName:"Personal de prueba",kind:"extra",date:today})).status).toBe(403);
+      expect((await api("GET",`/api/housekeeping/staff/expired?date=${today}`)).status).toBe(403);
       expect(
         (await api("POST", "/api/housekeeping/bulk", payload())).status,
       ).toBe(403);
@@ -169,6 +176,88 @@ describe.skipIf(!enabled)(
           })
         ).status,
       ).toBe(403);
+    });
+    it("creates fixed and extra staff without creating login accounts, and scopes extras to their day",async()=>{
+      const extra=await api("POST","/api/housekeeping/staff",{fullName:"Personal extra sintético",kind:"extra",date:today});
+      const fixed=await api("POST","/api/housekeeping/staff",{fullName:"Personal fijo sintético",kind:"permanent",date:today});
+      expect(extra.status).toBe(201);expect(fixed.status).toBe(201);
+      expect(extra.body.serviceDate).toBe(today);expect(fixed.body.serviceDate).toBeNull();
+      expect((await pool.query("SELECT id FROM system_users WHERE id=ANY($1)",[[extra.body.id,fixed.body.id]])).rows).toHaveLength(0);
+      const current=await api("GET",`/api/housekeeping/staff?date=${today}`);
+      expect(current.body.map((p:any)=>p.id)).toEqual(expect.arrayContaining([extra.body.id,fixed.body.id]));
+      const next=await api("GET","/api/housekeeping/staff?date=2099-01-01");
+      expect(next.body.map((p:any)=>p.id)).not.toContain(extra.body.id);
+      expect(next.body.map((p:any)=>p.id)).toContain(fixed.body.id);
+      expect((await api("POST","/api/housekeeping/staff",{fullName:" Personal extra sintético ",kind:"extra",date:today})).status).toBe(409);
+      expect((await api("POST","/api/housekeeping/staff",{fullName:"Prueba",kind:"extra",date:"2026-02-30"})).status).toBe(400);
+      expect((await api("GET","/api/housekeeping/staff?date=invalid")).status).toBe(400);
+    });
+    it("supports operational availability and rejects extra assignments on a different date",async()=>{
+      const person=(await api("POST","/api/housekeeping/staff",{fullName:"Personal operativo sintético",kind:"extra",date:today})).body;
+      const availability=await api("GET",`/api/housekeeping/availability?date=${today}`);
+      expect(availability.body.find((r:any)=>r.userId===person.id)).toMatchObject({status:"working",kind:"extra"});
+      const saved=await api("PUT",`/api/housekeeping/availability/${person.id}/${today}`,{
+        status:"working",shift:"morning",startTime:"08:00",endTime:"14:00",notes:"Refuerzo"});
+      expect(saved.status).toBe(200);
+      const t=await task({assignedTo:person.id});
+      expect(t.assignedTo).toBe(person.id);
+      expect((await api("POST","/api/housekeeping/assign",{roomId:id("second"),assignedTo:person.id,date:"2099-01-01"})).status).toBe(400);
+      expect((await api("PUT",`/api/housekeeping/availability/${person.id}/2099-01-01`,{
+        status:"day_off",shift:null,startTime:null,endTime:null,notes:""})).status).toBe(404);
+    });
+    it("warns about expired extra pending work without deleting names, tasks, or history",async()=>{
+      const person=(await api("POST","/api/housekeeping/staff",{fullName:"Refuerzo anterior sintético",kind:"extra",date:"2020-01-01"})).body;
+      const t=await task({assignedTo:person.id,scheduledDate:"2020-01-01"});
+      const roster=await api("GET",`/api/housekeeping/staff?date=${today}`);
+      expect(roster.body.map((r:any)=>r.id)).not.toContain(person.id);
+      const expired=await api("GET",`/api/housekeeping/staff/expired?date=${today}`);
+      expect(expired.body).toEqual(expect.arrayContaining([expect.objectContaining({id:person.id,pendingCount:1,fullName:person.fullName})]));
+      const board=await api("GET",`/api/housekeeping?date=${today}&includeActive=true`);
+      expect(board.body.map((r:any)=>r.id)).toContain(t.id);
+      const finish=await api("POST",`/api/housekeeping/${t.id}/finish-turn`,{expectedAssignedTo:person.id});
+      expect(finish.status).toBe(200);
+      expect((await api("GET",`/api/housekeeping/staff/expired?date=${today}`)).body.map((r:any)=>r.id)).not.toContain(person.id);
+      expect((await pool.query("SELECT full_name FROM housekeeping_operational_staff WHERE id=$1",[person.id])).rows[0].full_name).toBe(person.fullName);
+      expect((await storage.getHousekeepingTask(t.id)).assignedTo).toBe(person.id);
+    });
+    it.each(["pending","in_progress"])("finishes %s cleaning atomically, keeps attribution, and preserves the entered stay and No mover",async(status)=>{
+      await occupied();
+      const marker=(await storage.getReservation(id("reservation"))).housekeepingPreparation;
+      const t=await task();
+      if(status==="in_progress")await api("POST",`/api/housekeeping/${t.id}/start`);
+      const body={expectedAssignedTo:id("worker")};
+      const replies=await Promise.all([api("POST",`/api/housekeeping/${t.id}/finish-turn`,body),api("POST",`/api/housekeeping/${t.id}/finish-turn`,body)]);
+      expect(replies.map(r=>r.status)).toEqual([200,200]);
+      const saved=await storage.getHousekeepingTask(t.id);
+      expect(saved.status).toBe("completed");expect(saved.assignedTo).toBe(id("worker"));expect(saved.completedAt).toBeTruthy();
+      if(status==="pending")expect(saved.startedAt).toBeNull();
+      expect((await storage.getRoom(id("room"))).status).toBe("limpia_ocupada");
+      const reservation=await storage.getReservation(id("reservation"));
+      expect(reservation.status).toBe("checked_in");expect(reservation.housekeepingPreparation).toEqual(marker);
+      expect((await pool.query("SELECT id FROM audit_logs WHERE entity_id=$1 AND action='finish-turn'",[t.id])).rows).toHaveLength(1);
+    });
+    it("guards finishing against stale assignment, future work, non-cleaning work, and non-supervisors",async()=>{
+      const t=await task();
+      const endpoint=`/api/housekeeping/${t.id}/finish-turn`,body={expectedAssignedTo:id("worker")};
+      expect((await api("POST",endpoint,{expectedAssignedTo:id("other")})).status).toBe(409);
+      expect((await api("POST",endpoint,{})).status).toBe(400);
+      actor="worker";expect((await api("POST",endpoint,body)).status).toBe(403);actor="admin";
+      await pool.query("UPDATE housekeeping_tasks SET scheduled_date='2099-01-01' WHERE id=$1",[t.id]);
+      expect((await api("POST",endpoint,body)).status).toBe(409);
+      await pool.query("UPDATE housekeeping_tasks SET scheduled_date=$2,task_type='inspection' WHERE id=$1",[t.id,today]);
+      expect((await api("POST",endpoint,body)).status).toBe(409);
+      expect((await storage.getHousekeepingTask(t.id)).status).toBe("pending");
+    });
+    it.each(["no_molestar","maintenance","oos"])("does not overwrite %s through Turno completion",async(status)=>{
+      const t=await task();
+      await pool.query("UPDATE rooms SET status=$2 WHERE id=$1",[id("room"),status]);
+      expect((await api("POST",`/api/housekeeping/${t.id}/finish-turn`,{expectedAssignedTo:id("worker")})).status).toBe(409);
+      expect((await storage.getRoom(id("room"))).status).toBe(status);
+      expect((await storage.getHousekeepingTask(t.id)).status).toBe("pending");
+    });
+    it("does not create a new task when unassigning a room without pending work",async()=>{
+      expect((await api("POST","/api/housekeeping/assign",{roomId:id("room"),assignedTo:null,date:today})).status).toBe(200);
+      expect(await storage.getHousekeepingTasks(today)).toHaveLength(0);
     });
     it("creates selected rooms with date, assignee, instructions and priority", async () => {
       const r = await api(
@@ -486,6 +575,7 @@ describe.skipIf(!enabled)(
         expect(
           (await api("POST", `/api/housekeeping/${t.id}/start`)).status,
         ).toBe(500);
+        expect((await api("POST",`/api/housekeeping/${t.id}/finish-turn`,{expectedAssignedTo:id("worker")})).status).toBe(500);
         expect((await storage.getHousekeepingTask(t.id)).status).toBe(
           "pending",
         );

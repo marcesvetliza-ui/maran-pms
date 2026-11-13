@@ -5067,6 +5067,9 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await ensureRevenueManagementSchema();
   const { ensureAccommodationPermissionsSchema } = await import("./accommodationPermissions");
   await ensureAccommodationPermissionsSchema();
+  const {housekeepingStaffTables} = await import("./housekeepingStaffSchema");
+  for (const table of housekeepingStaffTables)
+    await db.execute(sql.raw(createTableWithoutRerunNotice(table.name, table.ddl)));
   await db.execute(sql.raw(createTableWithoutRerunNotice("housekeeping_staff_availability", `CREATE TABLE housekeeping_staff_availability (
  user_id varchar NOT NULL REFERENCES system_users(id),
  scheduled_date text NOT NULL,
