@@ -4,6 +4,7 @@ import {RestaurantItemQuantityPicker} from "@/components/restaurant-item-quantit
 import {restaurantPortionCents} from "@shared/restaurant-item-quantities";
 import { RestaurantMoveDestination } from "@/components/restaurant-move-destination";
 import { restaurantNonFiscalMethods } from "@shared/restaurant-settlement";
+import { resolveBillingPoint, type BillingPointConfig } from "@shared/billing-point-of-sale";
 import { formatDisplayDate } from "@shared/date-display";
 import {InventoryPendingConsumptions} from '@/components/inventory-pending-consumptions';
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -369,13 +370,14 @@ type AdvanceDialogProps = {
   posConfigsData?: any[];
   restaurantGuests?: any[];
   companies?: any[];
+  billingConfig?: BillingPointConfig;
 };
 
 function AdvanceDialog({
   reservationId, open, onOpenChange, reservations,
   advanceAmount, setAdvanceAmount, advancePaymentMethod, setAdvancePaymentMethod,
   advanceNotes, setAdvanceNotes, createAdvanceMutation, deleteAdvanceMutation,
-  posConfigsData = [], restaurantGuests = [], companies = [],
+  posConfigsData = [], restaurantGuests = [], companies = [], billingConfig,
 }: AdvanceDialogProps) {
   const { selectedPosNumero, selectedPosNombre } = useAuth();
   const reservation = reservations.find(r => r.id === reservationId);
@@ -454,6 +456,7 @@ function AdvanceDialog({
   };
 
   const isFactura = ["factura_a", "factura_b"].includes(advReceiptType);
+  const advanceFiscalPoint = resolveBillingPoint(billingConfig, posConfigsData.filter(p => p.area === "restaurant"), selectedPosNumero);
   const needsClient = isFactura && hasClient;
 
   return (
@@ -627,10 +630,10 @@ function AdvanceDialog({
               )}
             </div>
 
-            {isFactura && selectedPosNumero && (
+            {isFactura && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
                 <Monitor className="h-3.5 w-3.5 shrink-0" />
-                <span>PV {String(selectedPosNumero).padStart(4, "0")}{selectedPosNombre ? ` — ${selectedPosNombre}` : ""}</span>
+                <span>{advanceFiscalPoint.error || `PV ${String(advanceFiscalPoint.point).padStart(4, "0")} — ${billingConfig?.arcaAmbiente === "homologacion" ? "Homologación" : selectedPosNombre || "Restaurant"}`}</span>
               </div>
             )}
 
@@ -668,7 +671,7 @@ function AdvanceDialog({
             </div>
             <Button
               className="w-full"
-              disabled={!advanceAmount || parseFloat(advanceAmount) <= 0 || createAdvanceMutation.isPending || !reservationId}
+              disabled={!advanceAmount || parseFloat(advanceAmount) <= 0 || createAdvanceMutation.isPending || !reservationId || (isFactura && !!advanceFiscalPoint.error)}
               onClick={() => {
                 if (!reservationId || !advanceAmount) return;
                 createAdvanceMutation.mutate({
@@ -680,7 +683,7 @@ function AdvanceDialog({
                   vatCondition: advReceiptType === "factura_a" ? "responsable_inscripto" : (clientVat === "exento" ? "exento" : "consumidor_final"),
                   customerRazonSocial: advCustomerName || undefined,
                   customerCuit: advCustomerCuit || undefined,
-                  puntoVenta: selectedPosNumero || undefined,
+                  puntoVenta: isFactura ? advanceFiscalPoint.point! : selectedPosNumero || undefined,
                 });
               }}
               data-testid="button-submit-advance"
@@ -1030,7 +1033,8 @@ export default function RestaurantPage() {
   const { data: billingConfig } = useQuery<any>({
     queryKey: ["/api/billing/config"],
     queryFn: async () => { const r = await apiRequest("GET", "/api/billing/config"); return r.json(); },
-    enabled: isEmitirComprobanteOpen,
+    enabled: isEmitirComprobanteOpen || isCloseDialogOpen || isAdvanceDialogOpen,
+    staleTime: 0,
   });
   const { data: allUsers = [] } = useQuery<{ id: string; username: string; fullName: string; role: string; esMozo: string | null }[]>({
     queryKey: ["/api/staff/users"],
@@ -1793,6 +1797,8 @@ export default function RestaurantPage() {
       itemDescriptions?: Record<string, string>;
       comments?: string;
     }) => {
+      const fiscalPoint = resolveBillingPoint(billingConfig, posConfigsData.filter((p: any) => p.area === "restaurant"), data.puntoVenta);
+      if (data.emitInvoice && fiscalPoint.error) throw new Error(fiscalPoint.error);
       const res = await apiRequest("POST", `/api/restaurant/orders/${data.orderId}/close`, {
         chargeToRoom: data.paymentMethod === "cuenta_habitacion",
         receiptType: data.receiptType,
@@ -1809,7 +1815,7 @@ export default function RestaurantPage() {
         customerRazonSocial: data.customerRazonSocial,
         customerCuit: data.customerCuit,
         customerDni: data.customerDni,
-        puntoVenta: data.puntoVenta,
+        puntoVenta: data.emitInvoice ? fiscalPoint.point : data.puntoVenta,
         reservationAdvanceCredit: data.reservationAdvanceCredit,
         paymentSplits: data.paymentSplits,
         voucherCode: data.voucherCode,
@@ -2543,6 +2549,9 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
 
   const restaurantPVs = posConfigsData.filter((p: any) => p.activo && p.area === "restaurant");
   const compAmbiente: string = billingConfig?.arcaAmbiente ?? "ficticio";
+  const restaurantFiscalPVs = posConfigsData.filter((p: any) => p.area === "restaurant");
+  const compFiscalPoint = resolveBillingPoint(billingConfig, restaurantFiscalPVs, compPv);
+  const closeFiscalPoint = resolveBillingPoint(billingConfig, restaurantFiscalPVs, selectedPosNumero);
 
   function handleEmitirComprobante() {
     if (!compRazonSocial.trim()) return toast({ title: "Ingrese Razón Social / Nombre", variant: "destructive" });
@@ -2551,13 +2560,15 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
     if (compFormaPago === "cuenta_corriente" && !compCcEntityId) {
       return toast({ title: `Seleccione ${compCcEntityType === "company" ? "una empresa" : "una agencia"}`, variant: "destructive" });
     }
-    const pvNum = compPv || (restaurantPVs.length > 0 ? String(restaurantPVs[0].numero) : undefined);
+    const internal = restaurantVoucherTypes.has(compTipo);
+    if (!internal && compFiscalPoint.error) return toast({ title: compFiscalPoint.error, variant: "destructive" });
+    const pvNum = internal ? compPv || (restaurantPVs.length > 0 ? String(restaurantPVs[0].numero) : undefined) : compFiscalPoint.point;
     const compTipoLabel = compTipo === "voucher_justo" ? "Voucher Justo" : receiptTypeLabels[compTipo] || compTipo;
     emitirComprobanteMutation.mutate({
       tipoComprobante: compTipo,
       cliente: { razonSocial: compRazonSocial, cuit: compCuit || undefined, dni: compDni || undefined, condicionIva: compCondicionIva, domicilio: compDomicilio || undefined },
       items: compItems,
-      puntoVenta: pvNum ? parseInt(pvNum) : undefined,
+      puntoVenta: pvNum ? Number(pvNum) : undefined,
       cashArea: "restaurant",
       cashFormaPago: compFormaPago,
       cashLabel: `${compTipoLabel} — ${compRazonSocial}`,
@@ -5722,8 +5733,8 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                           <div className={`flex-1 text-sm font-medium px-3 py-2 rounded-md border flex items-center gap-2 ${isFactura ? "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200" : "bg-muted/40 text-foreground"}`}>
                             <Receipt className="h-4 w-4 shrink-0" />
                             <span>{receiptTypeLabels[effReceiptType] || effReceiptType}</span>
-                            {isFactura && selectedPosNumero && (
-                              <span className="ml-auto text-xs font-normal opacity-70">PV {String(selectedPosNumero).padStart(4, "0")}</span>
+                            {isFactura && (
+                              <span className="ml-auto text-xs font-normal opacity-70">{closeFiscalPoint.error || `PV ${String(closeFiscalPoint.point).padStart(4, "0")}${compAmbiente === "homologacion" ? " — Homologación" : ""}`}</span>
                             )}
                           </div>
                           <Select value={closeNonFiscalOverride} onValueChange={v => {
@@ -6644,6 +6655,10 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                 const effReceiptType = (closeNonFiscalOverride !== "__default__" ? closeNonFiscalOverride : "") || deriveReceiptFromVat(closeBillingClient?.vatCondition);
                 const hasRoomCharge = closePaymentSplits.some(s => s.method === "cuenta_habitacion");
                 const isFactura = !hasRoomCharge && ["factura_a", "factura_b", "factura_c"].includes(effReceiptType);
+                if (isFactura && closeFiscalPoint.error) {
+                  toast({ title: closeFiscalPoint.error, variant: "destructive" });
+                  return;
+                }
                 const isFactA = effReceiptType === "factura_a";
                 const vatCond = isFactA
                   ? "responsable_inscripto"
@@ -7083,13 +7098,18 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             )}
           </div>
 
-          {restaurantPVs.length > 1 && (
+          {!restaurantVoucherTypes.has(compTipo) && (
+            <p className="text-xs text-muted-foreground" data-testid="comp-fiscal-point">
+              {compFiscalPoint.error || `PV ${String(compFiscalPoint.point).padStart(4, "0")} — ${compAmbiente === "homologacion" ? "Homologación" : "Restaurant"}`}
+            </p>
+          )}
+          {(restaurantVoucherTypes.has(compTipo) ? restaurantPVs : compFiscalPoint.options).length > 1 && (
             <div className="space-y-1">
               <Label>Punto de Venta</Label>
-              <Select value={compPv} onValueChange={setCompPv}>
+              <Select value={restaurantVoucherTypes.has(compTipo) ? compPv : String(compFiscalPoint.point ?? "")} onValueChange={setCompPv}>
                 <SelectTrigger data-testid="select-comp-pv"><SelectValue placeholder="PV por defecto" /></SelectTrigger>
                 <SelectContent>
-                  {restaurantPVs.map((p: any) => (
+                  {(restaurantVoucherTypes.has(compTipo) ? restaurantPVs : compFiscalPoint.options).map((p: any) => (
                     <SelectItem key={p.id} value={String(p.numero)}>
                       PV {String(p.numero).padStart(4, "0")} — {p.nombre}
                     </SelectItem>
@@ -7250,7 +7270,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEmitirComprobanteOpen(false)}>Cancelar</Button>
-            <Button onClick={handleEmitirComprobante} disabled={emitirComprobanteMutation.isPending} data-testid="btn-comp-emitir">
+            <Button onClick={handleEmitirComprobante} disabled={emitirComprobanteMutation.isPending || (!restaurantVoucherTypes.has(compTipo) && !!compFiscalPoint.error)} data-testid="btn-comp-emitir">
               {emitirComprobanteMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Emitiendo...</> : "Emitir y descargar PDF"}
             </Button>
           </DialogFooter>
@@ -7800,6 +7820,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
         createAdvanceMutation={createAdvanceMutation}
         deleteAdvanceMutation={deleteAdvanceMutation}
         posConfigsData={posConfigsData}
+        billingConfig={billingConfig}
         restaurantGuests={restaurantGuests}
         companies={companies}
       />

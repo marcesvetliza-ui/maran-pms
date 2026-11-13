@@ -10,6 +10,7 @@ import { GuestSearchCombobox } from "@/components/guest-search-combobox";
 import { SpaFundingRecipientEditor } from "./spa-funding-recipient";
 import { SpaVoucherConfirmation, readSpaVoucherJournal } from "./spa-voucher-confirmation";
 import { SpaFundingPanel } from "./spa-funding-panel";
+import { validPointNumber } from "@shared/billing-point-of-sale";
 
 const ivaLabels:Record<string,string>={consumidor_final:"Consumidor final",responsable_inscripto:"Responsable inscripto",exento:"Exento",monotributo:"Monotributo",monotributista:"Monotributo",no_responsable:"No responsable",no_categorizado:"No categorizado"};
 type Row={id:string;method:typeof fundingMethods[number];value:string};
@@ -77,7 +78,8 @@ function PrefacturaForm({accountId,userId,canWrite,account,refreshAccount,onComp
  const inferredTipo=condition==="responsable_inscripto"?"FA":"FB";
  const effectiveType=receiptType??inferredTipo;
  const tipo=effectiveType==="cierre_spa"?"Voucher SPA — no fiscal":effectiveType==="FA"?"Factura A":"Factura B";
- const typeProblem=effectiveType!=="cierre_spa"&&!ivaLabels[condition]?"Falta una condición IVA válida en la ficha seleccionada. Revisá los datos fiscales antes de emitir.":effectiveType!=="cierre_spa"&&effectiveType!==inferredTipo?"El tipo elegido no corresponde a la condición IVA. Revisá el comprobante o los datos fiscales.":effectiveType==="cierre_spa"&&context.data&&context.data.voucherPoint==null?"Revisá la configuración del punto de venta SPA antes de emitir el voucher.":"";
+ const fiscalPointProblem=effectiveType==="cierre_spa"?"":context.isPending?"Cargando el punto de venta fiscal SPA…":context.isError?"No se pudo consultar el punto de venta fiscal SPA.":validPointNumber(context.data?.point)===null?"Revisá la configuración del punto de venta fiscal SPA antes de emitir.":"";
+ const typeProblem=fiscalPointProblem||(effectiveType!=="cierre_spa"&&!ivaLabels[condition]?"Falta una condición IVA válida en la ficha seleccionada. Revisá los datos fiscales antes de emitir.":effectiveType!=="cierre_spa"&&effectiveType!==inferredTipo?"El tipo elegido no corresponde a la condición IVA. Revisá el comprobante o los datos fiscales.":effectiveType==="cierre_spa"&&context.data&&context.data.voucherPoint==null?"Revisá la configuración del punto de venta SPA antes de emitir el voucher.":"");
  const [voucherPending,setVoucherPending]=useState(()=>readSpaVoucherJournal(userId,accountId)!==null);
  const [voucherBusy,setVoucherBusy]=useState(false);
  const active=projection.data?.operations.some(o=>!["applied","aborted"].includes(o.status));

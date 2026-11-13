@@ -6,6 +6,7 @@ import { SpaFundingConnectedPanel } from './spa-funding-connected-panel';
 const scope={kind:'spa',id:'spa-connected'};
 let calls:Array<{url:string;body:any}>,document:any,operation:any,covered:boolean,deny:boolean,noShift:boolean,unpaid:boolean,missingVat:boolean,emptyShifts:boolean;
 let allowCash = true;
+let fiscalPoint: number | null = 5;
 vi.mock("@/App", () => ({ useAuth: () => ({ hasPermission: (key:string) => allowCash && key === "sidebar:/cash-register" }) }));
 const ok=(data:unknown,status=200)=>new Response(JSON.stringify({ok:true,data}),{status});
 function mount(canWrite=true,onCompleted=vi.fn(),onRoomTransfer=vi.fn()) {
@@ -13,12 +14,12 @@ function mount(canWrite=true,onCompleted=vi.fn(),onRoomTransfer=vi.fn()) {
 }
 function op(status:string){return {id:operation?.id,scope,status,canAuthorize:status==='reserved',canFinalize:status==='authorized_pending_link',canResume:status==='fiscal_unknown',fundsRetained:status!=='applied',invoice:null,result:null,lastError:null};}
 beforeEach(()=>{
- sessionStorage.clear();calls=[];document=null;operation=null;covered=false;deny=false;noShift=false;unpaid=false;missingVat=false;emptyShifts=false;allowCash=true;
+ sessionStorage.clear();calls=[];document=null;operation=null;covered=false;deny=false;noShift=false;unpaid=false;missingVat=false;emptyShifts=false;allowCash=true;fiscalPoint=5;
  vi.stubGlobal('fetch',vi.fn(async(url:string,init?:RequestInit)=>{
   const body=init?.body?JSON.parse(String(init.body)):undefined;calls.push({url,body});
   if(url.endsWith('/account'))return ok({id:scope.id,chargeVersion:'a'.repeat(64),preferences:null,guestName:'Cliente SPA',status:'open',totalCents:9500000,paidCents:unpaid?0:covered?9500000:500000,balanceCents:unpaid?9500000:covered?0:9000000,readOnly:false,canInvoice:true,transferred:null,
    items:[{id:'item',description:'Masaje SPA',quantity:1,unitPrice:95000,subtotal:95000,itemType:'treatment',inventoryItemId:null}],payments:[],movements:[],events:[],operations:[],invoices:[]});
-  if(url.endsWith('/prefactura-context'))return ok({environment:'homologacion',point:5,voucherPoint:23,companies:[{id:'company',name:'Empresa RI',cuit:'20301234567',vatCondition:'responsable_inscripto',address:'Domicilio empresa'}]});
+  if(url.endsWith('/prefactura-context'))return ok({environment:'homologacion',point:fiscalPoint,voucherPoint:23,companies:[{id:'company',name:'Empresa RI',cuit:'20301234567',vatCondition:'responsable_inscripto',address:'Domicilio empresa'}]});
   if(url.endsWith('/recipient'))return ok({guestId:'customer',kind:'guest',firstName:'Cliente',lastName:'SPA',documentType:'DNI',documentNumber:'30111222',vatCondition:missingVat?null:'consumidor_final',cuit:'',address:'Domicilio',editable:true});
   if(url.endsWith('/collection-shifts'))return noShift?new Response('Unavailable',{status:503}):ok(emptyShifts?[]:[{id:'shift',label:'Mi caja SPA'}]);
   if(url.includes('/scopes/'))return ok({scope,debtCents:unpaid?9500000:covered?0:9000000,receipts:unpaid?[]:[{id:'r1',sourcePaymentId:'p1',method:'tarjeta_debito',amountCents:covered?9500000:500000,appliedCents:0,heldCents:0,freeCents:covered?9500000:500000,version:1}],documents:document?[document]:[],operations:operation?[operation]:[],rectifications:[]});
@@ -46,6 +47,14 @@ it('opens a source-filled prefactura without preparing, collecting or issuing au
  expect(screen.getByLabelText('Punto de venta')).toHaveValue('PV 0005 — Homologación');
  expect(calls.filter(c=>c.body)).toHaveLength(0);
  expect(screen.queryByText('Actualizar financiación')).not.toBeInTheDocument();
+});
+it.each([0,null])('does not prepare, collect or issue with invalid fiscal point %s, even with operational SPA point 23',async(point)=>{
+ fiscalPoint=point;mount();
+ await screen.findAllByText(/(?:Revisá la configuración del punto de venta fiscal SPA|No se pudo consultar el punto de venta fiscal SPA)/);
+ const review=screen.getByRole('button',{name:'Revisar factura'});
+ if(!review.hasAttribute('disabled'))await userEvent.click(review);
+ expect(screen.queryByRole('button',{name:'Registrar y emitir'})).not.toBeInTheDocument();
+ expect(calls.filter(c=>c.body)).toHaveLength(0);
 });
 it('company, discount, two payment methods and an advance are sent in exact cents then emitted through the existing finalizer',async()=>{
  const done=vi.fn();mount(true,done);await screen.findByLabelText('Monto del cobro 1');

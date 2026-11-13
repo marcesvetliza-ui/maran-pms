@@ -29,3 +29,12 @@ export function billingPointError(config: BillingPointConfig | null | undefined,
   }
   return null;
 }
+
+/** Resolve NEW requests only. Frozen/recovery requests must keep their identity. */
+export function resolveBillingPoint(config: BillingPointConfig | null | undefined, points: BillingPoint[], preferred?: unknown) {
+  const options = billingPointOptions(config, points);
+  const point = config?.arcaAmbiente === "homologacion"
+    ? options[0]?.numero ?? null
+    : validPointNumber(preferred == null || preferred === "" ? options[0]?.numero : preferred);
+  return { point, options, error: billingPointError(config, points, point) };
+}
