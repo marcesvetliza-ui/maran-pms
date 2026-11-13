@@ -46,6 +46,7 @@ it('documents pending sources of a group room without preparing a second payment
   return Response.json([]);
  });vi.stubGlobal('fetch',fetcher);
  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><PrefacturaDialog open onClose={vi.fn()} reservationId={id} reservation={{id,groupId:'g-doc',guestId:'g',status:'checked_in',guest:{id:'g',firstName:'Synthetic',lastName:'Guest',condicionIva:'Consumidor Final'},room:{roomNumber:'506'}} as any} mode="billing"/></QueryClientProvider>);
+ await userEvent.setup().selectOptions(await screen.findByLabelText('Qué querés hacer con estos cargos'),'invoice_only');
  expect(await screen.findByDisplayValue('Solo facturación; conserva los pagos')).toBeInTheDocument();
  const button=await screen.findByTestId('button-registrar-emitir');await waitFor(()=>expect(button).toBeEnabled());
  expect(button).toHaveTextContent('Emitir factura sin cobrar');
@@ -53,4 +54,32 @@ it('documents pending sources of a group room without preparing a second payment
  await waitFor(()=>expect(writes.some(w=>w.path==='/api/billing/invoices')).toBe(true));
  expect(writes).toHaveLength(1);expect(writes[0].body).toMatchObject({reservaId:id,groupDocumentationOnly:true,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});
  expect(writes[0].body.cashFormaPago).toBeUndefined();expect(writes[0].body.cashFormaPagoDetalle).toBeUndefined();expect(writes[0].body.reservationSettlementMethod).toBeUndefined();
+});
+
+it('defaults a new group room invoice to cash collection and preserves its payment plan',async()=>{
+ const id='room-cash';const writes:any[]=[];
+ const fetcher=vi.fn(async(url:any,options?:RequestInit)=>{
+  const path=String(url);
+  if(options?.method==='POST'){
+   writes.push({path,body:JSON.parse(String(options.body||'{}'))});
+   if(path==='/api/billing/invoices')return Response.json({id:507,tipoComprobante:'FB',puntoVenta:5,numero:507,montoTotal:'7500.00'});
+   if(path==='/api/payments')return Response.json({id:'cash7500'});
+  }
+  if(path.endsWith('/group-account'))return Response.json({groupId:'g-cash',balance:7500,charges:7500,paid:0,pendingInvoice:7500,groupCoverage:{},advances:[],reviewReceipts:[],unassigned:0});
+  if(path.endsWith('/reception-status'))return Response.json({stage:'none'});
+  if(path.endsWith('/pending-operation'))return Response.json({pending:null});
+  if(path.endsWith('/folio'))return Response.json({groupId:'g-cash',reservationCode:'RES507',guestName:'Synthetic Guest',roomNumber:'507',nights:1,roomRate:'7500',roomTotal:7500,charges:[],payments:[],grandTotal:7500,totalCharges:0,totalPayments:0,balance:7500});
+  if(path==='/api/billing/config')return Response.json({puntoVenta:5,arcaAmbiente:'ficticio'});
+  return Response.json([]);
+ });vi.stubGlobal('fetch',fetcher);
+ render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><PrefacturaDialog open onClose={vi.fn()} reservationId={id} reservation={{id,groupId:'g-cash',guestId:'g',status:'checked_in',guest:{id:'g',firstName:'Synthetic',lastName:'Guest',condicionIva:'Consumidor Final'},room:{roomNumber:'507'}} as any} mode="billing"/></QueryClientProvider>);
+ expect(await screen.findByLabelText('Qué querés hacer con estos cargos')).toHaveValue('collect_and_invoice');
+ const button=await screen.findByTestId('button-registrar-emitir');await waitFor(()=>expect(button).toBeEnabled());
+ await userEvent.setup().click(button);
+ await waitFor(()=>expect(writes).toHaveLength(2));
+ expect(writes.map(w=>w.path)).toEqual(['/api/billing/invoices','/api/payments']);
+ expect(writes[0].body.groupDocumentationOnly).toBeUndefined();
+ expect(writes[0].body).toMatchObject({reservationBillingAction:'collect_and_invoice',cashFormaPagoDetalle:[{method:'efectivo',amount:7500}],prefacturaRecovery:{version:2,payments:[{reservationId:id,method:'efectivo',amount:'7500.00'}]}});
+ expect(writes[1].body).toMatchObject({reservationId:id,method:'efectivo',amount:'7500.00',invoiceData:{id:507}});
+ expect(writes[1].body.paymentRequestId).toBe(writes[0].body.prefacturaRecovery.payments[0].paymentRequestId);
 });

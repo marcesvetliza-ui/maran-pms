@@ -104,6 +104,65 @@ suite('individual group room from its own prefactura',()=>{
   const r=await request('/api/billing/invoices',body);expect(r.status).toBe(409);
   expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(0);
  });
+ it('rejects automatic invoice-only requests from old tabs and contradictory action/payment plans before persisting an attempt',async()=>{
+  const f=await fixture();
+  const stale={...f.invoice,groupDocumentationOnly:true,cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}};
+  for(const body of [stale,{...stale,reservationBillingAction:'collect_and_invoice'},{...f.invoice,reservationBillingAction:'invoice_only'}]){
+   const rejected=await request('/api/billing/invoices',body);expect(rejected.status,JSON.stringify(rejected.body)).toBe(409);
+  }
+  expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT operation_id FROM billing_operations WHERE owner_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+ });
+ it('preserves an exactly matching frozen legacy invoice-only operation',async()=>{
+  const f=await fixture();
+  const body={...f.invoice,groupDocumentationOnly:true,cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}};
+  const {operationSnapshot,payloadHash}=await import('../billing/operationJournal');
+  const snapshot=operationSnapshot(body);
+  await pool.query("INSERT INTO billing_operations(operation_id,owner_type,owner_id,payload_hash,request_snapshot,fiscal_identity,stage) VALUES($1,'reservation',$2,$3,$4,'{}','prepared')",[f.invoice.creditOperationId,f.ids[0],payloadHash(snapshot),JSON.stringify(snapshot)]);
+  const issued=await request('/api/billing/invoices',body);expect(issued.status,JSON.stringify(issued.body)).toBe(201);
+  const changed=await request('/api/billing/invoices',{...body,cliente:{...body.cliente,razonSocial:'Different recipient'}});expect(changed.status).toBe(409);
+  expect((await pool.query('SELECT id FROM cash_movements WHERE source_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+ });
+ it('collects an invoice-only document atomically from a closed room, links its method, and replays without reissuing',async()=>{
+  const f=await fixture();
+  const chargeId=randomUUID();
+  await pool.query("INSERT INTO charges(id,reservation_id,description,amount,date,status) VALUES($1,$2,'Synthetic extras',35,'2026-11-11','active')",[chargeId,f.ids[0]]);
+  const folio=await(await import('../db-storage')).storage.getOrCreateFolio('reservation',f.ids[0]);
+  await pool.query("INSERT INTO folio_movements(folio_id,type,amount,description) VALUES($1,'charge',156,'Synthetic lodging and extras')",[folio.id]);
+  await pool.query('UPDATE folios SET total_charges=156,total_payments=0,balance=156 WHERE id=$1',[folio.id]);
+  const issued=await request('/api/billing/invoices',{...f.invoice,items:[{...f.invoice.items[0],descripcion:'Synthetic extras',precioUnitario:35,subtotal:35,subtotalNeto:35/1.21}],sourceChargeIds:[chargeId],sourceChargeAmounts:{[chargeId]:35},groupDocumentationOnly:true,reservationBillingAction:'invoice_only',cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});
+  expect(issued.status,JSON.stringify(issued.body)).toBe(201);
+  const before=(await pool.query('SELECT * FROM sales_invoices WHERE id=$1',[issued.body.id])).rows[0];
+  await pool.query("UPDATE reservations SET status='checked_out' WHERE id=$1",[f.ids[0]]);
+  const path=`/api/reservations/${f.ids[0]}/invoices/${issued.body.id}/collect`;
+  const body={amount:'35.00',method:'efectivo',paymentRequestId:randomUUID()};
+  const [first,retry]=await Promise.all([request(path,body),request(path,body)]);
+  expect(first.status,JSON.stringify(first.body)).toBeLessThan(300);expect(retry.body.id).toBe(first.body.id);
+  const after=(await pool.query('SELECT * FROM sales_invoices WHERE id=$1',[issued.body.id])).rows[0];
+  for(const key of Object.keys(before).filter(key=>!['payment_id','cash_forma_pago','cash_forma_pago_detalle','credit_reapplication_intent'].includes(key)))expect(after[key],key).toEqual(before[key]);
+  expect(after).toMatchObject({payment_id:first.body.id,cash_forma_pago:'efectivo',cash_forma_pago_detalle:[{method:'efectivo',amount:35}]});
+  expect(JSON.parse(first.body.invoiceRef).id).toBe(issued.body.id);
+  expect((await pool.query("SELECT amount,payment_method FROM cash_movements WHERE payment_id=$1 AND movement_type='income'",[first.body.id])).rows).toEqual([{amount:'35.00',payment_method:'cash'}]);
+  expect((await pool.query("SELECT source_id FROM folio_movements WHERE type='payment' AND source_id=$1",[first.body.id])).rows).toHaveLength(1);
+  expect((await pool.query("SELECT id FROM audit_logs WHERE entity_id=$1 AND description='Cobro de factura emitida; sin nueva emisión fiscal'",[String(issued.body.id)])).rows).toHaveLength(1);
+  expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(1);
+  expect((await pool.query('SELECT status FROM reservations WHERE id=$1',[f.ids[0]])).rows[0].status).toBe('checked_out');
+  const snapshot=await(await import('../billing/groupInvoiceScope')).getGroupInvoiceSnapshot(f.group);expect(snapshot.financial.operationalBalance).toBe(242);
+  expect((await pool.query('SELECT balance FROM folios WHERE id=$1',[folio.id])).rows[0].balance).toBe('121.00');
+  const duplicate=await request(path,{...body,paymentRequestId:randomUUID()});expect(duplicate.status).toBe(409);
+ });
+ it('rolls back payment, folio, invoice linkage and audit if Caja has no open shift',async()=>{
+  const f=await fixture();
+  const issued=await request('/api/billing/invoices',{...f.invoice,groupDocumentationOnly:true,reservationBillingAction:'invoice_only',cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});expect(issued.status).toBe(201);
+  const shifts=(await pool.query("SELECT id FROM cash_shifts WHERE area IN('reception','recepcion') AND status='open'")).rows.map((r:any)=>r.id);
+  try{
+   await pool.query("UPDATE cash_shifts SET status='closed' WHERE id=ANY($1::text[])",[shifts]);
+   const r=await request(`/api/reservations/${f.ids[0]}/invoices/${issued.body.id}/collect`,{amount:'121.00',method:'efectivo',paymentRequestId:randomUUID()});expect(r.status,JSON.stringify(r.body)).toBe(409);
+   expect((await pool.query('SELECT id FROM payments WHERE reservation_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+   expect((await pool.query('SELECT payment_id,cash_forma_pago FROM sales_invoices WHERE id=$1',[issued.body.id])).rows[0]).toEqual({payment_id:null,cash_forma_pago:null});
+   expect((await pool.query("SELECT id FROM audit_logs WHERE entity_id=$1 AND description='Cobro de factura emitida; sin nueva emisión fiscal'",[String(issued.body.id)])).rows).toHaveLength(0);
+  }finally{await pool.query("UPDATE cash_shifts SET status='open' WHERE id=ANY($1::text[])",[shifts]);}
+ });
  it.each([true,false])('blocks individual billing when group coverage is known or historically ambiguous (%s)',async(mapped)=>{
   const f=await fixture();const issued=await request('/api/billing/invoices',f.invoice);expect(issued.status).toBe(201);
   await pool.query('UPDATE sales_invoices SET group_id=$2,reserva_id=NULL,source_charge_amounts=$3 WHERE id=$1',[issued.body.id,f.group,mapped?JSON.stringify({[`reservation:${f.ids[0]}:accommodation`]:121}):null]);
@@ -117,7 +176,7 @@ suite('individual group room from its own prefactura',()=>{
   const f=await fixture();await pool.query("UPDATE groups SET master_folio_config='none' WHERE id=$1",[f.group]);
   if(paid){const payment=await request('/api/payments',{...f.payment,paymentPurpose:'group_room_collection',receiptType:'none'});expect(payment.status,JSON.stringify(payment.body)).toBe(201);}
   const before=await pool.query('SELECT count(*) FROM cash_movements WHERE shift_id=$1',[shift]);
-  const invoice={...f.invoice,groupDocumentationOnly:true,cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}};
+  const invoice={...f.invoice,groupDocumentationOnly:true,reservationBillingAction:"invoice_only",cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}};
   const issued=await request('/api/billing/invoices',invoice);expect(issued.status,JSON.stringify(issued.body)).toBe(201);
   const replay=await request('/api/billing/invoices',invoice);expect(replay.body.id).toBe(issued.body.id);
   const repeated=await request('/api/billing/invoices',{...invoice,creditOperationId:randomUUID()});expect(repeated.status).toBe(409);
@@ -176,7 +235,7 @@ suite('individual group room from its own prefactura',()=>{
  });
  it('rejects an advance whose sources were already invoiced by the group, and does not reuse a void receipt',async()=>{
   const f=await fixture();const id=f.ids[0];
-  const issued=await request('/api/billing/invoices',{...f.invoice,groupDocumentationOnly:true,cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});expect(issued.status).toBe(201);
+  const issued=await request('/api/billing/invoices',{...f.invoice,groupDocumentationOnly:true,reservationBillingAction:"invoice_only",cashFormaPagoDetalle:undefined,prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});expect(issued.status).toBe(201);
   await pool.query('UPDATE sales_invoices SET reserva_id=NULL,group_id=$2,source_charge_ids=$3,source_charge_amounts=$4 WHERE id=$1',[issued.body.id,f.group,JSON.stringify([`reservation:${id}:accommodation`]),JSON.stringify({[`reservation:${id}:accommodation`]:121})]);
   const paid=await request('/api/payments',{...f.payment,paymentPurpose:'group_room_collection',receiptType:'none'});expect(paid.status).toBe(201);
   const invoice={tipoComprobante:'FB',cliente:f.invoice.cliente,reservaId:id,paymentId:paid.body.id,items:f.invoice.items,cashFormaPago:'transferencia',cashFormaPagoDetalle:[{method:'transferencia',amount:121}]};
@@ -209,7 +268,7 @@ suite('individual group room from its own prefactura',()=>{
   const f=await fixture();const issued=await request('/api/billing/invoices',f.invoice);expect(issued.status).toBe(201);
   await pool.query('UPDATE sales_invoices SET source_charge_amounts=$2,source_charge_ids=$3 WHERE id=$1',[issued.body.id,JSON.stringify({'payment:legacy':121}),JSON.stringify(['payment:legacy'])]);
   const account=await(await import('../billing/groupAccount')).groupAccountSnapshot(f.ids[0]);expect(account).toMatchObject({fiscalRequiresReview:true,pendingInvoice:null});
-  const rejected=await request('/api/billing/invoices',{...f.invoice,groupDocumentationOnly:true,cashFormaPagoDetalle:undefined,creditOperationId:randomUUID(),prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});expect(rejected.status).toBe(409);
+  const rejected=await request('/api/billing/invoices',{...f.invoice,groupDocumentationOnly:true,reservationBillingAction:"invoice_only",cashFormaPagoDetalle:undefined,creditOperationId:randomUUID(),prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}});expect(rejected.status).toBe(409);
   const paid=await request('/api/payments',{...f.payment,paymentPurpose:'group_room_collection'});expect(paid.status,JSON.stringify(paid.body)).toBe(201);
  });
  it('leaves an advance unassigned, then applies mixed instruments to selected rooms without another Caja event',async()=>{
@@ -250,6 +309,15 @@ suite('individual group room from its own prefactura',()=>{
   await pool.query("UPDATE reservations SET status='checked_out' WHERE id=$1",[f.ids[0]]);
   const paid=await request('/api/payments',{...payment,invoiceData:{id:issued.body.id}});expect(paid.status,JSON.stringify(paid.body)).toBe(201);
   const snapshot=await(await import('../billing/groupAccount')).groupAccountSnapshot(f.ids[0]);expect(snapshot).toMatchObject({balance:0,paid:121,unassigned:0,reviewReceipts:[]});
+ });
+ it('accepts explicitly confirmed new money without consuming unassigned group advances',async()=>{
+  const f=await fixture();
+  const parent=await request(`/api/groups/${f.group}/master-payment`,{paymentRequestId:randomUUID(),paymentRows:[{method:'transfer',amount:'100.00',reference:'new advance'}],receiptType:'none',receiverDetails:{razonSocial:'Synthetic Group',dni:'30123456'},concepts:[{description:'Anticipo',amount:100}],leaveUnassigned:true});expect(parent.status,JSON.stringify(parent.body)).toBe(200);
+  const denied=await request('/api/billing/invoices',f.invoice);expect(denied.status).toBe(409);
+  const invoice={...f.invoice,creditOperationId:randomUUID(),reservationBillingAction:'collect_and_invoice',acknowledgeUnassignedAdvance:true};
+  const issued=await request('/api/billing/invoices',invoice);expect(issued.status,JSON.stringify(issued.body)).toBe(201);
+  const paid=await request('/api/payments',{...f.payment,invoiceData:{id:issued.body.id}});expect(paid.status,JSON.stringify(paid.body)).toBe(201);
+  expect(await(await import('../billing/groupAccount')).groupAccountSnapshot(f.ids[0])).toMatchObject({balance:0,paid:121,unassigned:100});
  });
  it('records a manual group distribution exactly once and leaves both reservations open',async()=>{
   const f=await fixture();const body={paymentRequestId:randomUUID(),distribution:'manual',distributionDetail:{[f.ids[0]]:31,[f.ids[1]]:69},paymentRows:[{method:'transfer',amount:'100.00',reference:'manual'}],receiptType:'none',receiverDetails:{razonSocial:'Synthetic Group',dni:'30123456'},concepts:[{description:'Anticipo',amount:100}]};

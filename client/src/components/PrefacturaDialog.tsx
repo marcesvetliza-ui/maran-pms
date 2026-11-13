@@ -12,7 +12,7 @@ import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { queryClient, apiRequest, parseApiError } from "@/lib/queryClient";
+import { queryClient, apiRequest, parseApiError, parseApiErrorPayload } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getLocalToday, fmtMoney, formatDateAR } from "@/lib/utils";
 import {
@@ -545,6 +545,8 @@ export function PrefacturaDialog({
   const [tipo, setTipo] = useState("FB");
   const [puntoVenta, setPuntoVenta] = useState("");
   const [saleCondition, setSaleCondition] = useState<SaleCondition>("contado");
+  const [groupNewMoneyConfirmed,setGroupNewMoneyConfirmed]=useState(false);
+  const [groupBillingAction, setGroupBillingAction] = useState<'collect_and_invoice' | 'invoice_only'>('collect_and_invoice');
   const [doCheckout, setDoCheckout] = useState(true);
 
   // Step 1: agregar un cargo sin salir del check-out (antes había que cerrar
@@ -713,7 +715,11 @@ export function PrefacturaDialog({
     enabled: open && !!reservationId,
   });
   const previousGroupAttempt=submission.current!.pending(reservationId);
-  const groupDocumentationOnly=!!folio?.groupId && ['FA','FB','FC','FM','FMB'].includes(tipo) && (!previousGroupAttempt || previousGroupAttempt.invoiceRequest?.groupDocumentationOnly===true);
+  const canChooseGroupBillingAction=!!folio?.groupId && ['FA','FB','FC','FM','FMB'].includes(tipo);
+  // A retry always retains the original fiscal request and payment plan.
+  const groupDocumentationOnly=canChooseGroupBillingAction && (previousGroupAttempt
+    ? previousGroupAttempt.invoiceRequest?.groupDocumentationOnly===true
+    : groupBillingAction==='invoice_only');
   const safeEmittedInvoices = Array.isArray(emittedInvoices) ? emittedInvoices : [];
   const groupAccount=useQuery<any>({queryKey:['group-room-account',String(reservationId)],enabled:open&&!!folio?.groupId,queryFn:async()=>(await apiRequest('GET',`/api/reservations/${reservationId}/group-account`)).json()});
   const coverageInvoices=useMemo(()=>{const amounts=groupAccount.data?.groupCoverage||{};return Object.keys(amounts).length?[...safeEmittedInvoices,{id:'group-coverage',tipo_comprobante:'FB',estado:'emitida',monto_total:Object.values(amounts).reduce((n:number,v:any)=>n+Number(v),0),source_charge_ids:Object.keys(amounts),source_charge_amounts:amounts}]:safeEmittedInvoices;},[emittedInvoices,groupAccount.data]);
@@ -751,6 +757,8 @@ export function PrefacturaDialog({
       billingRecipientTouched.current = false;
       setShowCreateCompany(false);
       setDoCheckout(true);
+      setGroupBillingAction('collect_and_invoice');
+      setGroupNewMoneyConfirmed(false);
       setEmittedInvoice(null);
       setCheckoutDone(false);
       setCheckoutFailed(false);
@@ -1648,6 +1656,7 @@ export function PrefacturaDialog({
             hasAccommodation: hasSelectedAccommodation,
           },
           ...invoicePaymentMethods,
+          ...(canChooseGroupBillingAction ? { reservationBillingAction: groupDocumentationOnly ? 'invoice_only' : 'collect_and_invoice', ...(!groupDocumentationOnly && groupNewMoneyConfirmed ? {acknowledgeUnassignedAdvance:true} : {}) } : {}),
           ...(groupDocumentationOnly?{groupDocumentationOnly:true,cashFormaPago:undefined,cashFormaPagoDetalle:undefined,reservationSettlementMethod:undefined}:{}),
           ...(usesCcEntity ? {
             ccEntityType: billingTarget,
@@ -1857,6 +1866,11 @@ export function PrefacturaDialog({
       onClose();
 
     } catch (err: any) {
+      const payload=parseApiErrorPayload(err) as any;
+      if(payload?.code==='GROUP_BILLING_ACTION_REQUIRED'&&payload.safeToReset===true&&!submission.current!.pending(reservationId)?.invoice){
+        submission.current!.complete(reservationId);setHasPendingSubmission(false);
+        const next=newSettlementOperationId();setCreditOperationId(next);window.sessionStorage.setItem(settlementOperationKey(reservationId),next);
+      }
       refetchReceptionStatus();
       setSubmitError(parseApiError(err));
     } finally {
@@ -1995,6 +2009,15 @@ export function PrefacturaDialog({
             {folio?.groupId&&<GroupRoomAccount key={String(reservationId)} reservationId={String(reservationId)} disabled={hasPendingSubmission||isSubmitting} onSaved={async()=>{await refetchFolio();await refetchEmittedInvoices();}}/>}
             {groupDocumentationOnly&&<p className="rounded border p-3 text-sm">Facturación de conceptos pendientes del grupo. Esta acción no registra dinero nuevo ni traslada deuda a otra cuenta. Para cobrar o aplicar un anticipo, usá las acciones de la cuenta de arriba.</p>}
             <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={`space-y-4 ${hasPendingSubmission ? "pointer-events-none opacity-70" : ""}`} data-testid="prefactura-editable-fields">
+            {canChooseGroupBillingAction && <section className="rounded-lg border p-3">
+              <Label htmlFor="group-billing-action">Qué querés hacer con estos cargos</Label>
+              <select id="group-billing-action" className="mt-1 block w-full rounded border bg-background p-2 text-sm" value={groupDocumentationOnly ? 'invoice_only' : 'collect_and_invoice'} onChange={event => { setGroupBillingAction(event.target.value as typeof groupBillingAction); setSaleCondition('contado'); setSubmitError(null); }}>
+                <option value="collect_and_invoice">Cobrar y facturar estos cargos</option>
+                <option value="invoice_only">Sólo facturar</option>
+              </select>
+              <p className="mt-1 text-xs text-muted-foreground">{groupDocumentationOnly ? 'Emite la factura y conserva el saldo por cobrar. No registra dinero en Caja.' : 'Registra el medio de pago y el dinero recibido ahora en Caja, además de emitir la factura.'}</p>
+              {!groupDocumentationOnly&&(groupAccount.data?.unassigned>0||groupAccount.data?.reviewReceipts?.length>0)&&<label className="mt-2 flex items-center gap-2 text-sm"><Checkbox checked={groupNewMoneyConfirmed} onCheckedChange={value=>setGroupNewMoneyConfirmed(value===true)}/>Confirmo que recibo dinero nuevo; los anticipos del grupo siguen sin asignar.</label>}
+            </section>}
             <section className="rounded-lg border bg-card/50 px-4 py-3" aria-label="Identidad y comprobante">
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identidad y comprobante</h2>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -2092,7 +2115,7 @@ export function PrefacturaDialog({
                   </div>
                   <div className="px-3 py-2.5 sm:px-4">
                     <div className="text-[10px] text-muted-foreground">Importe a facturar</div>
-                    <div className="font-semibold text-primary" data-testid="text-importe-a-facturar">${fmtMoney(totalSelected)}</div>
+                    <div className="font-semibold text-primary" data-testid="text-importe-a-facturar">${fmtMoney(canChooseGroupBillingAction ? invoiceAmount : totalSelected)}</div>
                     {tipo === "FT" && <div className="text-[10px]" data-testid="text-factura-t-reintegro-note">Reintegro turismo — importe sin IVA</div>}
                   </div>
                   <div className="px-3 py-2.5 sm:px-4">
@@ -2100,14 +2123,14 @@ export function PrefacturaDialog({
                     <div className="font-semibold text-amber-700">${fmtMoney(folio.financialSummary?.availableReleasedCredit ?? folio.financialSummary?.releasedAvailableAdvance ?? 0)}</div>
                   </div>
                   <div className="px-3 py-2.5 sm:px-4">
-                    <div className="text-[10px] text-muted-foreground">Crédito aplicado</div>
+                    <div className="text-[10px] text-muted-foreground">{canChooseGroupBillingAction ? "Ya pagado aplicado a esta factura" : "Crédito aplicado"}</div>
                     <div className="font-semibold text-green-700">${fmtMoney(appliedCreditForSelection)}</div>
                   </div>
                   <div className="px-3 py-2.5 sm:px-4">
-                    {saleCondition === "cuenta_corriente" ? (
+                    {groupDocumentationOnly || saleCondition === "cuenta_corriente" ? (
                       <>
                         <div className="text-[10px] text-muted-foreground">Cobro de caja</div>
-                        <div className="font-semibold text-muted-foreground">No corresponde</div>
+                        <div className="font-semibold text-muted-foreground">{groupDocumentationOnly ? '$0,00 · sin cobro nuevo' : 'No corresponde'}</div>
                       </>
                     ) : (
                       <>
@@ -2125,7 +2148,7 @@ export function PrefacturaDialog({
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-2">
                   <div>
                     <div className="text-[10px] font-semibold uppercase text-muted-foreground">
-                      {saleCondition === "cuenta_corriente" ? "Cargo a cuenta corriente" : "Nuevo cobro requerido"}
+                      {saleCondition === "cuenta_corriente" && !groupDocumentationOnly ? "Cargo a cuenta corriente" : canChooseGroupBillingAction ? "Dinero que se recibe ahora" : "Nuevo cobro requerido"}
                     </div>
                     <div className="text-xl font-bold text-amber-800" data-testid="new-charge-required">${fmtMoney(selectedBalance)}</div>
                     {saleCondition === "cuenta_corriente" && <div className="text-xs text-muted-foreground">No es dinero de caja: se registra en la cuenta de la entidad.</div>}

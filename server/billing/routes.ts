@@ -1,5 +1,5 @@
 import { groupRoomAdvanceInvoicePreview } from './groupRoomAdvanceInvoice';
-import {validateIndividualGroupPlan,assertIndividualGroupInvoice} from './individualGroupFolio';
+import {validateIndividualGroupPlan,assertIndividualGroupInvoice,assertGroupBillingAction} from './individualGroupFolio';
 import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
@@ -1202,6 +1202,7 @@ export function registerBillingRoutes(app: Express) {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       const giftExpiryError = giftVoucherItemsExpiryError(items);
       if (giftExpiryError) return res.status(400).json({ error: giftExpiryError });
+      await assertGroupBillingAction(req.body);
       if (req.body.prefacturaRecovery?.version === 2 && !isNonFiscalTipo(String(tipoComprobante)) && reservaId && typeof creditOperationId === "string" && /^[0-9a-f-]{20,}$/i.test(creditOperationId)) {
         assertFinancialSchemaReady();
         const config = await getBillingConfig();
@@ -1350,7 +1351,7 @@ export function registerBillingRoutes(app: Express) {
             WHERE reservation_id = ${reservationId}
             LIMIT 1
           `);
-          if (linkedGroup.rows.length > 0 && ['FA','FB','FC'].includes(tipoComprobante) && req.body.prefacturaRecovery?.version===2 && !isReservationCcSettlement && !groupId && typeof creditOperationId==='string' && /^[0-9a-f-]{36}$/i.test(creditOperationId)) {
+          if (linkedGroup.rows.length > 0 && ['FA','FB','FC','FM','FMB'].includes(tipoComprobante) && req.body.prefacturaRecovery?.version===2 && !isReservationCcSettlement && !groupId && typeof creditOperationId==='string' && /^[0-9a-f-]{36}$/i.test(creditOperationId)) {
             individualGroupId=String((linkedGroup.rows[0] as any).group_id);
             individualGroupPayments=groupDocumentationOnly?[]:validateIndividualGroupPlan(reservationId,req.body.prefacturaRecovery,newSettlement);
           } else if (linkedGroup.rows.length > 0) {
@@ -1718,7 +1719,7 @@ export function registerBillingRoutes(app: Express) {
               `La operación ya pertenece a una factura en estado ${String(previous.estado)}`, 409,
             );
           }
-          if(individualGroupId)await assertIndividualGroupInvoice(individualGroupId,reservationId,sanitizedSourceChargeAmounts,(individualGroupPayments||[]).reduce((n,p)=>n+Number(p.amount),0));
+          if(individualGroupId)await assertIndividualGroupInvoice(individualGroupId,reservationId,sanitizedSourceChargeAmounts,(individualGroupPayments||[]).reduce((n,p)=>n+Number(p.amount),0),req.body.acknowledgeUnassignedAdvance===true);
           const activePayments = await storage.getPayments(reservationId);
           const activePaymentById = new Map(activePayments.map((payment: any) => [String(payment.id), payment]));
           for (const allocation of ordinaryAdvances) {
@@ -1821,7 +1822,7 @@ export function registerBillingRoutes(app: Express) {
           };
           creditIntent = {
             ...(groupDocumentationOnly?{groupDocumentationOnly:true}:{}),
-            ...(individualGroupId&&!groupDocumentationOnly?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments}}:{}),
+            ...(individualGroupId&&!groupDocumentationOnly?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments,acknowledgeUnassignedAdvance:req.body.acknowledgeUnassignedAdvance===true}}:{}),
             ...(req.body.correctionOriginalInvoiceId ? {correctionOriginalInvoiceId:Number(req.body.correctionOriginalInvoiceId)} : {}),
             operationId: creditOperationId,
             ...immutableSnapshot,
@@ -2482,7 +2483,7 @@ export function registerBillingRoutes(app: Express) {
     } catch (e: any) {
       const status = e?.statusCode || e?.status;
       if (e instanceof FolioInvoiceValidationError || Number(status) >= 400) {
-        return res.status(status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+        return res.status(status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}), ...(e.safeToReset===true ? {safeToReset:true} : {}) });
       }
       res.status(500).json({ error: e?.code === "23505" ? "Hay un registro fiscal en conflicto. Conservamos la operación; verificá el intento pendiente antes de volver a emitir." : e.message, ...(e.code === "23505" ? { code: "BILLING_RECORD_CONFLICT" } : {}) });
     }

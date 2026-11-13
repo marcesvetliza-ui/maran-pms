@@ -1,4 +1,5 @@
 import {getGroupPaymentRequest} from './groupPaymentRequest';
+import {lockRoomInvoiceCollection,finishRoomInvoiceCollection} from './billing/reservationInvoiceCollection';
 import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
 import {withLodgingInventoryMutationLock} from './inventoryMutationLock';
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
@@ -1792,6 +1793,7 @@ export class DatabaseStorage implements IStorage {
 
   async createReservationPaymentWithLedger(input: {
     paymentRequest?: ReservationPaymentRequest;
+    invoiceCollection?: {invoiceId:number;acknowledgeUnassignedAdvance:boolean;userId?:string};
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;
     registeredBy?: string;
@@ -1875,6 +1877,12 @@ export class DatabaseStorage implements IStorage {
           return { ...existing, paymentRequestReplayed: true };
         }
       }
+      let collectionInvoice:any;
+      if(input.invoiceCollection){
+        if(!input.paymentRequest||input.accountSettlement||!cashBearingMethods.has(paymentMethod))throw Object.assign(new Error('El cobro de factura requiere un medio directo y una clave de operación.'),{statusCode:400});
+        collectionInvoice=await lockRoomInvoiceCollection(tx,input.payment.reservationId,input.invoiceCollection.invoiceId,canonicalAmount,input.invoiceCollection.acknowledgeUnassignedAdvance);
+      }
+      const collectionLabel=collectionInvoice ? `Cobro ${collectionInvoice.tipo_comprobante} ${String(collectionInvoice.punto_venta).padStart(4,'0')}-${String(collectionInvoice.numero).padStart(8,'0')}` : input.sourceLabel;
       const accountTransferGroup = input.accountSettlement && paymentMethod === "current_account"
         ? await lockAccountTransferGroup(tx, input.payment.reservationId)
         : null;
@@ -1976,6 +1984,7 @@ export class DatabaseStorage implements IStorage {
       }
       const [payment] = await tx.insert(payments).values({
         ...input.payment,
+        ...(collectionInvoice ? {notes:collectionLabel,invoiceRef:JSON.stringify({id:collectionInvoice.id,tipoComprobante:collectionInvoice.tipo_comprobante,puntoVenta:collectionInvoice.punto_venta,numero:collectionInvoice.numero,cae:collectionInvoice.cae,total:collectionInvoice.monto_total}),invoiceLinkFailed:false} : {}),
         amount: canonicalAmount,
         paymentRequestId: input.paymentRequest?.id ?? null,
         paymentRequestFingerprint: input.paymentRequest?.fingerprint ?? null,
@@ -2015,12 +2024,12 @@ export class DatabaseStorage implements IStorage {
           area: "reception",
           sourceType: "reservation",
           sourceId: payment.reservationId,
-          sourceLabel: input.sourceLabel,
+          sourceLabel: collectionLabel,
           paymentMethod,
           amount: canonicalAmount,
           movementType: "income",
           registeredBy: input.registeredBy || null,
-          receiptType: input.receiptType || null,
+          receiptType: collectionInvoice?.tipo_comprobante || input.receiptType || null,
           paymentId: payment.id,
           receiptNumber: sql<string>`nextval('cash_movements_receipt_number_seq'::regclass)::text`,
         } as any);
@@ -2071,7 +2080,7 @@ export class DatabaseStorage implements IStorage {
         sourceId: payment.id,
         cashMovementId: cashMovementId ?? null,
         registeredBy: input.registeredBy ?? null,
-        receiptType: input.receiptType ?? null,
+        receiptType: collectionInvoice?.tipo_comprobante ?? input.receiptType ?? null,
       });
       const [totals] = await tx.select({
         charges: sql<string>`COALESCE(SUM(CASE WHEN ${folioMovements.type} IN ('charge', 'transfer_in') THEN ${folioMovements.amount}::numeric ELSE 0 END), 0)`,
@@ -2180,6 +2189,7 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
+      if(collectionInvoice)await finishRoomInvoiceCollection(tx,collectionInvoice,payment.id,cashMovementId!,String(input.payment.method),input.registeredBy,input.invoiceCollection?.userId);
       return payment;
     });
   }
