@@ -27,6 +27,9 @@ function provenDraft(invoice: any, operation: BillingOperation | undefined, iden
     (["numbered", "submitting", "uncertain", "rejected"].includes(operation.stage) || unlinkedPreparation) &&
     ["environment", "issuer", "type", "pointOfSale"].every(key => stored[key] === (identity as any)[key] && (operation.fiscal_identity as any)?.[key] === stored[key]) &&
     stored.type === invoice.tipo_comprobante && stored.pointOfSale === Number(invoice.punto_venta) &&
+    (!invoice.center_settlement_area || request.recipientMode === "centro_comprobantes" && request.cashArea === invoice.center_settlement_area &&
+      String(request.recipientEntity?.type || "") === String(invoice.recipient_entity_type || "") &&
+      String(request.recipientEntity?.id || "") === String(invoice.recipient_entity_id || "")) &&
     request.tipoComprobante === invoice.tipo_comprobante &&
     Number(request.puntoVentaOverride ?? request.puntoVenta ?? stored.pointOfSale) === stored.pointOfSale &&
     payloadHash(request) === operation.payload_hash && Array.isArray(request.items) && request.items.length > 0 &&

@@ -152,10 +152,11 @@ suite("Recuperación segura de la serie después de un borrador retenido", () =>
     } finally { await pool!.query("DELETE FROM payments WHERE id=$1", [id]); }
   }));
 
-  it.each(["issuer", "environment", "snapshot", "ficticio"])("no consulta ni altera un borrador con evidencia incorrecta: %s", async kind => fixture(async f => {
+  it.each(["issuer", "environment", "snapshot", "ficticio", "recipient"])("no consulta ni altera un borrador con evidencia incorrecta: %s", async kind => fixture(async f => {
     if (kind === "issuer" || kind === "environment") await pool!.query("UPDATE sales_invoices SET fiscal_identity=jsonb_set(fiscal_identity,ARRAY[$2],to_jsonb($3::text)) WHERE id=$1", [f.invoice.id, kind, kind === "issuer" ? "99999999999" : "produccion"]);
     if (kind === "snapshot") await pool!.query("UPDATE billing_operations SET request_snapshot=jsonb_set(request_snapshot,'{cliente,razonSocial}','\"Otra persona\"') WHERE operation_id=$1", [f.oldOperation]);
     if (kind === "ficticio") await pool!.query("UPDATE sales_invoices SET modo_ficticio=true WHERE id=$1", [f.invoice.id]);
+    if (kind === "recipient") await pool!.query("UPDATE sales_invoices SET recipient_entity_type='company',recipient_entity_id='another-recipient' WHERE id=$1", [f.invoice.id]);
     await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT" });
     expect(mocks.consult).not.toHaveBeenCalled(); expect(mocks.authorize).toHaveBeenCalledTimes(1);
     expect((await pool!.query("SELECT id FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows).toHaveLength(1);
