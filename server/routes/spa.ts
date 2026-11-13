@@ -2006,6 +2006,7 @@ export function registerSpaRoutes(app: Express) {
         }).where(eq(spaAccounts.id, account.id)).returning();
 
         await storage.deductStockFromSpaAccount(req.params.id,req.user!.id);
+        await tx.update(salesInvoices).set({reconciliationStatus:'conciliada',reconciliationError:null,reconciliationUpdatedAt:new Date()}).where(eq(salesInvoices.id,invoice.id));
         return { account: closedAccount, payment, cashMovementId, alreadyLinked: false };
       });
 

@@ -1,4 +1,5 @@
 import { groupRoomAdvanceInvoicePreview } from './groupRoomAdvanceInvoice';
+import {isStandaloneSpaCashReceipt,settleStandaloneSpaCashReceipt} from './spaReceiptSettlement';
 import {validateIndividualGroupPlan,assertIndividualGroupInvoice,assertGroupBillingAction} from './individualGroupFolio';
 import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
@@ -2457,7 +2458,9 @@ export function registerBillingRoutes(app: Express) {
           const total = uncoveredSettlement;
           if (total > 0) {
             const nroFac = `${factura.tipoComprobante}-${String(factura.numero).padStart(8, "0")}`;
-            await storage.registerCashMovement(
+            if(isStandaloneSpaCashReceipt(factura,String(cashArea))){
+              Object.assign(factura,await settleStandaloneSpaCashReceipt(Number(factura.id),user?.fullName||user?.username,user?.id,cashLabelBody||nroFac));
+            }else await storage.registerCashMovement(
               cashArea,
               "comprobante",
               String(factura.id),
