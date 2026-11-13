@@ -1,6 +1,7 @@
 import "./housekeeping.css";
 import {loadHousekeepingBlockConflicts} from "@/lib/housekeeping-block-conflicts";
 import {useHousekeepingStatus} from "@/components/use-housekeeping-status";
+import HousekeepingDailyReportPage from "./housekeeping-daily-report";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
 import { formatDisplayDate } from "@shared/date-display";
@@ -1837,7 +1838,7 @@ export default function Housekeeping() {
       </div>
 
       {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} initialDate={plannerDate} initialTask={plannerTask} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value){setPlannerRooms([]);setPlannerDate(undefined);setPlannerTask(null);}}}/>}
-      <Tabs defaultValue="rooms">
+      <Tabs defaultValue="rooms" className="hk-main-tabs">
         <TabsList className="flex h-auto flex-wrap justify-start gap-1">
           <TabsTrigger value="rooms">Habitaciones · Hoy</TabsTrigger>
           {isSupervisor&&<TabsTrigger value="planning">Planificación por fecha</TabsTrigger>}
@@ -1870,10 +1871,19 @@ export default function Housekeeping() {
             )}
           </TabsTrigger>
           <TabsTrigger value="inventory" data-testid="tab-housekeeping-inventory" className="gap-1"><Boxes className="h-4 w-4" />Inventario Housekeeping</TabsTrigger>
+          {hasPermission("sidebar:/housekeeping-daily-report") && (
+            <TabsTrigger value="daily-report" data-testid="tab-housekeeping-daily-report" className="gap-1">
+              <ClipboardCheck className="h-4 w-4" />
+              Planilla Diaria
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {isSupervisor&&<TabsContent value="planning"><HousekeepingPlanningView onManageBlocks={date=>{setSelectedRoomId(null);setBlockEnabled(false);setEditingBlockId(null);setBlockFrom(date);setBlockTo(date);setBlockNotes("");setBlocksDialogOpen(true);}} onCreateTask={(roomId,date)=>{setPlannerRooms(roomId ? [roomId] : []);setPlannerTask(null);setPlannerDate(date);setTaskPlannerOpen(true);}} onEditTask={task=>{setPlannerTask(task);setPlannerRooms([task.roomId]);setPlannerDate(task.scheduledDate);setTaskPlannerOpen(true);}}/></TabsContent>}
         <TabsContent value="inventory"><HousekeepingInventory /></TabsContent>
+        {hasPermission("sidebar:/housekeeping-daily-report") && (
+          <TabsContent value="daily-report"><HousekeepingDailyReportPage /></TabsContent>
+        )}
 
         <TabsContent value="rooms">
           <div className="space-y-6 mt-2">

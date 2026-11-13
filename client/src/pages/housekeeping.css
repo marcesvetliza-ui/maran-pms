@@ -1,4 +1,19 @@
 /* Housekeeping: room content determines the grid, not a fixed seven-column count. */
+@media print {
+  /* The shared report prints alone whether opened here or from the sidebar. */
+  .housekeeping-page:has(.hsk-report) {
+    padding: 0 !important;
+  }
+  .housekeeping-page:has(.hsk-report) > :not(.hk-main-tabs),
+  .hk-main-tabs:has(.hsk-report) > [role="tablist"] {
+    display: none !important;
+  }
+  .hk-main-tabs:has(.hsk-report),
+  .hk-main-tabs:has(.hsk-report) > [role="tabpanel"] {
+    margin: 0 !important;
+  }
+}
+
 .hk-room-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 248px), 1fr));
