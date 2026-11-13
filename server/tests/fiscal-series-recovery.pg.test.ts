@@ -77,6 +77,28 @@ suite("Recuperación segura de la serie después de un borrador retenido", () =>
     expect((await pool!.query("SELECT error_code FROM billing_operations WHERE operation_id=$1", [f.oldOperation])).rows[0].error_code).toBe("BILLING_UNSENT_DRAFT_RETIRED");
   }));
 
+  it("recupera el hueco histórico entre la inserción del borrador y su vínculo al journal", async () => fixture(async f => {
+    await pool!.query("UPDATE billing_operations SET stage='prepared',invoice_id=NULL,error_code=NULL WHERE operation_id=$1", [f.oldOperation]);
+    await pool!.query("UPDATE sales_invoices SET reconciliation_error=NULL WHERE id=$1", [f.invoice.id]);
+    expect((await emit(f.next)).numero).toBe(254);
+    const operation = (await pool!.query("SELECT * FROM billing_operations WHERE operation_id=$1", [f.oldOperation])).rows[0];
+    expect(operation.error_code).toBe("BILLING_UNSENT_DRAFT_RETIRED");
+    expect(operation.request_snapshot.discardedDraft.id).toBe(f.invoice.id);
+  }));
+
+  it("una falla al vincular el journal revierte también el borrador nuevo y permite reintentar", async () => fixture(async f => {
+    const trigger = `draft_link_${randomUUID().replaceAll("-", "")}`;
+    await pool!.query(`CREATE FUNCTION ${trigger}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.operation_id='${f.newOperation}' AND NEW.stage='numbered' THEN RAISE EXCEPTION 'synthetic journal failure'; END IF; RETURN NEW; END $$`);
+    await pool!.query(`CREATE TRIGGER ${trigger} BEFORE UPDATE ON billing_operations FOR EACH ROW EXECUTE FUNCTION ${trigger}()`);
+    try {
+      await expect(emit(f.next)).rejects.toThrow();
+      expect((await pool!.query("SELECT id FROM sales_invoices WHERE punto_venta=$1", [f.point])).rows).toHaveLength(0);
+      expect((await pool!.query("SELECT stage,invoice_id FROM billing_operations WHERE operation_id=$1", [f.newOperation])).rows[0]).toEqual({ stage: "prepared", invoice_id: null });
+      expect(mocks.authorize).toHaveBeenCalledTimes(1);
+    } finally { await pool!.query(`DROP TRIGGER ${trigger} ON billing_operations`); await pool!.query(`DROP FUNCTION ${trigger}()`); }
+    expect((await emit(f.next)).numero).toBe(254);
+  }));
+
   it.each(["uncertain", "submitting"])("conserva un resultado %s no encontrado, pero permite verificar otra vez el mismo pedido bloqueado", async stage => fixture(async f => {
     await pool!.query("UPDATE billing_operations SET stage=$2,error_code='ARCA_RESULT_UNCERTAIN' WHERE operation_id=$1", [f.oldOperation, stage]);
     for (let i = 0; i < 2; i++) await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT", conflictInvoiceId: f.invoice.id });

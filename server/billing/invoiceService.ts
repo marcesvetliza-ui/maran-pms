@@ -508,11 +508,13 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
     const draft = await db.transaction(async (tx) => {
       await data.beforeDraftInsert?.(tx, values);
       const [inserted] = await tx.insert(salesInvoices).values(values).returning();
+      // The draft and its journal link must survive (or roll back) together.
+      // A restart between these writes must never leave an ownerless number.
+      if (operation) await billingOperationStage(tx, operation.operation_id, "numbered", inserted.id);
       return inserted;
     });
     pendingInvoice = draft;
     if (operation) {
-      await billingOperationStage(db, operation.operation_id, "numbered", draft.id);
       operation.invoice_id = draft.id;
     }
     return draft;

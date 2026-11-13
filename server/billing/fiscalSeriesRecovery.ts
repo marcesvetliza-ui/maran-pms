@@ -15,12 +15,16 @@ const saleTypes = new Set(["FA", "FB", "FM", "FMB", "FT"]);
 function provenDraft(invoice: any, operation: BillingOperation | undefined, identity: FiscalIdentity) {
   const stored = invoice?.fiscal_identity;
   const request = operationSnapshot(operation?.request_snapshot || {});
+  // Older versions committed the draft before recording invoice_id. An exact
+  // prepared journal/number match proves this crash preceded any sending stage.
+  const unlinkedPreparation = operation?.stage === "prepared" && operation.invoice_id === null &&
+    Number(operation.request_snapshot?._numberAttempt) === Number(invoice?.numero);
   const owner = operationOwner({ reservaId: invoice?.reserva_id, groupId: invoice?.group_id,
     spaAccountId: invoice?.spa_account_id, paymentId: invoice?.payment_id, restaurantOrderId: invoice?.restaurant_order_id });
   return !!operation && saleTypes.has(invoice?.tipo_comprobante) && invoice.estado === "autorizacion_pendiente" &&
-    invoice.modo_ficticio === false && !invoice.cae && operation.invoice_id === Number(invoice.id) &&
+    invoice.modo_ficticio === false && !invoice.cae && (operation.invoice_id === Number(invoice.id) || unlinkedPreparation) &&
     stored?.operationId === operation.operation_id && operation.owner_type === owner.type && operation.owner_id === owner.id &&
-    ["numbered", "submitting", "uncertain", "rejected"].includes(operation.stage) &&
+    (["numbered", "submitting", "uncertain", "rejected"].includes(operation.stage) || unlinkedPreparation) &&
     ["environment", "issuer", "type", "pointOfSale"].every(key => stored[key] === (identity as any)[key] && (operation.fiscal_identity as any)?.[key] === stored[key]) &&
     stored.type === invoice.tipo_comprobante && stored.pointOfSale === Number(invoice.punto_venta) &&
     request.tipoComprobante === invoice.tipo_comprobante &&
@@ -101,7 +105,7 @@ export async function recoverOccupiedFiscalNumber(database: Database, invoiceId:
     const rejected = operation!.stage === "rejected" && operation!.error_code === "ARCA_AUTHORIZATION_REJECTED";
     // "numbered" is committed before "submitting", which is itself committed
     // before any authorization call. All other crash states remain uncertain.
-    if (!rejected && operation!.stage !== "numbered") return review("El resultado sigue incierto. Recuperá la autorización del comprobante original.");
+    if (!rejected && !["numbered", "prepared"].includes(operation!.stage)) return review("El resultado sigue incierto. Recuperá la autorización del comprobante original.");
     if (await hasLinks(tx, invoice)) return review("El intento original tiene vínculos económicos que requieren conciliación.");
     const marker = rejected && invoice.center_settlement_area ? "ARCA_REJECTED_CENTER_CORRECTED"
       : rejected ? "BILLING_REJECTED_DRAFT_RETIRED" : "BILLING_UNSENT_DRAFT_RETIRED";
