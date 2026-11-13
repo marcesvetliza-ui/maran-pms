@@ -40,7 +40,12 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const ids = expected.map((row: any) => row.paymentRequestId).filter((id: any) => typeof id === "string");
   const payments = ids.length ? (await db.execute(sql`SELECT * FROM payments WHERE reservation_id=${operation.owner_id} AND payment_request_id IN (${sql.join(ids.map((id: string) => sql`${id}`), sql`,`)})`)).rows : [];
   const acknowledged = invoice ? acknowledgedPayments(expected, payments, operation.owner_id, Number(invoice.id)) : [];
-  const safeToCorrect = recovery?.version === 2 && ["prepared", "blocked"].includes(operation.stage) && !operation.invoice_id && !invoice && payments.length === 0;
+  const archived = operation.stage === "corrected" && ["BILLING_REJECTED_DRAFT_RETIRED", "BILLING_UNSENT_DRAFT_RETIRED"].includes(String(operation.error_code));
+  const safeToCorrect = recovery?.version === 2 && (["prepared", "blocked"].includes(operation.stage) || archived) && !operation.invoice_id && !invoice && payments.length === 0;
+  const canRetryNumberConflict = recovery?.version === 2 && operation.stage === "blocked" && operation.error_code === "BILLING_NUMBER_CONFLICT" && !operation.invoice_id && !invoice && payments.length === 0;
+  const conflict = canRetryNumberConflict && Number.isSafeInteger(operation.request_snapshot?._numberAttempt)
+    ? (await db.execute(sql`SELECT id FROM sales_invoices WHERE tipo_comprobante=${operation.fiscal_identity.type} AND punto_venta=${operation.fiscal_identity.pointOfSale} AND numero=${operation.request_snapshot._numberAttempt} LIMIT 1`)).rows[0] as any
+    : null;
   const canVerifyRejection = operation.stage === "rejected" && invoice?.estado === "autorizacion_pendiente" && !invoice.cae;
   const intent = invoice?.credit_reapplication_intent;
   const ccDone = operation.request_snapshot?.reservationSettlementMethod !== "cuenta_corriente" && operation.request_snapshot?.cashFormaPago !== "cuenta_corriente" || intent?.settlement?.status === "completed";
@@ -49,9 +54,9 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const canCloseCancelled = await canCloseCancelledReceptionOperation(db, operation, invoice);
   const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone;
   return {
-    operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled,
+    operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled, canRetryNumberConflict,
     acknowledgedPaymentIds: acknowledged, financiallyComplete, code: operation.error_code,
-    message: invoice?.estado === "anulada" ? `La factura ${invoice.tipo_comprobante} ${invoice.punto_venta}-${invoice.numero} de este intento está anulada. ${canCloseCancelled ? "Podés cerrar el intento anterior sin emitir ni cobrar y volver a revisar la cuenta vigente." : "Su anulación o sus cobros requieren conciliación antes de cerrar el intento."}` : operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}, está ocupada por otro registro. No se solicitó autorización. Administración debe revisar la numeración.` : null,
+    message: invoice?.estado === "anulada" ? `La factura ${invoice.tipo_comprobante} ${invoice.punto_venta}-${invoice.numero} de este intento está anulada. ${canCloseCancelled ? "Podés cerrar el intento anterior sin emitir ni cobrar y volver a revisar la cuenta vigente." : "Su anulación o sus cobros requieren conciliación antes de cerrar el intento."}` : operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}${conflict ? `, está ocupada por el comprobante interno #${conflict.id}` : ", necesita volver a verificarse"}. Al completar la operación se consultará ARCA y se recuperará el borrador anterior si hay evidencia suficiente, conservando los importes y pagos originales.` : archived ? "El borrador anterior fue archivado después de verificar que ARCA no lo autorizó. Revisá sus datos antes de preparar un nuevo intento." : null,
     invoice: issued ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
     attempt: recovery?.version === 2 ? { invoiceRequest: operation.request_snapshot,
       invoice: issued && ccDone && creditsDone ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,

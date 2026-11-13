@@ -16,10 +16,11 @@ const id = "selection-room-202";
 const nightId = "accommodation:2026-11-12";
 const reservation = { id, status: "checked_in", guest: { firstName: "Prueba", lastName: "Selección", nationality: "Argentina", vatCondition: "consumidor_final" }, room: { roomNumber: "202" } } as any;
 let invoices: any[], charges: any[], writes: Array<{ path: string; body: any }>, failInvoice: boolean;
+let numberConflict = false;
 let closed = vi.fn<() => void>(), complete = vi.fn<() => void>();
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 beforeEach(() => {
-  queryClient.clear(); sessionStorage.clear(); invoices = []; writes = []; failInvoice = false;
+  queryClient.clear(); sessionStorage.clear(); invoices = []; writes = []; failInvoice = false; numberConflict = false;
   closed = vi.fn<() => void>(); complete = vi.fn<() => void>();
   charges = [{ id: "extra-1000", description: "Cargo de prueba", amount: "1000", category: "otros", date: "2026-11-12" }];
   vi.stubGlobal("fetch", vi.fn(async (url: any, init?: RequestInit) => {
@@ -30,6 +31,7 @@ beforeEach(() => {
         const created = { ...body, id: "new-charge" }; charges.push(created); return json(created);
       }
       if (path === "/api/billing/invoices") {
+        if (numberConflict) return json({ error: "Numeración ocupada por el comprobante interno #1539", code: "BILLING_NUMBER_CONFLICT" }, 409);
         if (failInvoice) return json({ error: "Fallo transitorio" }, 503);
         const invoice = { id: 248, reservaId: id, estado: "emitida", tipo_comprobante: "FB",
           monto_total: body.items.reduce((sum: number, item: any) => sum + item.subtotal, 0),
@@ -44,7 +46,7 @@ beforeEach(() => {
       totalCharges: 1000, totalPayments: 0, grandTotal: 151000, balance: 151000 });
     if (path.endsWith("/group-account")) return json({ groupId: "fixture-group", charges: 151000, paid: 0, balance: 151000, pendingInvoice: 151000, groupCoverage: {}, advances: [], reviewReceipts: [], unassigned: 0 });
     if (path.endsWith("/pending-operation")) return json({ pending: null });
-    if (path.endsWith("/reception-status")) return json({ stage: "prepared", safeToCorrect: false });
+    if (path.endsWith("/reception-status")) return json({ stage: numberConflict ? "blocked" : "prepared", safeToCorrect: false, canRetryNumberConflict: numberConflict });
     if (path.endsWith("/invoices")) return json(invoices);
     if (path.endsWith("/billing/config")) return json({ puntoVenta: 5, arcaAmbiente: "ficticio" });
     if (path.endsWith("/transfer-remaining")) return json({ accommodation: 150000, charges: { "extra-1000": 1000 } });
@@ -68,6 +70,22 @@ async function emit(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByTestId("button-registrar-emitir"));
 }
 describe("Prefactura conserva exclusivamente los conceptos elegidos", () => {
+  it("reintenta un conflicto de número con los mismos conceptos e identificadores de pago", async () => {
+    const { user } = await openDialog();
+    await user.click(lodgingCheckbox());
+    numberConflict = true;
+    await emit(user);
+    const retry = await screen.findByTestId("button-retry-prefactura");
+    await waitFor(() => expect(retry).toBeEnabled());
+    const original = structuredClone(writes.find(write => write.path === "/api/billing/invoices")!.body);
+    numberConflict = false;
+    await user.click(retry);
+    await waitFor(() => expect(writes.filter(write => write.path === "/api/billing/invoices")).toHaveLength(2));
+    const retried = writes.filter(write => write.path === "/api/billing/invoices")[1].body;
+    expect(retried).toEqual(original);
+    expect(retried.sourceChargeIds).toEqual(["extra-1000"]);
+    expect(retried.prefacturaRecovery.payments[0].paymentRequestId).toBe(original.prefacturaRecovery.payments[0].paymentRequestId);
+  });
   it("mantiene la noche excluida tras refrescar, cerrar y reabrir, y emite sólo $1.000", async () => {
     const { user, view } = await openDialog();
     await user.click(lodgingCheckbox());
