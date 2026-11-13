@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 
 type Row = { originalLineId?: number; itemId: string; warehouseId: string; quantity: string; unit: string; unitCost: string };
 export type RemitoDraft = { stockItems?: Row[]; valid: boolean; subtotal: number };
@@ -55,8 +56,8 @@ export function PurchaseRemitoEditor({ snapshot, items, warehouses, onChange }: 
             <select className={selectClass} aria-label={`Depósito ${index + 1}`} value={row.warehouseId} onChange={event => update(index, { warehouseId: event.target.value })}>
               <option value="">Elegí un depósito</option>
               {!warehouses.some(warehouse => String(warehouse.id) === row.warehouseId) && row.warehouseId && <option value={row.warehouseId}>Depósito original</option>}
-              {warehouses.filter(warehouse => warehouse.isActive === "true" || String(warehouse.id) === row.warehouseId).map(warehouse =>
-                <option key={warehouse.id} value={warehouse.id}>{warehouse.name}{warehouse.isActive !== "true" ? " (inactivo)" : ""}</option>)}
+              {warehouses.filter(warehouse => isActiveWarehouse(warehouse) || String(warehouse.id) === row.warehouseId).map(warehouse =>
+                <option key={warehouse.id} value={warehouse.id}>{warehouse.name}{!isActiveWarehouse(warehouse) ? " (inactivo)" : ""}</option>)}
             </select>
           </Label>
           <Label className="space-y-1">Cantidad ({row.unit || "unidad"})

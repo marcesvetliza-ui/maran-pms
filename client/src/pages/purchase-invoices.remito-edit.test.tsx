@@ -11,7 +11,7 @@ const suppliers: any[] = [{ id: 1, razonSocial: "Proveedor sintético", cuit: "3
 const invoice: any = { id: 99, tipoComprobante: "REMITO", supplierId: 1, numeroComprobante: "123", fechaEmision: "2026-11-03", montoTotal: "0", estado: "registrado" };
 const items = [{ id: "item1", name: "Artículo original", unit: "unidad", costPrice: "1200", isActive: "true", purchaseEnabled: true },
   { id: "item2", name: "Artículo agregado", unit: "kg", costPrice: "777", isActive: "true", purchaseEnabled: true }];
-const warehouses = [{ id: "w1", name: "General", isActive: "true" }, { id: "w2", name: "Cocina", isActive: "true" }];
+const warehouses = [{ id: "w1", name: "General", is_active: "true" }, { id: "w2", name: "Cocina", is_active: "true" }];
 let snapshot: any;
 let fetchMock: ReturnType<typeof vi.fn>;
 let failLoad = false;

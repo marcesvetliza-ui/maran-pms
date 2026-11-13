@@ -2287,7 +2287,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
         <div className="space-y-4 py-2">
           {detail?.special_details?.remitoHistory?.length > 0 && <div className="rounded-md border p-3" data-testid="remito-history">
             <p className="font-semibold">Historial del remito</p>
-            {detail.special_details.remitoHistory.map((entry: any, index: number) => <p key={index}>{purchaseDocumentLabel(entry.previous.tipo_comprobante)} {entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante} → {purchaseDocumentLabel(entry.nextType)} · {entry.action === "factura_recibida" ? "Factura vinculada; stock y pagos conservados" : "Cambio de uso"}</p>)}
+            {detail.special_details.remitoHistory.map((entry: any, index: number) => <p key={index}>{purchaseDocumentLabel(entry.previous.tipo_comprobante)} {entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante} → {purchaseDocumentLabel(entry.nextType)} · {entry.action === "factura_recibida" ? "Factura vinculada; stock y pagos conservados" : entry.action === "edicion_remito" ? "Datos o artículos corregidos; stock ajustado por diferencia" : "Cambio de uso"}</p>)}
           </div>}
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             {rows.map(([label, val]) => (
