@@ -117,3 +117,50 @@ describe("physical room confirmation policy", () => {
     expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",date:"2026-10-11"});
   });
 });
+
+describe('completed group assignments release their occupied units',()=>{
+ const from='2026-11-10',day='2026-11-12',to='2026-11-13';
+ const departed=Array.from({length:3},(_,i)=>({id:`departed-${i}`,roomId:`room-${i}`,groupId:'face',roomTypeId:'suite',checkInDate:from,checkOutDate:i===2?to:day,status:'checked_out',checkedOutAt:day+'T15:00:00Z'}));
+ const current=Array.from({length:12},(_,i)=>({id:`current-${i}`,roomId:`current-room-${i}`,groupId:'face',roomTypeId:'suite',checkInDate:from,checkOutDate:to,status:'checked_in'}));
+ const individual=Array.from({length:2},(_,i)=>({id:`other-${i}`,roomTypeId:'suite',checkInDate:from,checkOutDate:to,status:'confirmed'}));
+ const input={roomTypeId:'suite',checkIn:day,checkOut:to,operationalInventory:17,groups:[{id:'face',status:'inhouse',checkInDate:from,checkOutDate:to}],blocks:[{groupId:'face',roomTypeId:'suite',quantity:15}],reservations:[...current,...individual,...departed]};
+ it('releases all three completed units, including departures outside the requested interval and an early departure',()=>{
+  const before=structuredClone(input);
+  expect(evaluateGroupInventory(input)).toBeNull();
+  expect(evaluateGroupInventory({...input,candidateUnits:3})).toBeNull();
+  expect(evaluateGroupInventory({...input,candidateUnits:4})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',hardDemand:18,unassignedConfirmedGroupUnits:0});
+  expect(input).toEqual(before);
+ });
+ it('still protects an actually unassigned confirmed unit even with an override',()=>{
+  expect(evaluateGroupInventory({...input,blocks:[{...input.blocks[0],quantity:16}],candidateUnits:3,hasSpecificRoom:true,override:true})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',canOverride:false,unassignedConfirmedGroupUnits:1});
+ });
+ it.each(['cancelled','no_show'])('does not turn %s into a group release',status=>{
+  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,status}))]})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',unassignedConfirmedGroupUnits:3});
+ });
+ it('does not free a unit before the actual Argentine departure day',()=>{
+  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,checkedOutAt:to+'T15:00:00Z'}))]})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',unassignedConfirmedGroupUnits:3});
+  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,checkedOutAt:'2026-11-13T02:30:00'}))]})).toBeNull();
+ });
+ it('conservatively uses the scheduled departure for legacy checkouts without a timestamp',()=>{
+  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,checkedOutAt:null}))],candidateUnits:3})).toMatchObject({unassignedConfirmedGroupUnits:1});
+ });
+ it('does not release the same physical room twice across sequential stays',()=>{
+  const small={...input,operationalInventory:1,blocks:[{...input.blocks[0],quantity:2}],reservations:departed.slice(0,2).map(r=>({...r,roomId:'one-room'}))};
+  expect(evaluateGroupInventory(small)).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',unassignedConfirmedGroupUnits:1});
+ });
+ it('does not call a room released if another active assignment of that group is using it',()=>{
+  const reused={...input,operationalInventory:2,blocks:[{...input.blocks[0],quantity:2}],reservations:[departed[0],{...current[0],roomId:departed[0].roomId}]};
+  expect(evaluateGroupInventory(reused)).toMatchObject({unassignedConfirmedGroupUnits:1});
+ });
+ it('preserves a later separate block and caps credits by the matching original block',()=>{
+  const old={...input.blocks[0],quantity:1};
+  const later={...old,blockCheckInDate:day,blockCheckOutDate:to};
+  const ended=departed.slice(0,2).map(r=>({...r,checkOutDate:day}));
+  expect(evaluateGroupInventory({...input,operationalInventory:1,blocks:[later],reservations:ended})).toMatchObject({unassignedConfirmedGroupUnits:1});
+  expect(evaluateGroupInventory({...input,operationalInventory:1,blocks:[old,later],reservations:ended})).toMatchObject({unassignedConfirmedGroupUnits:1});
+ });
+ it('does not use the excluded completed assignment to subsidize its own reactivation',()=>{
+  const single={...input,operationalInventory:1,blocks:[{...input.blocks[0],quantity:1}],reservations:[departed[0]],excludeReservationId:departed[0].id};
+  expect(evaluateGroupInventory(single)).toMatchObject({unassignedConfirmedGroupUnits:1});
+ });
+});
