@@ -6,6 +6,8 @@ import { withInvoiceAdvisoryLock } from "./billing/invoiceAdvisoryLock";
 import { initialNightlyPricing, nightlyTotal, amountString, pricingError } from "@shared/nightlyPricing";
 
 const financialScope = new AsyncLocalStorage<Set<string>>();
+/** Recovery must not wait on an owner lock already held by its own request. */
+export const hasFinancialScopeLock = (key: string) => financialScope.getStore()?.has(key) === true;
 const nightlyWriter = new AsyncLocalStorage<{ revision:number; dates?:string[] }>();
 export const withNightlyWriter = <T>(revision: number, action: () => Promise<T>, dates?:string[]) => nightlyWriter.run({revision,dates}, action);
 export function withFinancialScopeLock<T>(key: string, action: () => Promise<T>): Promise<T> {

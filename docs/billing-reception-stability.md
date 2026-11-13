@@ -9,8 +9,16 @@
   autorización. Los puntos desactivados o manuales no se ofrecen como puntos
   electrónicos de producción.
 - Cada emisión fiscal tiene un borrador persistido antes de solicitar CAE.
-  Una colisión se detecta antes de autorizar: no borra otro registro, no adopta
-  otra factura por coincidencia de número/CAE y no adelanta el contador.
+  Una colisión se detecta antes de autorizar. Bajo el bloqueo de serie, se
+  verifica el pedido inmutable del borrador y se consulta su identidad exacta
+  en ARCA. Un rechazo confirmado o una interrupción anterior al envío puede
+  archivarse automáticamente si ARCA confirma ausencia de autorización y no
+  hay vínculos económicos. El documento completo queda en el journal y la
+  auditoría. No se adopta otra factura por coincidencia de número/CAE ni se
+  adelanta el contador.
+  Si ARCA devuelve el CAE original, se conserva en su propia factura, pendiente
+  de conciliación; nunca se cobra esa operación desde otra reserva. Se vuelve
+  a consultar el último número antes de continuar la emisión nueva.
 - Los intentos nuevos de Prefactura conservan su pedido, importes y claves de
   pago en el servidor. Se recuperan también desde otra sesión/computadora.
   Para omitir un pago se exige su clave original, reserva, factura, importe,
@@ -20,6 +28,10 @@
   con fecha, receptor e importe. No se asigna otro número para salir del paso.
 - La pantalla diferencia un intento que no salió, un rechazo confirmado, un
   resultado incierto y una factura autorizada con registro pendiente.
+  Los conflictos de numeración anteriores al envío admiten reintentar el mismo
+  pedido con sus claves de pago originales. Se identifica el comprobante
+  interno que ocupa el número. Los pedidos rechazados o ya archivados siguen
+  requiriendo revisar sus datos antes de preparar una nueva operación.
 - **Corregir datos del intento** es una acción explícita. Antes de una
   autorización se libera solo el intento nuevo con evidencia del servidor.
   Tras un rechazo confirmado se consulta ARCA; únicamente la respuesta negativa
@@ -45,7 +57,12 @@ ni se reenvían por publicar esta corrección.
 La restricción histórica de tipo/punto/número se conserva. No se reclasifican
 facturas ni se cambian contadores históricos. Una serie ya contaminada con
 datos ficticios necesita revisión explícita; el programa la detiene antes de
-solicitar CAE. Tampoco cambia la configuración de homologación a producción.
+solicitar CAE. Un resultado incierto no se descarta sólo porque una consulta
+no lo encuentre: se recupera desde su cuenta de origen. Los documentos sin
+identidad/pedido verificable, cuentas de SPA/financiación, grupos, pedidos de
+Restaurant y documentos con vínculos económicos conservan su recuperación
+específica. La verificación no espera por otra cuenta financiera ocupada.
+Tampoco cambia la configuración de homologación a producción.
 
 `billing_operations` es un registro persistente de intención/etapa; no es un
 libro de Caja. Guarda el pedido necesario para recuperación con los permisos
