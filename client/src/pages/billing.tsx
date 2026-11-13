@@ -2459,6 +2459,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
         <Separator />
 
         {reservationAdvancePreview && <div className="rounded-md border bg-blue-50/60 dark:bg-blue-950/20 p-3 text-sm space-y-2" data-testid="group-advance-invoice-preview">
+          <p>Esta distribución corresponde al anticipo registrado, no a las casillas de Prefactura. Se aplica primero al alojamiento pendiente y después a otros cargos.</p>
           <p>Se facturan ${fPeso(reservationAdvancePreview.amount)} del anticipo ya registrado. No se vuelve a cobrar.</p>
           <ul>{reservationAdvancePreview.sources.map(source => <li key={source.id}>{source.label}: ${fPeso(source.amount)}</li>)}</ul>
           <p className="text-xs text-muted-foreground">Estos importes descuentan lo pendiente de facturar en la habitación y en el grupo.</p>
