@@ -1217,9 +1217,9 @@ export class DatabaseStorage implements IStorage {
       db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.roomTypeId, input.roomTypeId)),
       db.select().from(groupReservationLinks),
       db.select({
-        id: reservations.id, roomTypeId: reservations.roomTypeId,
+        id: reservations.id, roomId: reservations.roomId, roomTypeId: reservations.roomTypeId,
         checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate,
-        status: reservations.status,
+        status: reservations.status, checkedOutAt:reservations.checkedOutAt,
       }).from(reservations).where(and(
         eq(reservations.roomTypeId, input.roomTypeId),
         lt(reservations.checkInDate, input.checkOutDate),
@@ -1227,6 +1227,19 @@ export class DatabaseStorage implements IStorage {
       )),
     ]);
     const linkByReservation = new Map(linkRows.map(link => [link.reservationId, link.groupId]));
+    // Departures before the requested night still fulfill their group's block.
+    // Fetch only assignments belonging to overlapping active groups, not the
+    // entire history of this category. The shared policy verifies block dates.
+    const groupById=new Map(groupRows.map(group=>[group.id,group]));
+    const relevantGroups=new Set(blockRows.filter(block=>{
+      const group=groupById.get(block.groupId);
+      return group&&['confirmed','inhouse','tentative','blocked'].includes(group.status)
+        &&(block.blockCheckInDate||group.checkInDate)<input.checkOutDate
+        &&(block.blockCheckOutDate||group.checkOutDate)>input.checkInDate;
+    }).map(block=>block.groupId));
+    const departedIds=linkRows.filter(link=>relevantGroups.has(link.groupId)).map(link=>link.reservationId);
+    const departed=departedIds.length?await db.select({id:reservations.id,roomId:reservations.roomId,roomTypeId:reservations.roomTypeId,checkInDate:reservations.checkInDate,checkOutDate:reservations.checkOutDate,status:reservations.status,checkedOutAt:reservations.checkedOutAt}).from(reservations).where(and(inArray(reservations.id,departedIds),eq(reservations.roomTypeId,input.roomTypeId),eq(reservations.status,'checked_out'))):[];
+    const inventoryReservations=[...new Map([...reservationRows,...departed].map(row=>[row.id,row])).values()];
     return evaluateGroupInventory({
       roomTypeId: input.roomTypeId,
       checkIn: input.checkInDate,
@@ -1234,7 +1247,7 @@ export class DatabaseStorage implements IStorage {
       operationalInventory: roomRows.filter(room => isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
       groups: groupRows,
       blocks: blockRows,
-      reservations: reservationRows.map(row => ({ ...row, groupId: linkByReservation.get(row.id) ?? null })),
+      reservations: inventoryReservations.map(row => ({ ...row, groupId: linkByReservation.get(row.id) ?? null })),
       excludeReservationId: input.excludeReservationId,
       contextGroupId: input.contextGroupId,
       hasSpecificRoom: input.hasSpecificRoom,
@@ -1255,7 +1268,7 @@ export class DatabaseStorage implements IStorage {
     const allLinks = await db.select().from(groupReservationLinks);
     const relevantReservationIds = new Set(allLinks.map(link => link.reservationId));
     const linkedReservations = relevantReservationIds.size
-      ? await db.select({ id: reservations.id, roomTypeId: reservations.roomTypeId, checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate, status: reservations.status }).from(reservations).where(inArray(reservations.id, [...relevantReservationIds]))
+      ? await db.select({ id: reservations.id, roomId:reservations.roomId, roomTypeId: reservations.roomTypeId, checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate, status: reservations.status, checkedOutAt:reservations.checkedOutAt }).from(reservations).where(inArray(reservations.id, [...relevantReservationIds]))
       : [];
     const groupRows = allGroups.map(row => row.id === groupId ? {
       ...row,

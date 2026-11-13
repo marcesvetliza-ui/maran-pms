@@ -50,10 +50,12 @@ export type InventoryBlock = {
 
 export type InventoryReservation = {
   id: string;
+  roomId?: string;
   roomTypeId: string;
   checkInDate: string;
   checkOutDate: string;
   status: string;
+  checkedOutAt?: Date | string | null;
   groupId?: string | null;
 };
 
@@ -100,10 +102,41 @@ function blockDates(block: InventoryBlock, group?: InventoryGroup): [string, str
   ];
 }
 
+const departureDayFormat = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'});
+function departureDay(reservation: InventoryReservation): string {
+  const stamp=reservation.checkedOutAt;
+  if(!stamp)return reservation.checkOutDate;
+  // The PostgreSQL timestamp column stores UTC without an offset.
+  const date=stamp instanceof Date?stamp:new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(stamp)?stamp:stamp+'Z');
+  return Number.isNaN(date.getTime())?reservation.checkOutDate:departureDayFormat.format(date);
+}
+
+/** A completed room assignment is fulfilled, not an unassigned arrival.
+ * Keep real unassigned units, never use cancelled/no-show records as releases,
+ * and never credit an old stay against an unrelated later block.
+ */
+function releasedGroupUnits(completedStays:Array<{reservation:InventoryReservation;releasedOn:string}>,groupId:string,date:string,blocks:Array<{from:string;to:string;quantity:number}>,active:InventoryReservation[]) {
+  const occupied=new Set(active.filter(r=>r.groupId===groupId&&r.checkInDate<=date&&date<r.checkOutDate).map(r=>r.roomId||r.id));
+  const completed=new Map<string,InventoryReservation>();
+  for(const {reservation:r,releasedOn} of completedStays){
+    if(r.groupId!==groupId||r.checkInDate>date||releasedOn>date)continue;
+    const key=r.roomId||r.id;
+    if(!occupied.has(key))completed.set(key,r);
+  }
+  const slots=blocks.map(block=>({...block,remaining:block.quantity}));
+  // Cap each release by a block that the original stay actually consumed.
+  // Most constrained assignments first; ambiguous allocations stay conservative.
+  const eligible=[...completed.values()].map(r=>({r,matches:slots.filter(s=>overlaps(r.checkInDate,r.checkOutDate,s.from,s.to))})).sort((a,b)=>a.matches.length-b.matches.length);
+  let released=0;
+  for(const item of eligible){const slot=item.matches.find(s=>s.remaining>0);if(slot){slot.remaining--;released++;}}
+  return released;
+}
+
 /**
  * Evaluates one prospective room-type reservation for every night in its
  * half-open stay interval.  Active linked reservations consume their group's
- * block first; only the unconsumed remainder of a block is added to demand.
+ * block first; completed assignments release their units from their actual
+ * departure day. Only a genuinely unassigned remainder is added to demand.
  */
 export function evaluateGroupInventory(input: GroupInventoryInput): GroupInventoryConflict | null {
   const groupById = new Map(input.groups.map(group => [group.id, group]));
@@ -115,6 +148,11 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       const [from, to] = blockDates(block, group);
       return !!from && !!to && overlaps(input.checkIn, input.checkOut, from, to);
     });
+  const relevantGroupIds=new Set(relevantBlocks.map(({block})=>block.groupId));
+  const completedStays=input.reservations.filter(r=>r.status==='checked_out'
+    &&r.id!==input.excludeReservationId&&r.roomTypeId===input.roomTypeId
+    &&!!r.groupId&&relevantGroupIds.has(r.groupId))
+    .map(reservation=>({reservation,releasedOn:departureDay(reservation)}));
   const active = input.reservations.filter(reservation =>
     reservation.id !== input.excludeReservationId &&
     reservation.roomTypeId === input.roomTypeId &&
@@ -132,12 +170,13 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     });
     // Blocks of the same type and group add their quantities, while linked
     // reservations consume their combined commitment only once.
-    const blocksByGroup = new Map<string, { group: InventoryGroup; quantity: number }>();
+    const blocksByGroup = new Map<string, { group: InventoryGroup; quantity: number; intervals:Array<{from:string;to:string;quantity:number}> }>();
     for (const { block, group } of blocks) {
       const previous = blocksByGroup.get(block.groupId);
       blocksByGroup.set(block.groupId, {
         group: group!,
         quantity: (previous?.quantity ?? 0) + block.quantity,
+        intervals:[...(previous?.intervals||[]),{from:blockDates(block,group)[0],to:blockDates(block,group)[1],quantity:block.quantity}],
       });
     }
     const candidateUnits = Math.max(0, input.candidateUnits ?? 1);
@@ -154,19 +193,20 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       quantity: number;
       remaining: number;
     }> = [];
-    for (const [groupId, { group, quantity }] of blocksByGroup) {
+    for (const [groupId, { group, quantity, intervals }] of blocksByGroup) {
       const linkedCount = active.filter(reservation =>
         reservation.groupId === groupId &&
         reservation.checkInDate <= date && date < reservation.checkOutDate,
       ).length;
       const isCandidateInBlock = input.contextGroupId === groupId;
       const effectiveLinkedCount = linkedCount + (isCandidateInBlock ? candidateUnits : 0);
+      const remainingCommitment=Math.max(0,quantity-releasedGroupUnits(completedStays,groupId,date,intervals,active));
       if (HARD_GROUP_STATUSES.has(group.status)) {
-        hardDemand += Math.max(quantity, effectiveLinkedCount);
-        unassignedHardCommitment += Math.max(quantity - effectiveLinkedCount, 0);
+        hardDemand += Math.max(remainingCommitment, effectiveLinkedCount);
+        unassignedHardCommitment += Math.max(remainingCommitment - effectiveLinkedCount, 0);
       } else if (SOFT_GROUP_STATUSES.has(group.status)) {
         hardDemand += effectiveLinkedCount;
-        const remaining = Math.max(quantity - effectiveLinkedCount, 0);
+        const remaining = Math.max(remainingCommitment - effectiveLinkedCount, 0);
         if (remaining > 0) softRows.push({ group, quantity, remaining });
       }
     }
