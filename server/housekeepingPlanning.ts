@@ -31,8 +31,8 @@ export async function loadHousekeepingPlanning(
     FROM reservations r LEFT JOIN bed_types b ON b.id=r.bed_type_id LEFT JOIN guests g ON g.id=r.guest_id
     WHERE r.check_in_date<=${date} AND r.check_out_date>=${date} AND r.status IN ('confirmed','web_checkin','checked_in','checked_out') AND (${mode}='past' OR r.status<>'checked_out')
     AND NOT EXISTS(SELECT 1 FROM rooms v WHERE v.id=r.room_id AND (v.is_virtual=true OR v.room_number='REUB')) ORDER BY r.check_in_date,r.id`),
-    db.execute(sql`SELECT t.id,t.room_id,t.task_type,t.status,t.priority,t.assigned_to,t.notes,t.scheduled_date,t.started_at AT TIME ZONE 'UTC' AS started_at,t.completed_at AT TIME ZONE 'UTC' AS completed_at,t.inspected_at AT TIME ZONE 'UTC' AS inspected_at,u.full_name AS staff_name,rm.room_number
-    FROM housekeeping_tasks t LEFT JOIN system_users u ON u.id=t.assigned_to LEFT JOIN rooms rm ON rm.id=t.room_id WHERE t.scheduled_date=${date} AND NOT EXISTS(SELECT 1 FROM rooms v WHERE v.id=t.room_id AND (v.is_virtual=true OR v.room_number='REUB')) ORDER BY t.created_at,t.id`),
+    db.execute(sql`SELECT t.id,t.room_id,t.task_type,t.status,t.priority,t.assigned_to,t.notes,t.scheduled_date,t.started_at AT TIME ZONE 'UTC' AS started_at,t.completed_at AT TIME ZONE 'UTC' AS completed_at,t.inspected_at AT TIME ZONE 'UTC' AS inspected_at,COALESCE(u.full_name,s.full_name) AS staff_name,rm.room_number
+    FROM housekeeping_tasks t LEFT JOIN system_users u ON u.id=t.assigned_to LEFT JOIN housekeeping_operational_staff s ON s.id=t.assigned_to LEFT JOIN rooms rm ON rm.id=t.room_id WHERE t.scheduled_date=${date} AND NOT EXISTS(SELECT 1 FROM rooms v WHERE v.id=t.room_id AND (v.is_virtual=true OR v.room_number='REUB')) ORDER BY t.created_at,t.id`),
     loadHousekeepingDailyReport(date),
   ]);
   const rooms = roomRows.rows as any[],

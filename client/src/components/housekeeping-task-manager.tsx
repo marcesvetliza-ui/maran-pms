@@ -72,6 +72,7 @@ export function HousekeepingTaskManager({
     notes: "",
   });
   const availability = useStaffAvailability(form.scheduledDate);
+  const selectableStaff=availability.data?.map(row=>({id:row.userId,fullName:row.fullName})) ?? staff;
   const selectedAvailability = availability.data?.find(v=>v.userId===form.assignedTo);
   const [message, setMessage] = useState("");
   const requestedEdit = useRef<TaskEditor | null>(null);
@@ -111,6 +112,10 @@ export function HousekeepingTaskManager({
       );
       return response.json();
     },
+  });
+  const historicalStaff=useQuery<{id:string;fullName:string}[]>({
+    queryKey:["/api/housekeeping/staff",date],
+    queryFn:async()=>(await apiRequest("GET",`/api/housekeeping/staff?date=${date}`)).json(),
   });
   const save = useMutation({
     mutationFn: async () => {
@@ -234,7 +239,8 @@ export function HousekeepingTaskManager({
                     <span>{states[t.status]}</span>
                   </div>
                   <p>
-                    {staff.find((s) => s.id === t.assignedTo)?.fullName ||
+                    {historicalStaff.data?.find(s=>s.id===t.assignedTo)?.fullName ||
+                      staff.find((s) => s.id === t.assignedTo)?.fullName ||
                       "Sin asignar"}{" "}
                     · Prioridad {priorities[t.priority]}
                   </p>
@@ -342,7 +348,7 @@ export function HousekeepingTaskManager({
                   }
                 >
                   <option value="">Sin asignar</option>
-                  {staff.map((s) => (
+                  {selectableStaff.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.fullName} · {availability.data?.find(v=>v.userId===s.id)?.status ? availabilityDescription(availability.data.find(v=>v.userId===s.id)) : "Sin completar"}
                     </option>
@@ -461,7 +467,7 @@ export function HousekeepingTaskManager({
             <p className="text-sm text-muted-foreground">
               {formatDisplayDate(form.scheduledDate)} · {selected.length} tareas
               ·{" "}
-              {staff.find((s) => s.id === form.assignedTo)?.fullName ||
+              {selectedAvailability?.fullName || staff.find((s) => s.id === form.assignedTo)?.fullName ||
                 "Sin asignar"}
             </p>
             {message && (
