@@ -51,7 +51,7 @@ suite("Remito: stock, deuda, pagos y factura en una transacción", () => {
     await updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "REMITO-NF" });
     await createPaymentOrder(tx, { supplierId: f.supplier, facturaIds: [f.invoice], formaPago: "efectivo", efectivo: 1000, montoParcial: 1000 }, () => "2026-11-03");
     await expect(updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "REMITO" })).rejects.toThrow("pagos aplicados");
-    const invoice = await updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "FACT-A", supplierId: f.supplier, numeroComprobante: "123", puntoVenta: "1", fechaEmision: "2026-11-03", periodo: "11/2026", montoNeto: "2000", montoIva21: "420", cuentaContableId: f.expense }, "admin-test", true);
+    const invoice = await updatePurchaseRemito(tx, f.invoice, { tipoComprobante: "FACT-A", supplierId: f.supplier, numeroComprobante: "123", puntoVenta: "1", fechaEmision: "2026-11-03", periodo: "11/2026", montoNeto: "2000", montoIva21: "420", cuentaContableId: f.expense, stockItems: [], formasPago: [] }, "admin-test", true);
     expect(invoice.id).toBe(f.invoice); expect(invoice.tipo_comprobante).toBe("FACT-A");
     expect(Number(invoice.saldo_pendiente)).toBe(1420); expect(invoice.estado).toBe("parcial");
     expect(invoice.special_details.remitoHistory.at(-1).previous.tipo_comprobante).toBe("REMITO-NF");

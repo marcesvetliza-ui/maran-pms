@@ -41,7 +41,7 @@ export async function updatePurchaseRemito(tx: Executor, id: number, input: any,
   if ((invoiceMode || !editing) && input.supplierId != null && Number(input.supplierId) !== Number(existing.supplier_id)) throw fail("La factura debe pertenecer al mismo proveedor del remito.", 400);
   const nextType = input.tipoComprobante ?? existing.tipo_comprobante;
   if (invoiceMode ? !/^FACT-[ABCM]$/.test(nextType) : !isPurchaseRemito(nextType)) throw fail("Tipo de comprobante inválido para esta operación.", 400);
-  if ((input.stockItems !== undefined && !editing) || input.formasPago?.length) throw fail("El remito conserva su stock y sus pagos. Registrá cualquier nuevo pago desde una orden de pago.", 400);
+  if ((input.stockItems !== undefined && !editing && (!Array.isArray(input.stockItems) || input.stockItems.length > 0)) || input.formasPago?.length) throw fail("El remito conserva su stock y sus pagos. Registrá cualquier nuevo pago desde una orden de pago.", 400);
   if ((await tx.execute(sql`SELECT id FROM inventory_source_reversals WHERE source_type='purchase_invoice' AND source_id=${String(id)} AND completed_at IS NOT NULL`)).rows.length) throw fail("El stock del remito fue revertido. No se puede cambiar su uso ni asociar una factura.");
   const payments = (await tx.execute(sql`SELECT COALESCE(sum(importe_cancelado),0) AS paid, count(*) AS count FROM payment_order_items WHERE invoice_id=${id}`)).rows[0] as any;
   const paidByOrders = Number(payments?.paid ?? 0);
