@@ -1,6 +1,6 @@
 import "./housekeeping.css";
 import {loadHousekeepingBlockConflicts} from "@/lib/housekeeping-block-conflicts";
-import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
+import {useHousekeepingStatus} from "@/components/use-housekeeping-status";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
 import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
 import { formatDisplayDate } from "@shared/date-display";
@@ -144,7 +144,7 @@ const priorityConfig: Record<Priority, { label: string; className: string }> = {
   urgent: { label: "Urgente", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
 };
 
-function RoomCard({ 
+export function RoomCard({
   room, 
   tasks, 
   isOccupied,
@@ -282,7 +282,10 @@ function RoomCard({
                 <Badge className={`${taskStatusConfig[task.status as TaskStatus].className} text-xs`}>
                   {taskTypeLabels[task.taskType as TaskType] || task.taskType}
                 </Badge>
-                {task.status === "pending" && (
+                {task.status === "in_progress" && task.scheduledDate !== getArgentinaToday() && (
+                  <span className="text-xs text-amber-700">En curso desde {formatDisplayDate(task.scheduledDate)}</span>
+                )}
+                {task.status === "pending" && !pendingTasks.some(t => t.status === "in_progress") && (
                   <Button 
                     size="sm" 
                     variant="ghost" 
@@ -1091,7 +1094,7 @@ interface PendingAction {
 }
 
 // ─── MobileRoomCard ───────────────────────────────────────────────────────────
-function MobileRoomCard({
+export function MobileRoomCard({
   room,
   tasks,
   checkoutToday,
@@ -1215,6 +1218,9 @@ function MobileRoomCard({
             {currentTask.notes && (
               <p className="text-xs mt-0.5 opacity-80 whitespace-pre-wrap break-words">{currentTask.notes}</p>
             )}
+            {activeTask && activeTask.scheduledDate !== getArgentinaToday() && (
+              <p className="text-xs mt-1">Tarea sin finalizar desde {formatDisplayDate(activeTask.scheduledDate)}. Finalizala antes de iniciar otra limpieza.</p>
+            )}
           </div>
         )}
 
@@ -1316,12 +1322,7 @@ function MobileRoomCard({
           <span className="text-xs text-muted-foreground w-full mb-0.5">Cambiar estado:</span>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `Disponible — Hab. ${room.roomNumber}`,
-              description: "¿Marcar esta habitación como disponible?",
-              confirmLabel: "Sí, disponible",
-              fn: () => onUpdateStatus(room.id, "available"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "available")}
             disabled={isUpdating || room.status === "available"}
             data-testid={`button-set-available-${room.id}`}
           >
@@ -1329,12 +1330,7 @@ function MobileRoomCard({
           </button>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `Limpia ocupada — Hab. ${room.roomNumber}`,
-              description: "¿Marcar esta habitación como limpia con huésped?",
-              confirmLabel: "Sí",
-              fn: () => onUpdateStatus(room.id, "limpia_ocupada"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "limpia_ocupada")}
             disabled={isUpdating || room.status === "limpia_ocupada"}
             data-testid={`button-set-limpia-ocupada-${room.id}`}
           >
@@ -1342,12 +1338,7 @@ function MobileRoomCard({
           </button>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `No molestar — Hab. ${room.roomNumber}`,
-              description: "¿Activar estado No molestar?",
-              confirmLabel: "Sí",
-              fn: () => onUpdateStatus(room.id, "no_molestar"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "no_molestar")}
             disabled={isUpdating || room.status === "no_molestar"}
             data-testid={`button-set-no-molestar-${room.id}`}
           >
@@ -1355,12 +1346,7 @@ function MobileRoomCard({
           </button>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `Sucia — Hab. ${room.roomNumber}`,
-              description: "¿Marcar esta habitación como sucia?",
-              confirmLabel: "Sí, sucia",
-              fn: () => onUpdateStatus(room.id, "dirty"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "dirty")}
             disabled={isUpdating || room.status === "dirty"}
             data-testid={`button-set-dirty-${room.id}`}
           >
@@ -1464,7 +1450,8 @@ export default function Housekeeping() {
   const { data: tasks, isLoading: tasksLoading } = useQuery<HousekeepingTaskWithRoom[]>({
     queryKey: ["/api/housekeeping", today],
     queryFn: () =>
-      fetch(`/api/housekeeping?date=${today}`, { credentials: "include" }).then(r => r.json()),
+      apiRequest("GET", `/api/housekeeping?date=${today}&includeActive=true`).then(r => r.json()),
+    refetchInterval: 30000,
   });
 
   const { data: hkStaff = [] } = useQuery<any[]>({
@@ -1592,7 +1579,7 @@ export default function Housekeeping() {
     },
   });
 
-  const updateRoomStatusMutation = useRoomStatusCorrection(rooms || []);
+  const updateRoomStatusMutation = useHousekeepingStatus(rooms || []);
 
   const createTaskMutation = useMutation({
     mutationFn: (data: { roomId: string; taskType: string; priority: string; notes?: string; scheduledDate: string }) => 

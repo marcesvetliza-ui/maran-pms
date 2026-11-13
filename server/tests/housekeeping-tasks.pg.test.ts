@@ -373,14 +373,35 @@ describe.skipIf(!enabled)(
         expect((await storage.getRoom(id("room"))).status).toBe(status);
       },
     );
-    it("requires a reason and saves it with the manual correction", async () => {
+    it("changes status without requiring a reason and retains audit and concurrency guards", async () => {
       const path=`/api/housekeeping/room/${id("room")}/status`;
-      expect((await api("PATCH",path,{status:"available"})).status).toBe(400);
-      expect((await api("PATCH",path,{status:"available",reason:"   "})).status).toBe(400);
+      expect((await api("PATCH",path,{status:"available",expectedStatus:"dirty"})).status).toBe(200);
+      const direct=await pool.query("SELECT details FROM audit_logs WHERE entity_id=$1 AND action='room_status' ORDER BY timestamp DESC LIMIT 1",[id("room")]);
+      expect(JSON.parse(direct.rows[0].details)).toMatchObject({reason:null,before:"dirty",after:"available",source:"housekeeping_status"});
+      expect((await api("PATCH",path,{status:"dirty",reason:"   "})).status).toBe(200);
+      expect((await api("PATCH",path,{status:"available",reason:"x".repeat(501)})).status).toBe(400);
       expect((await api("PATCH",path,{status:"available",reason:"Revisión presencial",expectedStatus:"occupied"})).status).toBe(409);
       expect((await api("PATCH",path,{status:"available",reason:"Revisión presencial",expectedStatus:"dirty"})).status).toBe(200);
       const log=await pool.query("SELECT details FROM audit_logs WHERE entity_id=$1 AND action='room_status' ORDER BY timestamp DESC LIMIT 1",[id("room")]);
       expect(JSON.parse(log.rows[0].details)).toMatchObject({reason:"Revisión presencial",before:"dirty",after:"available"});
+    });
+    it("exposes earlier unfinished tasks on the daily board without exposing another worker's tasks", async () => {
+      const t = await task();
+      await api("POST", `/api/housekeeping/${t.id}/start`);
+      await pool.query("UPDATE housekeeping_tasks SET scheduled_date='2020-01-01' WHERE id=$1",[t.id]);
+      const b = await task({taskType:"deep_clean",assignedTo:id("other")});
+      await pool.query("UPDATE housekeeping_tasks SET status='in_progress',scheduled_date='2020-01-01' WHERE id=$1",[b.id]);
+      const normal = await api("GET", `/api/housekeeping?date=${today}`);
+      expect(normal.body.map((row:any)=>row.id)).not.toContain(t.id);
+      const board = await api("GET", `/api/housekeeping?date=${today}&includeActive=true`);
+      expect(board.body.map((row:any)=>row.id)).toEqual(expect.arrayContaining([t.id,b.id]));
+      actor="worker";
+      const mine = await api("GET", `/api/housekeeping?date=${today}&includeActive=true`);
+      expect(mine.body.map((row:any)=>row.id)).toContain(t.id);
+      expect(mine.body.map((row:any)=>row.id)).not.toContain(b.id);
+      // Completing earlier work is still possible and does not duplicate its start.
+      await pool.query("UPDATE housekeeping_tasks SET status='pending' WHERE id=$1",[b.id]);
+      expect((await api("POST", `/api/housekeeping/${t.id}/complete`)).status).toBe(200);
     });
     it("manual corrections preserve the entered stay and No mover", async () => {
       await occupied();
