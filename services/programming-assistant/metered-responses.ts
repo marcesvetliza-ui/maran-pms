@@ -80,12 +80,13 @@ export function meteredResponses(
         );
         try {
           const response = await provider.responses.create(
-            { ...body, truncation: "disabled" },
+            { ...body, truncation: "disabled", service_tier: "default" },
             { ...options, headers: { "X-Client-Request-Id": reservation } },
           );
           const u = response.usage;
           if (
             !u ||
+            (response.service_tier && response.service_tier !== "default") ||
             !(
               response.model === model || response.model.startsWith(model + "-")
             ) ||

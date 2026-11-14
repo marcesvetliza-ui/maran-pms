@@ -57,6 +57,8 @@ El perfil admite `gpt-5.3-codex` con tarifas verificadas para la evaluación del
 9 de noviembre: input US$1,75, caché US$0,175 y output US$14 por millón de tokens.
 Los modelos sin ese perfil no generan inferencia. No se usan herramientas
 nativas, sesiones remotas persistentes ni reintentos automáticos del proveedor.
+Las generaciones fijan `service_tier=default` para utilizar la tarifa estándar;
+un nivel de facturación distinto informado por el proveedor requiere revisión.
 Si el conteo no está disponible, no se genera una respuesta sin reserva.
 
 ## Correo y bandeja

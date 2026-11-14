@@ -7,15 +7,16 @@ Preparado en `advance/assistant-pilot-20261114`, para integrar únicamente a
 
 | Grupo | Archivos | Pruebas correctas |
 | --- | ---: | ---: |
-| Suite completa del asistente | 27 | 298 |
+| Suite completa del asistente | 27 | 299 |
 | Investigador Codex, propuestas, transporte y pasarela del PMS | 4 | 56 |
 | Pantallas y componentes de Soporte | 4 | 31 |
 | Integración en esquemas propios de PostgreSQL local | 4 | 20 |
-| Total sin duplicar pruebas | 39 | 405 |
+| Total sin duplicar pruebas | 39 | 406 |
 
 Las pruebas incluyen conversación y seguimiento, capturas privadas, permisos,
 solicitudes idempotentes, presupuesto compartido, concurrencia entre reservas de
 consumo, arranque simultáneo de réplicas, cupos por colaborador y por hotel,
+tarifa estándar explícita y rechazo de un nivel de facturación inesperado,
 reinicios, consumo incierto y conciliación auditada. Comprueban avisos sin
 inferencia, fallas de correo, reintentos con la misma clave, propuestas
 desactualizadas y rechazo de acciones no permitidas devueltas por el modelo.

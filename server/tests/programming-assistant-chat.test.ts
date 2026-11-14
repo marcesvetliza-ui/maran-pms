@@ -17,6 +17,61 @@ const image = {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=",
 };
 describe("conversational support boundaries", () => {
+  it("pins standard pricing and quarantines a provider response charged under another tier", async () => {
+    const store = {
+      reserve: vi.fn(async () => "call-id"),
+      settle: vi.fn(),
+      uncertain: vi.fn(),
+    };
+    const response = {
+      id: "response-test",
+      model: "gpt-5.3-codex",
+      service_tier: "default",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 10,
+        input_tokens_details: { cached_tokens: 0 },
+      },
+    };
+    const provider = {
+      responses: {
+        inputTokens: { count: vi.fn(async () => ({ input_tokens: 100 })) },
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(response)
+          .mockResolvedValueOnce({ ...response, service_tier: "priority" }),
+      },
+    };
+    const client = meteredResponses(
+      store as any,
+      provider as any,
+      "case",
+      "alice",
+      "gpt-5.3-codex",
+    );
+    const request = {
+      model: "gpt-5.3-codex",
+      store: false as const,
+      stream: false as const,
+      tools: [],
+      tool_choice: "none" as const,
+      max_output_tokens: 100,
+      input: "consulta",
+    };
+    await client.responses.create(request, {
+      signal: new AbortController().signal,
+    });
+    expect(provider.responses.create.mock.calls[0][0].service_tier).toBe(
+      "default",
+    );
+    await expect(
+      client.responses.create(request, {
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("Consumo sin verificar");
+    expect(store.settle).toHaveBeenCalledTimes(1);
+    expect(store.uncertain).toHaveBeenCalledWith("call-id");
+  });
   it("accepts natural text or an image without requiring a technical form and rejects claimed authority", () => {
     const requestId = "11111111-1111-4111-8111-111111111111";
     expect(
