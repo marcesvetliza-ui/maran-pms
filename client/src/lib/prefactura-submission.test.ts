@@ -3,6 +3,17 @@ import { createPrefacturaSubmission } from "./prefactura-submission";
 
 describe("Prefactura persisted payment intent", () => {
   beforeEach(() => sessionStorage.clear());
+  it("recovers an account checkout after reopening with the original entity, amount and operation", async () => {
+    const submission=createPrefacturaSubmission(sessionStorage);
+    const request={operationId:crypto.randomUUID(),entityType:"company",entityId:"original-company",expectedBalance:"70000.00",entityName:"Original account"};
+    submission.prepareAccountCheckout("r",request);
+    await expect(submission.run("r",async()=>{throw new Error("Lost response");})).rejects.toThrow("Lost response");
+    const reopened=createPrefacturaSubmission(sessionStorage);
+    expect(reopened.prepareAccountCheckout("r",{...request,entityId:"another-company",expectedBalance:"1.00"}).accountCheckout).toEqual(request);
+    const writes:Array<{url:string;body:unknown}>=[];
+    expect(await reopened.run("r",async(url,body)=>{writes.push({url,body});return {success:true};})).toMatchObject({checkoutCompleted:true});
+    expect(writes).toEqual([{url:"/api/reservations/r/check-out-to-account",body:request}]);
+  });
   it("rechaza solicitudes y pagos de otra reserva antes de escribir", () => {
     const submission = createPrefacturaSubmission(sessionStorage);
     expect(() => submission.prepare("202", { reservaId: "706" }, [])).toThrow("otra reserva");

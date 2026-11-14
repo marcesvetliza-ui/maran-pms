@@ -28,6 +28,7 @@ import { changesAccommodation } from "@shared/accommodationPermission";
 import { anularRestaurantRoomCharge } from "./restaurant-room-charge-void";
 import { RESTAURANT_ROOM_CHARGE_VOID_ROLES, canVoidReservationCharge } from "@shared/reservationChargePermissions";
 import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
+import { checkoutReservationToAccount } from "../billing/reservationAccountCheckout";
 import { audit } from "../audit";
 import { isReservationLocked } from "./utils";
 import {
@@ -1557,6 +1558,21 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
+  app.post("/api/reservations/:id/check-out-to-account", requireAuth, async (req, res) => {
+    try {
+      assertFinancialSchemaReady();
+      const result = await checkoutReservationToAccount(req.params.id, req.body || {}, (req as any).user || {});
+      if (!result.alreadyClosed) {
+        storage.createCheckoutCleaningTask(result.roomId).catch(error => console.error("[checkout-cc] limpieza:", error));
+        sendCheckoutEmail(req.params.id, `${req.protocol}://${req.get("host")}`).catch(error => console.error("[checkout-cc] email:", error));
+      }
+      res.json(result);
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.message || "No se pudo trasladar el saldo y cerrar la estadía.",
+        notApplied: [400, 404, 409].includes(error.statusCode) });
+    }
+  });
+
   // Check-out endpoint
   app.post("/api/reservations/:id/check-out", requireAuth, async (req, res) => {
     const run = async () => {
@@ -3037,6 +3053,7 @@ export function registerReservationsRoutes(app: Express) {
       }
       const payment = await storage.createReservationPaymentWithLedger({
         paymentRequest,
+        expectedReservationStatus: reservationForPayment?.status,
         payment: req.body,
         sourceLabel: groupPersonalExtras ? `[personal_extras] ${cashLabel}` : cashLabel,
         registeredBy: (req as any).user?.username,

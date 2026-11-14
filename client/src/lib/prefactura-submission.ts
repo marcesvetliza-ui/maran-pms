@@ -6,6 +6,7 @@ export type PrefacturaAttempt = {
   payments: Payload[];
   checkoutRequested: boolean;
   acknowledgedPaymentIds?: string[];
+  accountCheckout?: { operationId: string; entityType: string; entityId: string; expectedBalance: string; entityName: string };
 };
 
 function assertReservation(reservationId: string | number, attempt: PrefacturaAttempt) {
@@ -56,6 +57,14 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
       storage.setItem(key(reservationId), JSON.stringify(attempt));
       return this.pending(reservationId)!;
     },
+    prepareAccountCheckout(reservationId: string | number, request: NonNullable<PrefacturaAttempt["accountCheckout"]>) {
+      const previous = this.pending(reservationId);
+      if (previous) { assertReservation(reservationId, previous); return previous; }
+      const attempt: PrefacturaAttempt = { ownerReservationId: String(reservationId), invoiceRequest: null, invoice: null,
+        payments: [], checkoutRequested: true, accountCheckout: { ...request } };
+      storage.setItem(key(reservationId), JSON.stringify(attempt));
+      return this.pending(reservationId)!;
+    },
     restore(reservationId: string | number, attempt: PrefacturaAttempt) {
       if (this.pending(reservationId)) return false;
       if (!attempt?.invoiceRequest || String(attempt.invoiceRequest.reservaId) !== String(reservationId) ||
@@ -84,6 +93,11 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
       if (!attempt) throw new Error("No hay una operación pendiente de Prefactura.");
       assertReservation(reservationId, attempt);
       assertActive();
+      if (attempt.accountCheckout) {
+        await post(`/api/reservations/${reservationId}/check-out-to-account`, attempt.accountCheckout);
+        assertActive();
+        return { invoice: null, paymentCount: 0, checkoutRequested: true, checkoutCompleted: true };
+      }
       if (attempt.invoiceRequest && !attempt.invoice) {
         const invoice = await post("/api/billing/invoices", attempt.invoiceRequest);
         assertReservation(reservationId, { ...attempt, invoice });
