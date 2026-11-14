@@ -139,4 +139,24 @@ describe.skipIf(!enabled)("atomic checkout with the operational balance transfer
       expect(await facts(f)).toEqual(before);
     }finally{await clean(f);}
   });
+  it("waits for an ordinary checkout without holding the inventory mutex", async () => {
+    const f=await fixture();const client=await pool!.connect();let pending:ReturnType<typeof checkoutReservationToAccount>|undefined;
+    const finance=`reservation-finance:${f.id}`,inventory='lodging-inventory-mutations';
+    try {
+      await client.query('SELECT pg_advisory_lock(hashtext($1))',[finance]);
+      pending=checkoutReservationToAccount(f.id,payload(f),actor);
+      let waiting=false;
+      for(let attempt=0;attempt<100&&!waiting;attempt++){
+        const locks=await pool!.query("SELECT 1 FROM pg_locks WHERE locktype='advisory' AND objid=(hashtext($1)::bigint & 4294967295)::oid AND NOT granted",[finance]);
+        waiting=locks.rows.length>0;if(!waiting)await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      expect(waiting).toBe(true);
+      const result=await client.query('SELECT pg_try_advisory_lock(hashtext($1)) AS acquired',[inventory]);
+      expect(result.rows[0].acquired).toBe(true);
+    }finally{
+      await client.query('SELECT pg_advisory_unlock(hashtext($1))',[inventory]);
+      await client.query('SELECT pg_advisory_unlock(hashtext($1))',[finance]);
+      client.release();try{if(pending)await pending;}finally{await clean(f);}
+    }
+  });
 });

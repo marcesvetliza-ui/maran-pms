@@ -4,7 +4,7 @@ import { getOperationalReservationCharges } from "@shared/reservationFolio";
 import { db, withDatabaseTransaction } from "../db";
 import { storage, getArgentinaToday } from "../db-storage";
 import { withLodgingInventoryMutationLock } from "../inventoryMutationLock";
-import { withReservationFinancialLock } from "../nightlyPricingGuard";
+import { withFinancialScopeLock, withReservationFinancialLock } from "../nightlyPricingGuard";
 import { parseReservationPaymentRequest } from "../reservationPaymentRequest";
 
 const fail = (message: string, statusCode = 409) => Object.assign(new Error(message), { statusCode });
@@ -19,8 +19,10 @@ export async function checkoutReservationToAccount(reservationId: string, body: 
   const request = parseReservationPaymentRequest({ paymentRequestId: operationId, reservationId,
     action: "checkout_to_account", entityType, entityId, expectedBalance }, String(actor.id || actor.username || ""));
   if (!request) throw fail("El cierre requiere una clave de operación.", 400);
-  return withReservationFinancialLock(reservationId, () => withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
-    await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`reservation-finance:${reservationId}`}))`);
+  // Checkout already takes reservation-finance before the inventory mutex.
+  // Keep that order so a concurrent ordinary checkout cannot deadlock here.
+  return withReservationFinancialLock(reservationId, () => withFinancialScopeLock(`reservation-finance:${reservationId}`,
+    () => withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
     await db.execute(sql`SELECT id FROM reservations WHERE id=${reservationId} FOR UPDATE`);
     const reservation = await storage.getReservation(reservationId);
     if (!reservation) throw fail("No se encontró la reserva.", 404);
@@ -68,5 +70,5 @@ export async function checkoutReservationToAccount(reservationId: string, body: 
       entityType: "reservation", entityId: reservationId, description: note, timestamp: new Date(),
       details: JSON.stringify({ operationId: request.id, amount, accountEntityType: entityType, accountEntityId: entityId, paymentId: payment.id }) });
     return { success: true, alreadyClosed: false, paymentId: payment.id, amount, roomId: reservation.roomId };
-  })));
+  }))));
 }
