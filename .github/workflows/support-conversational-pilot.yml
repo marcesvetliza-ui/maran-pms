@@ -1,0 +1,49 @@
+name: Soporte conversacional de Xenia
+
+on:
+  pull_request:
+    branches: [feature/xenia-support-approval-foundation]
+    paths:
+      - "services/programming-assistant/**"
+      - "shared/*support*"
+      - "server/routes/programming-support.ts"
+      - "server/tests/*support*"
+      - "server/tests/programming-assistant-*"
+      - "client/src/components/support-*"
+      - "client/src/pages/programming-support*"
+      - ".github/workflows/support-conversational-pilot.yml"
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: maran_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=5
+    env:
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/maran_test
+      NPM_CONFIG_UPDATE_NOTIFIER: "false"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm ci --prefix services/programming-assistant --no-audit --no-fund
+      - run: npm run check
+      - run: npm run test:assistant
+      - run: npx vitest run --config vitest.server.config.ts server/tests/support-change-workflow.test.ts server/tests/support-responses-transport.test.ts server/tests/codex-investigator.test.ts server/tests/programming-support-gateway.test.ts
+      - run: npx vitest run client/src/pages/programming-support.test.tsx client/src/components/support-change-review.test.tsx client/src/components/support-chat-panel.test.tsx
+      - run: npx vitest run --config vitest.server.pg.config.ts server/tests/support-conversational.pg.test.ts server/tests/support-approval-foundation.pg.test.ts server/tests/support-proposal-chat.pg.test.ts server/tests/support-codex-configuration.pg.test.ts
+      - run: npm run build
+      - run: npx esbuild services/programming-assistant/index.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/xenia-assistant.mjs

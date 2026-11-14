@@ -1,6 +1,7 @@
 import {supportTicketLabel,recommendationDescription} from '@shared/support-recommendation';
 import {supportReportText} from "@shared/support-report-presentation";
 import { SupportChangeReview } from "@/components/support-change-review";
+import {SupportChatPanel} from '@/components/support-chat-panel';
 import {citedScreens} from "@shared/programming-support-scope";
 import {SupportExecutionDetails} from '@/components/support-execution-details';
 import {SupportRejectedReviews} from '@/components/support-rejected-reviews';
@@ -24,6 +25,7 @@ export default function ProgrammingSupport() {
     canReview?: boolean;
     workflowSimulation?: boolean;
     proposalReview?: boolean;
+    conversational?:boolean;
     enabled: boolean;
     configured: boolean;
     version: string | null;
@@ -84,6 +86,7 @@ export default function ProgrammingSupport() {
       setBusy(false);
     }
   }
+  if(config?.conversational)return <SupportChatPanel config={config} cases={cases} ready={!!ready} casesError={isError}/>;
   return (
     <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
