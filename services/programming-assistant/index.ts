@@ -6,7 +6,7 @@ if (process.env.APP_ENV !== "pilot")
   throw new Error("El primer asistente solo puede arrancar con APP_ENV=pilot.");
 if (!process.env.ASSISTANT_DATABASE_URL)
   throw new Error("Configurar una base propia en ASSISTANT_DATABASE_URL.");
-const notification =
+let notification =
   process.env.SUPPORT_NOTIFY_ENABLED === "true"
     ? {
         apiKey: process.env.RESEND_API_KEY || "",
@@ -15,10 +15,12 @@ const notification =
         ...(process.env.SUPPORT_NOTIFY_INCLUDE_SUMMARY==='true'?{includeSummary:true}:{}),
       }
     : undefined;
-if (notification && Object.values(notification).some((v) => !v))
-  throw new Error(
-    "Completar configuración del correo o mantener SUPPORT_NOTIFY_ENABLED=false.",
-  );
+if (notification && Object.values(notification).some((v) => !v)) {
+  if(process.env.SUPPORT_CONVERSATIONAL_ENABLED==='true'){
+    console.warn('Correo de soporte incompleto: los avisos se conservan en la bandeja del PMS.');
+    notification=undefined;
+  }else throw new Error("Completar configuración del correo o mantener SUPPORT_NOTIFY_ENABLED=false.");
+}
 const mode=supportInvestigatorMode(process.env);
 const codexTransport=process.env.SUPPORT_CODEX_TRANSPORT||'responses';
 if(mode==='codex'&&codexTransport!=='responses'&&codexTransport!=='sdk')throw Error('SUPPORT_CODEX_TRANSPORT debe ser responses o sdk');
@@ -36,6 +38,7 @@ const service = await createService({
   codexPaidEnabled: process.env.SUPPORT_CODEX_PAID_ENABLED === "true",
   codexTransport:codexTransport as 'responses'|'sdk',
   proposalReview:process.env.SUPPORT_PROPOSAL_REVIEW_ENABLED==='true',
+  conversational:process.env.SUPPORT_CONVERSATIONAL_ENABLED==='true',
   dailyLimit: dailyInvestigationLimit(process.env.ASSISTANT_DAILY_LIMIT),
   workflowSimulation: mode === "simulation",
   notification,

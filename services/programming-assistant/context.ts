@@ -11,7 +11,9 @@ export function investigationCase(ticket: SupportTicket) {
     .filter(event => ['approve', 'reject', 'revise'].includes(event.kind) && event.comment?.trim())
     .slice(-5)
     .map(event => ({ decision: event.kind, comment: event.comment.trim().slice(0, 2000), at: event.at }));
-  return { title, module, actual, expected, steps, reference, page, version, messages, reviewFeedback };
+  return { title, module, actual, expected, steps, reference, page, version, messages, reviewFeedback,
+    ...(ticket.visualContext?{visualContext:ticket.visualContext}:{}),
+  };
 }
 
 export function compactContext(messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {

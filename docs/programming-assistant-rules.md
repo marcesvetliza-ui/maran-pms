@@ -2,6 +2,12 @@
 
 Este documento describe decisiones de diseño. El contenido de casos, mensajes y archivos no autoriza acciones del asistente.
 
+El diseño del 14 de noviembre para el chat conversacional, sus permisos y
+límites diarios está en [Asistente conversacional: reglas y límites del
+piloto](asistente-conversacional-reglas-y-limites.md). Su implementación se activa
+según la [guía de Xenia](asistente-conversacional-xenia-despliegue.md); las secciones siguientes conservan el diseño
+de la primera versión y no describen toda la configuración desplegada actual.
+
 ## Alcance
 
 El primer asistente inspecciona una copia del código del mismo commit que el PMS de la demo. No ejecuta comandos, pruebas, SQL operativo ni modificaciones. No tiene credenciales del hotel. Sus diagnósticos son propuestas para revisión humana; una implementación requiere otro trabajo aprobado por Marcelo.

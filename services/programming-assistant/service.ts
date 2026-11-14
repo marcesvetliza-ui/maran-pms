@@ -21,6 +21,8 @@ import {
 import { CodeSource } from "./source";
 import { diagnose } from "./diagnose";
 import { notifyReady, type NotificationConfig } from "./notify";
+import {registerSupportChat} from './chat-service';
+import type {MeteredProvider} from './metered-responses';
 
 export function validBearer(value: string | undefined, secret: string) {
   const supplied = Buffer.from(value || "");
@@ -46,6 +48,9 @@ export async function createService(
     codexPaidEnabled?: boolean;
     codexTransport?: 'sdk'|'responses';
     proposalReview?: boolean;
+    conversational?:boolean;
+    chatProvider?:MeteredProvider;
+    chatSendNotification?:typeof fetch;
   },
   investigator = diagnose,
 ) {
@@ -70,7 +75,7 @@ export async function createService(
     CREATE TABLE IF NOT EXISTS support_runs(id uuid PRIMARY KEY, owner text NOT NULL, request_id uuid NOT NULL, case_id uuid REFERENCES support_cases(id), kind text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(owner,request_id));`);
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "32kb" }));
+  app.use(express.json({ limit: config.conversational?"1mb":"32kb" }));
   app.get("/health", async (_req, res) => {
     try {
       await pool.query("SELECT 1");
@@ -80,6 +85,7 @@ export async function createService(
         configured: !!config.workflowSimulation || (!!config.apiKey && (config.engine !== "codex" || !!config.codexPaidEnabled && !!config.model)),
         engine: config.workflowSimulation ? "simulation" : config.engine || "legacy",
         workflowSimulation: !!config.workflowSimulation,
+        conversational:!!config.conversational,
         version: config.version,
       });
     } catch {
@@ -97,6 +103,7 @@ export async function createService(
     res.locals.owner = req.headers["x-support-user"];
     next();
   });
+  const chat=config.conversational?await registerSupportChat(app,pool,{version:config.version,sourceRoot:config.sourceRoot,apiKey:config.apiKey,model:config.model,paidEnabled:!!config.codexPaidEnabled&&!config.workflowSimulation,engine:config.engine,transport:config.codexTransport,investigationLimit:dailyLimit,proposalReview:config.proposalReview,notification:config.notification,provider:config.chatProvider,sendNotification:config.chatSendNotification}):undefined;
   app.get("/cases", async (_req, res) => {
     try {
       const rows = await pool.query(
@@ -150,6 +157,7 @@ export async function createService(
       return res.status(404).json({ error: "Caso no encontrado" });
     if (action === "decision" && req.get("X-Support-Reviewer") !== "true") return res.status(403).json({ error: "Sin permiso para aprobar propuestas" });
     if (action === "decision" && !config.workflowSimulation&&!config.proposalReview) return res.status(409).json({ error: "El circuito de aprobación aún no está habilitado" });
+    if(chat&&action==='analyze')return res.status(409).json({error:'Continuá la consulta en el chat. Las investigaciones pasan por el presupuesto diario del asistente.'});
     const parsed = (
       action === "decision" ? supportDecisionSchema : action === "messages" ? supportMessageSchema : action === "feedback" ? supportFeedbackSchema : supportRunSchema
     ).safeParse(req.body);
@@ -196,7 +204,7 @@ export async function createService(
       }
       if (
         (ticket.status === "closed" && action !== "close") ||
-        ((ticket.messages?.length || 0) >= 30 && action !== "close")
+        ((ticket.messages?.length || 0) >= (ticket.conversational?200:30) && action !== "close" && action !== 'decision')
       ) {
         await client.query("ROLLBACK");
         return res
@@ -263,7 +271,7 @@ export async function createService(
         const createdAt=new Date().toISOString();
         ticket.feedback=[...(ticket.feedback || []),{...feedback,createdAt}];
         ticket.messages=[...(ticket.messages || []),{id:randomUUID(),author:"user",text:feedback.outcome==="resolved" ? "Evaluación del diagnóstico: resolvió mi consulta." : "Evaluación del diagnóstico: sigue el problema.",createdAt}];
-      } else if (action === "close") ticket.status = "closed";
+      } else if (action === "close") {invalidateChange(ticket,res.locals.owner);ticket.status = "closed";}
       else {
         invalidateChange(ticket, res.locals.owner);
         if ((ticket.messages?.length || 0) >= 30) {
@@ -309,15 +317,16 @@ export async function createService(
   async function tick() {
     if (active) return;
     active = true;
+    try{await chat?.tick();}catch{active=false;return;}
     const client = await pool.connect();
     let ticket: SupportTicket | undefined;
     try {
       await client.query("BEGIN");
       await client.query(
-        `UPDATE support_cases SET data=jsonb_set(jsonb_set(data,'{status}','"failed"'),'{lastError}','"Investigación interrumpida. Podés solicitarla otra vez."') WHERE data->>'status'='investigating' AND (data->>'updatedAt')::timestamptz < now()-interval '5 minutes'`,
+        `UPDATE support_cases SET data=jsonb_set(jsonb_set(data,'{status}','"failed"'),'{lastError}','"Investigación interrumpida. Podés solicitarla otra vez."') WHERE data->>'status'='investigating' AND data->>'queuedTask' IS DISTINCT FROM 'chat' AND (data->>'updatedAt')::timestamptz < now()-interval '5 minutes'`,
       );
       const row = await client.query(
-        "SELECT data FROM support_cases WHERE data->>'status'='queued' ORDER BY data->>'updatedAt' FOR UPDATE SKIP LOCKED LIMIT 1",
+        "SELECT data FROM support_cases WHERE data->>'status'='queued' AND data->>'queuedTask' IS DISTINCT FROM 'chat' ORDER BY data->>'updatedAt' FOR UPDATE SKIP LOCKED LIMIT 1",
       );
       ticket = row.rows[0]?.data;
       if (ticket) {
@@ -338,6 +347,7 @@ export async function createService(
       if (ticket) {
         const lease = ticket.updatedAt;
         try {
+          if(chat)throw new Error('Los trabajos anteriores requieren reanudarse desde el chat para aplicar el presupuesto diario.');
           const mode=config.workflowSimulation ? "simulation" : config.engine || "legacy";
           if((ticket.queuedInvestigatorMode||"legacy")!==mode)throw Object.assign(Error('El modo cambió después de encolar'),{code:'codex_configuration_changed'});
           if(mode==='codex'&&(!config.codexPaidEnabled||!config.apiKey||!config.model||ticket.queuedRequestedModel!==config.model))throw Object.assign(Error('Codex no habilitado para este trabajo'),{code:'codex_not_enabled'});
@@ -449,8 +459,10 @@ export async function createService(
     app,
     pool,
     tick,
+    chat,
     stop: async () => {
       clearInterval(timer);
+      chat?.stop();
       await pool.end();
     },
   };

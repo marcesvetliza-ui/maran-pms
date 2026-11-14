@@ -116,6 +116,7 @@ export type SupportMessage = {
   author: string;
   text: string;
   createdAt: string;
+  images?: Array<{id:string;name:string}>;
 };
 export type SupportTicket = {
   id: string;
@@ -134,6 +135,7 @@ export type SupportTicket = {
   createdBy: string;
   report: SupportDiagnosis | null;
   reportId?: string;
+  reportStale?:boolean;
   changeCandidate?: SupportChangeCandidate;
   workflowEvents?: SupportWorkflowEvent[];
   feedback?: Array<{requestId:string;reportId:string;outcome:"resolved"|"unresolved";createdAt:string}>;
@@ -141,6 +143,10 @@ export type SupportTicket = {
   queuedInvestigatorMode?: "legacy"|"simulation"|"codex";
   queuedRequestedModel?: string;
   queuedCodexTransport?: "sdk"|"responses";
+  conversational?: boolean;
+  queuedTask?: 'chat';
+  queuedRunId?: string;
+  visualContext?: string;
   investigator?: {engine:'codex';requestedModel:string;effectiveModel:string|null;providerTurns:number;inputTokens:number;cachedInputTokens:number;outputTokens:number};
   execution?: SupportExecution;
   rejectedReviews?: RejectedReview[];
