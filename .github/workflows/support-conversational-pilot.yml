@@ -41,6 +41,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm ci --prefix services/programming-assistant --no-audit --no-fund
       - run: npm run check
+      - run: npx tsc --noEmit --pretty false -p services/programming-assistant/tsconfig.json
       - run: npm run test:assistant
       - run: npx vitest run --config vitest.server.config.ts server/tests/support-change-workflow.test.ts server/tests/support-responses-transport.test.ts server/tests/codex-investigator.test.ts server/tests/programming-support-gateway.test.ts
       - run: npx vitest run client/src/pages/programming-support.test.tsx client/src/components/support-change-review.test.tsx client/src/components/support-chat-panel.test.tsx

@@ -145,12 +145,10 @@ export function registerProgrammingSupport(app: Express) {
           },
         );
         if (response.status === 401)
-          return res
-            .status(503)
-            .json({
-              error:
-                "No se pudo autenticar el servicio de soporte. El PMS sigue funcionando; Administración debe revisar la conexión del asistente.",
-            });
+          return res.status(503).json({
+            error:
+              "No se pudo autenticar el servicio de soporte. El PMS sigue funcionando; Administración debe revisar la conexión del asistente.",
+          });
         res.set("Cache-Control", "private, no-store");
         return res.status(response.status).json(await response.json());
       } catch {
@@ -242,13 +240,12 @@ export function registerProgrammingSupport(app: Express) {
         redirect: "error",
       });
       const payload = await upstream.json();
+      res.set("Cache-Control", "private, no-store");
       if (upstream.status === 401)
-        return res
-          .status(503)
-          .json({
-            error:
-              "No se pudo autenticar el servicio de soporte. El PMS sigue funcionando; Administración debe revisar la conexión del asistente.",
-          });
+        return res.status(503).json({
+          error:
+            "No se pudo autenticar el servicio de soporte. El PMS sigue funcionando; Administración debe revisar la conexión del asistente.",
+        });
       res.status(upstream.status).json(payload);
     } catch {
       res.status(503).json({

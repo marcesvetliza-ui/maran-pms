@@ -48,7 +48,8 @@ export class ChatStore {
     readonly responseLimit = 20,
   ) {}
   async initialize() {
-    await this.pool.query(`
+    await this.transaction(async (db) => {
+      await db.query(`
       CREATE TABLE IF NOT EXISTS support_chat_settings(id boolean PRIMARY KEY DEFAULT true CHECK(id),daily_micros bigint NOT NULL CHECK(daily_micros BETWEEN 100000 AND 10000000));
       INSERT INTO support_chat_settings(id,daily_micros) VALUES(true,1000000) ON CONFLICT DO NOTHING;
       CREATE TABLE IF NOT EXISTS support_usage_days(day date PRIMARY KEY,spent_micros bigint NOT NULL DEFAULT 0,reserved_micros bigint NOT NULL DEFAULT 0);
@@ -61,6 +62,7 @@ export class ChatStore {
       ALTER TABLE support_runs ADD COLUMN IF NOT EXISTS payload_digest text;
       CREATE INDEX IF NOT EXISTS support_provider_calls_unsettled ON support_provider_calls(status,created_at);
     `);
+    });
   }
   async transaction<T>(work: (client: pg.PoolClient) => Promise<T>) {
     const client = await this.pool.connect();

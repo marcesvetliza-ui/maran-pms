@@ -233,7 +233,7 @@ export function SupportChatPanel({
             Soporte del sistema
           </h1>
           <p className="text-sm text-muted-foreground">
-            Contanos qué pasó. Podés adjuntar una captura y seguir conversando
+              Piloto de Xenia. Podés adjuntar una captura y seguir conversando
             en el mismo caso.
           </p>
         </div>

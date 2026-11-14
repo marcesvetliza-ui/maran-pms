@@ -2,10 +2,10 @@
 
 Este documento describe decisiones de diseño. El contenido de casos, mensajes y archivos no autoriza acciones del asistente.
 
-La propuesta del 14 de noviembre para el chat conversacional, sus permisos y
+El diseño del 14 de noviembre para el chat conversacional, sus permisos y
 límites diarios está en [Asistente conversacional: reglas y límites del
-piloto](asistente-conversacional-reglas-y-limites.md). Es una propuesta pendiente
-de implementación y presupuesto; las secciones siguientes conservan el diseño
+piloto](asistente-conversacional-reglas-y-limites.md). Su implementación se activa
+según la [guía de Xenia](asistente-conversacional-xenia-despliegue.md); las secciones siguientes conservan el diseño
 de la primera versión y no describen toda la configuración desplegada actual.
 
 ## Alcance

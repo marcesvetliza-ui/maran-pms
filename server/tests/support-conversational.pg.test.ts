@@ -2,7 +2,10 @@ import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { createService } from "../../services/programming-assistant/service";
-import { hotelDay } from "../../services/programming-assistant/chat-store";
+import {
+  hotelDay,
+  ChatStore,
+} from "../../services/programming-assistant/chat-store";
 
 const suite = process.env.DATABASE_URL ? describe : describe.skip;
 const image = {
@@ -485,6 +488,16 @@ suite("conversational support on its own PostgreSQL schema", () => {
         (a: any) => a.kind === "human_review",
       ),
     ).toBe(true);
+  });
+  it("serializes the first settings creation across simultaneous service replicas", async () => {
+    await service.pool.query("DROP TABLE support_chat_settings");
+    const replica = new ChatStore(service.pool);
+    await Promise.all([service.chat!.store.initialize(), replica.initialize()]);
+    const rows = await service.pool.query(
+      "SELECT daily_micros FROM support_chat_settings",
+    );
+    expect(rows.rows).toHaveLength(1);
+    expect(Number(rows.rows[0].daily_micros)).toBe(1000000);
   });
   it("detects a crashed provider call and alerts without waiting for another user message", async () => {
     const first = await create();

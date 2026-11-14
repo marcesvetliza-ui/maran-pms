@@ -70,7 +70,7 @@ El día se mide de 00:00 a 24:00 en `America/Argentina/Buenos_Aires`.
 
 | Control | Límite inicial | Qué cuenta |
 | --- | --- | --- |
-| Conversación por colaborador | 20 respuestas del asistente por día | Respuestas de ayuda, preguntas de aclaración y resultados de investigaciones |
+| Conversación por colaborador | 20 solicitudes de respuesta por día | Respuestas de ayuda, preguntas de aclaración y resultados de investigaciones; los intentos iniciados también cuentan si fallan |
 | Investigación técnica de todo el hotel | 10 investigaciones por día | Cada investigación admitida que empieza a consumir el modelo, aunque termine fallida |
 | Consumo de todo el hotel | US$1 por día, confirmado por Marcelo | Todas las llamadas pagadas: conversación, investigación, revisión y reintentos |
 
