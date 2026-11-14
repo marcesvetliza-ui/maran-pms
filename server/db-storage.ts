@@ -1793,6 +1793,7 @@ export class DatabaseStorage implements IStorage {
 
   async createReservationPaymentWithLedger(input: {
     paymentRequest?: ReservationPaymentRequest;
+    expectedReservationStatus?: string;
     invoiceCollection?: {invoiceId:number;acknowledgeUnassignedAdvance:boolean;userId?:string};
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;
@@ -1886,6 +1887,12 @@ export class DatabaseStorage implements IStorage {
       const accountTransferGroup = input.accountSettlement && paymentMethod === "current_account"
         ? await lockAccountTransferGroup(tx, input.payment.reservationId)
         : null;
+      if (input.expectedReservationStatus) {
+        const current = await tx.execute(sql`SELECT status FROM reservations WHERE id=${input.payment.reservationId} FOR UPDATE`);
+        if ((current.rows[0] as any)?.status !== input.expectedReservationStatus) {
+          throw Object.assign(new Error("La estadía cambió mientras se preparaba el pago. Actualizá el folio antes de continuar."), { statusCode: 409 });
+        }
+      }
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this
       // repair by payment identity and make the event explicitly idempotent.
