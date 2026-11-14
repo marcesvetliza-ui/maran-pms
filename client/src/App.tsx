@@ -1,6 +1,8 @@
 import {useSessionPermissions} from "@/hooks/use-session-permissions";
+import { useVerifiedSession } from "@/hooks/use-verified-session";
+import { SessionConnectionNotice } from "@/components/session-connection-notice";
 import { canViewCash } from "@shared/cash-user-access";
-import { useState, useEffect, createContext, useContext, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, createContext, useContext, useCallback, lazy, Suspense } from "react";
 import { Switch, Route, useRoute, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
@@ -413,8 +415,10 @@ function AppLayout() {
 }
 
 function AuthenticatedApp() {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [checking, setChecking] = useState(true);
+  const session = useVerifiedSession<AuthUser>({ onInvalidated: () => queryClient.clear(), onIdentityChange: () => queryClient.clear(), onExternalLogout: () => clearPosState() });
+  const { user, checkAuth } = session;
+  const [signingOut, setSigningOut] = useState(false);
+  const signingOutRef = useRef(false);
   const [, navigate] = useLocation();
 
   const [selectedPosId, setSelectedPosId] = useState<string | null>(() => localStorage.getItem("maranPosId"));
@@ -427,10 +431,6 @@ function AuthenticatedApp() {
   const [posConfigs, setPosConfigs] = useState<any[]>([]);
   const [posChecking, setPosChecking] = useState(false);
 
-  const authChannel = useCallback(() => {
-    try { return new BroadcastChannel("maran-auth"); } catch { return null; }
-  }, []);
-
   const clearPosState = useCallback(() => {
     localStorage.removeItem("maranPosId");
     localStorage.removeItem("maranPosNumero");
@@ -442,35 +442,6 @@ function AuthenticatedApp() {
     setPosConfigs([]);
   }, []);
 
-  const checkAuth = useCallback(async () => {
-    try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
-      if (res.ok) {
-        const userData = await res.json();
-        // sessionStorage vive solo en la pestaña actual.
-        // Si no existe el flag, esta es una pestaña nueva (favorito, nueva ventana)
-        // y debemos cerrar la sesión del servidor para exigir login explícito.
-        const tabActive = sessionStorage.getItem("maranTabActive");
-        if (!tabActive) {
-          await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-          setUser(null);
-        } else {
-          setUser(userData);
-        }
-      } else {
-        setUser(null);
-      }
-    } catch {
-      setUser(null);
-    } finally {
-      setChecking(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
   // Etapa 1 del ABM de usuarios: el conjunto de resourceKey habilitados
   // para el rol de este usuario, servido por role_permissions (ver
   // server/permissions.ts) en vez de los arrays de roles hardcodeados que
@@ -479,24 +450,6 @@ function AuthenticatedApp() {
   const permissionsReady=permissions.ready;
   const resourceKeySet = new Set(permissions.resourceKeys);
   const hasPermission = (resourceKey: string) => resourceKeySet.has(resourceKey);
-
-  // Escuchar eventos de auth desde otros tabs del mismo navegador
-  useEffect(() => {
-    const ch = authChannel();
-    if (!ch) return;
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === "logout") {
-        clearPosState();
-        setUser(null);
-        queryClient.clear();
-      } else if (e.data?.type === "login") {
-        // Otro tab inició sesión: re-verificar con el servidor para obtener el usuario actualizado
-        checkAuth().then(() => setChecking(false));
-      }
-    };
-    ch.addEventListener("message", handler);
-    return () => { ch.removeEventListener("message", handler); ch.close(); };
-  }, [authChannel, checkAuth, clearPosState]);
 
   const fetchAndSelectPos = useCallback(async () => {
     if (localStorage.getItem("maranPosId")) return;
@@ -521,8 +474,8 @@ function AuthenticatedApp() {
   }, []);
 
   useEffect(() => {
-    if (user) fetchAndSelectPos();
-  }, [user, fetchAndSelectPos]);
+    if (user?.id) fetchAndSelectPos();
+  }, [user?.id, fetchAndSelectPos]);
 
   const applyPos = (id: string, numero: number, nombre: string) => {
     setSelectedPosId(id);
@@ -556,7 +509,7 @@ function AuthenticatedApp() {
   const handleLogin = (userData: AuthUser) => {
     // Marcar esta pestaña como activa — el flag vive solo mientras la pestaña esté abierta
     sessionStorage.setItem("maranTabActive", "1");
-    setUser(userData);
+    session.acceptLogin(userData);
     navigate(getRoleHomePage(userData.role));
     // Notificar a otros tabs que hubo un nuevo login
     try {
@@ -567,39 +520,50 @@ function AuthenticatedApp() {
   };
 
   const handleLogout = async () => {
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
+    setSigningOut(true);
     sessionStorage.removeItem("maranTabActive");
-    try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    } catch {}
-    // Notificar a otros tabs que hubo logout ANTES de limpiar estado local
+    session.clearSession();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    try { await fetch("/api/auth/logout", { method: "POST", credentials: "include", signal: controller.signal }); } catch {}
+    finally { window.clearTimeout(timeout); }
+    // Complete (or time out) the logout request before another tab can log in.
     try {
       const ch = new BroadcastChannel("maran-auth");
       ch.postMessage({ type: "logout" });
       ch.close();
     } catch {}
     clearPosState();
-    setUser(null);
-    queryClient.clear();
+    signingOutRef.current = false;
+    setSigningOut(false);
   };
 
-  if(user && !checking && !posChecking && !permissionsReady && permissions.isError){
-    return <div role="alert" className="min-h-screen flex flex-col items-center justify-center gap-4 p-6">
+  if (signingOut) return <main role="status" className="min-h-screen flex items-center justify-center bg-background">Cerrando sesión…</main>;
+
+  const connectionNotice = <SessionConnectionNotice blocked={session.blocked} busy={session.busy} error={session.error} retryAt={session.retryAt}
+    modal={!!user} onRetry={() => void checkAuth()} onLogout={() => void handleLogout()} />;
+  if (!user && session.blocked) return connectionNotice;
+
+  if(user && !posChecking && !permissionsReady && permissions.isError){
+    return <><div role="alert" className="min-h-screen flex flex-col items-center justify-center gap-4 p-6">
       <p>No se pudieron cargar tus permisos. Tu sesión sigue abierta; podés reintentar.</p>
       <Button onClick={()=>permissions.refetch()}>Reintentar carga</Button>
-    </div>;
+    </div>{connectionNotice}</>;
   }
 
   // user && !permissionsReady: recién logueado, todavía no llegó
   // /api/permissions/mine — sin esto, el sidebar se armaría un instante con
   // hasPermission() devolviendo false para todo (pantalla vacía).
-  if (checking || posChecking || (user && !permissionsReady)) {
+  if (user && (posChecking || !permissionsReady)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <><div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-4">
           <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-muted-foreground">Cargando...</p>
         </div>
-      </div>
+      </div>{connectionNotice}</>
     );
   }
 
@@ -608,12 +572,13 @@ function AuthenticatedApp() {
   }
 
   if (showPosSelector && posConfigs.length > 0) {
-    return <PosSelector configs={posConfigs} onSelect={setSelectedPos} />;
+    return <><PosSelector configs={posConfigs} onSelect={setSelectedPos} />{connectionNotice}</>;
   }
 
   return (
     <AuthContext.Provider value={{ user, logout: handleLogout, selectedPosId, selectedPosNumero, selectedPosNombre, setSelectedPos, changePosMode, hasPermission, permissionsReady }}>
-      <AppLayout />
+      <AppLayout key={`${user.id}:${user.role}`} />
+      {connectionNotice}
     </AuthContext.Provider>
   );
 }
