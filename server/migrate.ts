@@ -5092,5 +5092,14 @@ WHERE status='limpia_ocupada' AND housekeeping_service_date IS NULL;`);
     await db.execute(sql.raw(createTableWithoutRerunNotice(table.name, table.ddl)));
   await db.execute(sql.raw(createIndexWithoutRerunNotice("hospitality_birthday_queue_idx", "CREATE INDEX hospitality_birthday_queue_idx ON hospitality_birthday_contacts(status,created_at)")));
   await db.execute(sql.raw(createIndexWithoutRerunNotice("hospitality_birthday_events_contact_idx", "CREATE INDEX hospitality_birthday_events_contact_idx ON hospitality_birthday_contact_events(contact_id,created_at)")));
+  await withTimeout("legacy_consumption_voucher_194_attribution", T, async () => {
+    const { repairLegacyConsumptionVoucher } = await import("./billing/legacyConsumptionVoucherRepair");
+    const result = await repairLegacyConsumptionVoucher(pool);
+    if (result !== "not_applicable") {
+      const { accommodationFiscalStatus } = await import("./nightlyPricingGuard");
+      const fiscal = await accommodationFiscalStatus("d8b09f1c-3b0b-4f2e-bbfb-e3b1691fb6ab");
+      logger.info("Atribución histórica del cierre 194 verificada", { result, accommodationEditable: !fiscal.blocked, fiscalState: fiscal.state });
+    }
+  });
   logger.info("Migraciones incrementales completadas.");
 }
