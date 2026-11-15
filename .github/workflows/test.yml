@@ -71,6 +71,9 @@ jobs:
           RUN_PREVENTIVE_ROOMS_PG_TESTS: "true"
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/preventive-rooms.pg.test.ts
 
+      - name: Verificar recuperación fiscal con proveedores simulados
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/center-invoice-recovery.pg.test.ts server/tests/fiscal-series-recovery.pg.test.ts server/tests/invoice-stale-draft-collision.pg.test.ts
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 

@@ -1,7 +1,8 @@
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { BILLING_OPERATION_SCHEMA_SQL } from "../billing/operationJournal";
 import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 
@@ -62,11 +63,14 @@ suite("center invoice recovers its own ARCA number and registers CC once", () =>
     base = `http://127.0.0.1:${server.address().port}`;
   });
   beforeEach(() => {
+    // ARCA clients and fetch are mocked below; exercise fiscal logic without changing pilot policy.
+    resetAppEnvForTests(); initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     mocks.environment = "homologacion"; mocks.role = "admin";
     mocks.authorize.mockReset().mockRejectedValueOnce(new Error("Respuesta de ARCA no recibida"));
     mocks.consult.mockReset().mockResolvedValue(authorization);
     global.fetch = vi.fn(async (_url, init) => new Response(lastAuthorizedForRequest(244, init), { status: 200 })) as any;
   });
+  afterEach(() => { resetAppEnvForTests(); initAppEnv({ APP_ENV: "test", NODE_ENV: "test" }); });
   afterAll(async () => {
     global.fetch = originalFetch;
     if (server) await new Promise<void>(resolve => server.close(() => resolve()));

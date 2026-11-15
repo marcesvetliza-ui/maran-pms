@@ -1,6 +1,7 @@
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { BILLING_OPERATION_SCHEMA_SQL } from "../billing/operationJournal";
 import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 
@@ -17,9 +18,12 @@ const originalFetch = global.fetch;
 suite("Numeración ocupada: no borrar ni adoptar un comprobante ajeno", () => {
   beforeAll(async () => { await pool!.query(BILLING_OPERATION_SCHEMA_SQL); ({ emitirFactura: emit } = await import("../billing/invoiceService")); });
   beforeEach(() => {
+    // ARCA clients and fetch are mocked below; exercise fiscal logic without changing pilot policy.
+    resetAppEnvForTests(); initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     mocks.authorize.mockReset(); mocks.consult.mockReset();
     global.fetch = vi.fn(async (_url, init) => new Response(lastAuthorizedForRequest(0, init), { status: 200 })) as any;
   });
+  afterEach(() => { resetAppEnvForTests(); initAppEnv({ APP_ENV: "test", NODE_ENV: "test" }); });
   afterAll(async () => { global.fetch = originalFetch; await pool?.end(); });
   it.each([
     ["autorizacion_pendiente", null], ["autorizacion_pendiente", "71234567890123"],

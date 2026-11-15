@@ -1,6 +1,7 @@
+import { initAppEnv, resetAppEnvForTests } from "../app-env";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 
 const mocks = vi.hoisted(() => ({ point: 5, last: 253, authorize: vi.fn(), consult: vi.fn() }));
@@ -43,9 +44,12 @@ async function fixture(run: (f: any) => Promise<void>, reservation = false) {
 suite("Recuperación segura de la serie después de un borrador retenido", () => {
   beforeAll(async () => { ({ emitirFactura: emit } = await import("../billing/invoiceService")); });
   beforeEach(() => {
+    // ARCA clients and fetch are mocked below; exercise fiscal logic without changing pilot policy.
+    resetAppEnvForTests(); initAppEnv({ APP_ENV: "production", NODE_ENV: "production" });
     mocks.last = 253; mocks.authorize.mockReset().mockResolvedValue(authorization); mocks.consult.mockReset().mockResolvedValue(null);
     global.fetch = vi.fn(async (_url, init) => new Response(lastAuthorizedForRequest(mocks.last, init), { status: 200 })) as any;
   });
+  afterEach(() => { resetAppEnvForTests(); initAppEnv({ APP_ENV: "test", NODE_ENV: "test" }); });
   afterAll(async () => { global.fetch = originalFetch; await pool?.end(); });
 
   it.each([false, true])("una reserva nueva puede usar 254 tras verificar y archivar el rechazado (reserva original=%s)", async reservation => fixture(async f => {
