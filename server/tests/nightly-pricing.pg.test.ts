@@ -42,7 +42,29 @@ async function moneyEvidence() {
   return (await applicationPool.query(`SELECT
     (SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY id),'[]') FROM payments p) AS payments,
     (SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY id),'[]') FROM cash_movements c) AS cash,
-    (SELECT coalesce(jsonb_agg(to_jsonb(i) ORDER BY id),'[]') FROM sales_invoices i) AS invoices`)).rows[0];
+    (SELECT coalesce(jsonb_agg(to_jsonb(i) ORDER BY id),'[]') FROM sales_invoices i) AS invoices,
+    (SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY id),'[]') FROM charges c) AS charges`)).rows[0];
+}
+
+async function invoicedStayWithTransferredCharge(checkIn='2090-06-01'){
+  const id=idFor(`extension-${randomUUID()}`),chargeId=idFor(`transfer-${randomUUID()}`);
+  const checkOut=new Date(Date.parse(`${checkIn}T00:00:00Z`)+86400000).toISOString().slice(0,10);
+  const snapshot=[{date:checkIn,rateCents:26600000,discountCents:0}];
+  await applicationPool.query(`INSERT INTO reservations(id,reservation_code,guest_id,room_id,room_type_id,
+    check_in_date,check_out_date,nights,base_rate_per_night,final_rate_per_night,total_room_amount,
+    discount_type,discount_value,status,source,number_of_guests,created_at,pricing_scheme,pricing_revision,nightly_pricing)
+    VALUES($1::text,$1::text,$2,$3,$4,$5,$6,1,266000,266000,266000,'none',0,'checked_in','directo',1,NOW(),'nightly_v1',0,$7)`,
+    [id,idFor('guest'),idFor('room-5'),idFor('type'),checkIn,checkOut,JSON.stringify(snapshot)]);
+  await applicationPool.query(`INSERT INTO charges(id,reservation_id,description,amount,date,category)
+    VALUES($1,$2,'Alojamiento transferido desde otra habitación · prueba sintética',266000,$3,'room')`,[chargeId,id,checkIn]);
+  await applicationPool.query(`INSERT INTO payments(id,reservation_id,amount,method,notes,date,status)
+    VALUES($1,$2,532000,'efectivo','Pago del alojamiento y el cargo transferido · prueba sintética',NOW(),'active')`,[idFor(`paid-${randomUUID()}`),id]);
+  const invoice=await applicationPool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,
+    cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,modo_ficticio,reserva_id,source_charge_ids,source_charge_amounts,items)
+    VALUES('FA',999,(SELECT coalesce(max(numero),0)+1 FROM sales_invoices WHERE tipo_comprobante='FA' AND punto_venta=999),NOW(),
+    'Prueba sintética de extensión','Responsable Inscripto',532000,532000,'emitida',true,$1,$2,$3,'[]') RETURNING id`,
+    [id,JSON.stringify([`accommodation:${checkIn}`,chargeId]),JSON.stringify({[`accommodation:${checkIn}`]:266000,[chargeId]:266000})]);
+  return {reservation:await saved(id),invoiceId:invoice.rows[0].id,chargeId};
 }
 describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales · datos sintéticos en base desechable", () => {
   beforeAll(async () => {
@@ -104,6 +126,7 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     if (applicationPool) {
       await applicationPool.query("DELETE FROM sales_invoices WHERE reserva_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
       await applicationPool.query("DELETE FROM payments WHERE reservation_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
+      await applicationPool.query("DELETE FROM charges WHERE reservation_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
       await applicationPool.query("DELETE FROM reservation_changelog WHERE reservation_id IN (SELECT id FROM reservations WHERE guest_id=$1)",[idFor("guest")]);
       await applicationPool.query("DELETE FROM reservations WHERE guest_id=$1",[idFor("guest")]);
       await applicationPool.query("DELETE FROM rooms WHERE room_type_id=$1",[idFor("type")]);
@@ -332,6 +355,41 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
     expect(state.data.fiscal.state).toBe(suffix === "partial" ? "parcial" : "facturado");
     expect((await request(`${pathFor(id)}/apply`, rateBody())).status).toBe(409);
     expect((await request(`/api/reservations/${id}`, { totalRoomAmount: "1" }, "PATCH")).status).toBe(409);
+  });
+  it('extiende una estadía facturada y pagada con cargos transferidos sin modificar esos documentos o cobros',async()=>{
+    const {reservation:before,chargeId}=await invoicedStayWithTransferredCharge();
+    const state=await request(pathFor(before.id));expect(state.data.fiscal.state).toBe('facturado');expect(state.data.canExtend).toBe(true);
+    const checkOut=new Date(Date.parse(`${before.checkOutDate}T00:00:00Z`)+86400000).toISOString().slice(0,10);
+    const proposal={revision:0,reason:'Prolongación de la estadía',edit:{kind:'stay',checkIn:before.checkInDate,checkOut,addedRates:{[before.checkOutDate]:'266000'}}};
+    const money=await moneyEvidence();expect((await request(`${pathFor(before.id)}/preview`,proposal)).status).toBe(200);
+    const results=await Promise.all([request(`${pathFor(before.id)}/apply`,proposal),request(`${pathFor(before.id)}/apply`,proposal)]);
+    expect(results.map(r=>r.status).sort()).toEqual([200,409]);
+    const after=await saved(before.id);expect(after.checkOutDate).toBe(checkOut);expect(after.pricingRevision).toBe(1);
+    expect(after.nightlyPricing.slice(0,1)).toEqual(before.nightlyPricing);expect(after.totalRoomAmount).toBe('532000.00');
+    expect(await moneyEvidence()).toEqual(money);
+    const charge=(await applicationPool.query('SELECT * FROM charges WHERE id=$1',[chargeId])).rows[0];expect(Number(charge.amount)).toBe(266000);
+    const paid=(await applicationPool.query('SELECT sum(amount)::numeric AS total FROM payments WHERE reservation_id=$1',[before.id])).rows[0];
+    expect(Number(after.totalRoomAmount)+Number(charge.amount)-Number(paid.total)).toBe(266000);
+    const fiscal=(await request(pathFor(before.id))).data.fiscal;expect(fiscal.state).toBe('parcial');expect(fiscal.pendingCents).toBe(26600000);
+    expect((await request(`${pathFor(before.id)}/apply`,{...proposal,revision:1,edit:{...proposal.edit,checkOut:before.checkOutDate,addedRates:{}}})).status).toBe(409);
+    expect((await request(`/api/reservations/${before.id}`,{checkOutDate:'2090-07-01'},'PATCH')).status).toBe(409);
+  });
+  it('vuelve a bloquear la extensión si aparece una autorización pendiente después de la revisión',async()=>{
+    const {reservation:before,invoiceId}=await invoicedStayWithTransferredCharge('2090-07-01');
+    const checkOut='2090-07-03';const proposal={revision:0,reason:'Extensión de prueba',edit:{kind:'stay',checkIn:before.checkInDate,checkOut,addedRates:{[before.checkOutDate]:'266000'}}};
+    expect((await request(`${pathFor(before.id)}/preview`,proposal)).status).toBe(200);
+    await applicationPool.query("UPDATE sales_invoices SET estado='autorizacion_pendiente' WHERE id=$1",[invoiceId]);
+    const money=await moneyEvidence();expect((await request(pathFor(before.id))).data.canExtend).toBe(false);
+    expect((await request(`${pathFor(before.id)}/apply`,proposal)).status).toBe(409);expect(await moneyEvidence()).toEqual(money);
+    expect((await saved(before.id)).checkOutDate).toBe(before.checkOutDate);
+  });
+  it('mantiene el control de disponibilidad física de las noches nuevas aun con alojamiento facturado',async()=>{
+    const {reservation:before}=await invoicedStayWithTransferredCharge('2090-08-01');
+    const proposal={revision:0,reason:'Extensión de prueba',overrideTentativeGroupWarning:true,edit:{kind:'stay',checkIn:before.checkInDate,checkOut:'2090-08-03',addedRates:{[before.checkOutDate]:'266000'}}};
+    expect((await request(`${pathFor(before.id)}/preview`,proposal)).status).toBe(200);
+    await invoicedStayWithTransferredCharge('2090-08-02');
+    const money=await moneyEvidence();expect((await request(`${pathFor(before.id)}/apply`,proposal)).status).toBe(409);
+    expect((await saved(before.id)).checkOutDate).toBe(before.checkOutDate);expect(await moneyEvidence()).toEqual(money);
   });
   it("no convierte anteriores al leer, editar notas o intentar inyectar un esquema", async () => {
     const id = idFor("legacy");

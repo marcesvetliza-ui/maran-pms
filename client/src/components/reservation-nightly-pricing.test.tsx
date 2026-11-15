@@ -66,6 +66,27 @@ describe("Folio con información operativa", () => {
     expect(screen.getByRole("button", { name: "Editar alojamiento" })).toBeDisabled();
   });
 
+  it('permite extender noches facturadas conservando ingreso y edición de tarifas bloqueados',()=>{
+    data.reservation.pricingScheme='nightly_v1';data.reservation.status='checked_in';
+    data.reservation.nightlyPricing=[{date:'2026-10-20',rateCents:18000,discountCents:0}];
+    data.blocked='El alojamiento tiene cobertura fiscal.';data.canExtend=true;
+    const ref=createRef<ReservationNightlyPricingHandle>();
+    render(<ReservationNightlyPricing ref={ref} reservationId="saved-reservation"/>);
+    expect(screen.getByRole('button',{name:'Editar tarifas'})).toBeDisabled();
+    act(()=>ref.current!.openStay());expect(screen.getByRole('heading',{name:'Extender estadía'})).toBeInTheDocument();
+    expect(screen.getByLabelText('Nuevo ingreso')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Nuevo egreso'),{target:{value:'2026-10-22'}});
+    fireEvent.change(screen.getByLabelText('Tarifa nueva 21/10/2026'),{target:{value:'200'}});
+    expect(screen.getByRole('button',{name:'Revisar propuesta'})).toBeEnabled();
+    expect(screen.getByText(/consumos transferidos/)).toBeInTheDocument();
+  });
+  it('no ofrece extender si la protección fiscal no habilita esa capacidad',()=>{
+    data.reservation.pricingScheme='nightly_v1';data.reservation.nightlyPricing=[{date:'2026-10-20',rateCents:18000,discountCents:0}];
+    data.blocked='Hay una autorización pendiente.';data.canExtend=false;
+    const ref=createRef<ReservationNightlyPricingHandle>();render(<ReservationNightlyPricing ref={ref} reservationId="saved-reservation"/>);
+    act(()=>ref.current!.openStay());expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it("conserva la tabla y las acciones de las tarifas nocturnas reales", () => {
     data.reservation.pricingScheme = "nightly_v1";
     data.reservation.nightlyPricing = [{ date: "2026-10-20", rateCents: 18000, discountCents: 0 }];
