@@ -6,6 +6,8 @@ import { queryClient } from "@/lib/queryClient";
 vi.mock("@/App", () => ({ useAuth: () => ({ user: { role: "manager" }, hasPermission: () => true, selectedPosNumero: 24, selectedPosNombre: "Restaurant" }) }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 import RestaurantPage from "./restaurant";
+import EmitirComprobantePage from './emitir-comprobante';
+import {Router,Route} from 'wouter';
 let config: any, sent: any[];
 beforeEach(() => {
   queryClient.clear(); sent = [];
@@ -24,6 +26,20 @@ beforeEach(() => {
   }));
 });
 afterEach(() => { cleanup(); queryClient.clear(); vi.unstubAllGlobals(); });
+it('lleva desde Notas de Crédito al buscador del Centro en el área Restaurant sin emitir',async()=>{
+  window.history.replaceState({},'', '/restaurant');
+  try{
+    const user=userEvent.setup();
+    render(<QueryClientProvider client={queryClient}><Router><Route path="/restaurant" component={RestaurantPage}/><Route path="/operaciones/emitir-comprobante" component={EmitirComprobantePage}/></Router></QueryClientProvider>);
+    await user.click(await screen.findByRole('tab',{name:'Notas de Crédito'}));
+    await user.click(screen.getByRole('link',{name:'Ir a Emitir Comprobante'}));
+    expect(await screen.findByTestId('select-area')).toHaveTextContent('Restaurant');expect(screen.getByTestId('select-operacion')).toHaveTextContent('Venta');
+    await user.click(screen.getByTestId('select-tipo'));await user.click(screen.getByRole('option',{name:'Nota de Crédito B'}));
+    expect(await screen.findByTestId('input-buscar-comprobante-nc-nd')).toBeInTheDocument();
+    await waitFor(()=>expect(fetch).toHaveBeenCalledWith('/api/billing/invoices?area=restaurant',expect.objectContaining({credentials:'include'})));
+    expect(sent).toEqual([]);
+  }finally{window.history.replaceState({},'', '/');}
+});
 async function openForm() {
   const user = userEvent.setup();
   render(<QueryClientProvider client={queryClient}><RestaurantPage /></QueryClientProvider>);

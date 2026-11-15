@@ -4,6 +4,7 @@ import {validateIndividualGroupPlan,assertIndividualGroupInvoice,assertGroupBill
 import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
+import { restaurantInvoiceScope } from './restaurantInvoiceScope';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
 import { centerInvoiceRecoveryRequest } from "./centerInvoiceRecovery";
@@ -852,6 +853,8 @@ export function registerBillingRoutes(app: Express) {
           si.reserva_id IS NOT NULL
           OR si.punto_venta IN (SELECT numero FROM pos_configs WHERE area = ${area} AND activo = true)
         )`;
+      } else if (area === "restaurant") {
+        whereClause = sql`${whereClause} AND ${restaurantInvoiceScope}`;
       } else if (area) {
         whereClause = sql`${whereClause}
           AND si.reserva_id IS NULL
@@ -865,6 +868,7 @@ export function registerBillingRoutes(app: Express) {
                ${directInvoiceOperationProof} AS _direct_invoice_operation,
                ${nonFiscalAnnulmentProof} AS non_fiscal_annulment,
                CASE
+                 WHEN ${area === "restaurant"} THEN 'restaurant'
                  WHEN si.reserva_id IS NOT NULL THEN 'recepcion'
                  ELSE pc.area
                END AS area_name,
