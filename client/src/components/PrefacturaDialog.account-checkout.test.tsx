@@ -70,6 +70,14 @@ describe('Prefactura checkout with a documented/transfer balance in Cuenta Corri
     expect(JSON.parse(String(writes[0][1]?.body))).toEqual(request);
     expect(sessionStorage.getItem(`prefactura-pending:${id}`)).toBeNull();expect(sessionStorage.getItem(`prefactura-account-checkout:${id}`)).toBeNull();
   });
+  it('preserves both original intents if an older checkout and another checkout are already stored',async()=>{
+    const attempt=(operationId:string)=>({ownerReservationId:id,invoiceRequest:null,invoice:null,payments:[],checkoutRequested:true,accountCheckout:{operationId,entityType:'guest',entityId:'account-guest',entityName:'Guest',expectedBalance:'70000.00'}});
+    const older=JSON.stringify(attempt(crypto.randomUUID())),current=JSON.stringify(attempt(crypto.randomUUID()));
+    sessionStorage.setItem(`prefactura-pending:${id}`,older);sessionStorage.setItem(`prefactura-account-checkout:${id}`,current);
+    const {fetchMock}=setup();await screen.findByTestId('button-retry-prefactura');
+    expect(sessionStorage.getItem(`prefactura-pending:${id}`)).toBe(older);expect(sessionStorage.getItem(`prefactura-account-checkout:${id}`)).toBe(current);
+    expect(fetchMock.mock.calls.filter(([,o])=>o?.method==='POST')).toHaveLength(0);
+  });
   it.each([false,true])('closes with a one-cent late charge while preserving a corrected-payment fiscal attempt (lost response=%s)',async lost=>{
     const original={ownerReservationId:id,invoiceRequest:{reservaId:id,creditOperationId:crypto.randomUUID(),tipoComprobante:'FB',cliente:{razonSocial:'Original recipient'},sourceChargeIds:['accommodation:2026-11-14'],sourceChargeAmounts:{'accommodation:2026-11-14':201000}},invoice:{id:1591,reserva_id:id},payments:[{reservationId:id,amount:'201000.00',method:'efectivo',paymentRequestId:crypto.randomUUID()}],checkoutRequested:false};
     const originalJson=JSON.stringify(original);sessionStorage.setItem(`prefactura-pending:${id}`,originalJson);

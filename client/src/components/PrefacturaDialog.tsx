@@ -786,8 +786,8 @@ export function PrefacturaDialog({
     if (open) {
       const legacy = submission.current!.pending(reservationId);
       if (legacy?.accountCheckout) {
-        accountSubmission.current!.prepareAccountCheckout(reservationId, legacy.accountCheckout);
-        submission.current!.complete(reservationId);
+        const migrated = accountSubmission.current!.prepareAccountCheckout(reservationId, legacy.accountCheckout);
+        if ((['operationId','entityType','entityId','expectedBalance','entityName'] as const).every(key=>migrated.accountCheckout?.[key]===legacy.accountCheckout![key])) submission.current!.complete(reservationId);
       }
       setHasPendingSubmission(!!submission.current!.pending(reservationId));
       setHasPendingAccountCheckout(!!accountSubmission.current!.pending(reservationId));
