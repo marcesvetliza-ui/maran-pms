@@ -182,8 +182,12 @@ function ComprobanteSelectionPage() {
     [hasPermission],
   );
 
-  const [area, setArea] = useState<AreaId | "">(spaContext && areasPermitidas.some(a=>a.id==='spa') ? "spa" : areasPermitidas.length === 1 ? areasPermitidas[0].id : "");
-  const [operacion, setOperacion] = useState<Operacion | "">(spaContext ? "venta" : "");
+  const initialParams = new URLSearchParams(window.location.search);
+  const requestedArea = areasPermitidas.find(a=>a.id===initialParams.get('area'))?.id;
+  const initialArea: AreaId | '' = spaContext && areasPermitidas.some(a=>a.id==='spa') ? 'spa' : requestedArea || (areasPermitidas.length===1 ? areasPermitidas[0].id : '');
+  const requestedOperation = requestedArea && OPERACIONES.find(op=>op.id===initialParams.get('operacion') && op.areas.includes(requestedArea))?.id;
+  const [area, setArea] = useState<AreaId | "">(initialArea);
+  const [operacion, setOperacion] = useState<Operacion | "">(spaContext ? "venta" : requestedOperation || "");
   const [tipo, setTipo] = useState<string>("");
   // Registrar: cargar un comprobante que ya se emitió afuera del sistema (no
   // llama a ARCA), a diferencia de emitirlo ahora — ver RegistrarComprobanteVenta.

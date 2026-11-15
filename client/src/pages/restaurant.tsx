@@ -1939,7 +1939,7 @@ export default function RestaurantPage() {
   });
 
   const { data: billingInvoices = [], isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery<any[]>({
-    queryKey: ["/api/billing/invoices", ncDateFrom, ncDateTo],
+    queryKey: ["/api/billing/invoices", {area:"restaurant",desde:ncDateFrom,hasta:ncDateTo}],
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/billing/invoices?desde=${ncDateFrom}&hasta=${ncDateTo}&area=restaurant`);
       return res.json();
@@ -3633,11 +3633,16 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
         <TabsContent value="notas_credito" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileX className="h-5 w-5" />
-                Notas de Crédito
-              </CardTitle>
-              <p className="text-sm text-muted-foreground">Emitir notas de crédito sobre facturas ya cerradas. Solo se muestran facturas de los puntos de venta del restaurante.</p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <CardTitle className="flex items-center gap-2">
+                  <FileX className="h-5 w-5" />
+                  Notas de Crédito
+                </CardTitle>
+                {hasPermission("sidebar:/operaciones/emitir-comprobante") && hasPermission("api:emitir-comprobante:restaurant") && <Button asChild variant="outline" size="sm">
+                  <Link href="/operaciones/emitir-comprobante?area=restaurant&operacion=venta" data-testid="button-restaurant-credit-note-center"><Receipt className="h-4 w-4 mr-2"/>Ir a Emitir Comprobante</Link>
+                </Button>}
+              </div>
+              <p className="text-sm text-muted-foreground">Consultá las facturas y notas de crédito de Restaurant. Para emitir una nota, abrí Emitir Comprobante, elegí el tipo y buscá la factura original.</p>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Filters */}

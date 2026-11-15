@@ -40,6 +40,28 @@ function renderPage() {
 }
 
 describe("EmitirComprobantePage — selección Área / Operación / Tipo", () => {
+  it('abre el acceso de Restaurant en Venta sin elegir la letra de la nota',async()=>{
+    mockRole='admin';window.history.replaceState({},'', '/operaciones/emitir-comprobante?area=restaurant&operacion=venta');
+    try{
+      renderPage();
+      expect(screen.getByTestId('select-area')).toHaveTextContent('Restaurant');
+      expect(screen.getByTestId('select-operacion')).toHaveTextContent('Venta');
+      expect(screen.getByTestId('select-tipo')).toHaveTextContent('Elegir tipo');
+      const user=userEvent.setup();await user.click(screen.getByTestId('select-tipo'));
+      await user.click(screen.getByRole('option',{name:'Nota de Crédito B'}));
+      expect(await screen.findByTestId('input-buscar-comprobante-nc-nd')).toBeInTheDocument();
+    }finally{window.history.replaceState({},'', '/');}
+  });
+  it('ignora un área del enlace que el usuario no tiene habilitada',()=>{
+    mockRole='spa';window.history.replaceState({},'', '/operaciones/emitir-comprobante?area=restaurant&operacion=venta');
+    try{renderPage();expect(screen.getByTestId('select-area')).toHaveTextContent('Spa');expect(screen.getByTestId('select-area')).toBeDisabled();expect(screen.getByTestId('select-operacion')).toHaveTextContent('Elegir operación');}
+    finally{window.history.replaceState({},'', '/');}
+  });
+  it('no precarga una operación incompatible con el área del enlace',()=>{
+    mockRole='admin';window.history.replaceState({},'', '/operaciones/emitir-comprobante?area=restaurant&operacion=compra');
+    try{renderPage();expect(screen.getByTestId('select-area')).toHaveTextContent('Restaurant');expect(screen.getByTestId('select-operacion')).toHaveTextContent('Elegir operación');}
+    finally{window.history.replaceState({},'', '/');}
+  });
   it("un turno SPA abre venta sin tipo seleccionado y permite elegir su comprobante", async () => {
     mockRole="admin";
     window.history.replaceState({},'', '/operaciones/emitir-comprobante?spaAccountId=spa-test');
