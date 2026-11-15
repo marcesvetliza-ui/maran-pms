@@ -1,12 +1,29 @@
 import { describe, it, expect } from "vitest";
 import { buildPackagePricingPatch } from "../client/src/lib/reservation-package-pricing";
-import { allocateCents, calendarNights, editNights, initialNightlyPricing, moneyCents, nightlyTotal, type NightlyEdit } from "./nightlyPricing";
+import { allocateCents, calendarNights, editNights, initialNightlyPricing, moneyCents, nightlyTotal, isStayExtension, type NightlyEdit } from "./nightlyPricing";
 const nights = [
   { date: "2026-10-20", rateCents: 9_000_000, discountCents: 0 },
   { date: "2026-10-21", rateCents: 9_500_000, discountCents: 0 },
 ];
 const edit = (extra: Partial<Extract<NightlyEdit, { kind: "rates" }>> = {}) =>
   editNights(nights, { kind: "rates", dates: nights.map(n => n.date), discountMode: "amount", discountScope: "night", ...extra });
+
+describe('extensión de noches contratadas',()=>{
+  const before={checkInDate:'2026-10-20',checkOutDate:'2026-10-22',nightlyPricing:nights.map((n,i)=>({...n,discountCents:i?100:0}))};
+  const after=()=>({checkInDate:before.checkInDate,checkOutDate:'2026-10-23',nightlyPricing:[...before.nightlyPricing,{date:'2026-10-22',rateCents:9700001,discountCents:0}]});
+  it('agrega una noche y conserva las tarifas y descuentos de todas las anteriores',()=>expect(isStayExtension(before,after())).toBe(true));
+  it.each(['rate','discount','remove','arrival','same','gap','invalid'] as const)('rechaza %s como extensión de noches protegidas',kind=>{
+    const next=after();next.nightlyPricing=next.nightlyPricing.map(n=>({...n}));
+    if(kind==='rate')next.nightlyPricing[0].rateCents++;
+    if(kind==='discount')next.nightlyPricing[1].discountCents++;
+    if(kind==='remove')next.nightlyPricing.shift();
+    if(kind==='arrival')next.checkInDate='2026-10-21';
+    if(kind==='same'){next.checkOutDate=before.checkOutDate;next.nightlyPricing.pop();}
+    if(kind==='gap')next.nightlyPricing[2].date='2026-10-24';
+    if(kind==='invalid')next.nightlyPricing[2].discountCents=next.nightlyPricing[2].rateCents+1;
+    expect(isStayExtension(before,next)).toBe(false);
+  });
+});
 describe("Contratos nocturnos en centavos", () => {
   it("mantiene tarifas diferentes con pesos por noche y porcentaje real", () => {
     const pesos = edit({ discount: "5000" });

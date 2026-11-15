@@ -3,13 +3,15 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { db, pool } from "./db";
 import { withInvoiceAdvisoryLock } from "./billing/invoiceAdvisoryLock";
-import { initialNightlyPricing, nightlyTotal, amountString, pricingError } from "@shared/nightlyPricing";
+import { initialNightlyPricing, nightlyTotal, amountString, pricingError, isStayExtension, moneyCents } from "@shared/nightlyPricing";
 
 const financialScope = new AsyncLocalStorage<Set<string>>();
 /** Recovery must not wait on an owner lock already held by its own request. */
 export const hasFinancialScopeLock = (key: string) => financialScope.getStore()?.has(key) === true;
-const nightlyWriter = new AsyncLocalStorage<{ revision:number; dates?:string[] }>();
+const nightlyWriter = new AsyncLocalStorage<{ revision:number; dates?:string[]; extension?:boolean }>();
 export const withNightlyWriter = <T>(revision: number, action: () => Promise<T>, dates?:string[]) => nightlyWriter.run({revision,dates}, action);
+/** Only the validated stay route can request the exception for new nights. */
+export const withStayExtensionWriter = <T>(revision:number,action:()=>Promise<T>)=>nightlyWriter.run({revision,extension:true},action);
 export function withFinancialScopeLock<T>(key: string, action: () => Promise<T>): Promise<T> {
   const held = financialScope.getStore();
   if (held?.has(key)) return action();
@@ -76,8 +78,9 @@ export async function accommodationFiscalStatus(id: string, totalCents = 0, edit
     : ambiguous || authorizing || coveredCents > 0
       ? "El alojamiento tiene cobertura fiscal o una autorización pendiente. Resolvé primero el ajuste por el circuito fiscal existente; no se modificarán pagos ni Caja." : null;
   const state = group.rows.length ? "grupal" : ambiguous ? "revisar" : authorizing ? "en_curso" : coveredCents >= totalCents && coveredCents > 0 ? "facturado" : coveredCents > 0 ? "parcial" : "pendiente";
+  const extensionBlocked=group.rows.length || ambiguous || authorizing || coveredCents>totalCents ? blocked : null;
   return { blocked, state, coveredCents: ambiguous || group.rows.length ? null : coveredCents,
-    pendingCents: ambiguous || group.rows.length ? null : Math.max(0, totalCents - coveredCents) };
+    pendingCents: ambiguous || group.rows.length ? null : Math.max(0, totalCents - coveredCents),extensionBlocked };
 }
 export async function accommodationFiscalBlock(id: string): Promise<string | null> {
   return (await accommodationFiscalStatus(id)).blocked;
@@ -116,6 +119,20 @@ export async function guardPricingUpdate(existing: Record<string, any>, patch: R
     const after = patch.nightlyPricing;
     if (existing.pricingScheme === 'nightly_v1' && (!Array.isArray(before) || !Array.isArray(after) || before.length!==after.length || before.some((n:any,i:number)=>n.date!==after[i].date || (!writer.dates!.includes(n.date) && JSON.stringify(n)!==JSON.stringify(after[i]))))) pricingError('Sólo se puede cambiar la noche seleccionada.',409);
   }
-  const blocked = (await accommodationFiscalStatus(existing.id,0,writer?.dates)).blocked;
-  if (blocked) pricingError(blocked, 409);
+  const fiscal=await accommodationFiscalStatus(existing.id,Number.isFinite(Number(existing.totalRoomAmount))?Math.round(Number(existing.totalRoomAmount)*100):0,writer?.dates);
+  if(writer?.extension){
+    if(existing.pricingScheme!=='nightly_v1' || !isStayExtension(existing as any,patch as any) ||
+      ['earlyCheckInCharge','lateCheckOutCharge','voucherId','voucherAppliedAmount'].some(key=>changed.includes(key)))
+      pricingError('La extensión debe conservar el ingreso, las noches anteriores y sus cargos.',409);
+    const nights=patch.nightlyPricing;
+    const total=nightlyTotal(nights);
+    if(moneyCents(existing.totalRoomAmount)!==nightlyTotal(existing.nightlyPricing) ||
+      patch.nights!==nights.length || patch.pricingRevision!==revision!+1 ||
+      moneyCents(patch.totalRoomAmount)!==total ||
+      moneyCents(patch.finalRatePerNight)!==Math.round(total/nights.length) ||
+      moneyCents(patch.baseRatePerNight)!==Math.round(nights.reduce((sum:number,n:any)=>sum+n.rateCents,0)/nights.length) ||
+      patch.discountType!=='none' || Number(patch.discountValue)!==0)
+      pricingError('El total de la extensión no coincide con el detalle de noches.',409);
+    if(fiscal.extensionBlocked)pricingError(fiscal.extensionBlocked,409);
+  }else if(fiscal.blocked)pricingError(fiscal.blocked,409);
 }
