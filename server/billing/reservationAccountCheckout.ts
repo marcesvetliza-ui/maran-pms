@@ -50,7 +50,7 @@ export async function checkoutReservationToAccount(reservationId: string, body: 
     const [charges, paid] = await Promise.all([storage.getCharges(reservationId), storage.getPaymentsTotal(reservationId)]);
     const saved = Number(reservation.totalRoomAmount || 0);
     const lodging = saved > 0 ? saved : Number(reservation.finalRatePerNight || 0) * Number(reservation.nights || 0);
-    const balance = Math.round((lodging + getOperationalReservationCharges(charges).reduce((sum, c) => sum + Number(c.amount), 0) - paid) * 100);
+    const balance = Math.round(lodging * 100) + getOperationalReservationCharges(charges).reduce((sum, c) => sum + Math.round(Number(c.amount) * 100), 0) - Math.round(paid * 100);
     if (!Number.isSafeInteger(balance) || balance <= 0 || balance !== Math.round(Number(expectedBalance) * 100)) {
       throw fail("El saldo cambió. Actualizá el folio y confirmá nuevamente el importe a trasladar.");
     }

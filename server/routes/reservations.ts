@@ -1611,21 +1611,22 @@ export function registerReservationsRoutes(app: Express) {
 
       // Always compute balance (needed for both the block and the CC cargo creation)
       const operationalCharges = getOperationalReservationCharges(await storage.getCharges(req.params.id));
-      const chargesTotal = operationalCharges.reduce((sum, charge) => sum + (Number(charge.amount) || 0), 0);
+      const chargesTotalCents = operationalCharges.reduce((sum, charge) => sum + Math.round((Number(charge.amount) || 0) * 100), 0);
       const paymentsTotal = await storage.getPaymentsTotal(req.params.id);
       const savedRoomTotal = parseFloat(reservation.totalRoomAmount || "0");
       const roomTotal = savedRoomTotal > 0
         ? savedRoomTotal
         : parseFloat(reservation.finalRatePerNight || "0") * (reservation.nights || 0);
-      const balance = roomTotal + chargesTotal - paymentsTotal;
+      const balanceCents = Math.round(roomTotal * 100) + chargesTotalCents - Math.round(paymentsTotal * 100);
+      const balance = balanceCents / 100;
 
       // A zero-balance UI action must never fall back to forced/historical
       // departure and create a CC debt if the balance changed meanwhile.
-      if (req.body?.requireSettled === true && balance > 0.01) {
+      if (req.body?.requireSettled === true && balanceCents > 0) {
         return res.status(409).json({error:"El saldo cambió. Actualizá el folio y liquidá el importe pendiente antes de dar check-out.",balance});
       }
 
-      if (balance > 0.01 && !(isGroupLinked && groupDeparture) && (isGroupLinked || !forceCheckout)) {
+      if (balanceCents > 0 && !(isGroupLinked && groupDeparture) && (isGroupLinked || !forceCheckout)) {
         return res.status(400).json({
           error: "Saldo pendiente",
           message: `La reserva tiene un saldo pendiente de $${balance.toFixed(2)}. Liquide antes de hacer check-out.`,
@@ -1634,7 +1635,7 @@ export function registerReservationsRoutes(app: Express) {
       }
 
       // Si se cierra con saldo pendiente y hay empresa/agencia/huésped vinculado, crear un cargo en CC
-      if (forceCheckout && !isGroupLinked && balance > 0.01) {
+      if (forceCheckout && !isGroupLinked && balanceCents > 0) {
         const guestNameCC = reservation.guest
           ? `${reservation.guest.firstName} ${reservation.guest.lastName}`
           : "Huésped";
@@ -1758,7 +1759,7 @@ export function registerReservationsRoutes(app: Express) {
       // visible en Caja para trazabilidad — un movimiento informativo de $0
       // que no suma a ningún total (mismo mecanismo que ya usa Cuenta
       // Corriente/voucher, ver ensureInformationalMovement).
-      if (roomTotal === 0 && chargesTotal === 0) {
+      if (roomTotal === 0 && chargesTotalCents === 0) {
         try {
           const [existingZeroMovement] = await db.select().from(cashMovements).where(and(
             eq(cashMovements.sourceType, "reservation_checkout_no_charge"),

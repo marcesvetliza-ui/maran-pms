@@ -3,6 +3,19 @@ import { createPrefacturaSubmission } from "./prefactura-submission";
 
 describe("Prefactura persisted payment intent", () => {
   beforeEach(() => sessionStorage.clear());
+  it('keeps a checkout-to-account retry separate from an existing fiscal intent',async()=>{
+    const fiscal=createPrefacturaSubmission(sessionStorage);
+    fiscal.prepare('r',{reservaId:'r',creditOperationId:crypto.randomUUID()},[{reservationId:'r',amount:'201000.00',method:'efectivo'}]);
+    const original=sessionStorage.getItem('prefactura-pending:r');
+    const departure=createPrefacturaSubmission(sessionStorage,'prefactura-account-checkout');
+    const request={operationId:crypto.randomUUID(),entityType:'guest',entityId:'g',expectedBalance:'0.01',entityName:'Guest'};
+    departure.prepareAccountCheckout('r',request);
+    await expect(departure.run('r',async()=>{throw Error('lost');})).rejects.toThrow('lost');
+    const reopened=createPrefacturaSubmission(sessionStorage,'prefactura-account-checkout');
+    expect(reopened.prepareAccountCheckout('r',{...request,expectedBalance:'999.00'}).accountCheckout).toEqual(request);
+    await reopened.run('r',async(url,body)=>{expect(url).toBe('/api/reservations/r/check-out-to-account');expect(body).toEqual(request);return {success:true};});
+    reopened.complete('r');expect(sessionStorage.getItem('prefactura-pending:r')).toBe(original);
+  });
   it("recovers an account checkout after reopening with the original entity, amount and operation", async () => {
     const submission=createPrefacturaSubmission(sessionStorage);
     const request={operationId:crypto.randomUUID(),entityType:"company",entityId:"original-company",expectedBalance:"70000.00",entityName:"Original account"};

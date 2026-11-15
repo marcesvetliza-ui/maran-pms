@@ -23,9 +23,9 @@ function assertReservation(reservationId: string | number, attempt: PrefacturaAt
 
 // Save the complete intent before the first write. Reopening or refreshing must
 // not reconstruct amounts, dates, instruments or fiscal sources from a new folio.
-export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">) {
+export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "setItem" | "removeItem">, namespace = "prefactura-pending") {
   let busy = false;
-  const key = (reservationId: string | number) => `prefactura-pending:${reservationId}`;
+  const key = (reservationId: string | number) => `${namespace}:${reservationId}`;
   return {
     acquire() {
       if (busy) return false;
