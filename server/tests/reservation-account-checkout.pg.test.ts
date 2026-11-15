@@ -75,6 +75,33 @@ describe.skipIf(!enabled)("atomic checkout with the operational balance transfer
   });
   afterAll(async () => { if (server) await new Promise<void>(resolve => server.close(() => resolve())); await pool?.end(); const { pool: applicationPool } = await import("../db"); await applicationPool.end(); vi.restoreAllMocks(); });
 
+  it.each(['0.01','3500.00'])('moves a late-checkout balance of %s to the guest while preserving an issued, corrected-payment attempt',async amount=>{
+    const f=await fixture(),operationId=randomUUID(),paymentRequestId=randomUUID();
+    try{
+      await pool!.query('DELETE FROM charges WHERE reservation_id=$1',[f.id]);
+      await pool!.query('UPDATE reservations SET total_room_amount=201000 WHERE id=$1',[f.id]);
+      await pool!.query("INSERT INTO charges(id,reservation_id,description,amount,date,category) VALUES($1,$2,'Late Check-out 19:00',$3,CURRENT_DATE,'otros')",[`${f.id}-late`,f.id,amount]);
+      await pool!.query("UPDATE payments SET amount=201000,method='transferencia',payment_request_id=$2 WHERE reservation_id=$1",[f.id,paymentRequestId]);
+      const invoice=(await pool!.query("UPDATE sales_invoices SET tipo_comprobante='FB',monto_total=201000,monto_neto=201000,cash_forma_pago='transferencia' WHERE reserva_id=$1 RETURNING id",[f.id])).rows[0].id;
+      await pool!.query("UPDATE payments SET invoice_ref=$2 WHERE reservation_id=$1",[f.id,JSON.stringify({id:invoice})]);
+      const snapshot={reservaId:f.id,creditOperationId:operationId,prefacturaRecovery:{version:2,checkoutRequested:false,payments:[{reservationId:f.id,paymentRequestId,amount:'201000.00',method:'efectivo'}]}};
+      await pool!.query("INSERT INTO billing_operations(operation_id,owner_type,owner_id,payload_hash,request_snapshot,fiscal_identity,stage,invoice_id) VALUES($1,'reservation',$2,'synthetic',$3,'{}','authorized',$4)",[operationId,f.id,JSON.stringify(snapshot),invoice]);
+      const journal=(await pool!.query('SELECT * FROM billing_operations WHERE operation_id=$1',[operationId])).rows;
+      const before=await facts(f);
+      const ordinary=await fetch(`${base}/api/reservations/${f.id}/check-out`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requireSettled:true})});
+      expect(ordinary.status).toBe(409);expect((await ordinary.json()).balance).toBe(Number(amount));expect(await facts(f)).toEqual(before);
+      const body={...payload(f),expectedBalance:amount};
+      const results=await Promise.all([post(f,body),post(f,body)]);expect(results.map(r=>r.status)).toEqual([200,200]);
+      const after=await facts(f);expect(after.reservation).toBe('checked_out');expect(after.room).toBe('dirty');
+      expect(after.payments.find(p=>p.id===`${f.id}-paid`)).toEqual(before.payments[0]);
+      expect(after.payments.filter(p=>p.method==='cuenta_corriente')).toEqual([expect.objectContaining({amount})]);
+      expect(after.accounts).toEqual([expect.objectContaining({entity_type:'guest',entity_id:f.guest,amount,type:'cargo'})]);
+      expect(after.cash.filter(c=>c.movement_type==='income')).toEqual([]);expect(after.invoices).toEqual(before.invoices);
+      expect((await pool!.query('SELECT * FROM billing_operations WHERE operation_id=$1',[operationId])).rows).toEqual(journal);
+      expect(after.audit).toHaveLength(1);
+    }finally{await pool!.query('DELETE FROM billing_operations WHERE operation_id=$1',[operationId]);await clean(f);}
+  });
+
   it.each(["guest", "company"])("closes the room and transfers exactly $70,000 to the selected %s once", async entityType => {
     const f = await fixture();
     try {

@@ -14,6 +14,11 @@ describe("Pagos recuperados con evidencia exacta", () => {
 });
 
 describe("Discovery of issued invoices after a partial credit note", () => {
+  it('explains a modified receipt without acknowledging it or allowing a second collection',async()=>{
+    vi.mocked(db.execute).mockResolvedValueOnce({rows:[{id:77,estado:'emitida'}]} as any).mockResolvedValueOnce({rows:[{...saved,method:'transferencia'}]} as any);
+    const result=await receptionOperationStatus({operation_id:'original',owner_id:'r1',invoice_id:77,stage:'authorized',request_snapshot:{prefacturaRecovery:{version:2,payments:[payment],checkoutRequested:false}}} as any);
+    expect(result).toMatchObject({stage:'authorized',financiallyComplete:false,acknowledgedPaymentIds:[],paymentConflicts:['request-1'],paymentConflictMessage:expect.stringContaining('check-out se gestiona por separado')});
+  });
   const operation: any = { operation_id: "op", owner_id: "r1", invoice_id: 125, stage: "authorized", request_snapshot: {
     cashFormaPago: "cuenta_corriente", prefacturaRecovery: { version: 2, payments: [], checkoutRequested: true }
   } };

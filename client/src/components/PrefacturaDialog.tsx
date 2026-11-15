@@ -516,6 +516,11 @@ export function PrefacturaDialog({
   const submission = useRef<ReturnType<typeof createPrefacturaSubmission> | null>(null);
   if (!submission.current) submission.current = createPrefacturaSubmission(window.sessionStorage);
   const [hasPendingSubmission, setHasPendingSubmission] = useState(false);
+  const accountSubmission = useRef<ReturnType<typeof createPrefacturaSubmission> | null>(null);
+  if (!accountSubmission.current) accountSubmission.current = createPrefacturaSubmission(window.sessionStorage, 'prefactura-account-checkout');
+  const [hasPendingAccountCheckout, setHasPendingAccountCheckout] = useState(false);
+  const [checkoutAccountKey, setCheckoutAccountKey] = useState('');
+  const [standaloneAccountCheckout, setStandaloneAccountCheckout] = useState(false);
 
   // Steps
   const [step, setStep] = useState(1);
@@ -779,7 +784,15 @@ export function PrefacturaDialog({
   // On open: reset step and mark folio as not-yet-initialized for this session
   useEffect(() => {
     if (open) {
+      const legacy = submission.current!.pending(reservationId);
+      if (legacy?.accountCheckout) {
+        const migrated = accountSubmission.current!.prepareAccountCheckout(reservationId, legacy.accountCheckout);
+        if ((['operationId','entityType','entityId','expectedBalance','entityName'] as const).every(key=>migrated.accountCheckout?.[key]===legacy.accountCheckout![key])) submission.current!.complete(reservationId);
+      }
       setHasPendingSubmission(!!submission.current!.pending(reservationId));
+      setHasPendingAccountCheckout(!!accountSubmission.current!.pending(reservationId));
+      setCheckoutAccountKey(''); setStandaloneAccountCheckout(false);
+      setShowAccountCheckoutWarning(false);
       setStep(1);
       billingRecipientTouched.current = false;
       setShowCreateCompany(false);
@@ -1315,18 +1328,26 @@ export function PrefacturaDialog({
   const operationalBalance = folio?.financialSummary?.operationalFolioBalance
     ?? Math.max(0, Number(folio?.balance || 0));
   const alreadyPaidAndInvoiced = !!folio
-    && operationalBalance <= 0.01
+    && Math.round(Number(operationalBalance) * 100) <= 0
     && originalBillableItems.every((item) => (remainingAmountsByCharge[item.id] || 0) <= 0.01);
   // Departure and fiscal issuance are separate operations. Never use the
   // selected invoice amount or available credit as proof of a paid stay.
   const checkoutBalance = Number(folio?.financialSummary?.operationalFolioBalance ?? folio?.balance);
-  const canCheckoutWithoutCollection = mode === "checkout" && !!folio && Number.isFinite(checkoutBalance) && checkoutBalance <= 0.01 && !submission.current!.pending(reservationId)?.accountCheckout;
-  const accountCheckoutAttempt = hasPendingSubmission ? submission.current!.pending(reservationId)?.accountCheckout : undefined;
+  const checkoutBalanceCents = Math.round(checkoutBalance * 100);
+  const accountCheckoutAttempt = hasPendingAccountCheckout ? accountSubmission.current!.pending(reservationId)?.accountCheckout : undefined;
+  const canCheckoutWithoutCollection = mode === "checkout" && !!folio && Number.isSafeInteger(checkoutBalanceCents) && checkoutBalanceCents <= 0 && !accountCheckoutAttempt;
+  const canTransferCheckout = mode === 'checkout' && !!folio && !folio.groupId && Number.isSafeInteger(checkoutBalanceCents) && checkoutBalanceCents > 0;
   const accountCheckoutOnly = mode === "checkout" && doCheckout && !!folio && !folio.groupId &&
-    saleCondition === "cuenta_corriente" && operationalBalance > 0.01 && allBillableItems.length === 0 &&
+    saleCondition === "cuenta_corriente" && checkoutBalanceCents > 0 && allBillableItems.length === 0 &&
     (!hasPendingSubmission || !!accountCheckoutAttempt);
-  const accountCheckoutAmount = accountCheckoutAttempt ? Number(accountCheckoutAttempt.expectedBalance) : operationalBalance;
-  const accountCheckoutName = accountCheckoutAttempt?.entityName || razonSocial || "la entidad elegida";
+  const checkoutAccounts: {entityType:'guest'|'company'|'agency';entityId:string;entityName:string}[] = [];
+  if (reservation?.guestId) checkoutAccounts.push({entityType:'guest',entityId:reservation.guestId,entityName:`${(reservation.guest as any)?.firstName || ''} ${(reservation.guest as any)?.lastName || ''}`.trim() || 'Huésped de la reserva'});
+  if (reservation?.companyId) checkoutAccounts.push({entityType:'company',entityId:reservation.companyId,entityName:companies.find(c=>String(c.id)===reservation.companyId)?.razonSocial || (reservation as any).company?.razonSocial || 'Empresa de la reserva'});
+  if (reservation?.agencyId) checkoutAccounts.push({entityType:'agency',entityId:reservation.agencyId,entityName:agencies.find(a=>String(a.id)===reservation.agencyId)?.name || 'Agencia de la reserva'});
+  if (billingEntityId && !checkoutAccounts.some(a=>a.entityType===billingTarget && a.entityId===billingEntityId)) checkoutAccounts.push({entityType:billingTarget,entityId:billingEntityId,entityName:razonSocial || 'Entidad seleccionada'});
+  const checkoutAccount = checkoutAccounts.find(a=>`${a.entityType}:${a.entityId}`===checkoutAccountKey) || checkoutAccounts.find(a=>a.entityType===billingTarget && a.entityId===billingEntityId) || checkoutAccounts[0];
+  const accountCheckoutAmount = accountCheckoutAttempt ? Number(accountCheckoutAttempt.expectedBalance) : checkoutBalanceCents / 100;
+  const accountCheckoutName = accountCheckoutAttempt?.entityName || checkoutAccount?.entityName || razonSocial || "la entidad elegida";
 
   async function doAccountCheckout() {
     const scope = viewScope.current.version;
@@ -1334,33 +1355,32 @@ export function PrefacturaDialog({
     if (!submission.current!.acquire()) return;
     setIsSubmitting(true); setSubmitError(null);
     try {
-      const previous = submission.current!.pending(reservationId);
-      if (previous && !previous.accountCheckout) throw new Error("Completá primero la operación pendiente de esta reserva.");
+      const previous = accountSubmission.current!.pending(reservationId);
       if (!previous) {
-        if (!accountCheckoutOnly || !["guest", "company", "agency"].includes(billingTarget) || !billingEntityId) {
+        if ((!accountCheckoutOnly && !canTransferCheckout) || !checkoutAccount) {
           throw new Error("Seleccioná el huésped, empresa o agencia que recibirá la deuda.");
         }
-        submission.current!.prepareAccountCheckout(reservationId, { operationId: newSettlementOperationId(),
-          entityType: billingTarget, entityId: billingEntityId, expectedBalance: operationalBalance.toFixed(2),
+        accountSubmission.current!.prepareAccountCheckout(reservationId, { operationId: newSettlementOperationId(),
+          entityType: checkoutAccount.entityType, entityId: checkoutAccount.entityId, expectedBalance: accountCheckoutAmount.toFixed(2),
           entityName: accountCheckoutName });
       }
-      setHasPendingSubmission(true);
-      await submission.current!.run(reservationId, async (url, body) => {
+      setHasPendingAccountCheckout(true);
+      await accountSubmission.current!.run(reservationId, async (url, body) => {
         const response = await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const result = await response.json();
         if (!response.ok) throw Object.assign(new Error(result.error || "No se pudo completar el cierre a Cuenta Corriente."), { notApplied: result.notApplied === true });
         return result;
       }, () => { if (!isCurrentView()) throw new Error("La reserva abierta cambió. El cierre original queda disponible para recuperarlo."); });
-      submission.current!.complete(reservationId);
+      accountSubmission.current!.complete(reservationId);
       await Promise.all(["/api/reservations", "/api/reservations/check-out", "/api/payments", "/api/rooms", "/api/rooms/in-house", "/api/dashboard/departures", "/api/dashboard/stats", "/api/planning", "/api/housekeeping", "/api/account-movements", "/api/account-summary", "/api/guests", "/api/folios"].map(key => queryClient.invalidateQueries({ queryKey: [key] })));
       if (!isCurrentView()) return;
-      setHasPendingSubmission(false);
+      setHasPendingAccountCheckout(false);
       toast({ title: "Check-out realizado", description: "El saldo quedó pendiente en la cuenta corriente seleccionada, sin cobro de Caja." });
       onCheckoutComplete?.(); onClose();
     } catch (error: any) {
-      if (error.notApplied && submission.current!.pending(reservationId)?.accountCheckout) {
-        submission.current!.complete(reservationId);
-        if (isCurrentView()) setHasPendingSubmission(false);
+      if (error.notApplied && accountSubmission.current!.pending(reservationId)?.accountCheckout) {
+        accountSubmission.current!.complete(reservationId);
+        if (isCurrentView()) setHasPendingAccountCheckout(false);
       }
       if (isCurrentView()) { setSubmitError(parseApiError(error)); void refetchFolio(); }
     } finally {
@@ -2067,6 +2087,17 @@ export function PrefacturaDialog({
 
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 sm:px-7">
+          {step < 3 && canTransferCheckout && <section className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3 dark:border-amber-700 dark:bg-amber-950/30" data-testid="checkout-outstanding-balance">
+            <p className="font-semibold">Queda un saldo de ${fmtMoney(checkoutBalanceCents / 100)}.</p>
+            <p className="text-sm">Podés saldarlo desde el folio o cerrar la habitación trasladando la deuda a Cuenta Corriente. Los comprobantes y las operaciones anteriores se conservan para su revisión.</p>
+            <label className="block text-sm">Cuenta corriente que recibirá el saldo
+              <select className="mt-1 block w-full rounded-md border bg-background p-2" aria-label="Cuenta corriente para el saldo" value={checkoutAccount ? `${checkoutAccount.entityType}:${checkoutAccount.entityId}` : ''} onChange={event=>setCheckoutAccountKey(event.target.value)} disabled={isSubmitting || !!accountCheckoutAttempt}>
+                {!checkoutAccount && <option value="">Seleccioná una cuenta</option>}
+                {checkoutAccounts.map(account=><option key={`${account.entityType}:${account.entityId}`} value={`${account.entityType}:${account.entityId}`}>{({guest:'Huésped',company:'Empresa',agency:'Agencia'})[account.entityType]} · {account.entityName}</option>)}
+              </select>
+            </label>
+            <Button onClick={()=>{setStandaloneAccountCheckout(true);setShowAccountCheckoutWarning(true);}} disabled={isSubmitting || folioLoading || !checkoutAccount || !!accountCheckoutAttempt} data-testid="button-checkout-balance-to-account">Cerrar y pasar a Cuenta Corriente</Button>
+          </section>}
           {step < 3 && canCheckoutWithoutCollection && <div className="space-y-4" data-testid="checkout-settled-confirmation">
             {reservationData?.notes && <div className="text-sm bg-muted/30 rounded-md p-3" data-testid="prefactura-reservation-notes"><div className="text-muted-foreground mb-1">Notas de la reserva:</div><div style={{whiteSpace:"pre-wrap"}}>{reservationData.notes}</div></div>}
             <div className="rounded-lg border border-green-300 bg-green-50 dark:bg-green-950/40 p-4 space-y-2">
@@ -2139,7 +2170,7 @@ export function PrefacturaDialog({
 
             {folio?.groupId&&<GroupRoomAccount key={String(reservationId)} reservationId={String(reservationId)} disabled={hasPendingSubmission||isSubmitting} onSaved={async()=>{await refetchFolio();await refetchEmittedInvoices();}}/>}
             {groupDocumentationOnly&&<p className="rounded border p-3 text-sm">Facturación de conceptos pendientes del grupo. Esta acción no registra dinero nuevo ni traslada deuda a otra cuenta. Para cobrar o aplicar un anticipo, usá las acciones de la cuenta de arriba.</p>}
-            <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={`space-y-4 ${hasPendingSubmission ? "pointer-events-none opacity-70" : ""}`} data-testid="prefactura-editable-fields">
+            <fieldset disabled={hasPendingSubmission || hasPendingAccountCheckout || isSubmitting || correctReceptionAttempt.isPending} className={`space-y-4 ${hasPendingSubmission || hasPendingAccountCheckout ? "pointer-events-none opacity-70" : ""}`} data-testid="prefactura-editable-fields">
             {canChooseGroupBillingAction && <section className="rounded-lg border p-3">
               <Label htmlFor="group-billing-action">Qué querés hacer con estos cargos</Label>
               <select id="group-billing-action" className="mt-1 block w-full rounded border bg-background p-2 text-sm" value={groupDocumentationOnly ? 'invoice_only' : 'collect_and_invoice'} onChange={event => { setGroupBillingAction(event.target.value as typeof groupBillingAction); setSaleCondition('contado'); setSubmitError(null); }}>
@@ -2561,7 +2592,7 @@ export function PrefacturaDialog({
         {/* ── STEP 2: Cobro ──────────────────────────────────────────────────── */}
         {step < 3 && !canCheckoutWithoutCollection && (
           <div className="space-y-0">
-            <fieldset disabled={hasPendingSubmission || isSubmitting || correctReceptionAttempt.isPending} className={hasPendingSubmission ? "pointer-events-none opacity-70" : ""}>
+            <fieldset disabled={hasPendingSubmission || hasPendingAccountCheckout || isSubmitting || correctReceptionAttempt.isPending} className={hasPendingSubmission || hasPendingAccountCheckout ? "pointer-events-none opacity-70" : ""}>
             {/* Zero-balance notice: no new payment required */}
             {!groupDocumentationOnly && totalSelected > 0.01 && selectedBalance <= 0.01 && (
               <div className="flex items-start gap-3 rounded-lg border border-green-300 bg-green-50 dark:border-green-700 dark:bg-green-950/40 px-4 py-3">
@@ -2696,7 +2727,7 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            {(hasPendingSubmission || serverAttempt || rejectionError) && (
+            {(hasPendingSubmission || hasPendingAccountCheckout || serverAttempt || rejectionError) && (
               <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
                 {folio?.groupId&&<p className="text-sm">Podés completar el cobro y el cierre de esta habitación desde esta prefactura. Se conservan los datos del intento original; las otras habitaciones del grupo no se cierran.</p>}
                 <p className="text-sm">{rejectionError ? "No se pudo consultar el intento fiscal. Volvé a abrir la prefactura antes de emitir." : serverAttempt ? "Hay un intento A rechazado por la condición IVA Exento. Verificá el rechazo para recuperar los datos originales y preparar una Factura B sin emitir ni cobrar." : "Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado."}</p>
@@ -2717,10 +2748,10 @@ export function PrefacturaDialog({
                 </div>}
                 {serverAttempt && !canCorrectExemptRejection && <p className="text-sm">Este intento requiere conciliación antes de continuar.</p>}
                 {hasPendingSubmission && receptionStatus && <p className="my-2 text-sm" data-testid="billing-operation-state">
-                  {receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
+                  {receptionStatus.paymentConflictMessage || receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
                 </p>}
                 {hasPendingSubmission && (receptionStatus?.safeToCorrect || receptionStatus?.canVerifyRejection || receptionStatus?.canCloseCancelled) && <Button type="button" variant="outline" onClick={() => correctReceptionAttempt.mutate()} disabled={isSubmitting || correctReceptionAttempt.isPending} data-testid="button-correct-reception-attempt">{correctReceptionAttempt.isPending ? "Verificando…" : receptionStatus.canCloseCancelled ? "Cerrar intento de factura anulada" : receptionStatus.canVerifyRejection ? "Verificar rechazo y corregir datos" : "Corregir datos del intento"}</Button>}
-                {hasPendingSubmission && !serverAttempt && receptionStatus?.stage !== "cancelled" && <Button onClick={() => void doSubmit()} disabled={isSubmitting || correctExemptRejection.isPending || correctReceptionAttempt.isPending || (!!pointError && !accountCheckoutAttempt) || receptionStatus?.stage === "blocked" && !receptionStatus?.canRetryNumberConflict || receptionStatus?.canVerifyRejection === true || receptionStatus?.stage === "corrected"} data-testid="button-retry-prefactura">
+                {(hasPendingSubmission || hasPendingAccountCheckout) && (!serverAttempt || accountCheckoutAttempt) && (receptionStatus?.stage !== "cancelled" || accountCheckoutAttempt) && <Button onClick={() => {if(accountCheckoutAttempt)void doAccountCheckout();else void doSubmit();}} disabled={isSubmitting || (!accountCheckoutAttempt && (correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!receptionStatus?.paymentConflicts?.length)) || (!accountCheckoutAttempt && (!!pointError || (receptionStatus?.stage === "blocked" && !receptionStatus?.canRetryNumberConflict) || receptionStatus?.canVerifyRejection === true || receptionStatus?.stage === "corrected"))} data-testid="button-retry-prefactura">
                   {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
                 </Button>}
                 {canCorrectExemptRejection && <Button type="button" variant="outline" className="mt-2 sm:ml-2" disabled={isSubmitting || folioLoading || correctExemptRejection.isPending} onClick={() => correctExemptRejection.mutate()} data-testid="button-correct-exempt-rejection">
@@ -2780,10 +2811,10 @@ export function PrefacturaDialog({
               </Button>
               {canCheckoutWithoutCollection && <Button onClick={()=>checkoutOnly.mutate()} disabled={checkoutOnly.isPending || isSubmitting || folioLoading} data-testid="button-checkout-without-issuance">{checkoutOnly.isPending ? "Cerrando estadía…" : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}</Button>}
               {!hasPendingSubmission && alreadyPaidAndInvoiced && mode !== "checkout" && <Button variant="outline" onClick={handleClose}>Cerrar</Button>}
-              {!alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
+              {!alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && !accountCheckoutOnly && (
                 <Button
                   onClick={handleSubmit}
-                  disabled={(!!folio?.groupId&&(groupAccount.isPending||groupAccount.isError||groupAccount.data?.fiscalRequiresReview))||discoveringOperation || operationDiscoveryError || (!!pointError && saleCondition !== "cuenta_corriente" && !alreadyPaidAndInvoiced) || hasPendingSubmission || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && !accountCheckoutOnly)}
+                  disabled={(!!folio?.groupId&&(groupAccount.isPending||groupAccount.isError||groupAccount.data?.fiscalRequiresReview))||discoveringOperation || operationDiscoveryError || (!!pointError && saleCondition !== "cuenta_corriente" && !alreadyPaidAndInvoiced) || hasPendingSubmission || hasPendingAccountCheckout || !!serverAttempt || rejectionLoading || rejectionError || correctExemptRejection.isPending || isSubmitting || (totalSelected <= 0.01 && !accountCheckoutOnly)}
                   data-testid="button-registrar-emitir"
                 >
                   {isSubmitting ? (
@@ -2996,14 +3027,14 @@ export function PrefacturaDialog({
         }}
       />
 
-      <Dialog open={showAccountCheckoutWarning} onOpenChange={setShowAccountCheckoutWarning}>
+      <Dialog open={showAccountCheckoutWarning} onOpenChange={open=>{setShowAccountCheckoutWarning(open);if(!open)setStandaloneAccountCheckout(false);}}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Check-out con deuda en cuenta corriente</DialogTitle></DialogHeader>
-          <p className="text-sm">La habitación tiene saldo pendiente. Se trasladarán <strong>${fmtMoney(accountCheckoutOnly || accountCheckoutAttempt ? accountCheckoutAmount : selectedBalance)}</strong> a la cuenta corriente de <strong>{accountCheckoutName}</strong> para cobrar después.</p>
-          <p className="text-sm text-muted-foreground">{accountCheckoutOnly || accountCheckoutAttempt ? "Se registrará el traslado y se realizará el check-out sin emitir otra factura. La deuda seguirá pendiente en la cuenta corriente." : "Se registrará el cierre no fiscal y se realizará el check-out. Este traslado no es un cobro: la deuda seguirá pendiente en la cuenta corriente."}</p>
+          <p className="text-sm">La habitación tiene saldo pendiente. Se trasladarán <strong>${fmtMoney(standaloneAccountCheckout || accountCheckoutOnly || accountCheckoutAttempt ? accountCheckoutAmount : selectedBalance)}</strong> a la cuenta corriente de <strong>{accountCheckoutName}</strong> para cobrar después.</p>
+          <p className="text-sm text-muted-foreground">{standaloneAccountCheckout || accountCheckoutOnly || accountCheckoutAttempt ? "Se registrará el traslado y se realizará el check-out sin emitir otra factura. La deuda seguirá pendiente en la cuenta corriente." : "Se registrará el cierre no fiscal y se realizará el check-out. Este traslado no es un cobro: la deuda seguirá pendiente en la cuenta corriente."}</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAccountCheckoutWarning(false)}>Volver a revisar</Button>
-            <Button onClick={() => { setShowAccountCheckoutWarning(false); void doSubmit(); }} data-testid="confirm-account-checkout">Confirmar traslado y check-out</Button>
+            <Button variant="outline" onClick={() => {setShowAccountCheckoutWarning(false);setStandaloneAccountCheckout(false);}}>Volver a revisar</Button>
+            <Button onClick={() => { setShowAccountCheckoutWarning(false); if(standaloneAccountCheckout || accountCheckoutAttempt)void doAccountCheckout();else void doSubmit(); }} data-testid="confirm-account-checkout">Confirmar traslado y check-out</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
