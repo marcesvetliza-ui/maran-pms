@@ -2507,6 +2507,8 @@ export function ReservationDetailDialog({
     type: "cargo" | "pago"; id: string; expectedDescription?: string; expectedAmount?: string;
   } | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState("");
+  const [anularChargeError, setAnularChargeError] = useState<string | null>(null);
+  useEffect(() => { setAnularChargeError(null); }, [anularTarget?.id, anularTarget?.type]);
   const [anularEmitirNC, setAnularEmitirNC] = useState(false);
   const [anularSinNCPending, setAnularSinNCPending] = useState(false);
   const [invoicingPaymentId, setInvoicingPaymentId] = useState<string | null>(null);
@@ -2837,6 +2839,7 @@ export function ReservationDetailDialog({
   });
 
   const anularChargeMutation = useMutation({
+    onMutate: () => setAnularChargeError(null),
     mutationFn: async ({ id, motivo, expectedDescription, expectedAmount }: {
       id: string; motivo: string; expectedDescription?: string; expectedAmount?: string;
     }) => {
@@ -2871,8 +2874,10 @@ export function ReservationDetailDialog({
         toast({ title: "El cargo ya se anuló", description: "Falta actualizar el folio. Actualizá la pantalla antes de continuar." });
       }
     },
-    onError: (error: any) => {
-      toast({ title: "Error", description: parseApiError(error) || "No se pudo anular el cargo", variant: "destructive" });
+    onError: (error: any, variables) => {
+      const message = parseApiError(error) || "No se pudo anular el cargo";
+      if (anularTarget?.type === "cargo" && anularTarget.id === variables.id) setAnularChargeError(message);
+      toast({ title: "Error", description: message, variant: "destructive" });
       console.error("Anular charge error:", error);
     },
   });
@@ -5444,6 +5449,7 @@ export function ReservationDetailDialog({
                 data-testid="input-motivo-anulacion"
               />
             </div>
+            {anularTarget?.type === "cargo" && anularChargeError && <p role="alert" className="text-sm text-destructive" data-testid="charge-void-error">{anularChargeError}</p>}
             <DialogFooter>
               <Button variant="outline" onClick={() => { setAnularTarget(null); setMotivoAnulacion(""); setAnularEmitirNC(false); }}>
                 Cancelar

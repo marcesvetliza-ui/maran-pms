@@ -48,6 +48,7 @@ it('retains the reason and balance when the server rejects cancellation',async()
  await user.type(screen.getByLabelText('Motivo obligatorio'),'Revisar cargo');await user.click(screen.getByRole('button',{name:'Confirmar anulación'}));
  await waitFor(()=>expect(state.toast).toHaveBeenCalledWith(expect.objectContaining({description:'El cargo ya tiene un comprobante asociado.',variant:'destructive'})));
  expect(screen.getByLabelText('Motivo obligatorio')).toHaveValue('Revisar cargo');expect(voided).toBe(false);
+ expect(screen.getByTestId('prefactura-charge-void-error')).toHaveTextContent('El cargo ya tiene un comprobante asociado.');
 });
 it('provides a working description-only pencil for restaurant sources without changing the original consumption',async()=>{
  const user=await open();await user.click(await screen.findByTestId('button-edit-charge-description-restaurant-charge'));

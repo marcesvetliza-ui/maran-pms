@@ -2033,10 +2033,16 @@ export function registerReservationsRoutes(app: Express) {
           return res.status(403).json({ error: "No se puede anular cargos de una reserva cerrada" });
         }
       }
-      if (existing.reservationId && await manualChargeHasSourceLedger(existing.id)) {
+      if (existing.reservationId) {
+        // The safe mutation also proves legacy Early/Late supplements without a
+        // linked source movement; an existing ledger is not a prerequisite.
         const updated = await anularManualChargeLegacy(
           existing.reservationId,
-          { id: existing.id, description: existing.description, amount: existing.amount },
+          {
+            id: existing.id,
+            description: req.body.expectedDescription ?? existing.description,
+            amount: req.body.expectedAmount ?? existing.amount,
+          },
           motivoAnulacion,
           {
             id: String((req as any).user?.id ?? ""),
@@ -2045,9 +2051,6 @@ export function registerReservationsRoutes(app: Express) {
           },
         );
         return res.json(updated);
-      }
-      if (existing.reservationId) {
-        return res.status(409).json({ error: "Los cargos de reserva solo pueden anularse desde la acción segura de extras de prefactura." });
       }
       const [updated] = await db.update(charges)
         .set({ status: "anulado", anuladoPor: anuladoPor || null, motivoAnulacion, anuladoAt: new Date() })
