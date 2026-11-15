@@ -1,8 +1,10 @@
 import "./housekeeping.css";
 import {loadHousekeepingBlockConflicts} from "@/lib/housekeeping-block-conflicts";
-import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
+import {useHousekeepingStatus} from "@/components/use-housekeeping-status";
+import HousekeepingDailyReportPage from "./housekeeping-daily-report";
 import {hasDailyHousekeepingPending} from "@shared/housekeepingService";
-import {HousekeepingStaffAvailability} from "@/components/housekeeping-staff-availability";
+import {HousekeepingShift} from "@/components/housekeeping-shift";
+import {useHousekeepingDay} from "@/hooks/use-housekeeping-day";
 import { formatDisplayDate } from "@shared/date-display";
 import {HousekeepingPreparationControl} from "@/components/housekeeping-preparation";
 import {HousekeepingPlanningView} from "@/components/housekeeping-planning";
@@ -144,7 +146,7 @@ const priorityConfig: Record<Priority, { label: string; className: string }> = {
   urgent: { label: "Urgente", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
 };
 
-function RoomCard({ 
+export function RoomCard({
   room, 
   tasks, 
   isOccupied,
@@ -282,7 +284,10 @@ function RoomCard({
                 <Badge className={`${taskStatusConfig[task.status as TaskStatus].className} text-xs`}>
                   {taskTypeLabels[task.taskType as TaskType] || task.taskType}
                 </Badge>
-                {task.status === "pending" && (
+                {task.status === "in_progress" && task.scheduledDate !== getArgentinaToday() && (
+                  <span className="text-xs text-amber-700">En curso desde {formatDisplayDate(task.scheduledDate)}</span>
+                )}
+                {task.status === "pending" && !pendingTasks.some(t => t.status === "in_progress") && (
                   <Button 
                     size="sm" 
                     variant="ghost" 
@@ -1091,7 +1096,7 @@ interface PendingAction {
 }
 
 // ─── MobileRoomCard ───────────────────────────────────────────────────────────
-function MobileRoomCard({
+export function MobileRoomCard({
   room,
   tasks,
   checkoutToday,
@@ -1215,6 +1220,9 @@ function MobileRoomCard({
             {currentTask.notes && (
               <p className="text-xs mt-0.5 opacity-80 whitespace-pre-wrap break-words">{currentTask.notes}</p>
             )}
+            {activeTask && activeTask.scheduledDate !== getArgentinaToday() && (
+              <p className="text-xs mt-1">Tarea sin finalizar desde {formatDisplayDate(activeTask.scheduledDate)}. Finalizala antes de iniciar otra limpieza.</p>
+            )}
           </div>
         )}
 
@@ -1316,12 +1324,7 @@ function MobileRoomCard({
           <span className="text-xs text-muted-foreground w-full mb-0.5">Cambiar estado:</span>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `Disponible — Hab. ${room.roomNumber}`,
-              description: "¿Marcar esta habitación como disponible?",
-              confirmLabel: "Sí, disponible",
-              fn: () => onUpdateStatus(room.id, "available"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "available")}
             disabled={isUpdating || room.status === "available"}
             data-testid={`button-set-available-${room.id}`}
           >
@@ -1329,12 +1332,7 @@ function MobileRoomCard({
           </button>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `Limpia ocupada — Hab. ${room.roomNumber}`,
-              description: "¿Marcar esta habitación como limpia con huésped?",
-              confirmLabel: "Sí",
-              fn: () => onUpdateStatus(room.id, "limpia_ocupada"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "limpia_ocupada")}
             disabled={isUpdating || room.status === "limpia_ocupada"}
             data-testid={`button-set-limpia-ocupada-${room.id}`}
           >
@@ -1342,12 +1340,7 @@ function MobileRoomCard({
           </button>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `No molestar — Hab. ${room.roomNumber}`,
-              description: "¿Activar estado No molestar?",
-              confirmLabel: "Sí",
-              fn: () => onUpdateStatus(room.id, "no_molestar"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "no_molestar")}
             disabled={isUpdating || room.status === "no_molestar"}
             data-testid={`button-set-no-molestar-${room.id}`}
           >
@@ -1355,12 +1348,7 @@ function MobileRoomCard({
           </button>
           <button
             className="text-xs px-2 py-1.5 rounded-md bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium disabled:opacity-40"
-            onClick={() => confirm({
-              title: `Sucia — Hab. ${room.roomNumber}`,
-              description: "¿Marcar esta habitación como sucia?",
-              confirmLabel: "Sí, sucia",
-              fn: () => onUpdateStatus(room.id, "dirty"),
-            })}
+            onClick={() => onUpdateStatus(room.id, "dirty")}
             disabled={isUpdating || room.status === "dirty"}
             data-testid={`button-set-dirty-${room.id}`}
           >
@@ -1460,15 +1448,17 @@ export default function Housekeeping() {
     refetchInterval: 30000,
   });
 
-  const today = getArgentinaToday();
+  const today = useHousekeepingDay();
   const { data: tasks, isLoading: tasksLoading } = useQuery<HousekeepingTaskWithRoom[]>({
     queryKey: ["/api/housekeeping", today],
     queryFn: () =>
-      fetch(`/api/housekeeping?date=${today}`, { credentials: "include" }).then(r => r.json()),
+      apiRequest("GET", `/api/housekeeping?date=${today}&includeActive=true`).then(r => r.json()),
+    refetchInterval: 30000,
   });
 
   const { data: hkStaff = [] } = useQuery<any[]>({
-    queryKey: ["/api/housekeeping/staff"],
+    queryKey: ["/api/housekeeping/staff",today],
+    queryFn:()=>apiRequest("GET",`/api/housekeeping/staff?date=${today}`).then(r=>r.json()),
     enabled: isSupervisor,
   });
 
@@ -1592,7 +1582,7 @@ export default function Housekeeping() {
     },
   });
 
-  const updateRoomStatusMutation = useRoomStatusCorrection(rooms || []);
+  const updateRoomStatusMutation = useHousekeepingStatus(rooms || []);
 
   const createTaskMutation = useMutation({
     mutationFn: (data: { roomId: string; taskType: string; priority: string; notes?: string; scheduledDate: string }) => 
@@ -1729,16 +1719,6 @@ export default function Housekeeping() {
     onError: (error: Error) => toast({ title: "No se pudo iniciar", description: parseApiError(error), variant: "destructive" }),
   });
 
-  const assignMutation = useMutation({
-    mutationFn: (data: { roomId: string; assignedTo: string | null; date: string }) =>
-      apiRequest("POST", "/api/housekeeping/assign", data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/housekeeping"] });
-      toast({ title: "Asignación guardada" });
-    },
-    onError: () => toast({ title: "Error al asignar", variant: "destructive" }),
-  });
-
   const floors = rooms ? Array.from(new Set(rooms.map(r => r.floor).filter((f): f is number => f != null))).sort((a, b) => a - b) : [];
   
   const filteredRooms = rooms?.filter(room => {
@@ -1850,7 +1830,7 @@ export default function Housekeeping() {
       </div>
 
       {isSupervisor&&<HousekeepingTaskManager rooms={rooms||[]} staff={hkStaff} open={taskPlannerOpen} initialRoomIds={plannerRooms} initialDate={plannerDate} initialTask={plannerTask} onOpenChange={value=>{setTaskPlannerOpen(value);if(!value){setPlannerRooms([]);setPlannerDate(undefined);setPlannerTask(null);}}}/>}
-      <Tabs defaultValue="rooms">
+      <Tabs defaultValue="rooms" className="hk-main-tabs">
         <TabsList className="flex h-auto flex-wrap justify-start gap-1">
           <TabsTrigger value="rooms">Habitaciones · Hoy</TabsTrigger>
           {isSupervisor&&<TabsTrigger value="planning">Planificación por fecha</TabsTrigger>}
@@ -1883,10 +1863,19 @@ export default function Housekeeping() {
             )}
           </TabsTrigger>
           <TabsTrigger value="inventory" data-testid="tab-housekeeping-inventory" className="gap-1"><Boxes className="h-4 w-4" />Inventario Housekeeping</TabsTrigger>
+          {hasPermission("sidebar:/housekeeping-daily-report") && (
+            <TabsTrigger value="daily-report" data-testid="tab-housekeeping-daily-report" className="gap-1">
+              <ClipboardCheck className="h-4 w-4" />
+              Planilla Diaria
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {isSupervisor&&<TabsContent value="planning"><HousekeepingPlanningView onManageBlocks={date=>{setSelectedRoomId(null);setBlockEnabled(false);setEditingBlockId(null);setBlockFrom(date);setBlockTo(date);setBlockNotes("");setBlocksDialogOpen(true);}} onCreateTask={(roomId,date)=>{setPlannerRooms(roomId ? [roomId] : []);setPlannerTask(null);setPlannerDate(date);setTaskPlannerOpen(true);}} onEditTask={task=>{setPlannerTask(task);setPlannerRooms([task.roomId]);setPlannerDate(task.scheduledDate);setTaskPlannerOpen(true);}}/></TabsContent>}
         <TabsContent value="inventory"><HousekeepingInventory /></TabsContent>
+        {hasPermission("sidebar:/housekeeping-daily-report") && (
+          <TabsContent value="daily-report"><HousekeepingDailyReportPage /></TabsContent>
+        )}
 
         <TabsContent value="rooms">
           <div className="space-y-6 mt-2">
@@ -2151,112 +2140,7 @@ export default function Housekeeping() {
 
         {isSupervisor && (
         <TabsContent value="turno">
-          <HousekeepingStaffAvailability />
-          <div className="mt-4 space-y-6">
-            {/* ── Cards por mucama ── */}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <h3 className="md:col-span-2 xl:col-span-3 text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                <Users className="h-4 w-4" /> Personal asignado hoy
-              </h3>
-              {hkStaff.length === 0 && (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  No hay mucamas/gobernanta registradas aún. Creá usuarios con perfil Housekeeping o Gobernanta.
-                </p>
-              )}
-              {hkStaff.map((staff: any) => {
-                const staffTasks = (tasks ?? []).filter(t => t.assignedTo === staff.id);
-                const roleLabel: Record<string, string> = { housekeeping: "Mucama", gobernanta: "Gobernanta", responsable_area: "Resp. Área" };
-                return (
-                  <Card key={staff.id} className="rounded-xl shadow-sm border">
-                    <CardContent className="p-4">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <span className="text-sm font-bold text-primary">{staff.fullName.charAt(0).toUpperCase()}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-medium text-sm truncate">{staff.fullName}</p>
-                            <Badge variant="outline" className="text-xs shrink-0">{roleLabel[staff.role] ?? staff.role}</Badge>
-                          </div>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            {staffTasks.length === 0 ? "Sin habitaciones asignadas" : `${staffTasks.length} hab. asignada${staffTasks.length !== 1 ? "s" : ""}`}
-                          </p>
-                          {staffTasks.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {staffTasks.map(t => (
-                                <div key={t.id} className="flex items-center gap-1 bg-muted rounded px-2 py-0.5 text-xs">
-                                  <span className="font-medium">Hab. {t.room?.roomNumber}</span>
-                                  <button
-                                    className="text-muted-foreground hover:text-destructive ml-0.5"
-                                    title="Desasignar"
-                                    onClick={() => assignMutation.mutate({ roomId: t.roomId, assignedTo: null, date: today })}
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-
-            {/* ── Habitaciones a asignar ── */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                <Sparkles className="h-4 w-4" /> Habitaciones del turno
-              </h3>
-              {rooms
-                ?.filter(r => ["dirty", "cleaning", "occupied"].includes(r.status))
-                .sort((a, b) => parseInt(a.roomNumber) - parseInt(b.roomNumber))
-                .map(room => {
-                  const task = (tasks ?? []).find(t => t.roomId === room.id);
-                  const assignedStaff = task?.assignedTo ? hkStaff.find((s: any) => s.id === task.assignedTo) : null;
-                  const statusLabel: Record<string, string> = { dirty: "Sucia", cleaning: "Limpiando", occupied: "Ocupada" };
-                  const statusColor: Record<string, string> = { dirty: "bg-orange-100 text-orange-700", cleaning: "bg-yellow-100 text-yellow-700", occupied: "bg-blue-100 text-blue-700" };
-                  return (
-                    <div key={room.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm">Hab. {room.roomNumber}</span>
-                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${statusColor[room.status] ?? "bg-muted text-muted-foreground"}`}>
-                            {hasDailyHousekeepingPending(room.status,room.housekeepingServiceDate,today) ? "Ocupada · limpieza pendiente" : statusLabel[room.status] ?? room.status}
-                          </span>
-                          {checkoutRoomIds.has(room.id) && (
-                            <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Checkout hoy</span>
-                          )}
-                        </div>
-                        {assignedStaff && (
-                          <p className="text-xs text-muted-foreground mt-0.5">Asignada a: <strong>{assignedStaff.fullName}</strong></p>
-                        )}
-                      </div>
-                      <Select
-                        value={task?.assignedTo ?? "__none__"}
-                        onValueChange={(val) => assignMutation.mutate({ roomId: room.id, assignedTo: val === "__none__" ? null : val, date: today })}
-                        disabled={assignMutation.isPending}
-                      >
-                        <SelectTrigger className="w-36 h-8 text-xs" data-testid={`select-assign-${room.id}`}>
-                          <SelectValue placeholder="Asignar a…" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">— Sin asignar —</SelectItem>
-                          {hkStaff.map((s: any) => (
-                            <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  );
-                })}
-              {rooms && rooms.filter(r => ["dirty", "cleaning", "occupied"].includes(r.status)).length === 0 && (
-                <p className="text-sm text-muted-foreground py-6 text-center">No hay habitaciones que requieran limpieza hoy.</p>
-              )}
-            </div>
-          </div>
+          <HousekeepingShift rooms={rooms || []} />
         </TabsContent>
         )}
 

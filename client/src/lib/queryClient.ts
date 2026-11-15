@@ -1,5 +1,6 @@
 import { formatDisplayDate } from "@shared/date-display";
 import {confirmHousekeepingMove} from "./confirm-housekeeping-move";
+import { assertSessionWriteAllowed } from "./session-write-guard";
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 export function handleSessionExpired() {
@@ -38,6 +39,7 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  assertSessionWriteAllowed(method);
   const res = await fetch(url, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},

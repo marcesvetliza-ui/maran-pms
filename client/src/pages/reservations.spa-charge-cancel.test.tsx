@@ -42,4 +42,5 @@ it("keeps the cancellation dialog and reason when rejected and shows a readable 
  fail=true;const user=await openCancellation();await user.type(screen.getByTestId("input-motivo-anulacion"),"Error de carga");await user.click(screen.getByTestId("button-confirm-anular"));
  await waitFor(()=>expect(toast).toHaveBeenCalledWith(expect.objectContaining({description:"El cargo ya tiene un comprobante asociado.",variant:"destructive"})));
  expect(screen.getByTestId("input-motivo-anulacion")).toHaveValue("Error de carga");expect(cancelled).toBe(false);
+ expect(screen.getByTestId('charge-void-error')).toHaveTextContent('El cargo ya tiene un comprobante asociado.');
 });

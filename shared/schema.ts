@@ -445,6 +445,33 @@ export type HousekeepingTaskStatus = "pending" | "in_progress" | "completed" | "
 export type HousekeepingTaskType = "checkout_clean" | "stayover_clean" | "deep_clean" | "inspection" | "turndown" | "maintenance_prep";
 export type HousekeepingPriority = "low" | "normal" | "high" | "urgent";
 
+// Operational staff are not login accounts. Extras are scoped to one service day.
+export const housekeepingOperationalStaff = pgTable("housekeeping_operational_staff", {
+  id: varchar("id").primaryKey(),
+  fullName: text("full_name").notNull(),
+  kind: text("kind").$type<"permanent" | "extra">().notNull(),
+  serviceDate: text("service_date"),
+  createdBy: varchar("created_by").notNull(),
+  createdAt: timestamp("created_at", {withTimezone: true}).notNull().defaultNow(),
+}, table => [
+  check("housekeeping_operational_staff_kind_check",sql`${table.kind} IN ('permanent','extra')`),
+  check("housekeeping_operational_staff_day_check",sql`(${table.kind}='extra' AND ${table.serviceDate} IS NOT NULL) OR (${table.kind}='permanent' AND ${table.serviceDate} IS NULL)`),
+]);
+export const housekeepingOperationalAvailability = pgTable("housekeeping_operational_availability", {
+  userId: varchar("user_id").notNull().references(() => housekeepingOperationalStaff.id),
+  scheduledDate: text("scheduled_date").notNull(),
+  status: text("status").notNull(),
+  shift: text("shift"),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
+  notes: text("notes").notNull().default(""),
+  updatedBy: varchar("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", {withTimezone: true}).notNull().defaultNow(),
+}, table => [
+  primaryKey({columns: [table.userId, table.scheduledDate]}),
+  check("housekeeping_operational_availability_status_check",sql`${table.status} IN ('working','day_off','absent')`),
+]);
+
 export const housekeepingStaffAvailability = pgTable("housekeeping_staff_availability", {
   userId: varchar("user_id").notNull().references(() => systemUsers.id),
   scheduledDate: text("scheduled_date").notNull(),

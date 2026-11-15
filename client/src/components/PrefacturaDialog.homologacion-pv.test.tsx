@@ -234,7 +234,10 @@ describe("PrefacturaDialog — Punto de venta en homologación", () => {
 
   it("permite corregir explícitamente un intento que el servidor confirma que no salió", async () => {
     const operation = crypto.randomUUID();
-    const original = { reservaId: RESERVATION_ID, tipoComprobante: "FB", puntoVentaOverride: 21, creditOperationId: operation, cliente: { razonSocial: "Marcelo", condicionIva: "Consumidor Final" } };
+    const original = { reservaId: RESERVATION_ID, tipoComprobante: "FB", puntoVentaOverride: 21, creditOperationId: operation,
+      sourceChargeIds: ["accommodation"], sourceChargeAmounts: { accommodation: 70000 },
+      items: [{ descripcion: "Alojamiento", subtotal: 70000 }],
+      cliente: { razonSocial: "Marcelo", condicionIva: "Consumidor Final" } };
     sessionStorage.setItem(`prefactura-pending:${RESERVATION_ID}`, JSON.stringify({ invoiceRequest: original, invoice: null, payments: [], checkoutRequested: true }));
     const base = buildFetchMock();
     fetchMock = vi.fn(async (url, options) => {

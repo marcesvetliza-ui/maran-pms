@@ -86,6 +86,27 @@ export function editNights(existing: PricedNight[], edit: NightlyEdit): PricedNi
   return result;
 }
 
+/** Extending adds dates at the end while keeping every contracted night intact. */
+export function isStayExtension(
+  before: {checkInDate:string;checkOutDate:string;nightlyPricing?:PricedNight[] | null},
+  after: {checkInDate:string;checkOutDate:string;nightlyPricing?:PricedNight[] | null},
+): boolean {
+  try {
+    if(before.checkInDate!==after.checkInDate || after.checkOutDate<=before.checkOutDate ||
+      !Array.isArray(before.nightlyPricing) || !Array.isArray(after.nightlyPricing))return false;
+    const oldDates=calendarNights(before.checkInDate,before.checkOutDate);
+    const newDates=calendarNights(after.checkInDate,after.checkOutDate);
+    if(before.nightlyPricing.length!==oldDates.length || after.nightlyPricing.length!==newDates.length ||
+      before.nightlyPricing.some((night,i)=>night.date!==oldDates[i]) ||
+      after.nightlyPricing.some((night,i)=>night.date!==newDates[i]))return false;
+    nightlyTotal(before.nightlyPricing);nightlyTotal(after.nightlyPricing);
+    return before.nightlyPricing.every((night,i)=>{
+      const proposed=after.nightlyPricing![i];
+      return proposed.date===night.date && proposed.rateCents===night.rateCents && proposed.discountCents===night.discountCents;
+    });
+  }catch{return false;}
+}
+
 /** Used only during creation; refuses unexplained totals. */
 export function initialNightlyPricing(reservation: Record<string, any>): PricedNight[] {
   const dates = calendarNights(reservation.checkInDate, reservation.checkOutDate);

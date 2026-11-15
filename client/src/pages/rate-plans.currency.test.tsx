@@ -26,7 +26,7 @@ it('creates a USD plan from the ordinary pilot form, keeping the entered amount'
 it('keeps ARS as the creation default and offers no USD selector outside pilot', () => {
   state.pilot = false; show();
   expect(screen.queryByRole('combobox', { name: 'Moneda' })).toBeNull();
-  expect(screen.getByText('ARS')).toBeTruthy();
+  expect(screen.getByText('ARS — Peso Argentino')).toBeTruthy();
 });
 it('preserves an existing USD plan when saving other fields', async () => {
   show({ id: 'usd-existing', name: 'USD BAR', roomTypeId: 'premium', baseRate: '100', currency: 'USD' });

@@ -12,7 +12,7 @@ it('finds invoice validation, existing concurrency assertions, mock scope, clien
  expect(reads.some(read=>read.path==='server/billing/routes.ts' && read.content.includes('saldo suficiente para facturar'))).toBe(true);
  expect(reads.some(read=>read.path==='server/tests/folio-invoice-concurrency.test.ts' && read.content.includes('vi.mock("../db"'))).toBe(true);
  expect(reads.some(read=>read.path==='server/tests/folio-invoice-concurrency.test.ts' && read.content.includes('toEqual([201, 409])') && read.content.includes('toHaveLength(1)'))).toBe(true);
- expect(reads.some(read=>read.path==='client/src/lib/prefactura-submission.ts' && read.content.includes('attempt.invoice = await post') && read.content.includes('for (const payment of attempt.payments)'))).toBe(true);
+ expect(reads.some(read=>read.path==='client/src/lib/prefactura-submission.ts' && read.content.includes('const invoice = await post') && read.content.includes('attempt.invoice = invoice') && read.content.includes('for (const payment of attempt.payments)'))).toBe(true);
  expect(reads.some(read=>read.path==='client/src/components/PrefacturaDialog.tsx' && read.content.includes('setSubmitError(parseApiError(err))'))).toBe(true);
  expect(reads.every(read=>source.validates(read))).toBe(true);
 });

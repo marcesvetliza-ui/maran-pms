@@ -7,8 +7,8 @@ import { storage } from "../db-storage";
 import { db, withDatabaseTransaction } from "../db";
 import { requireAuth, requirePermission } from "../auth";
 import { canEditAccommodation } from "../accommodationPermissions";
-import { accommodationFiscalStatus, withNightlyWriter, withReservationFinancialLock } from "../nightlyPricingGuard";
-import { amountString, calendarNights, editNights, nightlyTotal, pricingError, type PricedNight } from "@shared/nightlyPricing";
+import { accommodationFiscalStatus, withNightlyWriter, withStayExtensionWriter, withReservationFinancialLock } from "../nightlyPricingGuard";
+import { amountString, calendarNights, editNights, nightlyTotal, pricingError, isStayExtension, type PricedNight } from "@shared/nightlyPricing";
 
 const ratesSchema = z.object({
   kind: z.literal("rates"), dates: z.array(z.string()).min(1).max(730),
@@ -35,12 +35,14 @@ async function getState(id: string) {
   const reservation = await storage.getReservation(id);
   if (!reservation) pricingError("Reserva no encontrada.", 404);
   const fiscal = await accommodationFiscalStatus(id, Math.round(Number(reservation.totalRoomAmount || 0) * 100));
-  return { reservation, blocked: fiscal.blocked, fiscal };
+  const canExtend=reservation.pricingScheme==='nightly_v1' && Array.isArray(reservation.nightlyPricing) &&
+    !['checked_out','cancelled','no_show'].includes(reservation.status) && !fiscal.extensionBlocked;
+  return { reservation, blocked: fiscal.blocked, fiscal, canExtend };
 }
 async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
-  const { reservation, blocked } = await getState(id);
+  const { reservation, blocked, fiscal } = await getState(id);
   if (reservation.pricingScheme !== "nightly_v1" || !reservation.nightlyPricing) pricingError("Reserva anterior: conservá su circuito de precios original.", 409);
-  if (blocked) pricingError(blocked, 409);
+  if(blocked && (input.edit.kind!=='stay' || fiscal.extensionBlocked))pricingError(blocked,409);
   if (["checked_out", "cancelled", "no_show"].includes(reservation.status)) pricingError("La reserva está cerrada.", 409);
   if (input.revision !== reservation.pricingRevision) pricingError("Los precios cambiaron. Actualizá el folio antes de continuar.", 409);
   const before = reservation.nightlyPricing;
@@ -51,6 +53,9 @@ async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
   const after = input.edit.kind === "package" ? packageProposal!.after : editNights(before, input.edit);
   const checkIn = input.edit.kind === "stay" ? input.edit.checkIn : reservation.checkInDate;
   const checkOut = input.edit.kind === "stay" ? input.edit.checkOut : reservation.checkOutDate;
+  const extensionOnly=!!blocked && input.edit.kind==='stay' && !fiscal.extensionBlocked &&
+    isStayExtension(reservation as any,{checkInDate:checkIn,checkOutDate:checkOut,nightlyPricing:after});
+  if(blocked && !extensionOnly)pricingError(blocked,409);
   if (input.edit.kind === "stay") {
     if (reservation.status === "checked_in" && checkIn !== reservation.checkInDate) pricingError("No cambies el ingreso de una estadía ya iniciada.", 409);
     if (await storage.checkOverbooking(reservation.roomId, checkIn, checkOut, id)) pricingError("La habitación no está disponible en las fechas propuestas.", 409);
@@ -64,7 +69,7 @@ async function buildProposal(id: string, input: z.infer<typeof requestSchema>) {
       });
     }
   }
-  return { before, after, checkIn, checkOut, packageProposal, revision: reservation.pricingRevision,
+  return { before, after, checkIn, checkOut, packageProposal, extensionOnly, revision: reservation.pricingRevision,
     previousTotalCents: nightlyTotal(before), newTotalCents: nightlyTotal(after),
     differenceCents: nightlyTotal(after) - nightlyTotal(before),
     removed: before.filter(n => !after.some(a => a.date === n.date)),
@@ -133,7 +138,8 @@ export function registerNightlyPricingRoutes(app: Express) {
           _inventoryContextGroupId: (proposal.reservation as any).groupId,
           _inventoryOverrideTentativeGroupWarning: input.overrideTentativeGroupWarning,
         });
-        const saved = await withNightlyWriter(input.revision, () => storage.updateReservation(req.params.id, patch));
+        const writer=proposal.extensionOnly?withStayExtensionWriter:withNightlyWriter;
+        const saved = await writer(input.revision, () => storage.updateReservation(req.params.id, patch));
         const details = { before: proposal.before, after: proposal.after, reason: reason || null,
           previousTotal: amountString(proposal.previousTotalCents), newTotal: amountString(proposal.newTotalCents),
           package: proposal.packageProposal ? {id:proposal.packageProposal.packageId,name:proposal.packageProposal.packageName,totalCents:proposal.packageProposal.packageTotalCents} : null,
