@@ -1,7 +1,7 @@
 name: Verificar revisión publicada en Xenia
 on:
   push:
-    branches: [feature/xenia-channex-staging]
+    branches: [feature/xenia-support-approval-foundation]
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

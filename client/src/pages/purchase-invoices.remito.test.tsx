@@ -180,7 +180,11 @@ describe("InvoiceDialog — Remito", () => {
     let payload: any;
     vi.stubGlobal("fetch", vi.fn(async (url: any, options?: RequestInit) => {
       if (options?.method === "PATCH") { payload = JSON.parse(String(options.body)); return new Response(JSON.stringify({ id: 99 }), { status: 200 }); }
-      if (String(url).endsWith("/api/purchase-invoices/99")) return new Response(JSON.stringify({ articleLines: [{ id: 1, item_name: "Artículo recibido", quantity: "2", unit_price: "1200", line_total: "2400" }], ordenesPago: [] }), { status: 200 });
+      if (String(url).endsWith("/api/purchase-invoices/99")) return new Response(JSON.stringify({
+        id: 99, tipo_comprobante: "REMITO", numero_comprobante: "R99", fecha_emision: "2026-11-03",
+        supplier_id: 1, estado: "registrado",
+        articleLines: [{ id: 1, item_name: "Artículo recibido", quantity: "2", unit_price: "1200", line_total: "2400" }], ordenesPago: [],
+      }), { status: 200 });
       return new Response(JSON.stringify([]), { status: 200 });
     }));
     const user = userEvent.setup();

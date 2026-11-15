@@ -352,6 +352,7 @@ export interface IStorage {
   createPayment(payment: InsertPayment): Promise<Payment>;
   voidReservationPaymentAtomic(paymentId: string, operator: string, reason: string): Promise<{ alreadyVoided: boolean; paymentId: string }>;
   createReservationPaymentWithLedger(input: {
+    invoiceCollection?: {invoiceId:number;acknowledgeUnassignedAdvance:boolean;userId?:string};
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;
     registeredBy?: string;

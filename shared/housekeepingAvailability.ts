@@ -42,6 +42,9 @@ export type StaffAvailability = z.infer<typeof availabilitySchema> & {
   fullName: string;
   updatedAt?: string;
   taskCount?: number;
+  kind?: "permanent" | "extra";
+  serviceDate?: string | null;
+  source?: "user" | "operational";
 };
 export function availabilityDescription(v?: StaffAvailability) {
   if (!v) return "Sin completar";

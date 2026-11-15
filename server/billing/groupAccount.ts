@@ -8,9 +8,11 @@ import { db } from '../db';
 import { requireAuth, requirePermission } from '../auth';
 import { storage } from '../db-storage';
 import { getGroupInvoiceSnapshot, parseGroupInvoiceSourceAmounts } from './groupInvoiceScope';
-import { withFinancialScopeLock } from '../nightlyPricingGuard';
+import { withFinancialScopeLock, withReservationFinancialLock } from '../nightlyPricingGuard';
 import { groupAdvanceReceipt } from './groupAdvanceReceipt';
 import { allocateGroupMoney, groupMoneyCents } from '@shared/groupAccount';
+import {isUncollectedRoomInvoice} from './reservationInvoiceCollection';
+import {getArgentinaToday} from '../db-storage';
 const fail = (message: string, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 const parse = (v: any) => { try {
     return typeof v === 'string' ? JSON.parse(v) : v;
@@ -69,10 +71,28 @@ export async function groupAccountSnapshot(reservationId: string) {
         charges:chargeCents/100,paid:paidCents/100,balance:Math.max(0,chargeCents-paidCents)/100,
         pendingInvoice:fiscalRequiresReview?null:sources.reduce((n,s)=>n+Math.round(s.available*100),0)/100,
         fiscalRequiresReview,groupCoverage,advances,reviewReceipts,
+        collectibleInvoices:(invoices.rows as any[]).filter(invoice=>invoice.reserva_id===reservationId&&isUncollectedRoomInvoice(invoice)).map(invoice=>({id:invoice.id,type:invoice.tipo_comprobante,pointOfSale:invoice.punto_venta,number:invoice.numero,amount:Number(invoice.monto_total)})),
         unassigned:advances.reduce((n,p)=>n+Math.round(p.available*100),0)/100,
     };
 }
 export function registerGroupAccountRoutes(app: Express) {
+    app.post('/api/reservations/:id/invoices/:invoiceId/collect', requireAuth, requirePermission('sidebar:/reservations'), async(req,res)=>{
+        try{
+            const invoiceId=Number(req.params.invoiceId);
+            if(!Number.isSafeInteger(invoiceId)||invoiceId<=0)throw fail('Factura inválida.',400);
+            if(!['efectivo','transferencia','tarjeta_debito','tarjeta_credito','mercadopago'].includes(req.body.method))throw fail('Elegí un medio de pago directo.',400);
+            const body={...req.body,reservationId:req.params.id,invoiceId};
+            const identity=parseReservationPaymentRequest(body,String(req.user?.id||req.user?.username||''));
+            if(!identity)throw fail('El cobro requiere una clave de operación.',400);
+            const amount=(groupMoneyCents(body.amount)/100).toFixed(2);
+            const payment=await withReservationFinancialLock(req.params.id,()=>storage.createReservationPaymentWithLedger({
+                paymentRequest:identity,invoiceCollection:{invoiceId,acknowledgeUnassignedAdvance:body.acknowledgeUnassignedAdvance===true,userId:req.user?.id},
+                payment:{reservationId:req.params.id,amount,method:body.method,date:getArgentinaToday(),reference:body.reference||null,notes:`Cobro de factura emitida #${invoiceId}`},
+                sourceLabel:`Cobro de factura emitida #${invoiceId}`,registeredBy:req.user?.username,
+            }));
+            res.status(payment.paymentRequestReplayed?200:201).json(payment);
+        }catch(e:any){res.status(e.statusCode||500).json({error:e.message,notApplied:e.notApplied===true});}
+    });
     app.get('/api/reservations/:id/group-account', requireAuth, requirePermission('sidebar:/reservations'), async (req, res) => {
         try {
             res.json(await groupAccountSnapshot(req.params.id));

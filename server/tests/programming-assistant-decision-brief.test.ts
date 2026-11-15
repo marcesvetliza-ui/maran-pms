@@ -50,7 +50,7 @@ it("supplies source-backed decision paths even when the author omits the helper 
   expect(packet.checks.map((c:any)=>c.id)).toEqual(["capacity","discard","identity","collection"]);
   expect(packet.checks.every((c:any)=>c.evidence && !c.missing)).toBe(true);
   const code=packet.readings.map((r:any)=>r.content).join("\n");
-  for(const symbol of ["autorizacion_pendiente","Number(amount)","pending + 0.02","invoice.cae","lookup(invoice)","original.invoiceRequest?.creditOperationId","result?.discarded","newSettlementOperationId()","attempt.invoice = await post","attempt.payments"])
+  for(const symbol of ["autorizacion_pendiente","Number(amount)","pending + 0.02","invoice.cae","lookup(invoice)","original.invoiceRequest?.creditOperationId","result?.discarded","newSettlementOperationId()","const invoice = await post", "attempt.invoice = invoice","attempt.payments"])
     expect(code,symbol).toContain(symbol);
   for(const read of packet.readings)expect(s.validates(read)).toBe(true);
   expect(packet.readings.every((r:any)=>!r.incomplete)).toBe(true);
@@ -90,7 +90,11 @@ it("bounds oversized source lines and labels omitted decision evidence incomplet
   expect(brief!.readings.every(read=>read.incomplete)).toBe(true);
 });
 it("shares the bounded evidence allowance without repeating core code in author citations",async()=>{
-  const s=source(),review=await buildCoverageReview(reviewCases[3].report,s,invoiceConflictChecklist);
+  const s=source(), report=structuredClone(reviewCases[3].report);
+  const brief=await buildDecisionBrief(s,invoiceConflictChecklist);
+  const read=brief!.readings[0];
+  report.evidence=[{path:read.path,start:read.start,end:read.end,explanation:"Lectura compartida con el procedimiento de decisión actual."}];
+  const review=await buildCoverageReview(report,s,invoiceConflictChecklist);
   const raw=[...review.decisionBrief!.readings,...review.citedCode];
   expect(raw.reduce((sum,r)=>sum+r.content.length+1,0)).toBeLessThanOrEqual(16000);
   const keys=raw.flatMap(r=>r.content.split("\n").filter(Boolean).map(line=>`${r.path}:${line.match(/^\d+/)?.[0]}`));

@@ -16,6 +16,7 @@ import { getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
+import { recoverOccupiedFiscalNumber } from "./fiscalSeriesRecovery";
 
 type BillingDatabase = Omit<typeof db, "$client">;
 
@@ -275,6 +276,7 @@ async function getNextInvoiceNumberFromAfip(
   wsfeUrl: string,
   database: BillingDatabase,
   operationId?: string,
+  identity?: FiscalIdentity,
 ): Promise<number> {
   // Defensa en profundidad: este punto ya queda cubierto porque
   // getTokenAuth() (llamado por el único caller, antes de esta función)
@@ -297,8 +299,7 @@ async function getNextInvoiceNumberFromAfip(
     `<ar:PtoVta>${puntoVenta}</ar:PtoVta><ar:CbteTipo>${cbteTipo}</ar:CbteTipo>` +
     `</ar:FECompUltimoAutorizado></soapenv:Body></soapenv:Envelope>`;
 
-  let ultimoAfip: number;
-  try {
+  const lastNumber = async () => { try {
     const resp = await fetch(wsfeUrl, {
       method: "POST",
       headers: {
@@ -308,17 +309,30 @@ async function getNextInvoiceNumberFromAfip(
       body: envelope,
       signal: AbortSignal.timeout(10000),
     });
-    ultimoAfip = await readLastAuthorizedNumber(resp, { pointOfSale: puntoVenta, documentType: cbteTipo });
+    return await readLastAuthorizedNumber(resp, { pointOfSale: puntoVenta, documentType: cbteTipo });
   } catch (error: any) {
     if (error instanceof FiscalNumberLookupError) throw error;
     const timedOut = ["TimeoutError", "AbortError"].includes(error?.name);
     throw new FiscalNumberLookupError(timedOut ? 504 : 502, timedOut ? "tiempo de espera agotado" : "conexión no disponible");
-  }
-  const proximo = ultimoAfip + 1;
+  } };
+  // A verified recovery can change ARCA's last number. Read it again instead
+  // of guessing/skipping the occupied number or trusting the local counter.
+  let proximo = (await lastNumber()) + 1;
   if (operationId) await billingOperationNumber(database, operationId, proximo);
-
-  const occupied = await database.execute(sql`SELECT id,estado,modo_ficticio FROM sales_invoices WHERE tipo_comprobante=${tipo} AND punto_venta=${puntoVenta} AND numero=${proximo} LIMIT 1`);
-  if (occupied.rows[0]?.id) throw Object.assign(new Error(`La numeración ${tipo} PV ${puntoVenta}, número ${proximo}, está ocupada por otro registro. No se solicitó autorización. Administración debe revisar esa serie; no vuelvas a emitir ni adelantes el contador.`), {
+  let occupied = await database.execute(sql`SELECT id,estado,modo_ficticio FROM sales_invoices WHERE tipo_comprobante=${tipo} AND punto_venta=${puntoVenta} AND numero=${proximo} LIMIT 1`);
+  let reason: string | undefined;
+  if (occupied.rows[0]?.id && identity) {
+    const { feCompConsultar } = await import("./wsfevClient");
+    const recovered = await recoverOccupiedFiscalNumber(database, Number(occupied.rows[0].id), identity,
+      (invoice, expected) => feCompConsultar({ tipo, puntoVenta, numero: Number(invoice.numero), cuitEmisor: identity.issuer, token, sign }, identity.environment as "homologacion" | "produccion", expected), operationId);
+    reason = recovered.reason;
+    if (recovered.outcome !== "review") {
+      proximo = (await lastNumber()) + 1;
+      if (operationId) await billingOperationNumber(database, operationId, proximo);
+      occupied = await database.execute(sql`SELECT id,estado,modo_ficticio FROM sales_invoices WHERE tipo_comprobante=${tipo} AND punto_venta=${puntoVenta} AND numero=${proximo} LIMIT 1`);
+    }
+  }
+  if (occupied.rows[0]?.id) throw Object.assign(new Error(`La numeración ${tipo} PV ${puntoVenta}, número ${proximo}, está ocupada por el comprobante interno #${occupied.rows[0].id}. ${reason || "El registro original requiere revisión."} No se solicitó autorización para esta operación. Reintentá la misma operación para verificar su recuperación; no adelantes el contador.`), {
     statusCode: 409, code: "BILLING_NUMBER_CONFLICT", authorizationRequested: false,
     conflictInvoiceId: occupied.rows[0].id, pointOfSale: puntoVenta, documentType: tipo, number: proximo,
   });
@@ -505,11 +519,13 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
     const draft = await db.transaction(async (tx) => {
       await data.beforeDraftInsert?.(tx, values);
       const [inserted] = await tx.insert(salesInvoices).values(values).returning();
+      // The draft and its journal link must survive (or roll back) together.
+      // A restart between these writes must never leave an ownerless number.
+      if (operation) await billingOperationStage(tx, operation.operation_id, "numbered", inserted.id);
       return inserted;
     });
     pendingInvoice = draft;
     if (operation) {
-      await billingOperationStage(db, operation.operation_id, "numbered", draft.id);
       operation.invoice_id = draft.id;
     }
     return draft;
@@ -569,7 +585,7 @@ async function emitirFacturaUnlocked(data: NewInvoiceData, config: Awaited<Retur
     // Número sincronizado con AFIP (evita desfasaje por uso previo de modo ficticio)
     if (!pendingInvoice) {
       numero = await getNextInvoiceNumberFromAfip(
-        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl,db,operation?.operation_id
+        data.tipoComprobante, puntoVenta, token, sign, cuitAuth, wsfeUrl,db,operation?.operation_id,fiscalIdentity
       );
     }
 

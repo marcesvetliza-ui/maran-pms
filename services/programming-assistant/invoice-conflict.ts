@@ -17,7 +17,7 @@ export async function orientInvoiceConflict(source:CodeSource) {
  }
  if(files.includes('client/src/lib/prefactura-submission.ts')){
   const run=(await source.search('async run(', 'client/src/lib/prefactura-submission.ts')).matches[0];
-  if(run)reads.push(await source.read(run.path,run.line,run.line+27));
+  if(run)reads.push(await source.read(run.path,run.line,run.line+40));
  }
  for(const symbol of ['withReservationInvoiceLock','withInvoiceAdvisoryLock']) {
   const lock=await source.inspectSymbol(symbol,{maxDefinitions:1,maxTests:0,lines:70});

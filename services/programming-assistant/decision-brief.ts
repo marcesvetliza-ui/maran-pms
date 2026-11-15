@@ -33,7 +33,7 @@ const decisions = [
     question: "¿Orden emisión/pagos? ¿Qué falta comprobar del incidente?",
     path: "client/src/lib/prefactura-submission.ts",
     anchor: "async run(",
-    windows: [{before:0,after:24}],
+    windows: [{before:0,after:35}],
   },
 ] as const;
 

@@ -66,6 +66,7 @@ async function emitAndLinkInvoice(accountId: string, total: number, method: stri
   });
   const linked = await request("POST", `/api/spa/accounts/${accountId}/link-invoice`, { invoiceId: invoice.id });
   expect(linked.status, JSON.stringify(linked.body)).toBe(200);
+  expect((await pool!.query('SELECT reconciliation_status FROM sales_invoices WHERE id=$1',[invoice.id])).rows[0].reconciliation_status).toBe('conciliada');
   return Number(invoice.id);
 }
 

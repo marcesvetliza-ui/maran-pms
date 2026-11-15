@@ -25,7 +25,7 @@ export type BillingOperation = { operation_id: string; owner_type: string; owner
 export const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object"
   ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined && typeof value[key] !== "function").map(key => [key, canonical(value[key])])) : value;
 export const payloadHash = (value: unknown) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
-const snapshotKeys = ["groupDocumentationOnly","correctionOriginalInvoiceId","tipoComprobante", "cliente", "items", "reservaId", "paymentId", "groupId", "groupPaymentId", "groupPaymentIntent", "spaAccountId", "folioId", "puntoVenta", "puntoVentaOverride", "cashArea", "cashFormaPago", "cashFormaPagoDetalle", "ccEntityType", "ccEntityId", "sourceChargeIds", "sourceChargeAmounts", "observaciones", "folioContext", "creditReapplications", "ordinaryAdvanceApplications", "creditOperationId", "reservationSettlementMethod", "checkoutDiscount", "recipientMode", "recipientEntity", "recipientConsumerFinal", "prefacturaRecovery"];
+const snapshotKeys = ["acknowledgeUnassignedAdvance", "reservationBillingAction", "groupDocumentationOnly","correctionOriginalInvoiceId","tipoComprobante", "cliente", "items", "reservaId", "paymentId", "groupId", "groupPaymentId", "groupPaymentIntent", "spaAccountId", "folioId", "puntoVenta", "puntoVentaOverride", "cashArea", "cashFormaPago", "cashFormaPagoDetalle", "ccEntityType", "ccEntityId", "sourceChargeIds", "sourceChargeAmounts", "observaciones", "folioContext", "creditReapplications", "ordinaryAdvanceApplications", "creditOperationId", "reservationSettlementMethod", "checkoutDiscount", "recipientMode", "recipientEntity", "recipientConsumerFinal", "prefacturaRecovery"];
 export function operationSnapshot(input: Record<string, any>) {
   return JSON.parse(JSON.stringify(Object.fromEntries(snapshotKeys.filter(key => input[key] !== undefined).map(key => [key, input[key]]))));
 }
@@ -48,7 +48,10 @@ export async function beginBillingOperation(database: Executor, data: any, ident
   if (!operation || operation.owner_type !== owner.type || operation.owner_id !== owner.id) throw Object.assign(new Error("La operación no pertenece a esta cuenta."), { statusCode: 409, code: "BILLING_OPERATION_MISMATCH" });
   if (!data.recoveryInvoiceId && operation.payload_hash !== hash) throw Object.assign(new Error("La operación pendiente conserva otros datos. Recuperá el intento original antes de preparar uno nuevo."), { statusCode: 409, code: "BILLING_OPERATION_MISMATCH" });
   if (payloadHash(operation.fiscal_identity) !== payloadHash(identity)) throw Object.assign(new Error("La configuración fiscal cambió desde este intento. No se reenviará con otro ambiente, emisor o punto de venta."), { statusCode: 409, code: "BILLING_IDENTITY_CHANGED" });
-  if (["blocked", "rejected", "corrected"].includes(operation.stage)) throw Object.assign(new Error("Este intento necesita corregirse antes de preparar una nueva emisión."), { statusCode: 409, code: "BILLING_CORRECTION_REQUIRED", operationId });
+  // A numbering conflict happened BEFORE this operation had a draft or sent
+  // anything. Retry only its immutable request, never a rejected/uncertain send.
+  const retryNumberConflict = operation.stage === "blocked" && operation.error_code === "BILLING_NUMBER_CONFLICT" && !operation.invoice_id;
+  if (["blocked", "rejected", "corrected"].includes(operation.stage) && !retryNumberConflict) throw Object.assign(new Error("Este intento necesita corregirse antes de preparar una nueva emisión."), { statusCode: 409, code: "BILLING_CORRECTION_REQUIRED", operationId });
   if (["submitting", "uncertain"].includes(operation.stage) && !operation.invoice_id) throw Object.assign(new Error("Hay una autorización sin resultado verificable. Conservamos la operación para revisión."), { statusCode: 409, code: "BILLING_RESULT_UNCERTAIN" });
   return operation;
 }

@@ -1,4 +1,5 @@
 import { PurchaseInvoiceMetadataDialog } from '@/components/purchase-invoice-metadata-dialog';
+import { PurchaseRemitoEditor, type RemitoDraft } from "@/components/purchase-remito-editor";
 import { PURCHASE_CREDIT_NOTE_PAYMENT_METHODS } from '@shared/purchase-credit-note-payment';
 import { iibbRateFromAmount } from '@shared/iibbRate';
 import {matchesPurchaseReport,validatePurchaseReportFilters} from "@shared/purchase-invoice-report";
@@ -530,6 +531,14 @@ export function InvoiceDialog({
   };
 
   const isEditing = !!editingInvoice;
+  const isEditingRemito = isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante);
+  const [remitoSnapshot, setRemitoSnapshot] = useState<any>(null);
+  const [remitoDraft, setRemitoDraft] = useState<RemitoDraft | null>(null);
+  const [remitoEditLoadError, setRemitoEditLoadError] = useState(false);
+  const editView = useRef({ id: editingInvoice?.id, open, version: 0 });
+  if (editView.current.id !== editingInvoice?.id || editView.current.open !== open) {
+    editView.current = { id: editingInvoice?.id, open, version: editView.current.version + 1 };
+  }
 
   const [paymentAmountEdited,setPaymentAmountEdited] = useState(false);
   useEffect(()=>{setPaymentAmountEdited(false);},[open,editingInvoice]);
@@ -711,16 +720,45 @@ export function InvoiceDialog({
 
   const discountPreview=useMemo(()=>{try{const invoice=applyPurchaseAdjustments(form);return {invoice,error:'',total:calculatePurchaseInvoiceTotal(invoice)};}catch(e:any){return {invoice:form,error:e.message,total:0};}},[form]);
   const storedRemitoId = sourceRemito?.id || (isPurchaseRemito(editingInvoice?.tipoComprobante) ? editingInvoice?.id : undefined);
-  const { data: storedRemito, isLoading: loadingRemito, isError: remitoLoadError } = useQuery<any>({
+  const { data: storedRemito, isLoading: loadingRemito, isError: remitoLoadError, refetch: refetchStoredRemito } = useQuery<any>({
     queryKey: ["/api/purchase-invoices", storedRemitoId], enabled: open && !!storedRemitoId,
     queryFn: async () => { const response = await apiRequest("GET", `/api/purchase-invoices/${storedRemitoId}`); return response.json(); },
   });
+  useEffect(() => {
+    let active = true;
+    setRemitoSnapshot(null);
+    setRemitoDraft(null);
+    setRemitoEditLoadError(false);
+    if (open && isEditingRemito) {
+      void refetchStoredRemito({ cancelRefetch: false }).then(result => {
+        if (!active) return;
+        if (result.error || Number(result.data?.id) !== Number(editingInvoice?.id)) {
+          setRemitoEditLoadError(true);
+          return;
+        }
+        const current = camelInvoice(result.data);
+        if (!isPurchaseRemito(current.tipoComprobante) || current.estado === "anulado") {
+          setRemitoEditLoadError(true);
+          return;
+        }
+        setForm(previous => ({ ...previous, tipoComprobante: current.tipoComprobante,
+          supplierId: String(current.supplierId || ""), proveedorNombre: current.proveedorNombre || current.supplierNombre || "",
+          proveedorCuit: current.proveedorCuit || "", numeroComprobante: current.numeroComprobante || "",
+          puntoVenta: current.puntoVenta == null ? "" : String(current.puntoVenta), fechaEmision: current.fechaEmision || "",
+          periodo: current.periodo || "", observaciones: current.observaciones || "", centroCosto: current.centroCosto || "",
+          cuentaContableId: current.cuentaContableId ? String(current.cuentaContableId) : "",
+        }));
+        setRemitoSnapshot(result.data);
+      }).catch(() => { if (active) setRemitoEditLoadError(true); });
+    }
+    return () => { active = false; };
+  }, [open, isEditingRemito, editingInvoice?.id, refetchStoredRemito]);
   const storedSubtotal = (storedRemito?.articleLines || []).reduce((sum: number, row: any) => sum + Number(row.line_total), 0);
   const nonFiscalRows = invItems.filter(row => row.existingItemId);
   const nonFiscalTotal = nonFiscalRows.length
     ? nonFiscalPurchaseStockTotal(nonFiscalRows.map(row => ({ quantity: Number(row.quantity), unitCost: Number(row.costPrice) })))
     : 0;
-  const total = form.tipoComprobante === "REMITO-NF" ? (isEditing ? storedSubtotal : nonFiscalTotal) : discountPreview.total;
+  const total = form.tipoComprobante === "REMITO-NF" ? (isEditing ? remitoDraft?.subtotal ?? storedSubtotal : nonFiscalTotal) : discountPreview.total;
 
 
   // The suggested whole payment follows the final invoice, including later
@@ -915,15 +953,22 @@ export function InvoiceDialog({
   });
 
   const patchMut = useMutation({
-    mutationFn: (data: any) => apiRequest("PATCH", `/api/purchase-invoices/${editingInvoice!.id}`, data),
-    onSuccess: () => {
+    onMutate: (variables: { invoiceId: number; view: number; data: any }) => ({ view: variables.view }),
+    mutationFn: ({ invoiceId, data }: { invoiceId: number; view: number; data: any }) => apiRequest("PATCH", `/api/purchase-invoices/${invoiceId}`, data),
+    onSuccess: (_response, _variables, context) => {
       queryClient.invalidateQueries({ queryKey: ["/api/purchase-invoices"] });
-      resetDialog();
+      if (isEditingRemito) queryClient.invalidateQueries({ predicate: q => typeof q.queryKey[0] === "string" &&
+        (q.queryKey[0].startsWith("/api/inventory/") || q.queryKey[0].startsWith("/api/accounting-suppliers")) });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers"] });
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
+      if (context?.view !== editView.current.version || !editView.current.open) return;
+      resetDialog();
       toast({ title: "Comprobante actualizado correctamente" });
     },
-    onError: (e: any) => toast({ title: "Error al actualizar", description: e.message, variant: "destructive" }),
+    onError: (e: any, _variables, context) => {
+      if (context?.view === editView.current.version && editView.current.open)
+        toast({ title: "Error al actualizar", description: e.message, variant: "destructive" });
+    },
   });
 
   const handleSubmit = () => {
@@ -938,7 +983,14 @@ export function InvoiceDialog({
       return;
     }
     if (isEditing) {
-      patchMut.mutate({ ...form, formaPagoInformativa: /^NC-[ABCM]$/.test(form.tipoComprobante) ? form.formaPagoInformativa : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null });
+      if (isEditingRemito && (!remitoSnapshot || !remitoDraft?.valid || remitoEditLoadError || !form.numeroComprobante.trim())) {
+        toast({ title: "Revisá los datos y artículos del remito antes de guardar.", variant: "destructive" });
+        return;
+      }
+      patchMut.mutate({ invoiceId: editingInvoice!.id, view: editView.current.version, data: { ...form, ...(isEditingRemito ? {
+        expectedRemitoVersion: Number(remitoSnapshot.special_details?.remitoEditVersion ?? 0),
+        ...(remitoDraft?.stockItems !== undefined ? { stockItems: remitoDraft.stockItems } : {}),
+      } : {}), formaPagoInformativa: /^NC-[ABCM]$/.test(form.tipoComprobante) ? form.formaPagoInformativa : null, cuentaContableId: form.cuentaContableId ? parseInt(form.cuentaContableId) : null } });
       return;
     }
     if (!form.numeroComprobante) {
@@ -1050,7 +1102,7 @@ export function InvoiceDialog({
       }
     >
         <div className="py-2 space-y-4">
-          {storedRemitoId && <div className="rounded-md border p-3 space-y-1" data-testid="stored-remito-summary">
+          {storedRemitoId && !isEditingRemito && <div className="rounded-md border p-3 space-y-1" data-testid="stored-remito-summary">
             <p>{sourceRemito ? "La factura conserva el ingreso de mercadería y los pagos del remito. No vuelve a ingresar stock ni genera un segundo comprobante de deuda." : "El cambio de uso conserva los artículos y su ingreso original. No modifica cantidades ni costos."}</p>
             {remitoLoadError ? <p role="alert">No se pudo cargar el remito. Cerrá la ventana y volvé a intentar.</p> : loadingRemito ? <p>Cargando remito…</p> : (storedRemito?.articleLines || []).map((row: any) => <p key={row.id}>{row.item_name}: {row.quantity} × ${fmt(row.unit_price)}</p>)}
             <p>Valor de los artículos: ${fmt(storedSubtotal)}</p>
@@ -1180,7 +1232,7 @@ export function InvoiceDialog({
                         onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
                         onFocus={() => { setSupplierDropdownOpen(true); }}
                         onClick={() => { if (!supplierDropdownOpen) { setSupplierDropdownOpen(true); } }}
-                        disabled={!!sourceRemito || isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante)} data-testid="select-supplier"
+                        disabled={!!sourceRemito || isEditingRemito && !!remitoSnapshot?.ordenesPago?.length} data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
@@ -1271,6 +1323,15 @@ export function InvoiceDialog({
 
           <Separator />
 
+          {isRemito && <div className="space-y-2">
+            <Label>Observaciones del remito</Label>
+            <Textarea value={form.observaciones} onChange={event => f("observaciones", event.target.value)} rows={2} data-testid="input-observaciones" />
+          </div>}
+          {open && isEditingRemito && (
+            remitoEditLoadError ? <p role="alert">No se pudo cargar la versión actual del remito. Cerrá y volvé a abrirlo; no se guardarán cambios incompletos.</p>
+              : remitoSnapshot ? <PurchaseRemitoEditor key={remitoSnapshot.id} snapshot={remitoSnapshot} items={existingInvItems} warehouses={invWarehouses} onChange={setRemitoDraft} />
+                : <p role="status">Cargando la versión actual y los artículos del remito…</p>
+          )}
           {!isEditing && !sourceRemito && (
             <div className="space-y-2">
               <Label className="text-sm font-semibold">Artículos</Label>
@@ -1680,7 +1741,7 @@ export function InvoiceDialog({
                         onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
                         onFocus={() => { setSupplierDropdownOpen(true); }}
                         onClick={() => { if (!supplierDropdownOpen) { setSupplierDropdownOpen(true); } }}
-                        disabled={!!sourceRemito || isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante)} data-testid="select-supplier"
+                        disabled={!!sourceRemito || isEditingRemito && !!remitoSnapshot?.ordenesPago?.length} data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
@@ -2122,7 +2183,7 @@ export function InvoiceDialog({
           <Button variant="ghost" onClick={resetDialog}>Cancelar</Button>
           <Button
             onClick={handleSubmit}
-            disabled={!!storedRemitoId && !storedRemito || loadingRemito || createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
+            disabled={isEditingRemito && (!remitoSnapshot || !remitoDraft?.valid || remitoEditLoadError) || !!storedRemitoId && !storedRemito || loadingRemito || createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
             data-testid="btn-submit-invoice"
           >
             {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
@@ -2143,7 +2204,7 @@ export function InvoiceDialog({
             ) : (
               <Button
                 onClick={handleSubmit}
-                disabled={!!storedRemitoId && !storedRemito || loadingRemito || createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
+                disabled={isEditingRemito && (!remitoSnapshot || !remitoDraft?.valid || remitoEditLoadError) || !!storedRemitoId && !storedRemito || loadingRemito || createMut.isPending || patchMut.isPending || !isValidPurchaseInvoiceTotal(form.tipoComprobante, total) || (!isEditing && !suppliers.some((supplier) => String(supplier.id) === form.supplierId))}
                 data-testid="btn-submit-invoice"
               >
                 {(createMut.isPending || patchMut.isPending) && <span className="h-4 w-4 mr-2 animate-spin border-2 border-current border-t-transparent rounded-full inline-block" />}
@@ -2226,7 +2287,7 @@ function InvoiceDetailDialog({ invoice, accounts, onClose }: { invoice: Invoice 
         <div className="space-y-4 py-2">
           {detail?.special_details?.remitoHistory?.length > 0 && <div className="rounded-md border p-3" data-testid="remito-history">
             <p className="font-semibold">Historial del remito</p>
-            {detail.special_details.remitoHistory.map((entry: any, index: number) => <p key={index}>{purchaseDocumentLabel(entry.previous.tipo_comprobante)} {entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante} → {purchaseDocumentLabel(entry.nextType)} · {entry.action === "factura_recibida" ? "Factura vinculada; stock y pagos conservados" : "Cambio de uso"}</p>)}
+            {detail.special_details.remitoHistory.map((entry: any, index: number) => <p key={index}>{purchaseDocumentLabel(entry.previous.tipo_comprobante)} {entry.previous.numero_comprobante_ext || entry.previous.numero_comprobante} → {purchaseDocumentLabel(entry.nextType)} · {entry.action === "factura_recibida" ? "Factura vinculada; stock y pagos conservados" : entry.action === "edicion_remito" ? "Datos o artículos corregidos; stock ajustado por diferencia" : "Cambio de uso"}</p>)}
           </div>}
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             {rows.map(([label, val]) => (
