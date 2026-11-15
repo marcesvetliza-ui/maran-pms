@@ -33,10 +33,11 @@ export function ReservationChargeVoid({reservationId,charge,role,onSaved}: {
   });
   if(!canVoidReservationCharge(role,charge.category))return null;
   return <>
-    <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label="Anular cargo" title="Anular cargo con motivo" data-testid={`button-void-prefactura-charge-${charge.id}`} onClick={event=>{event.stopPropagation();setSnapshot({...charge});setReason("");setOpen(true);}}><Ban className="h-3.5 w-3.5"/></Button>
+    <Button type="button" size="icon" variant="ghost" className="h-7 w-7" aria-label="Anular cargo" title="Anular cargo con motivo" data-testid={`button-void-prefactura-charge-${charge.id}`} onClick={event=>{event.stopPropagation();mutation.reset();setSnapshot({...charge});setReason("");setOpen(true);}}><Ban className="h-3.5 w-3.5"/></Button>
     <Dialog open={open} onOpenChange={value=>{if(!mutation.isPending)setOpen(value);}}><DialogContent onClick={event=>event.stopPropagation()}>
       <DialogHeader><DialogTitle>Anular cargo</DialogTitle><DialogDescription>{charge.category === "restaurant" ? "Se quitará únicamente la imputación a esta habitación. El pedido, los consumos y la caja de Restaurante se conservan." : "El cargo quedará anulado con historial; no se borra su registro."}</DialogDescription></DialogHeader>
       <p>{snapshot?.description}</p><Label htmlFor={`void-reason-${charge.id}`}>Motivo obligatorio</Label><Input id={`void-reason-${charge.id}`} value={reason} maxLength={500} disabled={mutation.isPending} onChange={event=>setReason(event.target.value)}/>
+      {mutation.isError && <p role="alert" className="text-sm text-destructive" data-testid="prefactura-charge-void-error">{parseApiError(mutation.error)}</p>}
       <DialogFooter><Button type="button" variant="outline" disabled={mutation.isPending} onClick={()=>setOpen(false)}>Cancelar</Button><Button type="button" variant="destructive" disabled={!reason.trim() || mutation.isPending} onClick={()=>mutation.mutate()}>{mutation.isPending ? "Anulando…" : "Confirmar anulación"}</Button></DialogFooter>
     </DialogContent></Dialog>
   </>;
