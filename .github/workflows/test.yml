@@ -88,6 +88,9 @@ jobs:
       - name: Verificar anticipos grupales con saldo a favor sin duplicar Caja
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/group-credit-advance.pg.test.ts
 
+      - name: Verificar confirmación y guardado atómico de bloques grupales
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/group-block-confirmation.pg.test.ts
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 

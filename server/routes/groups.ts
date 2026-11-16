@@ -7,7 +7,8 @@ import { registerGroupOccupantRoutes } from "./group-occupant";
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
-import { db, pool } from "../db";
+import { db, pool, withDatabaseTransaction } from "../db";
+import { withLodgingInventoryMutationLock } from "../inventoryMutationLock";
 import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable, accountMovements as accountMovementsTable, accountMovementAllocations, cashMovements as cashMovementsTable } from "@shared/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../auth";
@@ -643,21 +644,29 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: "roomTypeId and quantity are required" });
       }
 
-      const qty = typeof quantity === 'number' ? quantity : parseInt(quantity, 10);
+      const qty = typeof quantity === "number" || typeof quantity === "string" ? Number(quantity) : NaN;
+      if (!Number.isSafeInteger(qty) || qty <= 0) {
+        return res.status(400).json({ error: "La cantidad de habitaciones debe ser un entero positivo." });
+      }
+      const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
+      // One inventory lock and transaction cover the block, placeholder guest,
+      // reservations, group links and room projections. A warning/error must
+      // not leave a partial block behind for the client's confirmed retry.
+      const result = await withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
+        const group = await storage.getGroup(req.params.groupId);
+        if (!group) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
 
-      const block = await storage.createGroupBlock({
-        groupId: req.params.groupId,
-        roomTypeId,
-        quantity: qty,
-        ratePlanId: ratePlanId || null,
-        agreedRate: agreedRate ? String(agreedRate) : null,
-        blockCheckInDate: blockCheckInDate || null,
-        blockCheckOutDate: blockCheckOutDate || null,
-      }, { overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true });
+        const block = await storage.createGroupBlock({
+          groupId: req.params.groupId,
+          roomTypeId,
+          quantity: qty,
+          ratePlanId: ratePlanId || null,
+          agreedRate: agreedRate ? String(agreedRate) : null,
+          blockCheckInDate: blockCheckInDate || null,
+          blockCheckOutDate: blockCheckOutDate || null,
+        }, { overrideTentativeGroupWarning });
 
-      // Auto-assign available rooms and create placeholder reservations
-      const group = await storage.getGroup(req.params.groupId);
-      if (group) {
+        // Auto-assign available rooms and create placeholder reservations
         const checkIn = blockCheckInDate || group.checkInDate;
         const checkOut = blockCheckOutDate || group.checkOutDate;
 
@@ -686,6 +695,9 @@ export function registerGroupsRoutes(app: Express) {
           const placeholderGuest = await getOrCreatePlaceholderGuest(group.id, group.name);
           const reservation = await storage.createReservation({
             _inventoryContextGroupId: group.id,
+            // Acceptance applies to every reservation in this same operation;
+            // physical overlaps and confirmed group shortages still reject it.
+            _inventoryOverrideTentativeGroupWarning: overrideTentativeGroupWarning,
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
             guestId: placeholderGuest.id,
             guestName: "",
@@ -717,10 +729,9 @@ export function registerGroupsRoutes(app: Express) {
           autoAssigned++;
         }
 
-        return res.status(201).json({ ...block, autoAssigned, totalRequested: qty });
-      }
-
-      res.status(201).json(block);
+        return { ...block, autoAssigned, totalRequested: qty };
+      }));
+      res.status(201).json(result);
     } catch (error: any) {
       res.status(error?.statusCode || 500).json(error?.response || { error: "Error creating group block" });
     }
