@@ -47,6 +47,12 @@ Se confirmó el acceso al código de Xenia por GitHub y se encontraron sus tres 
 
 Se verificaron controles y disposición responsive en cinco anchos de pantalla. El código quedó preparado para una rama separada de GitHub, sin fusionar a `main`. La publicación privada fue confirmada por el alojamiento. No se modificaron los DNS de los dominios comprados ni la aplicación de Maran.
 
+## Preparación de la conexión en Donweb
+
+Marcelo aceptó la propuesta de diseño. Se dieron de alta los nombres `xeniapms.com` y `www.xeniapms.com` en la configuración del alojamiento de la home. Se guardaron los dos destinos A, el CNAME y cuatro TXT de validación devueltos por el proveedor, con evidencia de estado pendiente.
+
+Se preparó el anexo operativo con los valores exactos y el recorrido de gestión de Donweb contrastado con su documentación. Falta la carga en la zona DNS de la cuenta de Marcelo, la validación externa y el certificado. El correo sigue siendo provisional. No se cambió el acceso privado de la home, no se configuraron redirecciones en Donweb y no se contrataron servicios de correo.
+
 ## Alcance de los cambios realizados
 
 La rama de planificación cambia archivos de `docs/xenia/`: documentación, evidencias y una herramienta de lectura. La home se preparó en un proyecto estático separado y se conserva en otra rama de GitHub bajo `web/xenia/`. La publicación de la home es privada e independiente. No se modificó código operativo de Maran, datos, numeradores, comprobantes, cobros, configuración de producción, DNS ni publicación automática del PMS. Ninguna de estas ramas se fusiona con `main` como parte de esta entrega.

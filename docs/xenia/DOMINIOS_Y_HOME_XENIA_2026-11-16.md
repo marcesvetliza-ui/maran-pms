@@ -45,4 +45,6 @@ Se verificaron anchos de 360, 390, 768, 1024 y 1440 píxeles, carga de recursos,
 
 ## Siguiente paso
 
-Marcelo revisa diseño, contenido y navegación. Después se completa el contacto, se confirma la entrada al PMS y se prepara una publicación pública con sus registros DNS, certificados y redirecciones. El canonical del sitio y la indexación se ajustan al conectar el dominio definitivo. Las pruebas de esta entrega no modificaron datos, DNS ni publicaciones de Maran.
+Marcelo indicó que le gustó la propuesta. Se prepararon `xeniapms.com` y `www.xeniapms.com` en el alojamiento y se obtuvieron los siete registros DNS de conexión y verificación. El anexo `DNS_XENIA_DONWEB_2026-11-16.md` conserva los valores y el recorrido de Donweb. Ambos nombres siguen pendientes de validación; no se modificó la zona DNS ni la audiencia privada de la home.
+
+Sigue la carga en Donweb, la comprobación del certificado, el contacto real y la confirmación de la entrada al PMS. La versión pública retirará los avisos de maqueta y ajustará canonical e indexación al dominio definitivo. Los otros tres dominios se redirigirán después de validar el principal y el soporte de HTTPS de las redirecciones. Las pruebas de esta entrega no modificaron datos, DNS ni publicaciones de Maran.

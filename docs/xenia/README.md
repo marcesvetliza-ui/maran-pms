@@ -19,5 +19,7 @@ La base documentada es una fotografía del 16 de noviembre de 2026. El objetivo 
 - `FUENTES_FISCALES_ARCA.json`: catálogo preparatorio de fuentes oficiales; no activa una tarea programada.
 - `evidencia/inventario-arranque-ia-2026-11-16.json`: referencias actualizadas en la continuación de soporte e IA.
 - `DOMINIOS_Y_HOME_XENIA_2026-11-16.md`: cuatro dominios comprados en Donweb, logos originales, primera home privada y próximos pasos de publicación.
+- `DNS_XENIA_DONWEB_2026-11-16.md`: anexo operativo con los siete registros reales para conectar el dominio principal y www, y los pasos de correo y redirecciones.
+- `evidencia/dns-sites-2026-11-16.json`: nombres pendientes de validación en el alojamiento; no implica que los registros se hayan cargado en Donweb.
 
 Los Word y PDF se entregan como archivos del plan. No es necesario publicar ni reiniciar el hotel para consultarlos. Los secretos se mantienen fuera de estos documentos.

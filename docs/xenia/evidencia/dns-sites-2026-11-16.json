@@ -1,0 +1,101 @@
+{
+  "checked_on": "2026-11-16",
+  "source": "Sites custom domain registration",
+  "apex": {
+    "id": "appgdom_6afb713c8f4c81918fcc860d4ef52e27",
+    "project_id": "appgprj_6afb690e46448191b52839b58cf121d0",
+    "hostname": "xeniapms.com",
+    "worker_name": "release---6afb6cafe5ec8191b0afd5c2ae7afcdb",
+    "status": "pending",
+    "provider_status": "pending",
+    "ssl_status": "initializing",
+    "cname_target": "custom-domains.chatgpt.site.",
+    "apex_proxy_ipv4_targets": [
+      "162.159.143.30",
+      "172.66.3.26"
+    ],
+    "validation_records": [
+      {
+        "record_type": "TXT",
+        "name": "_openai-site-verification.xeniapms.com",
+        "value": "openai-site-verification=Iu4RXFG1q6ug8HBHGK3GzBJz2H3zD6zWry9DmNkmq_4"
+      },
+      {
+        "record_type": "TXT",
+        "name": "_cf-custom-hostname.xeniapms.com",
+        "value": "394f2338-f2bc-4eac-914c-3992b4f03789"
+      }
+    ],
+    "last_error": null,
+    "created_at": "2026-11-16T21:10:20.560279+00:00",
+    "updated_at": "2026-11-16T21:10:23.055000+00:00"
+  },
+  "www": {
+    "id": "appgdom_6afb71933a488191a71b43c35c5d7249",
+    "project_id": "appgprj_6afb690e46448191b52839b58cf121d0",
+    "hostname": "www.xeniapms.com",
+    "worker_name": "release---6afb6cafe5ec8191b0afd5c2ae7afcdb",
+    "status": "pending",
+    "provider_status": "pending",
+    "ssl_status": "initializing",
+    "cname_target": "custom-domains.chatgpt.site.",
+    "apex_proxy_ipv4_targets": [
+      "162.159.143.30",
+      "172.66.3.26"
+    ],
+    "validation_records": [
+      {
+        "record_type": "TXT",
+        "name": "_openai-site-verification.www.xeniapms.com",
+        "value": "openai-site-verification=O-299jmrs1NG81SCwVAMzJ1KtYSwVfon4zppEr8sk4w"
+      },
+      {
+        "record_type": "TXT",
+        "name": "_cf-custom-hostname.www.xeniapms.com",
+        "value": "d7b1c738-2f43-4515-8b59-07c464d8aecf"
+      }
+    ],
+    "last_error": null,
+    "created_at": "2026-11-16T21:11:47.228062+00:00",
+    "updated_at": "2026-11-16T21:11:50.283975+00:00"
+  },
+  "records": [
+    {
+      "type": "A",
+      "name": "xeniapms.com",
+      "value": "162.159.143.30"
+    },
+    {
+      "type": "A",
+      "name": "xeniapms.com",
+      "value": "172.66.3.26"
+    },
+    {
+      "type": "TXT",
+      "name": "_openai-site-verification.xeniapms.com",
+      "value": "openai-site-verification=Iu4RXFG1q6ug8HBHGK3GzBJz2H3zD6zWry9DmNkmq_4"
+    },
+    {
+      "type": "TXT",
+      "name": "_cf-custom-hostname.xeniapms.com",
+      "value": "394f2338-f2bc-4eac-914c-3992b4f03789"
+    },
+    {
+      "type": "CNAME",
+      "name": "www.xeniapms.com",
+      "value": "custom-domains.chatgpt.site."
+    },
+    {
+      "type": "TXT",
+      "name": "_openai-site-verification.www.xeniapms.com",
+      "value": "openai-site-verification=O-299jmrs1NG81SCwVAMzJ1KtYSwVfon4zppEr8sk4w"
+    },
+    {
+      "type": "TXT",
+      "name": "_cf-custom-hostname.www.xeniapms.com",
+      "value": "d7b1c738-2f43-4515-8b59-07c464d8aecf"
+    }
+  ],
+  "donweb_zone_modified": false,
+  "site_public": false
+}
