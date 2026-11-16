@@ -543,7 +543,7 @@ function AuthenticatedApp() {
   if (signingOut) return <main role="status" className="min-h-screen flex items-center justify-center bg-background">Cerrando sesión…</main>;
 
   const connectionNotice = <SessionConnectionNotice blocked={session.blocked} busy={session.busy} error={session.error} retryAt={session.retryAt}
-    modal={!!user} onRetry={() => void checkAuth()} onLogout={() => void handleLogout()} />;
+    automaticRetry={session.automaticRetry} modal={!!user} onRetry={() => void checkAuth()} onLogout={() => void handleLogout()} />;
   if (!user && session.blocked) return connectionNotice;
 
   if(user && !posChecking && !permissionsReady && permissions.isError){
