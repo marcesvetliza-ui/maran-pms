@@ -70,6 +70,9 @@ jobs:
           RUN_PREVENTIVE_ROOMS_PG_TESTS: "true"
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/preventive-rooms.pg.test.ts
 
+      - name: Verificar preparación de Channex para una habitación
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "readiness respects"
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 
