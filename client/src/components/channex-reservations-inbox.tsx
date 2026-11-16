@@ -49,7 +49,7 @@ export function ChannexReservationsInbox({connectionId,canRetry,pending,onRetry}
  queryFn:async()=>(await apiRequest('GET',`/api/channex/connections/${encodeURIComponent(connectionId)}/inbound/bookings?view=${view}&page=${page}`)).json()});
  return <section className="space-y-4 border-t pt-4" aria-label="Bandeja de reservas recibidas">
  <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Bandeja de reservas recibidas</h3><Button variant="outline" disabled={q.isFetching} onClick={()=>void q.refetch()}>Actualizar bandeja</Button></div>
- <p className="text-sm text-muted-foreground">Una fila por reserva. Los filtros reflejan su última revisión vigente. Las reservas pendientes de aplicar también aparecen en Requieren atención.</p>
+ <p className="text-sm text-muted-foreground">Una fila por reserva. Los filtros reflejan su última revisión vigente. Los filtros Nuevas, Modificadas y Canceladas incluyen todos sus resultados. Las pendientes y con errores también aparecen en Requieren atención.</p>
  <div className="flex flex-wrap gap-2" role="group" aria-label="Filtrar reservas">{views.map(([key,label])=><Button key={key} variant={key===view?'default':'outline'} aria-pressed={key===view} onClick={()=>{setView(key);setPage(1);setExpanded(null);}}>{label} ({q.data?.counts[key] ?? '—'})</Button>)}</div>
  {q.isLoading?<p>Cargando reservas…</p>:q.error?<p role="alert">No se pudo consultar la bandeja. Intentá actualizarla.</p>:q.data&&<>
  <p className="text-sm text-muted-foreground" role="status">{q.data.counts[view]} reservas · Página {page}</p>

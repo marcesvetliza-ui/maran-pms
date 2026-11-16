@@ -69,11 +69,11 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   for(let i=0;i<26;i++) await insert(`n${i}`,`booking${i}`,'applied','new','2026-11-01T00:00:00Z');
   const before=(await pool.query('SELECT revision_id,status,acked_at FROM channex_inbound_revisions WHERE connection_id=$1 ORDER BY revision_id',[f.id])).rows;
   const all=await listInboundBookings(pool,f.id,'all',1);
-  expect(all.counts).toEqual({all:30,attention:3,new:26,modified:0,cancelled:1});expect(all.bookings).toHaveLength(25);
+  expect(all.counts).toEqual({all:30,attention:3,new:28,modified:0,cancelled:2});expect(all.bookings).toHaveLength(25);
   expect((await listInboundBookings(pool,f.id,'all',2)).bookings).toHaveLength(5);
   const attention=await listInboundBookings(pool,f.id,'attention',1);
   expect(attention.bookings).toHaveLength(3);expect(attention.bookings.find((b:any)=>b.booking_id==='a')).toMatchObject({revision_id:'a3',booking_status:'cancelled',status:'review',revision_count:4,channel:'Booking.com',reference:'OTA123'});
-  expect((await listInboundBookings(pool,f.id,'cancelled',1)).bookings[0].booking_id).toBe('b');
+  expect((await listInboundBookings(pool,f.id,'cancelled',1)).bookings.map((b:any)=>b.booking_id).sort()).toEqual(['a','b']);
   expect((await inboundBookingHistory(pool,f.id,'a3',1)).total).toBe(4);
   expect((await inboundBookingHistory(pool,'other','a3',1)).total).toBe(0);
   expect((await inboundBookingHistory(pool,f.id,'bad1',1)).total).toBe(1);
