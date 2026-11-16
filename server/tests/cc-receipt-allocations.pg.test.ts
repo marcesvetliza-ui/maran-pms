@@ -11,8 +11,8 @@ const actor={id:'synthetic-operator',name:'Recepción prueba',ip:'127.0.0.1'};
 async function fixture(){
  const p=pool!,entity=randomUUID(),receipt=randomUUID(),old=randomUUID(),target=randomUUID(),cash=randomUUID(),shift=randomUUID();ids.push(receipt,old,target);shifts.push(shift);
  await p.query(`INSERT INTO account_movements(id,entity_type,entity_id,date,type,description,amount,receipt_number,retentions) VALUES
- ($1,'company',$4,'2026-11-16','pago','Recibo CC',-110,'TEST-'||$1,'[{"concepto":"IIBB","monto":10}]'),
- ($2,'company',$4,'2026-11-16','cargo','Factura nueva',110,null,null),($3,'company',$4,'2026-10-01','cargo','Factura anterior',150,null,null)`,[receipt,old,target,entity]);
+ ($1,'company',$4,'2026-11-16','pago','Recibo CC',-110,$5,'[{"concepto":"IIBB","monto":10}]'),
+ ($2,'company',$4,'2026-11-16','cargo','Factura nueva',110,null,null),($3,'company',$4,'2026-10-01','cargo','Factura anterior',150,null,null)`,[receipt,old,target,entity,`TEST-${receipt}`]);
  await p.query('INSERT INTO account_movement_allocations(pago_id,cargo_id,amount) VALUES($1,$2,110)',[receipt,old]);
  await p.query("INSERT INTO cash_shifts(id,area,shift_number,opened_at,status) VALUES($1,'recepcion',900001,now(),'closed')",[shift]);
  await p.query(`INSERT INTO cash_movements(id,shift_id,area,source_type,source_id,payment_method,amount,movement_type,registered_by)
