@@ -31,6 +31,16 @@ export async function legacyFundingScopes(c:PoolClient,req:Request,schema:string
   const tokens=[req.body?.paymentId,req.body?.cashMovementId,req.body?.invoiceId,req.body?.folioId,
     ...req.path.split("/").filter(Boolean).map(decodeURIComponent)]
     .filter(v=>(typeof v==="string"&&v.length>0)||typeof v==="number").map(String);
+  // A debit can inherit its owner from the invoice/NC it adjusts. Include that
+  // persisted chain so the new correction access cannot bypass adopted folios.
+  if (/^\/billing\/debit-notes\/\d+(?:\/|$)/.test(req.path)) {
+    const parents = (await c.query(`WITH RECURSIVE ancestors(id,nota_credito_id,path) AS (
+      SELECT id,nota_credito_id,ARRAY[id] FROM ${s}.sales_invoices WHERE id::text=ANY($1::text[])
+      UNION ALL SELECT p.id,p.nota_credito_id,a.path||p.id FROM ${s}.sales_invoices p
+      JOIN ancestors a ON p.id=a.nota_credito_id WHERE NOT p.id=ANY(a.path) AND cardinality(a.path)<24
+    ) SELECT DISTINCT id::text AS id FROM ancestors`,[tokens])).rows;
+    tokens.push(...parents.map(row => String(row.id)));
+  }
   scopes.push(...(await c.query(`SELECT scope_kind AS kind,scope_id AS id FROM payment_funding.receipts
     WHERE source_payment_id=ANY($1::text[]) OR cash_movement_id=ANY($1::text[])
     UNION SELECT scope_kind,scope_id FROM payment_funding.documents WHERE invoice_id=ANY($1::text[])

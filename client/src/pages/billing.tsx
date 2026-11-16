@@ -2,6 +2,8 @@ import {billingPointOptions} from "@shared/billing-point-of-sale";
 import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
 import { canReviewCreditNoteAccount } from "@shared/credit-note-account-recovery";
 import {creditTypeForInvoice} from '@shared/fiscal-document-types';
+import { creditTypeForDebitNote } from '@shared/debitNoteActions';
+import { DebitNoteActionDialog } from '@/components/debit-note-action-dialog';
 import { CashCardRectification } from '@/components/cash-card-rectification';
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
@@ -220,6 +222,7 @@ export default function BillingPage() {
   });
   const [showNC, setShowNC] = useState<number | null>(null);
   const [showEdit, setShowEdit] = useState<number | null>(null);
+  const [debitNoteAction, setDebitNoteAction] = useState<{ id: number; action: "edit" | "annul" } | null>(null);
   const [retryingCenterInvoiceId, setRetryingCenterInvoiceId] = useState<number | null>(null);
   const [centerRecoveryTarget, setCenterRecoveryTarget] = useState<any>(null);
   const [centerCorrectionTarget, setCenterCorrectionTarget] = useState<any>(null);
@@ -444,6 +447,7 @@ export default function BillingPage() {
                   <SelectItem value="NCMB">NC MiPyme B</SelectItem>
                   <SelectItem value="NDA">ND A</SelectItem>
                   <SelectItem value="NDB">ND B</SelectItem>
+                  <SelectItem value="NDC">ND C</SelectItem>
                   <SelectItem value="NDT">ND T</SelectItem>
                   <SelectItem value="NDM">ND MiPyme A</SelectItem>
                   <SelectItem value="NDMB">ND MiPyme B</SelectItem>
@@ -505,7 +509,7 @@ export default function BillingPage() {
                         <div className="text-muted-foreground mt-0.5">
                           Factura original {nc.original_tipo_comprobante} {padNum(nc.original_punto_venta, 4)}-{padNum(nc.original_numero, 8)} · ${fPeso(nc.monto_total)}
                         </div>
-                        {!creditTypeForInvoice(nc.original_tipo_comprobante)&&<p className="mt-1 text-amber-800 dark:text-amber-200">El original es un comprobante interno o no verificable como factura fiscal. Requiere revisión antes de conciliar; no emitir otra NC.</p>}
+                        {!creditTypeForInvoice(nc.original_tipo_comprobante)&&!creditTypeForDebitNote(nc.original_tipo_comprobante)&&<p className="mt-1 text-amber-800 dark:text-amber-200">El original es un comprobante interno o no verificable como factura fiscal. Requiere revisión antes de conciliar; no emitir otra NC.</p>}
                         {getReconciliationError(nc) && (
                           <div className="text-amber-800 dark:text-amber-200 mt-1">{getReconciliationError(nc)}</div>
                         )}
@@ -520,11 +524,11 @@ export default function BillingPage() {
                         variant="outline"
                         className="shrink-0 border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-100"
                         onClick={() => reconcileCreditNoteMutation.mutate(Number(nc.id))}
-                        disabled={reconcileCreditNoteMutation.isPending||!creditTypeForInvoice(nc.original_tipo_comprobante)}
+                        disabled={reconcileCreditNoteMutation.isPending||!creditTypeForInvoice(nc.original_tipo_comprobante)&&!creditTypeForDebitNote(nc.original_tipo_comprobante)}
                         data-testid={`btn-reconcile-credit-note-${nc.id}`}
                       >
                         <RefreshCw className={`w-3.5 h-3.5 mr-1 ${reconcileCreditNoteMutation.isPending ? "animate-spin" : ""}`} />
-                        {creditTypeForInvoice(nc.original_tipo_comprobante)?'Reintentar y conciliar':'Revisión requerida'}
+                        {creditTypeForInvoice(nc.original_tipo_comprobante)||creditTypeForDebitNote(nc.original_tipo_comprobante)?'Reintentar y conciliar':'Revisión requerida'}
                       </Button>
                     </div>
                   ))}
@@ -651,6 +655,14 @@ export default function BillingPage() {
                                       <Pencil className="w-3.5 h-3.5" />
                                     </Button>
                                   )}
+                                  {!!creditTypeForDebitNote(f.tipo_comprobante) && ["emitida", "parcial", "registrada"].includes(f.estado) && <>
+                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Editar Nota de Débito" aria-label="Editar Nota de Débito" data-testid={`btn-editar-${f.id}`} onClick={() => setDebitNoteAction({ id: f.id, action: "edit" })}>
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                    {f.estado !== "registrada" && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Anular Nota de Débito mediante Nota de Crédito" aria-label="Anular Nota de Débito" data-testid={`btn-annul-debit-${f.id}`} onClick={() => setDebitNoteAction({ id: f.id, action: "annul" })}>
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </Button>}
+                                  </>}
                                   {f.tipo_comprobante?.startsWith("NC") && f.reserva_id && f.estado === "emitida" && !isInvoiceReconciliationPending(f) && canReviewCreditNoteAccount(f) && (
                                     <Button variant="ghost" size="sm" title="Revisar y recuperar descuento en cuenta corriente"
                                       disabled={reconcileCreditNoteMutation.isPending}
@@ -814,6 +826,7 @@ export default function BillingPage() {
 
       {showNC !== null && <NotaCreditoDialog invoiceId={showNC} onClose={() => setShowNC(null)} />}
       {showEdit !== null && <EditarComprobanteDialog invoiceId={showEdit} onClose={() => setShowEdit(null)} />}
+      {debitNoteAction && <DebitNoteActionDialog key={`${debitNoteAction.id}-${debitNoteAction.action}`} invoiceId={debitNoteAction.id} action={debitNoteAction.action} onClose={() => setDebitNoteAction(null)} />}
     </div>
   );
 }
