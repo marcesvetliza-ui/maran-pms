@@ -1,3 +1,6 @@
+import { useAuth } from "@/App";
+import { GROUP_CREDIT_ADVANCE_PERMISSION, supportsGroupCreditAdvance } from "@shared/groupCreditAdvance";
+import { GroupCreditAdvanceConfirmation } from "@/components/group-credit-advance-confirmation";
 import { GroupCommercialAgreement } from '@/components/group-commercial-agreement';
 import { groupCommercialAgreement } from '@shared/groupCommercialAgreement';
 import {GroupAdvanceAllocation} from '@/components/group-advance-allocation';
@@ -896,6 +899,8 @@ export function buildGroupInvoiceRecipientInitialValues({
 }
 
 export default function GroupDetailPage() {
+  const { hasPermission } = useAuth();
+  const canGroupCreditAdvance = hasPermission?.(GROUP_CREDIT_ADVANCE_PERMISSION) ?? false;
   const params = useParams();
   const groupId = params.id as string;
   const [, navigate] = useLocation();
@@ -917,6 +922,8 @@ export default function GroupDetailPage() {
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
   const [groupPaymentManualAmounts,setGroupPaymentManualAmounts]=useState<Record<string,string>>({});
   const [groupPaymentLeaveUnassigned,setGroupPaymentLeaveUnassigned]=useState(false);
+  const [groupCreditAdvanceReason, setGroupCreditAdvanceReason] = useState("");
+  const [groupCreditAdvanceAccepted, setGroupCreditAdvanceAccepted] = useState<string | null>(null);
   const [groupPaymentTargetRoom,setGroupPaymentTargetRoom]=useState('all');
   const [groupPaymentDistribution, setGroupPaymentDistribution] = useState("equal");
   const [groupPaymentCloseAll, setGroupPaymentCloseAll] = useState(false);
@@ -959,6 +966,8 @@ export default function GroupDetailPage() {
     setGroupPaymentDistribution("equal");
     setGroupPaymentManualAmounts({});
     setGroupPaymentLeaveUnassigned(false);
+    setGroupCreditAdvanceReason("");
+    setGroupCreditAdvanceAccepted(null);
     setGroupPaymentTargetRoom("all");
     setGroupPaymentCloseAll(false);
     setGroupPaymentCloseReservationIds([]);
@@ -1496,7 +1505,12 @@ export default function GroupDetailPage() {
       const grossPaymentTotal = validRows.reduce((sum, row) =>
         sum + (parseFloat(row.amount || "0") || 0)
         + (row.retencionEnabled ? (parseFloat(row.retencionMonto || "0") || 0) : 0), 0);
-      const receiptConceptItems = buildGroupInvoiceItems(
+      if (groupPaymentCreatesCredit && !groupCreditAdvanceValid) {
+        throw new Error("Revisá el permiso, el motivo y la confirmación del saldo a favor.");
+      }
+      const receiptConceptItems = groupPaymentCreatesCredit
+        ? [{ descripcion: `Anticipo a cuenta del grupo ${group?.name || groupId}`, precioUnitario: grossPaymentTotal }]
+        : buildGroupInvoiceItems(
         groupInvoiceSnapshot?.sources ?? [],
         groupInvoiceDistribution,
         group?.name || groupId,
@@ -1533,7 +1547,10 @@ export default function GroupDetailPage() {
         return { endpoint: `/api/groups/${groupId}/master-payment`, body: {
           paymentRows: rowsPayload,
           receiptType: groupPaymentReceiptType === "sin_comprobante" ? "none" : groupPaymentReceiptType,
-          leaveUnassigned:groupPaymentLeaveUnassigned,
+          leaveUnassigned: groupPaymentLeaveUnassigned || groupPaymentCreatesCredit,
+          ...(groupPaymentCreatesCredit ? { creditAdvance: {
+            confirmed: true, expectedBalanceCents: groupMasterBalanceCents, reason: groupCreditAdvanceReason.trim(),
+          } } : {}),
           closeReservationIds: groupPaymentCloseAll ? groupPaymentCloseReservationIds : [],
           distributionDetail: groupPaymentCloseAll
             ? Object.fromEntries(groupPaymentCloseReservationIds.map((id) => [id, Number(groupPaymentCloseAmounts[id] || 0)]))
@@ -1613,7 +1630,11 @@ export default function GroupDetailPage() {
       }
     },
     onError: (e: any) => {
-      if(/^(400|409):/.test(String(e?.message))){sessionStorage.removeItem(receiptOperationKey);setPendingReceipt(null);}
+      if(/^(400|403|409):/.test(String(e?.message))){
+        sessionStorage.removeItem(receiptOperationKey); setPendingReceipt(null);
+        setGroupCreditAdvanceAccepted(null);
+        void refreshGroupBillingState();
+      }
       toast({ title: "Error al registrar pago grupal", description: parseApiError(e), variant: "destructive" });
     },
   });
@@ -2002,7 +2023,21 @@ export default function GroupDetailPage() {
   const groupPaymentRetentionsTotal = groupPaymentRows.reduce((s, r) =>
     s + (r.retencionEnabled ? (parseFloat(r.retencionMonto || "0") || 0) : 0), 0);
   const groupPaymentGrossPaymentTotal = groupPaymentRowsTotal + groupPaymentRetentionsTotal;
-  const groupPaymentReceiptConcepts = buildGroupInvoiceItems(
+  const groupMasterBalanceCents = masterFolio ? Math.round(Number(masterFolio.masterBalance) * 100) : NaN;
+  const groupReceivedCents = Math.round(groupPaymentGrossPaymentTotal * 100);
+  const groupPaymentCreatesCredit = groupPaymentDestino === "master" && !groupPaymentCloseAll
+    && groupReceivedCents > 0 && groupReceivedCents > groupMasterBalanceCents;
+  const groupCreditAdvanceEligible = !groupPaymentIsFiscal && !groupPaymentCloseAll
+    && supportsGroupCreditAdvance(groupPaymentRows.filter(row => Number(row.amount) > 0).map(row => ({
+      method: row.method, retention: row.retencionEnabled ? { monto: Number(row.retencionMonto || 0) } : null,
+    })));
+  const groupCreditAdvanceSignature = `${groupMasterBalanceCents}:${groupReceivedCents}`;
+  const groupCreditAdvanceValid = canGroupCreditAdvance && groupCreditAdvanceEligible
+    && groupCreditAdvanceReason.trim().length >= 3 && groupCreditAdvanceReason.trim().length <= 500
+    && groupCreditAdvanceAccepted === groupCreditAdvanceSignature;
+  const groupPaymentReceiptConcepts = groupPaymentCreatesCredit
+    ? [{ descripcion: `Anticipo a cuenta del grupo ${group?.name || groupId}`, precioUnitario: groupPaymentGrossPaymentTotal }]
+    : buildGroupInvoiceItems(
     groupInvoiceSnapshot?.sources ?? [],
     groupInvoiceDistribution,
     group?.name || groupId,
@@ -2054,6 +2089,7 @@ export default function GroupDetailPage() {
     .every(r => !!r.reference.trim());
   const manualValid=groupPaymentDistribution!=='manual'||(Math.round(Object.values(groupPaymentManualAmounts).reduce((n,v)=>n+Number(v||0),0)*100)===Math.round(groupPaymentGrossPaymentTotal*100)&&Object.entries(groupPaymentManualAmounts).every(([id,v])=>Number(v||0)>=0&&Number(v||0)<=Number(folio?.reservations?.find(r=>r.reservationId===id)?.balance||0)+0.009));
   const groupPaymentCanSubmit = !pendingReceipt&&manualValid&& !groupPaymentMutation.isPending
+    && (!groupPaymentCreatesCredit || groupCreditAdvanceValid)
     && groupPaymentHasRequiredPaymentSum
     && (!groupPaymentIsFiscal || groupPaymentFiscalAvailable > 0)
     // A receiver is never optional, including an Anticipo.
@@ -2146,7 +2182,7 @@ export default function GroupDetailPage() {
                     prefillReceptor: true,
                   });
                 }}
-                disabled={groupPaymentMutation.isPending || (Number(masterFolio?.masterBalance || 0) <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01)}
+                disabled={groupPaymentMutation.isPending || (!canGroupCreditAdvance && Number(masterFolio?.masterBalance || 0) <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01)}
                 data-testid="button-settle-master-after-checkout"
               >
                 <CreditCard className="mr-2 h-4 w-4" />
@@ -2281,6 +2317,13 @@ export default function GroupDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {masterFolio && Number(masterFolio.masterBalance) < -0.009 && (
+        <div role="status" className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm dark:border-green-800 dark:bg-green-950/30">
+          <span className="font-semibold">Saldo a favor del grupo: {fmtMoney(Math.abs(Number(masterFolio.masterBalance)))}</span>
+          <p>El crédito permanece en el Folio Maestro. Los anticipos sin asignar se aplican explícitamente a los saldos de las habitaciones.</p>
+        </div>
+      )}
 
       {groupInvoiceSnapshot?.totals && Number(groupInvoiceSnapshot.totals.eligible) > 0 && (
         <Card className="border-violet-200 dark:border-violet-800">
@@ -2742,7 +2785,7 @@ export default function GroupDetailPage() {
                               prefillReceptor: true,
                             });
                           }}
-                          disabled={masterFolio.masterBalance <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01}
+                          disabled={!canGroupCreditAdvance && masterFolio.masterBalance <= 0.01 && Number(groupInvoiceSnapshot?.totals?.available ?? 0) <= 0.01}
                           data-testid="button-master-payment"
                         >
                           <CreditCard className="h-4 w-4 mr-1" />
@@ -2774,9 +2817,9 @@ export default function GroupDetailPage() {
                         <p className="text-lg font-bold text-green-700 dark:text-green-400">${masterFolio.masterPaid.toLocaleString("es-AR", { minimumFractionDigits: 2 })}</p>
                       </div>
                       <div className={`rounded-lg p-3 border col-span-2 sm:col-span-1 ${masterFolio.masterBalance > 0.01 ? "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800" : "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800"}`}>
-                        <p className="text-xs text-muted-foreground mb-1">Saldo pendiente</p>
+                        <p className="text-xs text-muted-foreground mb-1">{masterFolio.masterBalance < -0.009 ? "Saldo a favor del grupo" : "Saldo pendiente"}</p>
                         <p className={`text-lg font-bold ${masterFolio.masterBalance > 0.01 ? "text-red-700 dark:text-red-400" : "text-green-700 dark:text-green-400"}`} data-testid="folio-master-balance">
-                          ${masterFolio.masterBalance.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                          ${Math.abs(masterFolio.masterBalance).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                         </p>
                       </div>
                     </div>
@@ -4126,8 +4169,8 @@ export default function GroupDetailPage() {
               <div className="space-y-5">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
                   <div>
-                    <p className="text-xs text-muted-foreground">Saldo operativo</p>
-                    <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(priorBalance)}</p>
+                    <p className="text-xs text-muted-foreground">{priorBalance < -0.009 ? "Saldo a favor actual" : "Saldo operativo"}</p>
+                    <p className={priorBalance > 0 ? "font-semibold text-red-600" : "font-semibold text-green-600"}>{fmtMoney(Math.abs(priorBalance))}</p>
                   </div>
                   <div>
                       <p className="text-xs text-muted-foreground">Fuentes fiscales disponibles</p>
@@ -4753,7 +4796,14 @@ export default function GroupDetailPage() {
                   </div>
                 )}
 
-                {isMaster&&!isFiscal&&<label className="flex gap-2 text-sm"><Checkbox checked={groupPaymentLeaveUnassigned} onCheckedChange={v=>{setGroupPaymentLeaveUnassigned(v===true);setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);}}/>Dejar este anticipo sin asignar a habitaciones</label>}
+                {groupPaymentCreatesCredit && <GroupCreditAdvanceConfirmation
+                  balanceCents={groupMasterBalanceCents} receivedCents={groupReceivedCents}
+                  permitted={canGroupCreditAdvance} eligible={groupCreditAdvanceEligible}
+                  reason={groupCreditAdvanceReason} confirmed={groupCreditAdvanceAccepted === groupCreditAdvanceSignature}
+                  onReason={value => { setGroupCreditAdvanceReason(value); setGroupCreditAdvanceAccepted(null); }}
+                  onConfirm={value => setGroupCreditAdvanceAccepted(value ? groupCreditAdvanceSignature : null)}
+                />}
+                {isMaster&&!isFiscal&&<label className="flex gap-2 text-sm"><Checkbox disabled={groupPaymentCreatesCredit} checked={groupPaymentLeaveUnassigned || groupPaymentCreatesCredit} onCheckedChange={v=>{setGroupPaymentLeaveUnassigned(v===true);setGroupPaymentCloseAll(false);setGroupPaymentCloseReservationIds([]);}}/>Dejar este anticipo sin asignar a habitaciones</label>}
                 {/* 7. DISTRIBUCIÓN + CIERRE DIRIGIDO */}
                 <>
                   <div className="border-t" />
@@ -4789,7 +4839,7 @@ export default function GroupDetailPage() {
                     <div className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
                       <Checkbox
                         id="close-all-rooms"
-                        disabled={groupPaymentLeaveUnassigned||groupPaymentTargetRoom!=='all'||groupPaymentDistribution==='manual'}
+                        disabled={groupPaymentCreatesCredit||groupPaymentLeaveUnassigned||groupPaymentTargetRoom!=='all'||groupPaymentDistribution==='manual'}
                         checked={groupPaymentCloseAll}
                         onCheckedChange={(value) => {
                           const checked = !!value;

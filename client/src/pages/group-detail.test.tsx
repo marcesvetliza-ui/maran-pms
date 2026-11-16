@@ -11,8 +11,13 @@ const { apiRequestMock } = vi.hoisted(() => ({
   apiRequestMock: vi.fn(),
 }));
 
+let creditAdvancePermitted = false;
+vi.mock("@/App", () => ({ useAuth: () => ({ hasPermission: () => creditAdvancePermitted }) }));
+
 let pendingFiscalCollections: any[] = [];
 let groupFixtureForTest: any;
+let masterFixtureForTest: any;
+let invoiceFixtureForTest: any;
 
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>("@/lib/queryClient");
@@ -123,7 +128,10 @@ describe("Pago Grupal dialog entry-point modes", () => {
     queryClient.clear();
     sessionStorage.clear();
     pendingFiscalCollections = [];
+    creditAdvancePermitted = false;
     groupFixtureForTest = GROUP_FIXTURE;
+    masterFixtureForTest = MASTER_FOLIO_FIXTURE;
+    invoiceFixtureForTest = INVOICE_SNAPSHOT_FIXTURE;
 
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -133,8 +141,8 @@ describe("Pago Grupal dialog entry-point modes", () => {
         fiscal: { state: "pendiente", coveredCents: 0, pendingCents: 18500000 },
       });
       if (url.endsWith(`/api/groups/${GROUP_ID}/folio`)) return jsonResponse(FOLIO_FIXTURE);
-      if (url.endsWith(`/api/groups/${GROUP_ID}/master-folio`)) return jsonResponse(MASTER_FOLIO_FIXTURE);
-      if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(INVOICE_SNAPSHOT_FIXTURE);
+      if (url.endsWith(`/api/groups/${GROUP_ID}/master-folio`)) return jsonResponse(masterFixtureForTest);
+      if (url.endsWith(`/api/groups/${GROUP_ID}/invoice-snapshot`)) return jsonResponse(invoiceFixtureForTest);
       if (url.endsWith(`/api/groups/${GROUP_ID}/pending-fiscal-collections`)) return jsonResponse(pendingFiscalCollections);
       if (url.endsWith(`/api/groups/${GROUP_ID}/direct-invoices`)) return jsonResponse([]);
       if (url.endsWith(`/api/groups/${GROUP_ID}`)) return jsonResponse(groupFixtureForTest);
@@ -168,6 +176,53 @@ describe("Pago Grupal dialog entry-point modes", () => {
     await waitFor(()=>expect(apiRequestMock).toHaveBeenCalledWith('POST',`/api/groups/${GROUP_ID}/payment`,body));
     await waitFor(()=>expect(sessionStorage.getItem(`group-receipt-operation:${GROUP_ID}`)).toBeNull());
   });
+  it("requires permission and explicit confirmation for a Master Folio advance exceeding debt", async () => {
+    const user = userEvent.setup(); renderPage();
+    await user.click(await screen.findByTestId("tab-folio"));
+    await user.click(await screen.findByTestId("button-master-payment"));
+    await user.type(screen.getByTestId("input-group-entity-search"), "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Modo Anterior SA/i }));
+    const amount = screen.getByTestId("input-group-payment-amount-0");
+    await user.clear(amount); await user.type(amount, "200");
+    expect(await screen.findByTestId("group-credit-advance-confirmation")).toHaveTextContent("Necesitás el permiso");
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
+    creditAdvancePermitted = true;
+    await user.type(amount, "0"); // Triggers render with the newly granted permission.
+    await user.clear(amount); await user.type(amount, "200");
+    await user.type(screen.getByTestId("input-group-payment-reference-0"), "Transferencia del organizador");
+    await user.type(screen.getByLabelText("Motivo del saldo a favor"), "Adelanto del organizador");
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: /Confirmo registrar este anticipo/ }));
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeEnabled();
+    await user.clear(amount); await user.type(amount, "201");
+    expect(screen.getByRole("checkbox", { name: /Confirmo registrar este anticipo/ })).not.toBeChecked();
+    expect(screen.getByTestId("button-confirm-group-payment")).toBeDisabled();
+    await user.click(screen.getByRole("checkbox", { name: /Confirmo registrar este anticipo/ }));
+    await user.click(screen.getByTestId("button-confirm-group-payment"));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith("POST", `/api/groups/${GROUP_ID}/master-payment`, expect.objectContaining({
+      leaveUnassigned: true, creditAdvance: { confirmed: true, expectedBalanceCents: 12550, reason: "Adelanto del organizador" },
+      concepts: [{ description: `Anticipo a cuenta del grupo ${GROUP_FIXTURE.name}`, amount: 201 }],
+    })));
+  });
+
+  it("shows existing group credit clearly and permits a further authorized advance at zero fiscal availability", async () => {
+    creditAdvancePermitted = true;
+    masterFixtureForTest = { ...MASTER_FOLIO_FIXTURE, masterBalance: -10, masterPaid: 135.5 };
+    invoiceFixtureForTest = { sources: [], totals: { eligible: 125.5, invoiced: 125.5, available: 0 }, financial: { nonFiscalAdvances: 0, operationalBalance: 0 } };
+    const user = userEvent.setup(); renderPage();
+    await user.click(await screen.findByTestId("tab-folio"));
+    expect(screen.getByTestId("folio-master-balance")).toHaveTextContent("10,00");
+    expect(screen.getByTestId("folio-master-balance")).not.toHaveTextContent("-10");
+    expect(screen.getByTestId("button-master-payment")).toBeEnabled();
+    await user.click(screen.getByTestId("button-master-payment"));
+    await user.type(screen.getByTestId("input-group-entity-search"), "Empresa");
+    await user.click(await screen.findByRole("button", { name: /Empresa Modo Anterior SA/i }));
+    await user.type(screen.getByTestId("input-group-payment-amount-0"), "20");
+    const panel = await screen.findByTestId("group-credit-advance-confirmation");
+    expect(panel).toHaveTextContent("Saldo a favor actual");
+    expect(panel).toHaveTextContent("30,00");
+  });
+
   it("uses the nightly editor from Groups and saves only schedules through the legacy route", async () => {
     groupFixtureForTest = { ...GROUP_FIXTURE, reservations: [{ ...GROUP_FIXTURE.reservations[0],
       pricingScheme: "nightly_v1", finalRatePerNight: "92500.00", totalRoomAmount: "185000.00", pricingRevision: 0,

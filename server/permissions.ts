@@ -1,3 +1,4 @@
+import { GROUP_CREDIT_ADVANCE_PERMISSION } from "@shared/groupCreditAdvance";
 import { CHANNEX_CAPABILITIES, CHANNEX_ROLE_DEFAULTS } from "@shared/channexAccess";
 import { ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
 import { and, eq } from "drizzle-orm";
@@ -300,6 +301,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   "api:admin:countries-list": ["admin", "manager"],
   "api:account-movements:void": ["admin", "manager"],
+  [GROUP_CREDIT_ADVANCE_PERMISSION]: ["admin", "manager", "resp_administracion", "jefe_recepcion", "comercial"],
   "api:account-movements:reallocate": ["admin", "manager", "resp_administracion", "reception", "jefe_recepcion"],
   "api:admin:audit-logs": ["admin", "manager"],
   // Recorre TODO el historial de pagos en Cta. Cte. y puede crear muchos
@@ -472,6 +474,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:events:reset-nc": { label: "Restablecer estado de NC de un evento o mesa", section: "API — Operaciones" },
 
   "api:admin:countries-list": { label: "Ver el listado completo de Países (ARCA)", section: "API — Administración" },
+  [GROUP_CREDIT_ADVANCE_PERMISSION]: { label: "Aceptar anticipos de grupo superiores al saldo del Folio Maestro", section: "API — Grupos" },
   "api:account-movements:reallocate": { label: "Corregir facturas aplicadas de recibos CC sin cambiar Caja", section: "API — Administración" },
   "api:account-movements:void": { label: "Anular movimientos de cuenta corriente", section: "API — Administración" },
   "api:admin:audit-logs": { label: "Ver el registro de auditoría", section: "API — Administración" },
