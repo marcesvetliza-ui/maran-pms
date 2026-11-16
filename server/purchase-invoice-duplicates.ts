@@ -10,6 +10,7 @@ function canonicalColumn(column:SQL,empty='') {
  const text=sql`upper(regexp_replace(coalesce(${column},''),'[[:space:]]','','g'))`;
  return sql`CASE WHEN ${text}='' THEN ${empty} WHEN ${text} ~ '^[0-9]+$' THEN coalesce(nullif(ltrim(${text},'0'),''),'0') ELSE ${text} END`;
 }
+export { canonicalColumn as canonicalPurchaseColumn };
 /** Cancelled rows retain their history but no longer reserve the document identity.
  * Call as the first step inside the INSERT transaction, before any accounting or stock write. */
 export async function assertPurchaseInvoiceNotDuplicate(tx:Transaction,input:Identity) {

@@ -17,6 +17,7 @@ import { requireCashView, cashShiftAccess } from "./cash-user-access";
 import { canViewCash, canOperateCash } from "@shared/cash-user-access";
 import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
 import {createSpecialPurchase} from './specialPurchase';
+import { assertSpecialPurchaseNumberAvailable, specialPurchasePointInput, specialPurchaseReference } from './specialPurchaseNumbering';
 import {applyPurchaseAdjustments} from "@shared/purchaseInvoiceDiscount";
 import type { Express } from "express";
 import { createServer, type Server } from "http";
@@ -3017,6 +3018,8 @@ export async function registerRoutes(
       }
       if (["RESUMEN-BANCO", "RETENCION", "LIQ-TARJETA"].includes(req.body.tipoComprobante)) {
         const input = req.body;
+        const point = specialPurchasePointInput.safeParse(input.puntoVenta);
+        if (!point.success) return res.status(400).json({ error: "El punto de venta debe tener entre 1 y 5 dígitos." });
         const supplierId = Number(input.supplierId);
         const numero = typeof input.numeroComprobante === "string" ? input.numeroComprobante.trim() : "";
         const fecha = input.fechaEmision;
@@ -3071,22 +3074,18 @@ export async function registerRoutes(
         }
         const period = `${fecha.slice(5, 7)}/${fecha.slice(0, 4)}`;
         const result = await db.transaction(async (tx) => {
-          const duplicate = await tx.execute(sql`
-            SELECT id FROM purchase_invoices
-            WHERE tipo_comprobante = ${input.tipoComprobante} AND supplier_id = ${supplierId}
-              AND numero_comprobante = ${numero} AND estado != 'anulado' LIMIT 1
-          `);
-          if (duplicate.rows.length) {
-            throw Object.assign(new Error("Este registro ya existe para el emisor y número indicados."), { statusCode: 409 });
-          }
+          await assertSpecialPurchaseNumberAvailable(tx, {
+            tipoComprobante: input.tipoComprobante, puntoVenta: point.data, numeroComprobante: numero,
+            issuerType: 'supplier', issuerId: String(supplierId), sameIssuer: sql`supplier_id=${supplierId}`,
+          });
           const inserted = await tx.execute(sql`
             INSERT INTO purchase_invoices (
               tipo_comprobante, supplier_id, proveedor_nombre, proveedor_cuit,
-              numero_comprobante, fecha_emision, periodo, condicion_pago,
+              punto_venta, numero_comprobante, numero_comprobante_ext, fecha_emision, periodo, condicion_pago,
               monto_neto, monto_total, cuenta_contable_id, estado, observaciones
             ) VALUES (
               ${input.tipoComprobante}, ${supplierId}, ${emitter.rows[0].razon_social}, ${emitter.rows[0].cuit},
-              ${numero}, ${fecha}, ${period}, 'registro',
+              ${point.data ?? null}, ${numero}, ${specialPurchaseReference(point.data, numero)}, ${fecha}, ${period}, 'registro',
               ${amount}, ${amount}, ${emitter.rows[0].account_id}, 'registrado',
               ${typeof input.observaciones === "string" ? input.observaciones.trim() : null}
             ) RETURNING *
