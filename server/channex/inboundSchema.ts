@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS channex_settlement_rate_edits (
  previous_rate numeric(12,6), new_rate numeric(12,6), reason text NOT NULL, actor text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE channex_inbound_bookings ADD COLUMN IF NOT EXISTS manual_scope_override boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS channex_inbound_rooms (
  connection_id varchar NOT NULL, booking_id text NOT NULL, remote_room_id text NOT NULL,
  reservation_id varchar NOT NULL UNIQUE REFERENCES reservations(id), local_hash text,

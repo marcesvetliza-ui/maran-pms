@@ -1,6 +1,9 @@
 import { inboundBookingDetail } from './bookingDetail';
 import { inboxQuerySchema, listInboundBookings, inboundBookingHistory } from './inbox';
-import {requireChannex} from './access';
+import {requireChannex, channexAccess} from './access';
+import { assignmentRequestSchema, getInboundAssignmentOptions } from './manualAssignment';
+import { applyInboundRevision } from './inbound';
+import { BookingReviewError } from './bookingRevision';
 import {workerEnvironment,operationAllowed,PRODUCTION_URL} from './connectionPolicy';
 import type { Express } from "express";
 import type { Pool } from "pg";
@@ -64,6 +67,32 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
     if (!parsed.success || req.params.revisionId.length > 160) return res.status(400).json({ error: "Página o revisión inválidas" });
     try { res.type("application/json").send(JSON.stringify(await inboundBookingHistory(pool, req.params.id, req.params.revisionId, parsed.data.page))); }
     catch { res.status(503).json({ error: "No se pudo consultar el historial de la reserva" }); }
+  });
+  const assignmentError = (res: any, error: any) => {
+    if (error?.response && error?.statusCode) return res.status(error.statusCode).json(error.response);
+    if (error instanceof BookingReviewError) return res.status(409).json({ error: 'La reserva necesita revisión antes de asignarse.', code: error.code });
+    if (error?.code?.startsWith('ASSIGNMENT_') || ['NOT_FOUND','CATEGORY_CHANGE_CONFIRMATION_REQUIRED','MANUAL_SCOPE_CONFIRMATION_REQUIRED'].includes(error?.code))
+      return res.status(error.statusCode || 409).json({ error: error.message, code: error.code });
+    return res.status(409).json({ error: 'No se pudo asignar la reserva. Actualizá las habitaciones disponibles y revisá la configuración.' });
+  };
+  app.get(`${root}/assignment/:revisionId`, requireChannex('bookings'), async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (req.params.revisionId.length > 160) return res.sendStatus(400);
+    try {
+      const access = await channexAccess(req.user!.id);
+      res.json(await getInboundAssignmentOptions(req.params.id, req.params.revisionId, access.config));
+    } catch (error) { assignmentError(res, error); }
+  });
+  app.post(`${root}/assign/:revisionId`, requireChannex('bookings'), async (req, res) => {
+    const parsed = assignmentRequestSchema.safeParse(req.body);
+    if (!parsed.success || req.params.revisionId.length > 160) return res.status(400).json({error:'Revisá las habitaciones, las confirmaciones y el motivo de la asignación.'});
+    try {
+      const access = await channexAccess(req.user!.id);
+      const result = await applyInboundRevision(req.params.id, req.params.revisionId, {...parsed.data,
+        actor: {id:req.user!.id,name:req.user!.username || req.user!.fullName || 'Sistema',ip:req.ip},canOverrideScope:access.config});
+      if (!result?.applied) return res.status(409).json({error:'La reserva cambió. Actualizá la bandeja antes de asignarla.'});
+      res.json(result);
+    } catch (error) { assignmentError(res, error); }
   });
   app.patch(`${root}/settlement-rate`, permission, async (req, res) => {
     const parsed = settlementSettingsSchema.safeParse(req.body);

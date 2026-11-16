@@ -12,6 +12,7 @@ import { STAGING_URL } from "./ari";
 import { BookingReviewError, matchesMaskedReplay, parseBookingRevision, redactBooking, revisionHash, review } from "./bookingRevision";
 import { archiveBookingNotes } from "./bookingPrivate";
 import { settleBooking } from "./settlement";
+import { assignmentContext, assignmentFailure, assertLatestAssignableRevision, validateManualSelection, type ManualAssignment } from './manualAssignment';
 
 export function assertInboundStaging(connection: any) {
   if (!connection?.is_active || !operationAllowed(connection,"inbound")) return review("STAGING_ONLY");
@@ -42,6 +43,10 @@ export async function persistInboundRevision(target: Pool, connectionId: string,
     let booking: ReturnType<typeof parseBookingRevision> | undefined, code: string | null = null;
     try { booking = parseBookingRevision(payload, connection.channex_property_id); }
     catch (error) { if (!(error instanceof BookingReviewError)) throw error; code = error.code; }
+    // Serialize receipt with manual/automatic application of this booking so a
+    // newer revision cannot arrive between the latest-revision check and commit.
+    const lockBooking = booking?.bookingId || payload.attributes?.booking_id;
+    if (typeof lockBooking === 'string') await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`channex-booking:${connectionId}:${lockBooking}`]);
     const trustedHead = code && !["INVALID_REVISION", "WRONG_PROPERTY"].includes(code);
     const hash = revisionHash(payload);
     const privateNotes = archiveBookingNotes(input, connectionId, payload.id);
@@ -81,20 +86,34 @@ function localFingerprint(r: any) {
 }
 /** Canonical storage owns overlap checks, pricing guards, audit and the ARI
  * triggers. The entire multi-room booking and revision cursor commit together. */
-export async function applyInboundRevision(connectionId: string, revisionId: string) {
+export async function applyInboundRevision(connectionId: string, revisionId: string, manual?: ManualAssignment) {
   const initial = (await db.execute(sql`SELECT booking_id,status FROM channex_inbound_revisions WHERE connection_id=${connectionId} AND revision_id=${revisionId}`)).rows[0] as any;
-  if (!initial || initial.status !== "pending" || !initial.booking_id) return;
+  if (!initial || !initial.booking_id) { if (manual) throw assignmentFailure('Reserva recibida no encontrada.'); return; }
+  if (!manual && initial.status !== 'pending') return;
   return withInvoiceAdvisoryLock(pool, `channex-booking:${connectionId}:${initial.booking_id}`, async () => {
     const priorLinks = (await db.execute(sql`SELECT reservation_id FROM channex_inbound_rooms WHERE connection_id=${connectionId} AND booking_id=${initial.booking_id}`)).rows as any[];
     try {
       return await withReservationFinancialLocks(priorLinks.map(row => row.reservation_id), () => withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
         const source = (await db.execute(sql`SELECT * FROM channex_inbound_revisions WHERE connection_id=${connectionId} AND revision_id=${revisionId} FOR UPDATE`)).rows[0] as any;
-        if (source.status !== "pending") return;
-        const config = (await db.execute(sql`SELECT c.*,s.enabled,s.floor,s.currency,i.settlement_exchange_rate FROM channex_connections c
+        if (manual) {
+          await assertLatestAssignableRevision(connectionId, source);
+          if (source.payload_hash !== manual.expectedPayloadHash) throw assignmentFailure('La revisión cambió. Actualizá la bandeja.');
+          if (source.status === 'applied') {
+            if (!(await db.execute(sql`SELECT 1 FROM audit_logs WHERE entity_type='channex_manual_assignment' AND entity_id=${revisionId} AND details::jsonb->>'connectionId'=${connectionId} LIMIT 1`)).rows.length) throw assignmentFailure('La reserva ya fue aplicada al PMS.');
+            const replay = (await db.execute(sql`SELECT l.remote_room_id,r.id,r.room_id FROM channex_inbound_rooms l JOIN reservations r ON r.id=l.reservation_id
+              WHERE l.connection_id=${connectionId} AND l.booking_id=${source.booking_id}`)).rows as any[];
+            if (replay.length !== Object.keys(manual.assignments).length || replay.some(r => manual.assignments[r.remote_room_id] !== r.room_id))
+              throw assignmentFailure('La reserva ya fue asignada. Actualizá la bandeja para abrirla.');
+            return { applied: true, replayed: true, reservationIds: replay.map(r => r.id) };
+          }
+        } else if (source.status !== 'pending') return;
+        const config = (await db.execute(sql`SELECT c.*,s.enabled,s.floor,s.room_ids,s.currency,i.settlement_exchange_rate FROM channex_connections c
           JOIN channex_ari_settings s ON s.connection_id=c.id JOIN channex_inbound_settings i ON i.connection_id=c.id
           WHERE c.id=${connectionId} AND i.enabled FOR SHARE OF c,s,i`)).rows[0] as any;
-        if (!config || !config.enabled) return;
+        if (!config || !config.enabled) { if (manual) throw assignmentFailure('La recepción está pausada.'); return; }
         assertInboundStaging(config);
+        const proposal = manual ? await assignmentContext(connectionId, revisionId, manual.canOverrideScope) : null;
+        const selected = manual && proposal ? validateManualSelection(proposal.options, manual) : null;
         const booking = parseBookingRevision(source.payload, config.channex_property_id);
         await db.execute(sql`INSERT INTO channex_inbound_bookings(connection_id,booking_id) VALUES(${connectionId},${booking.bookingId}) ON CONFLICT DO NOTHING`);
         const cursor = (await db.execute(sql`SELECT * FROM channex_inbound_bookings WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId} FOR UPDATE`)).rows[0] as any;
@@ -103,7 +122,9 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
           await db.execute(sql`UPDATE channex_inbound_revisions SET status='stale',applied_at=now(),review_code=NULL WHERE connection_id=${connectionId} AND revision_id=${revisionId}`);
           return;
         }
+        if (!manual && cursor.manual_scope_override && booking.status !== 'cancelled') return review('MANUAL_ASSIGNMENT_REQUIRES_REVIEW');
         const links = (await db.execute(sql`SELECT * FROM channex_inbound_rooms WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId} ORDER BY remote_room_id FOR UPDATE`)).rows as any[];
+        if (manual && links.length) throw assignmentFailure('Esta reserva ya está vinculada al PMS.');
         if (!links.length) {
           const duplicate = await db.execute(sql`SELECT 1 FROM reservations WHERE external_reservation_id=${booking.bookingId} LIMIT 1`);
           if (duplicate.rows.length) return review("UNLINKED_EXTERNAL_RESERVATION");
@@ -198,10 +219,16 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
               FROM channex_room_type_mappings rm JOIN channex_rate_plan_mappings rp ON rp.connection_id=rm.connection_id AND rp.channex_room_type_id=rm.channex_room_type_id
               JOIN room_types rt ON rt.id=rm.room_type_id JOIN rate_plans p ON p.id=rp.rate_plan_id
               WHERE rm.connection_id=${connectionId} AND rm.channex_room_type_id=${room.remoteType} AND rp.channex_rate_plan_id=${room.remotePlan} AND rp.remote_present FOR SHARE OF rm,rp,rt,p`)).rows as any[];
-            if (maps.length !== 1 || maps[0].room_type_id !== maps[0].plan_room_type || maps[0].currency !== booking.currency) return review("INVALID_ROOM_MAPPING");
-            const map = maps[0], old = existing.get(room.key);
+            if (!manual && (maps.length !== 1 || maps[0].room_type_id !== maps[0].plan_room_type || maps[0].currency !== booking.currency)) return review("INVALID_ROOM_MAPPING");
+            const choice = selected?.get(room.key);
+            const map = choice ? { room_type_id: choice.categoryId, room_ids: null, max_occupancy: choice.capacity,
+              rate_plan_id: maps.length === 1 && maps[0].room_type_id === choice.categoryId && maps[0].plan_room_type === choice.categoryId && maps[0].currency === booking.currency ? maps[0].rate_plan_id : null } : maps[0];
+            const old = existing.get(room.key);
             if (map.room_ids === null && room.occupancy > map.max_occupancy) return review("OCCUPANCY_EXCEEDS_CAPACITY");
-            const candidates = (await db.execute(sql`SELECT r.id FROM rooms r WHERE ((${config.floor}::int IS NULL AND r.floor IS DISTINCT FROM 99) OR r.floor=${config.floor}) AND r.room_type_id=${map.room_type_id}
+            const candidates = (await db.execute(sql`SELECT r.id FROM rooms r WHERE r.floor IS DISTINCT FROM 99
+              AND (${!!manual} OR ${config.floor}::int IS NULL OR r.floor=${config.floor}) AND r.room_type_id=${map.room_type_id}
+              AND (${!!manual} OR ${sql.param(config.room_ids)}::text[] IS NULL OR r.id=ANY(${sql.param(config.room_ids)}::text[]))
+              AND (${!manual} OR r.id=${choice?.id || ''})
               AND (${sql.param(map.room_ids)}::text[] IS NULL OR r.id=ANY(${sql.param(map.room_ids)}::text[]))
               AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos') AND COALESCE(r.max_occupancy,${map.max_occupancy})>=${room.occupancy}
               AND NOT EXISTS(SELECT 1 FROM maintenance_blocks m WHERE m.room_id=r.id AND m.block_from<${booking.departure}::date AND m.block_to>=${booking.arrival}::date)
@@ -228,14 +255,17 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
               const code = `CHX-${randomUUID()}`;
               saved = await storage.createReservation({
                 ...patch, reservationCode: code, createdAt: new Date(), source: "ota",
-                externalReservationId: booking.bookingId
+                externalReservationId: booking.bookingId,
+                ...(manual ? { _inventoryOverrideTentativeGroupWarning: manual.overrideTentativeGroupWarning === true } : {})
               });
               saved = await withNightlyWriter(saved.pricingRevision, () => storage.updateReservation(saved.id, {
                 nightlyPricing: room.nights, pricingScheme: "nightly_v1", pricingRevision: saved.pricingRevision + 1
               }));
             }
             await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)
-              VALUES(${saved.id},'Channex','channex',${`${old ? "Modificación" : "Alta"} recibida de Channex. Estadía ${booking.arrival} → ${booking.departure}. Revisión ${revisionId}.`})`);
+              VALUES(${saved.id},${manual?.actor.name || 'Channex'},'channex',${manual
+                ? `Asignación manual desde Channex. Categoría original: ${proposal!.options.rooms.find(r => r.key === room.key)!.mappedCategory || proposal!.options.rooms.find(r => r.key === room.key)!.category}. Destino: ${choice!.category}, habitación ${choice!.number}. Motivo: ${manual.reason}. Revisión ${revisionId}.`
+                : `${old ? "Modificación" : "Alta"} recibida de Channex. Estadía ${booking.arrival} → ${booking.departure}. Revisión ${revisionId}.`})`);
             await db.execute(sql`INSERT INTO channex_inbound_rooms(connection_id,booking_id,remote_room_id,reservation_id,local_hash)
               VALUES(${connectionId},${booking.bookingId},${room.key},${saved.id},${localFingerprint(saved)})
               ON CONFLICT(connection_id,booking_id,remote_room_id) DO UPDATE SET local_hash=EXCLUDED.local_hash`);
@@ -247,9 +277,22 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
         await db.execute(sql`UPDATE channex_inbound_bookings SET last_revision_id=${revisionId},last_inserted_at=${booking.insertedAt}::timestamptz,guest_hash=${guestHash},cancelled=${booking.status === "cancelled"} WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`);
         if (booking.status !== "cancelled") await db.execute(sql`UPDATE channex_inbound_bookings SET source_currency=${booking.currency},settlement_exchange_rate=${settlementRate}
           WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`);
+        if (manual && proposal && selected) {
+          const changes = proposal.options.rooms.map(remote => ({ remoteRoomId: remote.key, sourceCategory: remote.category,
+            mappedCategory: remote.mappedCategory, selected: selected.get(remote.key) }));
+          await db.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,ip_address,timestamp)
+            VALUES(${manual.actor.id},${manual.actor.name},'create','ota','channex_manual_assignment',${revisionId},'Asignación manual de reserva OTA al PMS',
+            ${JSON.stringify({connectionId,bookingId:booking.bookingId,reason:manual.reason,changes,payloadHash:source.payload_hash,
+              currency:booking.currency,sourceTotal:proposal.options.amount,exchangeRate:settlementRate,settlementTotal:proposal.options.settlementTotal,
+              categoryChangeConfirmed:manual.confirmCategoryChange,scopeChangeConfirmed:manual.confirmScopeChange,tentativeGroupWarningConfirmed:manual.overrideTentativeGroupWarning === true})},${manual.actor.ip || null},now())`);
+          await db.execute(sql`UPDATE channex_inbound_bookings SET manual_scope_override=${changes.some(c => c.selected?.scopeOverride)}
+            WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`);
+        }
         await db.execute(sql`UPDATE channex_inbound_revisions SET status='applied',applied_at=now(),review_code=NULL WHERE connection_id=${connectionId} AND revision_id=${revisionId}`);
+        if (manual) return { applied: true, replayed: false, reservationIds: (await db.execute(sql`SELECT reservation_id FROM channex_inbound_rooms WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`)).rows.map((r: any) => r.reservation_id) };
       })));
     } catch (error) {
+      if (manual) throw error;
       // This runs after the canonical transaction rolled back. Never expose
       // raw SQL/provider errors, guest data or credentials in status/logs.
       const code = error instanceof BookingReviewError ? error.code : "PMS_APPLY_REQUIRES_REVIEW";

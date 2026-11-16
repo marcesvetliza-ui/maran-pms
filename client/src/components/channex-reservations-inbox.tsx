@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import { formatDisplayDate, formatDisplayDateTime } from '@shared/date-display';
 import { Button } from './ui/button';
 import { apiRequest } from '@/lib/queryClient';
+import { ChannexManualAssignment } from './channex-manual-assignment';
 import { reasons } from './channex-inbound-reasons';
 
 type View = 'attention' | 'new' | 'modified' | 'cancelled' | 'all';
@@ -47,15 +48,18 @@ function History({connectionId, revisionId}: {connectionId:string;revisionId:str
 type Filters = {search:string;channel:string;dateType:'received'|'stay';from:string;to:string};
 const emptyFilters:Filters={search:'',channel:'',dateType:'received',from:'',to:''};
 const guest=(r:Booking)=>r.guest_name || r.reservations[0]?.guestName || 'Huésped no informado';
+const canAssign=(r:Booking)=>!r.reservations.length&&r.booking_status!=='cancelled'&&['pending','review'].includes(r.status)&&!['INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'');
 const pmsLink=(id:string)=>`/reservations?view=${encodeURIComponent(id)}&returnTo=%2Fota-channels`;
 type Detail={notes:string|null;notesStatus:string;settlements:{reservation_id:string;source_currency:string;source_total:string;exchange_rate:string;settlement_currency:string;settlement_total:string;created_at:string}[]};
-function BookingDetail({connectionId,booking:r,canRetry,pending,onRetry}:{connectionId:string;booking:Booking;canRetry:boolean;pending:boolean;onRetry:(id:string)=>void}){
+function BookingDetail({connectionId,booking:r,canRetry,pending,onRetry,assignOpen,onAssigned}:{connectionId:string;booking:Booking;canRetry:boolean;pending:boolean;onRetry:(id:string)=>void;assignOpen:boolean;onAssigned:()=>void}){
+ const [assigning,setAssigning]=useState(assignOpen);
  const q=useQuery<Detail>({queryKey:['channex-booking-detail',connectionId,r.revision_id],staleTime:0,gcTime:0,retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false,
  queryFn:async()=>(await apiRequest('GET',`/api/channex/connections/${encodeURIComponent(connectionId)}/inbound/booking-detail/${encodeURIComponent(r.revision_id)}`)).json()});
  return <div className="space-y-5 text-sm">
  <section className="grid gap-3 sm:grid-cols-2"><div><p className="text-muted-foreground">Canal / referencia</p><p>{r.channel||'Canal no informado'} · {r.reference||r.booking_id||'Sin identificar'}</p></div><div><p className="text-muted-foreground">Estadía</p><p>{formatDisplayDate(r.arrival||r.reservations[0]?.checkInDate)} → {formatDisplayDate(r.departure||r.reservations[0]?.checkOutDate)}</p></div><div><p className="text-muted-foreground">Importe original del canal</p><p className="font-medium">{amount(r)}</p></div><div><p className="text-muted-foreground">Última recepción</p><p>{formatDisplayDateTime(r.created_at)}</p></div></section>
  <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold">Estado de la reserva</h3><p>Canal: {bookingLabels[r.booking_status||'']||'Estado no identificado'}</p><Result revision={r}/>
  {canRetry&&r.status==='review'&&!['INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'')&&<Button variant="outline" disabled={pending} onClick={()=>onRetry(r.revision_id)}>Reintentar revisión</Button>}</section>
+ {canRetry&&canAssign(r)&&<div>{assigning?<ChannexManualAssignment key={r.revision_id} connectionId={connectionId} revisionId={r.revision_id} onAssigned={onAssigned}/>:<Button onClick={()=>setAssigning(true)}>Asignar al PMS</Button>}</div>}
  <section className="space-y-2"><h3 className="font-semibold">Habitaciones y reserva en PMS</h3>{r.reservations.length?r.reservations.map(local=><div key={local.id} className="rounded border p-3"><p>{local.category} · Habitación {local.roomNumber}</p><p>{formatDisplayDate(local.checkInDate)} → {formatDisplayDate(local.checkOutDate)}</p><a className="underline text-primary" href={pmsLink(local.id)}>Ver reserva en PMS {local.code}</a></div>):<p className="text-muted-foreground">Todavía no hay una reserva vinculada en el PMS.</p>}</section>
  {q.isLoading?<p>Cargando conversión y observaciones…</p>:q.error?<div role="alert"><p>No se pudo consultar la conversión y las observaciones.</p><Button variant="outline" onClick={()=>void q.refetch()}>Volver a consultar detalle</Button></div>:q.data&&<>
  <section className="space-y-2"><h3 className="font-semibold">Conversión registrada en el PMS</h3>{q.data.settlements.length?q.data.settlements.map(s=><div key={s.reservation_id} className="rounded border p-3 space-y-1"><p>{r.reservations.find(local=>local.id===s.reservation_id)?.code||'Reserva vinculada'}</p><p>Original: {amount({...r,amount:s.source_total,currency:s.source_currency})}</p><p>Cotización conservada: ARS {new Intl.NumberFormat('es-AR',{maximumFractionDigits:6}).format(Number(s.exchange_rate))} por {s.source_currency}</p><p>Registrado: {amount({...r,amount:s.settlement_total,currency:s.settlement_currency})}</p><p className="text-muted-foreground">{formatDisplayDateTime(s.created_at)} · Los movimientos posteriores y el saldo se consultan en el folio.</p></div>):<p className="text-muted-foreground">No hay una conversión registrada para esta reserva. No se calcula con la cotización actual.</p>}</section>
@@ -68,6 +72,8 @@ export function ChannexReservationsInbox({connectionId,canRetry,pending,onRetry}
  connectionId:string;canRetry:boolean;pending:boolean;onRetry:(revisionId:string)=>void;
 }) {
  const [view,setView]=useState<View>('all'),[page,setPage]=useState(1),[selected,setSelected]=useState<Booking|null>(null);
+ const [assignOpen,setAssignOpen]=useState(false);
+ const openDetail=(r:Booking,assign=false)=>{setAssignOpen(assign);setSelected(r);};
  const [draft,setDraft]=useState<Filters>(emptyFilters),[filters,setFilters]=useState<Filters>(emptyFilters);
  const params=new URLSearchParams({view,page:String(page),search:filters.search,channel:filters.channel,dateType:filters.dateType});
  if(filters.from)params.set('from',filters.from);if(filters.to)params.set('to',filters.to);
@@ -91,18 +97,18 @@ export function ChannexReservationsInbox({connectionId,canRetry,pending,onRetry}
  {q.isLoading?<p>Cargando reservas…</p>:q.error?<p role="alert">No se pudo consultar la bandeja. Intentá actualizarla.</p>:q.data&&<>
  <p className="text-sm text-muted-foreground" role="status">{q.data.counts[view]} reservas · Página {page} · Los contadores respetan los filtros aplicados.</p>
  <div className="rounded-lg border overflow-x-auto"><table className="w-full min-w-[1080px] text-sm"><caption className="sr-only">Reservas recibidas de canales OTAs</caption><thead className="bg-muted/50 text-muted-foreground"><tr>{['Huésped / referencia','Canal','Habitación / categoría','Ingreso','Salida','Importe','Estado','Acciones'].map(h=><th key={h} scope="col" className="text-left px-4 py-3 font-medium">{h}</th>)}</tr></thead><tbody className="divide-y">
- {q.data.bookings.length===0?<tr><td colSpan={8} className="text-center p-10 text-muted-foreground">No hay reservas en esta vista.</td></tr>:q.data.bookings.map(r=><tr key={r.revision_id} tabIndex={0} className="hover:bg-muted/30 focus-visible:outline focus-visible:outline-primary cursor-pointer" onClick={()=>setSelected(r)} onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();setSelected(r);}}}>
+ {q.data.bookings.length===0?<tr><td colSpan={8} className="text-center p-10 text-muted-foreground">No hay reservas en esta vista.</td></tr>:q.data.bookings.map(r=><tr key={r.revision_id} tabIndex={0} className="hover:bg-muted/30 focus-visible:outline focus-visible:outline-primary cursor-pointer" onClick={()=>openDetail(r)} onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openDetail(r);}}}>
  <td className="px-4 py-3"><span className="font-medium block">{guest(r)}</span><span className="text-xs text-muted-foreground break-all">{r.reference||r.booking_id||'Sin identificar'}</span></td>
  <td className="px-4 py-3">{r.channel||'Sin informar'}</td>
  <td className="px-4 py-3">{r.reservations.length?r.reservations.map(local=><div key={local.id}><span className="font-medium">{local.roomNumber}</span><span className="text-xs text-muted-foreground block">{local.category}</span></div>):<span className="text-muted-foreground">Sin asignar en PMS</span>}</td>
  <td className="px-4 py-3 whitespace-nowrap">{formatDisplayDate(r.arrival||r.reservations[0]?.checkInDate)}</td><td className="px-4 py-3 whitespace-nowrap">{formatDisplayDate(r.departure||r.reservations[0]?.checkOutDate)}</td>
  <td className="px-4 py-3 whitespace-nowrap font-medium tabular-nums">{amount(r)}</td>
  <td className="px-4 py-3"><div className="space-y-1"><Badge variant={r.booking_status==='cancelled'?'destructive':'secondary'}>{bookingLabels[r.booking_status||'']||'Sin identificar'}</Badge><span className={`block text-xs ${r.status==='review'?'text-destructive':'text-muted-foreground'}`}>{appliedLabels[r.status]||'Estado por revisar'}</span></div></td>
- <td className="px-4 py-3"><Button size="sm" variant="outline" aria-label={`Ver detalle de ${guest(r)} · ${r.reference||r.booking_id||r.revision_id}`} onClick={e=>{e.stopPropagation();setSelected(r);}}>Ver detalle</Button></td>
+ <td className="px-4 py-3"><Button size="sm" variant="outline" aria-label={`Ver detalle de ${guest(r)} · ${r.reference||r.booking_id||r.revision_id}`} onClick={e=>{e.stopPropagation();openDetail(r);}}>Ver detalle</Button>{canRetry&&canAssign(r)&&<Button size="sm" className="mt-2" onClick={e=>{e.stopPropagation();openDetail(r,true);}}>Asignar al PMS</Button>}</td>
  </tr>)}
  </tbody></table></div>
  <div className="flex items-center justify-between gap-2"><span className="text-sm text-muted-foreground">25 reservas por página</span><div className="flex gap-2"><Button variant="outline" disabled={page===1} onClick={()=>setPage(page-1)}>Anterior</Button><Button variant="outline" disabled={page*q.data.pageSize>=q.data.counts[view]} onClick={()=>setPage(page+1)}>Siguiente</Button></div></div>
  </>}
- <Dialog open={!!selected} onOpenChange={open=>{if(!open)setSelected(null);}}><DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{selected?guest(selected):'Detalle de reserva'}</DialogTitle><DialogDescription>Detalle de la reserva recibida y su aplicación al PMS.</DialogDescription></DialogHeader>{selected&&<BookingDetail key={selected.revision_id} connectionId={connectionId} booking={q.data?.bookings.find(r=>r.revision_id===selected.revision_id)||selected} canRetry={canRetry} pending={pending} onRetry={onRetry}/>}</DialogContent></Dialog>
+ <Dialog open={!!selected} onOpenChange={open=>{if(!open)setSelected(null);}}><DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{selected?guest(selected):'Detalle de reserva'}</DialogTitle><DialogDescription>Detalle de la reserva recibida y su aplicación al PMS.</DialogDescription></DialogHeader>{selected&&<BookingDetail key={selected.revision_id} connectionId={connectionId} booking={q.data?.bookings.find(r=>selected.booking_id?r.booking_id===selected.booking_id:r.revision_id===selected.revision_id)||selected} canRetry={canRetry} pending={pending} onRetry={onRetry} assignOpen={assignOpen} onAssigned={()=>void q.refetch()}/>}</DialogContent></Dialog>
  </section>;
 }
