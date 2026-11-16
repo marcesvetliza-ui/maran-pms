@@ -18,7 +18,7 @@ const companies = [
     cuilCuit: "30-99887766-5",
   },
 ];
-function mount(tipo: string) {
+function mount(tipo: string, accounts: any[] = []) {
   return render(
     <QueryClientProvider
       client={
@@ -40,7 +40,7 @@ function mount(tipo: string) {
           razonSocial: c.razonSocial,
           cuit: c.cuilCuit.replace(/\D/g, ""),
         }))}
-        accounts={[]}
+        accounts={accounts}
         onClose={vi.fn()}
       />
     </QueryClientProvider>,
@@ -69,6 +69,53 @@ beforeEach(() => {
         ),
     ),
   );
+});
+
+describe("Numeración del comprobante administrativo", () => {
+  const accounts = [
+    { codigo: '4.2.1.08.18', nombre: 'Gastos bancarios' },
+    { codigo: '4.2.1.08.05.02', nombre: 'Liquidaciones' },
+    { codigo: '1.1.4.01.04.01', nombre: 'Retenciones IVA' },
+  ];
+  async function fill(tipo: string, point = '00024', number = '00000345') {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, options?: RequestInit) =>
+      new Response(JSON.stringify(options?.method === 'POST' ? { id: 123 } : String(input) === '/api/companies' ? companies : []), { headers: { 'Content-Type': 'application/json' } })));
+    mount(tipo, accounts);
+    const label = tipo === 'RETENCION' ? 'Empresa / Agencia que retuvo' : tipo === 'RESUMEN-BANCO' ? 'Banco' : 'Tarjeta / Procesadora';
+    await user.click(screen.getByRole('combobox', { name: label }));
+    await user.type(screen.getByPlaceholderText('Nombre o CUIT, con o sin guiones…'), '30123456789');
+    await user.click(await screen.findByRole('option'));
+    if (point) await user.type(screen.getByLabelText('Punto de Venta'), point);
+    await user.type(screen.getByLabelText(/^Número/), number);
+    await user.type(screen.getByLabelText(tipo === 'RETENCION' ? 'Importe final, sin agregar IVA' : 'Neto gravado al 21%'), '100');
+    return user;
+  }
+
+  it.each(['RESUMEN-BANCO', 'LIQ-TARJETA', 'RETENCION'])('envía el PV y el número por separado para %s', async tipo => {
+    const user = await fill(tipo);
+    await user.click(screen.getByRole('button', { name: 'Registrar comprobante' }));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1));
+    const [url, init] = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!;
+    expect(url).toBe('/api/purchase-invoices');
+    expect(JSON.parse(String(init?.body))).toMatchObject({ tipoComprobante: tipo, puntoVenta: '00024', numeroComprobante: '00000345' });
+  });
+
+  it('conserva referencias alfanuméricas y permite documentos sin PV', async () => {
+    const user = await fill('RESUMEN-BANCO', '', 'RES-NOV-2026');
+    await user.click(screen.getByRole('button', { name: 'Registrar comprobante' }));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+    const [, init] = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')!;
+    const body = JSON.parse(String(init?.body));
+    expect(body.numeroComprobante).toBe('RES-NOV-2026'); expect(body).not.toHaveProperty('puntoVenta');
+  });
+
+  it('impide enviar un punto de venta que no sea numérico', async () => {
+    await fill('RESUMEN-BANCO', 'AB12');
+    expect(screen.getByLabelText('Punto de Venta')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: 'Registrar comprobante' })).toBeDisabled();
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
 });
 describe("Emisor por CUIT en comprobantes de compras", () => {
   it.each([

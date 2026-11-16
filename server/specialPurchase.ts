@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "./db";
+import { assertSpecialPurchaseNumberAvailable, specialPurchasePointInput, specialPurchaseReference } from "./specialPurchaseNumbering";
 import {
   specialPurchaseTotals,
   specialPurchaseAccountCode,
@@ -18,6 +19,7 @@ const amount = z
   );
 export const specialPurchaseInput = z.object({
   tipoComprobante: z.enum(["RETENCION", "RESUMEN-BANCO", "LIQ-TARJETA"]),
+  puntoVenta: specialPurchasePointInput,
   numeroComprobante: z.string().trim().min(1).max(100),
   fechaEmision: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   specialDetails: z.object({
@@ -148,27 +150,16 @@ export async function createSpecialPurchase(
       p.numeroComprobante,
       d.jurisdiction.toLowerCase(),
     ].join("|");
-    await db.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtextextended(${identity},0))`,
-    );
-    const duplicate = (
-      await db.execute(
-        sql`SELECT id FROM purchase_invoices WHERE tipo_comprobante=${p.tipoComprobante} AND numero_comprobante=${p.numeroComprobante} AND estado<>'anulado' AND (special_details->>'issuerType'=${d.issuerType} AND special_details->>'issuerId'=${d.issuerId} AND coalesce(special_details->>'subtipo','')=${d.subtipo ?? ""} AND lower(coalesce(special_details->>'jurisdiction',''))=${d.jurisdiction.toLowerCase()} OR (special_details IS NULL AND proveedor_cuit=${issuer.cuit})) LIMIT 1`,
-      )
-    ).rows[0];
-    if (duplicate)
-      throw Object.assign(
-        new Error(
-          "Ya existe ese comprobante para el emisor, impuesto y jurisdicción",
-        ),
-        { statusCode: 409 },
-      );
+    await assertSpecialPurchaseNumberAvailable(db, {
+      ...p, issuerType: d.issuerType, issuerId: d.issuerId, subtipo: d.subtipo, jurisdiction: d.jurisdiction,
+      sameIssuer: sql`(special_details->>'issuerType'=${d.issuerType} AND special_details->>'issuerId'=${d.issuerId} AND coalesce(special_details->>'subtipo','')=${d.subtipo ?? ""} AND lower(coalesce(special_details->>'jurisdiction',''))=${d.jurisdiction.toLowerCase()} OR (special_details IS NULL AND proveedor_cuit=${issuer.cuit}))`,
+    });
     const result = (
-      await db.execute(sql`INSERT INTO purchase_invoices(tipo_comprobante,supplier_id,proveedor_nombre,proveedor_cuit,numero_comprobante,fecha_emision,periodo,condicion_pago,monto_neto,monto_total,monto_iva21,monto_iva105,monto_exento,percepcion_iva,ley_25413,retencion_iibb,subtipo_retencion,cuenta_contable_id,estado,observaciones,special_details)
-   VALUES(${p.tipoComprobante},${d.issuerType === "supplier" ? Number(d.issuerId) : null},${issuer.name},${issuer.cuit},${p.numeroComprobante},${p.fechaEmision},${p.fechaEmision.slice(5, 7) + "/" + p.fechaEmision.slice(0, 4)},'registro',${totals.neto},${totals.total},${totals.iva21},${totals.iva105},${d.exento},${d.percepcionIva},${d.ley25413},${d.retencionIibb},${d.subtipo ?? null},${account.id},'registrado',${p.observaciones ?? null},${JSON.stringify(d)}::jsonb) RETURNING *`)
+      await db.execute(sql`INSERT INTO purchase_invoices(tipo_comprobante,supplier_id,proveedor_nombre,proveedor_cuit,punto_venta,numero_comprobante,numero_comprobante_ext,fecha_emision,periodo,condicion_pago,monto_neto,monto_total,monto_iva21,monto_iva105,monto_exento,percepcion_iva,ley_25413,retencion_iibb,subtipo_retencion,cuenta_contable_id,estado,observaciones,special_details)
+   VALUES(${p.tipoComprobante},${d.issuerType === "supplier" ? Number(d.issuerId) : null},${issuer.name},${issuer.cuit},${p.puntoVenta ?? null},${p.numeroComprobante},${specialPurchaseReference(p.puntoVenta,p.numeroComprobante)},${p.fechaEmision},${p.fechaEmision.slice(5, 7) + "/" + p.fechaEmision.slice(0, 4)},'registro',${totals.neto},${totals.total},${totals.iva21},${totals.iva105},${d.exento},${d.percepcionIva},${d.ley25413},${d.retencionIibb},${d.subtipo ?? null},${account.id},'registrado',${p.observaciones ?? null},${JSON.stringify(d)}::jsonb) RETURNING *`)
     ).rows[0];
     await db.execute(
-      sql`INSERT INTO audit_logs(action,module,entity_type,entity_id,user_name,description,details,timestamp) VALUES('create','admin','special_purchase',${String(result.id)},${actor},'Registro informativo con desglose impositivo',${JSON.stringify({ identity, totals })}::jsonb,now())`,
+      sql`INSERT INTO audit_logs(action,module,entity_type,entity_id,user_name,description,details,timestamp) VALUES('create','admin','special_purchase',${String(result.id)},${actor},'Registro informativo con desglose impositivo',${JSON.stringify({ identity, totals, document: { puntoVenta: p.puntoVenta ?? null, numeroComprobante: p.numeroComprobante, numeroComprobanteExt: specialPurchaseReference(p.puntoVenta,p.numeroComprobante) } })}::jsonb,now())`,
     );
     return result;
   });

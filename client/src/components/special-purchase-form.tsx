@@ -38,7 +38,8 @@ export function SpecialPurchaseForm({
   const [issuerType, setIssuerType] = useState(ret ? "company" : "supplier"),
     [issuerId, setIssuerId] = useState(""),
     [subtipo, setSubtipo] = useState<keyof typeof RETENTION_LABELS>("iva");
-  const [numero, setNumero] = useState(""),
+  const [puntoVenta, setPuntoVenta] = useState(""),
+    [numero, setNumero] = useState(""),
     [fecha, setFecha] = useState(getLocalToday()),
     [period, setPeriod] = useState(getLocalToday().slice(0, 7)),
     [jurisdiction, setJurisdiction] = useState(""),
@@ -100,6 +101,7 @@ export function SpecialPurchaseForm({
     !!issuerId &&
     !!account &&
     !!numero.trim() &&
+    (!puntoVenta.trim() || /^\d{1,5}$/.test(puntoVenta.trim())) &&
     !!fecha &&
     totals.total > 0 &&
     Object.values(parsed).every((n) => Number.isFinite(n) && n >= 0) &&
@@ -108,6 +110,7 @@ export function SpecialPurchaseForm({
     mutationFn: async () => {
       const r = await apiRequest("POST", "/api/purchase-invoices", {
         tipoComprobante: tipo,
+        puntoVenta: puntoVenta.trim() || undefined,
         numeroComprobante: numero,
         fechaEmision: fecha,
         specialDetails: details,
@@ -205,13 +208,35 @@ export function SpecialPurchaseForm({
             </Select>
           </div>
         )}
+        <div className="grid gap-4 sm:col-span-2 sm:grid-cols-2">
         <div>
-          <Label>Número de {ret ? "certificado" : "comprobante"} *</Label>
+          <Label htmlFor="special-punto-venta">Punto de Venta</Label>
           <Input
+            id="special-punto-venta"
+            value={puntoVenta}
+            onChange={(e) => setPuntoVenta(e.target.value)}
+            placeholder="00001"
+            inputMode="numeric"
+            maxLength={5}
+            aria-describedby="special-punto-venta-help"
+            aria-invalid={!!puntoVenta.trim() && !/^\d{1,5}$/.test(puntoVenta.trim())}
+            data-testid="input-punto-venta"
+          />
+          <p id="special-punto-venta-help" className="mt-1 text-xs text-muted-foreground">
+            Si el documento no tiene punto de venta, dejalo vacío.
+          </p>
+        </div>
+        <div>
+          <Label htmlFor="special-numero">{ret ? "Número de certificado" : "Número"} *</Label>
+          <Input
+            id="special-numero"
             value={numero}
             onChange={(e) => setNumero(e.target.value)}
+            placeholder="00000001"
             maxLength={100}
+            data-testid="input-numero-comprobante"
           />
+        </div>
         </div>
         <div>
           <Label>Fecha *</Label>
