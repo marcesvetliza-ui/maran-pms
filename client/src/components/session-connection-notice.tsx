@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { Button } from "@/components/ui/button";
 
-type Props = { blocked: boolean; busy: boolean; error?: string; retryAt: number; modal?: boolean; onRetry: () => void; onLogout: () => void };
-export function SessionConnectionNotice({ blocked, busy, error, retryAt, modal = false, onRetry, onLogout }: Props) {
+type Props = { blocked: boolean; busy: boolean; error?: string; retryAt: number; automaticRetry?: boolean; modal?: boolean; onRetry: () => void; onLogout: () => void };
+export function SessionConnectionNotice({ blocked, busy, error, retryAt, automaticRetry = false, modal = false, onRetry, onLogout }: Props) {
   const content = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -23,7 +23,7 @@ export function SessionConnectionNotice({ blocked, busy, error, retryAt, modal =
   </div>;
   const details = <>
     {modal && <p className="mt-3 text-sm">Lo que estabas editando permanece abierto. Podrás volver a operar cuando verifiquemos tu sesión.</p>}
-    {remaining > 0 && <p className="mt-2 text-sm" role="status">Volvé a intentar en {wait}.</p>}
+    {remaining > 0 && <p className="mt-2 text-sm" role="status">{automaticRetry ? `La conexión se reintentará automáticamente en ${wait}.` : `Volvé a intentar en ${wait}.`}</p>}
     {controls}
   </>;
   if (!modal) return <main className="min-h-screen flex items-center justify-center bg-background p-6">

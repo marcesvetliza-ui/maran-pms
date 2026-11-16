@@ -9,8 +9,8 @@ const requestTimeout = 8_000;
 const maxAutomaticDelay = 5_000;
 
 class SessionConnectionError extends Error {
-  constructor(public retryAt = 0, public status?: number) {
-    super(status === 429 ? "El sistema está atendiendo muchas solicitudes. Esperá un momento antes de reintentar."
+  constructor(public retryAt = 0, public status?: number, public automaticRetry = false) {
+    super(status === 429 ? "Se alcanzó temporalmente el límite de consultas. Esperá un momento para recuperar la conexión."
       : "No se pudo verificar la conexión con el sistema. Podés reintentar sin volver a ingresar tus credenciales.");
   }
 }
@@ -44,7 +44,9 @@ export function useVerifiedSession<T extends Identity>(callbacks: Callbacks = {}
         if (!response.ok) {
           const raw = response.headers.get("Retry-After");
           const delay = raw == null ? 0 : /^\d+$/.test(raw) ? Number(raw) * 1000 : Date.parse(raw) - Date.now();
-          throw new SessionConnectionError(Number.isFinite(delay) && delay > 0 ? Date.now() + delay : 0, response.status);
+          const wait = Number.isFinite(delay) && delay > 0 ? delay : 0;
+          throw new SessionConnectionError(wait ? Date.now() + wait : 0, response.status,
+            response.status === 429 && wait > maxAutomaticDelay);
         }
         const user = await response.json();
         signal.throwIfAborted();
@@ -92,6 +94,17 @@ export function useVerifiedSession<T extends Identity>(callbacks: Callbacks = {}
     }
     await client.refetchQueries({ queryKey: key }, { cancelRefetch: replace });
   }, [client]);
+  useEffect(() => {
+    const error = query.error;
+    if (!query.isError || !error?.automaticRetry) return;
+    // One GET after the server's cooldown, never polling during it or replaying
+    // an operation. Logout, login and unmount cancel this scheduled check.
+    const current = generation.current;
+    const timer = window.setTimeout(() => {
+      if (current === generation.current) void checkAuth();
+    }, Math.max(0, error.retryAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [query.isError, query.error, checkAuth]);
   const clearSession = useCallback(() => {
     generation.current++;
     holdSessionWrites(owner.current, true);
@@ -125,6 +138,6 @@ export function useVerifiedSession<T extends Identity>(callbacks: Callbacks = {}
 
   const failure = query.error || query.failureReason;
   return { user: query.data ?? null, blocked, busy: query.isFetching || query.isPending,
-    error: failure?.message, retryAt: failure?.retryAt || 0,
+    error: failure?.message, retryAt: failure?.retryAt || 0, automaticRetry: failure?.automaticRetry || false,
     checkAuth, clearSession, acceptLogin };
 }
