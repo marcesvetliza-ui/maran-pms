@@ -264,7 +264,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   await pool.query("UPDATE channex_ari_settings SET enabled=false,currency='USD',room_ids=$2::text[] WHERE connection_id=$1",[f.id,[selected]]);
   await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1",[f.id]);
   await pool.query("UPDATE rate_plans SET currency='USD',base_rate=145,rate_1pax=120,rate_2pax=145 WHERE id=$1",[f.plan]);
-  await pool.query("UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies='[1,2]'::jsonb WHERE connection_id=$1",[f.id]);
+  await pool.query("UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies=ARRAY[1,2] WHERE connection_id=$1",[f.id]);
   await pool.query("INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,stop_sell) VALUES($1,$2::date,true)",[f.plan,databaseToday]);
   const before=(await pool.query("SELECT count(*) AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n;
   const preview=await previewChannexAri(pool,f.id);
