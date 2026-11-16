@@ -1,3 +1,5 @@
+import { normalizeToSpanishPaymentMethod } from "./payment-method";
+import { GROUP_CREDIT_ADVANCE_PERMISSION, parseGroupCreditAdvanceConfirmation, supportsGroupCreditAdvance, groupCreditAdvanceSummary } from "@shared/groupCreditAdvance";
 import {getGroupPaymentRequest} from './groupPaymentRequest';
 import {lockRoomInvoiceCollection,finishRoomInvoiceCollection} from './billing/reservationInvoiceCollection';
 import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
@@ -3328,6 +3330,7 @@ export class DatabaseStorage implements IStorage {
    * payments are traceable allocations and must never be added again to a total.
    */
   async recordGroupPayment(input: {
+    creditAdvanceAuthorization?: import("@shared/groupCreditAdvance").GroupCreditAdvanceConfirmation & { userId: string };
     paymentRequest?: import("./reservationPaymentRequest").ReservationPaymentRequest;
     groupId: string;
     destination: GroupPaymentDestination;
@@ -3382,6 +3385,31 @@ export class DatabaseStorage implements IStorage {
         SELECT id, name FROM groups WHERE id = ${input.groupId} FOR UPDATE
       `);
       if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
+
+      let creditAdvanceAudit: Record<string, unknown> | undefined;
+      let creditAdvanceActor: { id: string; username: string } | undefined;
+      if (input.creditAdvanceAuthorization) {
+        const confirmation = parseGroupCreditAdvanceConfirmation(input.creditAdvanceAuthorization);
+        const actor = await tx.execute(sql`
+          SELECT u.id, u.username FROM system_users u
+          JOIN role_permissions rp ON rp.role = u.role AND rp.resource_key = ${GROUP_CREDIT_ADVANCE_PERMISSION}
+          WHERE u.id = ${input.creditAdvanceAuthorization.userId} AND u.is_active = 'true'
+          FOR SHARE OF u
+        `);
+        creditAdvanceActor = actor.rows[0] as any;
+        if (!creditAdvanceActor) throw Object.assign(new Error("No tenés permiso para aceptar anticipos superiores al saldo del grupo."), { statusCode: 403 });
+        if (input.destination !== "master_folio" || !["none", "sin_comprobante"].includes(input.receiptType || "")
+          || input.invoiceData || input.closeReservationIds?.length
+          || !supportsGroupCreditAdvance(input.paymentRows.map(row => ({ ...row, method: normalizeToSpanishPaymentMethod(row.method) })))) {
+          throw invalid("El saldo a favor requiere un Anticipo al Folio Maestro, sin cierre de habitaciones ni retenciones, con efectivo, transferencia o tarjeta.");
+        }
+        // Never reserve some instruments for group charges while declaring the
+        // rest reusable. The whole receipt remains explicitly unassigned.
+        if (Object.keys(input.distributionDetail || {}).some(key => key !== "__unassigned__")) {
+          throw invalid("El anticipo con saldo a favor debe quedar sin asignar a habitaciones.");
+        }
+        input = { ...input, creditAdvanceAuthorization: { ...confirmation, userId: creditAdvanceActor!.id } };
+      }
 
       let linkedInvoice: any = null;
       if (input.invoiceData) {
@@ -3701,8 +3729,23 @@ export class DatabaseStorage implements IStorage {
         const scopedDirectCents = cents(totals.direct_all_paid);
         const totalReceivedCents = cents(totals.master_parent_paid) + scopedDirectCents;
         const availableCents = masterTotalCents - totalReceivedCents;
-        if (receivedCents > availableCents) {
-          throw invalid(`El cobro supera el saldo disponible del Folio Maestro de $${Math.max(0, availableCents) / 100}.`);
+        if (input.creditAdvanceAuthorization) {
+          if (input.creditAdvanceAuthorization.expectedBalanceCents !== availableCents) {
+            throw Object.assign(new Error("El saldo del grupo cambió. Actualizá el Folio Maestro y volvé a confirmar el anticipo y su saldo a favor."), { statusCode: 409 });
+          }
+          if (receivedCents <= availableCents) throw invalid("Este cobro no supera el saldo; registralo como un anticipo habitual.");
+          if (cents(input.distributionDetail.__unassigned__ || 0) !== receivedCents) {
+            throw invalid("El anticipo completo debe quedar sin asignar a habitaciones.");
+          }
+          creditAdvanceAudit = {
+            reason: input.creditAdvanceAuthorization.reason,
+            balanceBeforeCents: availableCents, receivedCents,
+            balanceAfterCents: availableCents - receivedCents,
+            ...groupCreditAdvanceSummary(availableCents, receivedCents),
+            unassignedCents: receivedCents,
+          };
+        } else if (receivedCents > availableCents) {
+          throw invalid(`El cobro supera el saldo disponible del Folio Maestro de $${Math.max(0, availableCents) / 100}. Para registrar saldo a favor se requiere permiso y confirmación explícita.`);
         }
       }
 
@@ -4110,6 +4153,14 @@ export class DatabaseStorage implements IStorage {
         closedReservations = { processed: closeReservationIds.length, checkedIn, confirmed };
       }
 
+      if (creditAdvanceAudit && creditAdvanceActor) {
+        await tx.insert(auditLogs).values({
+          userId: creditAdvanceActor.id, userName: creditAdvanceActor.username,
+          action: "create", module: "groups", entityType: "group_payment", entityId: groupPayment.id,
+          description: "Anticipo de grupo con saldo a favor autorizado",
+          details: JSON.stringify({ groupId: input.groupId, ...creditAdvanceAudit }), timestamp: new Date(),
+        });
+      }
       return { groupPayment, reservationPayments, closedReservations };
     });
   }

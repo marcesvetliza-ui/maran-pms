@@ -1,3 +1,4 @@
+import { parseGroupCreditAdvanceConfirmation } from "@shared/groupCreditAdvance";
 import {normalizeToSpanishPaymentMethod} from '../payment-method';
 import {parseReservationPaymentRequest} from '../reservationPaymentRequest';
 import {getGroupPaymentRequest,replayGroupPayment} from '../groupPaymentRequest';
@@ -2219,7 +2220,13 @@ export function registerGroupsRoutes(app: Express) {
         .filter((payment: any) => masterPaymentIds.has(payment.id))
         .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
       const masterBalance = masterTotal - masterParentPaid - directAllPaid;
-      if (closeReservationIds.length === 0 && totalAmount > masterBalance + 0.009) {
+      // The authenticated actor is supplied by the server, never from the body.
+      // Storage checks current permissions and the confirmed balance under lock.
+      const creditAdvanceAuthorization = req.body.creditAdvance == null ? undefined : {
+        ...parseGroupCreditAdvanceConfirmation(req.body.creditAdvance),
+        userId: String((req.user as any)?.id || ""),
+      };
+      if (!creditAdvanceAuthorization && closeReservationIds.length === 0 && totalAmount > masterBalance + 0.009) {
         return res.status(400).json({
           error: `El cobro de $${totalAmount.toFixed(2)} supera el saldo del Folio Maestro de $${Math.max(0, masterBalance).toFixed(2)}.`,
         });
@@ -2280,9 +2287,9 @@ export function registerGroupsRoutes(app: Express) {
          allocationEntries.push({ id: "__master_balance__", weight: historicalMasterBalance });
        }
        if (allocationEntries.length === 0) allocationEntries.push({ id: "__master_balance__", weight: 1 });
-      if(leaveUnassigned&&rows.some(row=>!['efectivo','transferencia','tarjeta_debito','tarjeta_credito','mercadopago'].includes(normalizeToSpanishPaymentMethod(row.method))||Number(row.retention?.monto||0)>0))return res.status(400).json({error:'Para dejar un anticipo sin asignar, usá efectivo, transferencia o tarjeta sin retenciones. Las liquidaciones con retención o cuenta corriente requieren indicar su destino.'});
-      if(leaveUnassigned&&(closeReservationIds.length||isFiscalGroupReceipt(evidence.receiptType)))return res.status(400).json({error:'El anticipo sin asignar no cierra habitaciones ni emite una factura.'});
-      const allocation = leaveUnassigned ? {'__unassigned__':totalAmount} : confirmedAllocation
+      if((leaveUnassigned||creditAdvanceAuthorization)&&rows.some(row=>!['efectivo','transferencia','tarjeta_debito','tarjeta_credito','mercadopago'].includes(normalizeToSpanishPaymentMethod(row.method))||Number(row.retention?.monto||0)>0))return res.status(400).json({error:'Para dejar un anticipo sin asignar, usá efectivo, transferencia o tarjeta sin retenciones. Las liquidaciones con retención o cuenta corriente requieren indicar su destino.'});
+      if((leaveUnassigned||creditAdvanceAuthorization)&&(closeReservationIds.length||isFiscalGroupReceipt(evidence.receiptType)))return res.status(400).json({error:'El anticipo sin asignar no cierra habitaciones ni emite una factura.'});
+      const allocation = (leaveUnassigned||creditAdvanceAuthorization) ? {'__unassigned__':totalAmount} : confirmedAllocation
         ?? distributeCents(Math.round(totalAmount * 100), allocationEntries);
       const destination = closeReservationIds.length > 0 ? "group_distribution" : "master_folio";
       const persistedConcepts = normalizeConceptsForGroupPaymentDestination({
@@ -2304,6 +2311,7 @@ export function registerGroupsRoutes(app: Express) {
 
       const recorded = await storage.recordGroupPayment({
         paymentRequest,
+        creditAdvanceAuthorization,
         groupId: req.params.groupId,
         // A directed checkout is launched from the Master Folio UI, but its
         // explicit room allocations are operational room payments. Keeping

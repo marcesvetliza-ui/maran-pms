@@ -453,6 +453,7 @@ export interface IStorage {
   deleteGroupCharge(id: string): Promise<boolean>;
   createGroupPayment(payment: InsertGroupPayment): Promise<GroupPayment>;
   recordGroupPayment(input: {
+    creditAdvanceAuthorization?: import("@shared/groupCreditAdvance").GroupCreditAdvanceConfirmation & { userId: string };
     paymentRequest?: import("./reservationPaymentRequest").ReservationPaymentRequest;
     groupId: string;
     destination: GroupPaymentDestination;
