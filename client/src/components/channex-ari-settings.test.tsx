@@ -43,3 +43,19 @@ it('saves only the selected physical room in USD while keeping capture paused', 
   fireEvent.click(screen.getByRole('button',{name:'Guardar alcance'}));
   await waitFor(()=>expect(requests.find(r=>r.method==='PATCH')?.body).toEqual({floor:2,currency:'USD',enabled:false,roomIds:['r201']}));
 });
+
+it('shows older blocked events through a read-only filter without resetting unsaved scope edits',async()=>{
+ const blocked={id:'old-4',kind:'restrictions',status:'blocked',date_from:'2026-11-16',date_to:'2028-03-29',last_error:'La moneda del plan debe coincidir',task_ids:null,attempts:2};
+ vi.stubGlobal('fetch',vi.fn(async(url:any,options?:RequestInit)=>{
+  requests.push({url:String(url),method:options?.method??'GET',body:null});
+  return new Response(JSON.stringify({...status,summary:[{status:'blocked',count:4},{status:'pending',count:35}],events:String(url).includes('eventStatus=blocked')?[blocked]:[]}),{status:200,headers:{'Content-Type':'application/json'}});
+ }));
+ render(<QueryClientProvider client={queryClient}><ChannexAriSettings connectionId="connection" /></QueryClientProvider>);
+ const floor=await screen.findByLabelText('Piso incluido (vacío: todo el hotel)');
+ fireEvent.change(floor,{target:{value:'3'}});
+ fireEvent.change(screen.getByLabelText('Mostrar eventos'),{target:{value:'blocked'}});
+ expect(await screen.findByText('La moneda del plan debe coincidir')).toBeInTheDocument();
+ expect(screen.getByText('Intentos: 2')).toBeInTheDocument();expect(floor).toHaveValue(3);
+ expect(requests.some(r=>r.url.endsWith('/ari?eventStatus=blocked'))).toBe(true);
+ expect(requests.every(r=>r.method==='GET')).toBe(true);
+});
