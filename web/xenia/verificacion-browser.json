@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "viewport_widths": [
+    1440,
+    1024,
+    768,
+    390,
+    360
+  ],
+  "checked": [
+    "assets",
+    "no_horizontal_overflow",
+    "product_tabs",
+    "tab_keyboard_navigation",
+    "fictional_reservation_details",
+    "area_tabs",
+    "contact_validation_and_local_draft",
+    "clipboard_copy",
+    "privacy_dialog",
+    "mobile_menu",
+    "module_accordion"
+  ],
+  "page_errors": [],
+  "external_messages_sent": false,
+  "hotel_data_accessed": false
+}
