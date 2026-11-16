@@ -1,3 +1,4 @@
+import { ChannexAriEvents } from './channex-ari-events';
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -21,11 +22,7 @@ export function ChannexAriSettings({ connectionId,canConfigure=true,canSync=true
       {canSync&&<QueueActions connectionId={connectionId} enabled={data.settings.enabled} />}
       <Button variant="outline" size="sm" onClick={() => refetch()}>Actualizar estado</Button>
       <details><summary className="cursor-pointer text-sm">Últimos cambios y tareas de Channex</summary>
-        <div className="space-y-2 mt-2">{data.events.map(e => <div key={e.id} className="rounded border p-2 text-sm">
-          <p>{e.kind === 'availability' ? 'Disponibilidad' : 'Tarifas'} · {e.date_from} → {e.date_to} · {({ pending: 'Pendiente', delivered: 'Procesado', blocked: 'Requiere revisión' } as Record<string, string>)[e.status]}</p>
-          {e.last_error && <p role="alert" className="text-destructive">{e.last_error}</p>}
-          {!!e.task_ids?.length && <p className="break-all text-muted-foreground">Tareas de Channex: {e.task_ids.join(', ')}</p>}
-        </div>)}</div>
+        <ChannexAriEvents key={connectionId} connectionId={connectionId} recent={data.events} summary={data.summary} refreshRecent={() => refetch()} />
       </details>
     </> : null}
   </CardContent></Card>;

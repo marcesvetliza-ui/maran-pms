@@ -17,6 +17,8 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
   const configure = requireChannex('config');
   app.get('/api/channex/connections/:id/ari', requireChannex('status'), async (req, res) => {
     try {
+      const eventStatus = z.enum(['pending','blocked','delivered']).optional().parse(req.query.eventStatus);
+      res.setHeader('Cache-Control','private, no-store');
       const c = await pool.connect(); try {
         const connection=(await c.query('SELECT id,environment FROM channex_connections WHERE id=$1',[req.params.id])).rows[0];
         if (!connection) return res.status(404).json({ error: 'Conexión no encontrada' });
@@ -24,7 +26,7 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
         const previewFloor = req.query.floor === 'all' ? null : req.query.floor === undefined ? settings.floor : z.coerce.number().int().min(-5).max(100).parse(req.query.floor);
         const rooms = await inventoryPreview(c, req.params.id, previewFloor);
         const summary = (await c.query(`SELECT status,count(*)::int AS count FROM channex_ari_outbox WHERE connection_id=$1 GROUP BY status`, [req.params.id])).rows;
-        const events = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,reason,status,attempts,task_ids,last_error,created_at FROM channex_ari_outbox o WHERE connection_id=$1 ORDER BY o.id DESC LIMIT 30`, [req.params.id])).rows;
+        const events = (await c.query(`SELECT id::text,kind,date_from::text,date_to::text,reason,status,attempts,task_ids,last_error,created_at FROM channex_ari_outbox o WHERE connection_id=$1 AND ($2::text IS NULL OR status=$2) ORDER BY o.id DESC LIMIT 30`, [req.params.id,eventStatus ?? null])).rows;
         res.json({ settings, rooms, summary, events, dispatchEnabled: !!workerEnvironment('ari') });
       } finally { c.release(); }
     } catch (error) { res.status(error instanceof z.ZodError ? 400 : 503).json({ error: 'No se pudo consultar el alcance y la cola de Channex' }); }
