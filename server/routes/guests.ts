@@ -1,3 +1,4 @@
+import { registerCcReceiptAllocationRoutes } from './cc-receipt-allocations';
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth, requirePermission } from "../auth";
@@ -247,6 +248,7 @@ async function registerCcReceiptCashMovements(
 
 export function registerGuestsRoutes(app: Express) {
   registerCcReceiptCashRepairRoutes(app);
+  registerCcReceiptAllocationRoutes(app);
   // Companies
   app.get("/api/companies", async (req, res) => {
     try {

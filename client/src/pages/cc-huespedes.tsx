@@ -1,3 +1,4 @@
+import { CcCorrectAllocationsAction } from "@/components/cc-correct-allocations-action";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { useLocation } from "wouter";
@@ -287,7 +288,8 @@ export default function CcHuespedesPage() {
                               >
                                 <FileText className="h-3 w-3" /> Recibo PDF
                               </a>
-                              <CcVoidReceiptAction movement={m} entityLabel={viewingGuest?.name || ""} />
+                              <CcCorrectAllocationsAction movement={m} entityLabel={viewingGuest?.name || ""} />
+                          <CcVoidReceiptAction movement={m} entityLabel={viewingGuest?.name || ""} />
                             </div>
                           )}
                         </TableCell>

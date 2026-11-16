@@ -79,6 +79,9 @@ jobs:
       - name: Verificar bandeja Channex agrupada y de solo lectura
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "groups the inbox"
 
+      - name: Verificar corrección de imputaciones CC sin modificar Caja
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/cc-receipt-allocations.pg.test.ts
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 

@@ -1,3 +1,4 @@
+import { CcCorrectAllocationsAction } from "@/components/cc-correct-allocations-action";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
 import { getArgentinaToday } from "@/lib/utils";
@@ -1440,6 +1441,7 @@ export default function AdminCuentasPage() {
                             <FileText className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
                           <CcCashShiftRepairAction movement={r} canManage={canRepairCashShift} />
+                          <CcCorrectAllocationsAction movement={r} entityLabel={r.entityName} />
                           <CcVoidReceiptAction movement={r} entityLabel={r.entityName} />
                         </div>
                       </td>

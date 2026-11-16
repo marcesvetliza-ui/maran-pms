@@ -1328,7 +1328,7 @@ export function registerExportRoutes(app: Express) {
         SELECT a.amount AS applied_amount, c.date AS cargo_date, c.description AS cargo_description, c.amount AS cargo_amount
         FROM account_movement_allocations a
         JOIN account_movements c ON c.id = a.cargo_id
-        WHERE a.pago_id = ${id}
+        WHERE a.pago_id = ${id} AND a.voided = false
         ORDER BY c.date ASC
       `);
       const allocations = allocResult.rows as any[];
