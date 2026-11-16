@@ -1,3 +1,4 @@
+import {ChannexAriPreview} from './channex-ari-preview';
 import { ChannexAriEvents } from './channex-ari-events';
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -19,6 +20,7 @@ export function ChannexAriSettings({ connectionId,canConfigure=true,canSync=true
       <p className="text-sm font-medium">{data.dispatchEnabled ? 'Envíos habilitados en el servidor.' : 'Envíos externos deshabilitados. Podés configurar el alcance y registrar cambios sin enviarlos.'}</p>
       {canConfigure&&<InventoryEditor key={`${connectionId}:${data.settings.updated_at ?? 'new'}`} connectionId={connectionId} initial={data.settings} />}
       <div className="text-sm flex flex-wrap gap-4">{data.summary.map(s => <span key={s.status}>{({ pending: 'Pendientes', delivered: 'Procesados', blocked: 'Requieren revisión' } as Record<string, string>)[s.status]}: {s.count}</span>)}</div>
+      {canConfigure&&<ChannexAriPreview key={connectionId} connectionId={connectionId} />}
       {canSync&&<QueueActions connectionId={connectionId} enabled={data.settings.enabled} />}
       <Button variant="outline" size="sm" onClick={() => refetch()}>Actualizar estado</Button>
       <details><summary className="cursor-pointer text-sm">Últimos cambios y tareas de Channex</summary>

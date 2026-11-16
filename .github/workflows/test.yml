@@ -73,6 +73,9 @@ jobs:
       - name: Verificar preparación de Channex para una habitación
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "readiness respects"
 
+      - name: Verificar vista previa Channex sin publicar
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "previews selected USD"
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 
