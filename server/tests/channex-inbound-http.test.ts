@@ -9,6 +9,23 @@ let server:Server;
 afterEach(async()=>{vi.unstubAllEnvs();if(server)await new Promise<void>(r=>server.close(()=>r()));});
 async function start(query:any){const app=express();app.use(express.json());registerChannexInboundWebhook(app,{query} as any);registerChannexInboundRoutes(app,{query} as any);server=app.listen(0,"127.0.0.1");await new Promise<void>(r=>server.once("listening",r));return `http://127.0.0.1:${(server.address() as any).port}`;}
 describe("inbound authenticated notifications and configuration",()=>{
+ it("protects the read-only inbox and history and validates pagination before querying",async()=>{
+  const query=vi.fn(async(_sql:string,_params:unknown[])=>({rows:[{counts:{all:0},bookings:[],revisions:[],total:0}]})),base=await start(query);
+  for(const path of ['/bookings','/history/revision']) {
+   expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`)).status).toBe(401);
+  }
+  for(const path of ['/bookings?view=invalid','/bookings?page=0','/history/revision?page=-1']) {
+   expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{headers:{'x-role':'reception'}})).status).toBe(400);
+  }
+  expect(query).not.toHaveBeenCalled();
+  for(const path of ['/bookings?view=attention&page=2','/history/revision?page=1']) {
+   const response=await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{headers:{'x-role':'reception'}});
+   expect(response.status).toBe(200);expect(response.headers.get('cache-control')).toBe('private, no-store');
+  }
+  expect(query.mock.calls[0][1]).toEqual(['conn','attention',25]);
+  expect(query.mock.calls[1][1]).toEqual(['conn','revision',0]);
+  for(const [sql] of query.mock.calls) expect(sql).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/);
+ });
  it("leaves notifications unavailable without the staging flag",async()=>{
   vi.stubEnv("CHANNEX_INBOUND_STAGING_ENABLED","");const query=vi.fn(),base=await start(query);
   expect((await fetch(`${base}/api/channex/inbound/conn/notify`,{method:"POST"})).status).toBe(404);expect(query).not.toHaveBeenCalled();
