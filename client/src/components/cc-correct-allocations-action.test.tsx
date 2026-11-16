@@ -35,3 +35,7 @@ it('retains the exact request identity when retrying a lost response',async()=>{
  const posts=vi.mocked(apiRequest).mock.calls.filter(([method])=>method==='POST');expect(posts).toHaveLength(2);expect(posts[1]).toEqual(first);
 });
 it('does not offer correction on voided or linked receipts',()=>{mount({...movement,reservationId:'reservation'} as any);expect(screen.queryByRole('button')).not.toBeInTheDocument();});
+
+it('allows clearing the current selection to leave an explicitly reviewed payment on account',async()=>{
+ mock();mount();const user=userEvent.setup();await user.click(screen.getByRole('button',{name:'Corregir facturas aplicadas'}));await screen.findByLabelText('Aplicar a Factura nueva');await user.click(screen.getByRole('button',{name:'Quitar selección'}));await user.type(screen.getByLabelText('Motivo de la corrección'),'Pago a cuenta pendiente de identificar');await user.click(screen.getByRole('button',{name:'Revisar corrección'}));expect(screen.getByText('El recibo quedará como pago a cuenta, sin comprobantes aplicados.')).toBeInTheDocument();await user.click(screen.getByRole('button',{name:'Confirmar corrección'}));await waitFor(()=>expect(apiRequest).toHaveBeenCalledWith('POST',expect.any(String),expect.objectContaining({allocations:[]})));
+});
