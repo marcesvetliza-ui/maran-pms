@@ -1,3 +1,4 @@
+import { inboxQuerySchema, listInboundBookings, inboundBookingHistory } from './inbox';
 import {requireChannex} from './access';
 import {workerEnvironment,operationAllowed,PRODUCTION_URL} from './connectionPolicy';
 import type { Express } from "express";
@@ -39,6 +40,20 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
         FROM channex_inbound_settlements WHERE reservation_id=$1 ORDER BY created_at DESC,revision_id DESC LIMIT 1`, [req.params.id])).rows[0];
       res.json(row || null);
     } catch { res.status(503).json({ error: "No se pudo consultar el importe original del canal" }); }
+  });
+  app.get(`${root}/bookings`, requireChannex("read"), async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    const parsed = inboxQuerySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "Filtro o página inválidos" });
+    try { res.type("application/json").send(JSON.stringify(await listInboundBookings(pool, req.params.id, parsed.data.view, parsed.data.page))); }
+    catch { res.status(503).json({ error: "No se pudo consultar la bandeja de reservas" }); }
+  });
+  app.get(`${root}/history/:revisionId`, requireChannex("read"), async (req, res) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    const parsed = inboxQuerySchema.safeParse(req.query);
+    if (!parsed.success || req.params.revisionId.length > 160) return res.status(400).json({ error: "Página o revisión inválidas" });
+    try { res.type("application/json").send(JSON.stringify(await inboundBookingHistory(pool, req.params.id, req.params.revisionId, parsed.data.page))); }
+    catch { res.status(503).json({ error: "No se pudo consultar el historial de la reserva" }); }
   });
   app.patch(`${root}/settlement-rate`, permission, async (req, res) => {
     const parsed = settlementSettingsSchema.safeParse(req.body);

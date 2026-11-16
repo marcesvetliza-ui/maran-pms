@@ -31,6 +31,7 @@ beforeEach(()=>{
    if(url.includes('/rate-plan-mappings/')){planMappings=planMappings.map(row=>({...row,...payload}));return response({...planMappings[0],connectionId:'conn'});}
   }
   if(url.includes('/ari'))return response({settings:{floor:null,currency:'ARS',enabled:false},dispatchEnabled:false,rooms:[],summary:[],events:[]});
+  if(url.includes('/inbound/bookings?'))return response({counts:{all:0,attention:0,new:0,modified:0,cancelled:0},bookings:[],page:1,pageSize:25});
   if(url.endsWith('/inbound'))return response({serverEnabled:false,settings:{enabled:false,has_token:false},revisions:[]});
   return response([]);
  }));

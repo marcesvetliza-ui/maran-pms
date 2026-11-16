@@ -76,6 +76,9 @@ jobs:
       - name: Verificar vista previa Channex sin publicar
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "previews selected USD"
 
+      - name: Verificar bandeja Channex agrupada y de solo lectura
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "groups the inbox"
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 
