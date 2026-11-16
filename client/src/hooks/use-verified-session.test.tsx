@@ -48,13 +48,36 @@ describe("verified sessions during temporary connection failures", () => {
     fetch.mockResolvedValue(response(200)); act(() => { void result.current.checkAuth(); }); await advance();
     expect(result.current.user).toEqual(user); expect(result.current.blocked).toBe(false);
   });
-  it("honors a long Retry-After without polling the rate limit", async () => {
+  it("honors a long Retry-After and resumes automatically only after the cooldown", async () => {
     const fetch = vi.fn().mockResolvedValue(response(429, {}, { "Retry-After": "60" })); vi.stubGlobal("fetch", fetch);
     const { result } = renderHook(() => useVerifiedSession()); await advance();
     expect(result.current.busy).toBe(false); expect(result.current.retryAt).toBeGreaterThan(Date.now());
     await act(async () => { await result.current.checkAuth(); }); await advance(59_000); expect(fetch).toHaveBeenCalledTimes(1);
-    fetch.mockResolvedValue(response(200)); await advance(1000); act(() => { void result.current.checkAuth(); }); await advance();
+    fetch.mockResolvedValue(response(200)); await advance(1000); await advance();
     expect(fetch).toHaveBeenCalledTimes(2); expect(result.current.user).toEqual(user);
+  });
+  it("waits again if the server renews the cooldown instead of polling or logging out", async () => {
+    const fetch = vi.fn().mockResolvedValue(response(429, {}, { "Retry-After": "120" })); vi.stubGlobal("fetch", fetch);
+    const invalid = vi.fn(); const { result } = renderHook(() => useVerifiedSession({ onInvalidated: invalid })); await advance();
+    await advance(119_000); expect(fetch).toHaveBeenCalledTimes(1);
+    await advance(1000); expect(fetch).toHaveBeenCalledTimes(2);
+    await advance(119_000); expect(fetch).toHaveBeenCalledTimes(2);
+    fetch.mockResolvedValue(response(200)); await advance(1000);
+    expect(fetch).toHaveBeenCalledTimes(3); expect(result.current.user).toEqual(user); expect(invalid).not.toHaveBeenCalled();
+    expect(fetch.mock.calls.every(([url]) => url === "/api/auth/me")).toBe(true);
+  });
+  it.each(["logout", "login", "unmount"])("cancels scheduled reconnection after %s", async action => {
+    const fetch = vi.fn().mockResolvedValue(response(429, {}, { "Retry-After": "120" })); vi.stubGlobal("fetch", fetch);
+    const { result, unmount } = renderHook(() => useVerifiedSession()); await advance();
+    act(() => { if (action === "logout") result.current.clearSession(); else if (action === "login") result.current.acceptLogin(other); else unmount(); });
+    await advance(125_000); expect(fetch).toHaveBeenCalledTimes(1);
+    if (action === "login") expect(result.current.user).toEqual(other);
+    if (action === "logout") expect(result.current.user).toBeNull();
+  });
+  it("keeps short rate-limit failures bounded when no longer cooldown is supplied", async () => {
+    const fetch = vi.fn().mockResolvedValue(response(429, {}, { "Retry-After": "1" })); vi.stubGlobal("fetch", fetch);
+    const { result } = renderHook(() => useVerifiedSession()); await advance(); await advance(1000); await advance(2500); await advance(60_000);
+    expect(fetch).toHaveBeenCalledTimes(3); expect(result.current.busy).toBe(false); expect(result.current.blocked).toBe(true);
   });
   it("ends a truly expired session immediately without retrying credentials", async () => {
     const fetch = vi.fn().mockResolvedValue(response(401, { message: "No autenticado" })); vi.stubGlobal("fetch", fetch);
@@ -83,6 +106,26 @@ describe("verified sessions during temporary connection failures", () => {
 
 describe("session verification preserves an open reservation safely", () => {
   function Draft() { const [value, setValue] = useState(""); return <input aria-label="Notas sin guardar" value={value} onChange={event => setValue(event.target.value)} />; }
+  it("preserves a draft and resumes automatically after a long rate-limit pause", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(response(200)).mockResolvedValueOnce(response(429, {}, { 'Retry-After': '120' })).mockResolvedValue(response(200));
+    vi.stubGlobal('fetch', fetch);
+    let session!: ReturnType<typeof useVerifiedSession>;
+    function Harness() {
+      session = useVerifiedSession();
+      return <>{session.user && <Draft />}<SessionConnectionNotice {...session} modal={!!session.user} onRetry={() => void session.checkAuth()} onLogout={session.clearSession} /></>;
+    }
+    render(<Harness />); await advance(); const input = screen.getByLabelText('Notas sin guardar');
+    fireEvent.change(input, { target: { value: 'Datos pendientes de guardar' } });
+    act(() => { void session.checkAuth(); }); await advance();
+    expect(screen.getByRole('status')).toHaveTextContent(/reintentará automáticamente/);
+    expect(screen.getByRole('button', { name: 'Reintentar conexión' })).toBeDisabled();
+    await expect(apiRequest('POST', '/api/reservations', {})).rejects.toMatchObject({ notSent: true });
+    await advance(119_000); expect(fetch).toHaveBeenCalledTimes(2); expect(input).toHaveValue('Datos pendientes de guardar');
+    await advance(1000); expect(fetch).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Notas sin guardar')).toBe(input); expect(input).toHaveValue('Datos pendientes de guardar');
+    expect(fetch.mock.calls.every(([url]) => url === '/api/auth/me')).toBe(true);
+  });
   it("keeps the same form mounted behind the reconnect notice and never replays a write", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(response(200)).mockResolvedValueOnce(response(503)).mockResolvedValueOnce(response(200)); vi.stubGlobal("fetch", fetch);
     let session!: ReturnType<typeof useVerifiedSession>;

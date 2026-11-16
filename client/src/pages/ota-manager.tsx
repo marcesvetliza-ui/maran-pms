@@ -30,8 +30,33 @@ export default function OtaManager(){
  const {data:roomOptions=[]}=useQuery<any[]>({queryKey:[`/api/channex/connections/${id}/room-options`],enabled:!!id&&!!access?.config});
  const {data:roomMaps=[]}=useQuery<any[]>({queryKey:[`/api/channex/connections/${id}/room-type-mappings`],enabled:!!id&&!!access?.config});
  const {data:planMaps=[]}=useQuery<any[]>({queryKey:[`/api/channex/connections/${id}/rate-plan-mappings`],enabled:!!id&&!!access?.config});
- const action=useMutation({mutationFn:async({method,path,body}:{method:string;path:string;body?:unknown})=>(await apiRequest(method,path,body)).json(),onMutate:()=>setFeedback(''),onSuccess:async(result,request)=>{setKey('');if(request.path.endsWith('/sync-catalog'))setFeedback(`Catálogo obtenido: ${result.roomTypes} categorías y ${result.ratePlans} planes tarifarios.`);else if(request.path.includes('/rate-plan-mappings/'))setFeedback('Tarifa vinculada guardada.');else if(request.path.includes('/room-type-mappings/'))setFeedback('Mapeo de habitaciones guardado.');else if(request.path==='/api/channex/connections'&&request.method==='POST'){setSelected(result.id);setFeedback('Conexión guardada desactivada.');}await client.invalidateQueries({predicate:query=>String(query.queryKey[0]).startsWith('/api/channex')});}});
- const run=(method:string,path:string,body?:unknown)=>action.mutate({method,path,body});
+ const action=useMutation({
+  mutationFn:async({method,path,body}:{method:string;path:string;body?:unknown;connectionId:string})=>(await apiRequest(method,path,body)).json(),
+  onMutate:()=>setFeedback(''),
+  onSuccess:async(result,request)=>{
+   setKey('');
+   if(request.path.endsWith('/sync-catalog'))setFeedback(`Catálogo obtenido: ${result.roomTypes} categorías y ${result.ratePlans} planes tarifarios.`);
+   else if(request.path.includes('/rate-plan-mappings/'))setFeedback('Tarifa vinculada guardada.');
+   else if(request.path.includes('/room-type-mappings/'))setFeedback('Mapeo de habitaciones guardado.');
+   else if(request.path==='/api/channex/connections'&&request.method==='POST'){setSelected(result.id);setFeedback('Conexión guardada desactivada.');}
+   const mapping=request.path.startsWith('/api/channex/room-type-mappings/')?'room-type-mappings':request.path.startsWith('/api/channex/rate-plan-mappings/')?'rate-plan-mappings':null;
+   if(mapping){
+    // Saving each mapping used to reload the entire module, including access,
+    // runtime and unrelated catalogs. Refresh only the affected property's
+    // mapping and derived views; keep the property captured before the save.
+    const connectionId=request.connectionId;
+    await Promise.all([
+     client.invalidateQueries({queryKey:[`/api/channex/connections/${connectionId}/${mapping}`],exact:true}),
+     client.invalidateQueries({queryKey:['/api/channex/connections',connectionId,mapping]}),
+     client.invalidateQueries({queryKey:['/api/channex/connections',connectionId,'ari']}),
+     client.invalidateQueries({queryKey:['/api/channex/bookings',connectionId]}),
+     client.invalidateQueries({queryKey:['channex-inbound',connectionId]}),
+     client.invalidateQueries({queryKey:['channex-readiness',connectionId]}),
+    ]);
+   }else await client.invalidateQueries({predicate:query=>String(query.queryKey[0]).startsWith('/api/channex')});
+  },
+ });
+ const run=(method:string,path:string,body?:unknown)=>action.mutate({method,path,body,connectionId:id});
  if(isLoading)return <p className="p-6">Verificando permisos de Canales OTAs…</p>;
  if(accessError)return <p role="alert" className="p-6">No se pudieron verificar tus permisos. Volvé a cargar la página.</p>;
  if(!access?.entry)return <p className="p-6">No tenés acceso a Canales OTAs. Admin puede habilitarlo en Permisos.</p>;

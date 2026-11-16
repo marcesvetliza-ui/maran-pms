@@ -413,7 +413,7 @@ const SUB_COLLAPSED_KEY = "sidebar_collapsed_subgroups";
 export function AppSidebar() {
   const [location] = useLocation();
   const { user, hasPermission: roleHasPermission } = useAuth();
-  const {data:otaAccess}=useChannexAccess();
+  const {data:otaAccess}=useChannexAccess({poll:true});
   const hasPermission=(key:string)=>key==='sidebar:/ota-channels'?!!otaAccess?.entry:roleHasPermission(key);
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
