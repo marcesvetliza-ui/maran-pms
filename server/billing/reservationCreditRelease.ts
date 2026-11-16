@@ -3,7 +3,7 @@ import { allocateFundingCents } from "@shared/fundingAllocation";
 import { parseReservationInvoiceRef,reservationPaymentReleasedCents } from "@shared/reservationFolio";
 
 /** Runs inside the same reservation-locked NC reconciliation transaction. */
-export async function releaseReservationCredit(tx:any,original:any,nc:any) {
+export async function releaseReservationCredit(tx:any,original:any,nc:any,previewOnly=false) {
  const invoiceId=String(original.id),net=Math.round((Number(original.monto_total)-Number(original.monto_acreditado||0))*100),target=Math.round(Number(nc.monto_total??nc.montoTotal)*100);
  const payments=(await tx.execute(sql`SELECT * FROM payments WHERE reservation_id=${String(original.reserva_id)} ORDER BY id COLLATE "C" FOR UPDATE`)).rows as any[];
  const entries=payments.flatMap(p=>{
@@ -19,6 +19,7 @@ export async function releaseReservationCredit(tx:any,original:any,nc:any) {
  if(!Number.isSafeInteger(net)||!Number.isSafeInteger(target)||net<covered||target>net||target<=0)throw new Error('La cobertura de la NC requiere conciliación por IDs antes de liberar anticipos');
  // Unpaid coverage participates in the fiscal reduction, but never becomes money.
  const released=allocateFundingCents(target,[...entries.map(e=>e.capacity),net-covered]);
+ if(previewOnly)return;
  for(let index=0;index<entries.length;index++){
   const e=entries[index],ref={...e.ref,fundingReleases:{...(e.ref as any).fundingReleases,[invoiceId]:e.released+released[index]}};
   await tx.execute(sql`UPDATE payments SET invoice_ref=${JSON.stringify(ref)} WHERE id=${e.p.id}`);

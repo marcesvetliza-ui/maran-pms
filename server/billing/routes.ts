@@ -5,6 +5,8 @@ import { reconcileClosedCorrectionAccount } from './closedCorrectionAccount';
 import { closedCorrectionProof, loadClosedCorrection, correctionInvoiceBody, correctionError } from './closedReservationCorrection';
 import { requireCreditNoteAccess } from './restaurantCreditNoteAccess';
 import { restaurantInvoiceScope } from './restaurantInvoiceScope';
+import { registerDebitNoteActionRoutes, restoreAnnulledDebitCredit, resumeDebitAnnulment } from './debitNoteActions';
+import { isDebitAnnulmentCredit } from '@shared/debitNoteActions';
 import { annulNonFiscalInvoice, nonFiscalAnnulmentProof, nonFiscalAnnulmentArea, canAnnulNonFiscalInvoice, validateNonFiscalAnnulmentReason, NON_FISCAL_VOID_PERMISSION } from "./nonFiscalAnnulment";
 import { directInvoiceOperationProof } from "./directInvoiceReconciliation";
 import { centerInvoiceRecoveryRequest } from "./centerInvoiceRecovery";
@@ -611,6 +613,7 @@ async function withSpaInvoiceLock<T>(spaAccountId: string, action: () => Promise
 }
 
 export function registerBillingRoutes(app: Express) {
+  registerDebitNoteActionRoutes(app);
   // Historical references stay readable for vouchers and folios, but an
   // archived document cannot start a new settlement or fiscal correction.
   const requireActiveInvoice = async (req: any, res: any, next: any) => {
@@ -994,6 +997,7 @@ export function registerBillingRoutes(app: Express) {
       `);
       const nc = initialNc.rows[0] as any;
       const original = initialOriginal.rows[0] as any;
+      if (original && isDebitAnnulmentCredit(nc)) return res.json(await resumeDebitAnnulment(original, nc, req));
       if(original)requireFiscalInvoiceForCredit(original.tipo_comprobante);
       if (nc?.group_id && !nc.reserva_id && original?.group_id === nc.group_id) {
         return res.json(await recoverGroupCreditNote(ncId,(req as any).user));
@@ -4026,6 +4030,7 @@ export function registerBillingRoutes(app: Express) {
           if (nc.reconciliation_status && nc.reconciliation_status !== "conciliada") {
             throw new Error("La Nota de Crédito todavía no está conciliada con el Folio");
           }
+          if (isDebitAnnulmentCredit(nc)) return restoreAnnulledDebitCredit(nc, req.body, req);
 
           const sourceInvoiceResult = await db.execute(sql`
             SELECT * FROM sales_invoices WHERE id = ${Number(nc.nota_credito_id)} LIMIT 1

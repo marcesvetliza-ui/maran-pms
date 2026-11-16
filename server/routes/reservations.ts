@@ -1360,6 +1360,7 @@ export function registerReservationsRoutes(app: Express) {
           nc.fecha_emision,
           nc.monto_total,
           nc.monto_acreditado AS monto_revertido,
+          nc.observaciones,
           nc.estado,
           nc.items,
           nc.source_charge_ids,

@@ -8,6 +8,7 @@ import { ReservationChargeVoid } from "@/components/reservation-charge-void";
 import { nonFiscalCollectionError, isCashMethod } from "@shared/cash-document-classification";
 import { CompanySelector } from "@/components/entity-selector";
 import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
+import { isDebitAnnulmentCredit } from "@shared/debitNoteActions";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
@@ -3552,7 +3553,7 @@ function NotaDebitoDialog({
     if (open) {
       setSelectedCreditNoteId(creditNotes.length === 1 ? String(creditNotes[0].id) : "");
       setMotivo("");
-      setMonto("");
+      setMonto(creditNotes.length === 1 && isDebitAnnulmentCredit(creditNotes[0]) ? String(Number(creditNotes[0].monto_total) - Number(creditNotes[0].monto_revertido || 0)) : "");
       setEmittedNd(null);
       setDialogError(null);
     }
@@ -3580,12 +3581,18 @@ function NotaDebitoDialog({
     setIsSubmitting(true);
     setDialogError(null);
     try {
+      const correctionKey = `prefactura-nd-correction:${selectedCreditNote.id}`;
+      const isDebitRestoration = isDebitAnnulmentCredit(selectedCreditNote);
+      const operationId = isDebitRestoration ? window.sessionStorage.getItem(correctionKey) || crypto.randomUUID() : undefined;
+      if (operationId) window.sessionStorage.setItem(correctionKey, operationId);
       const res = await apiRequest("POST", `/api/billing/invoices/${selectedCreditNote.id}/nota-debito`, {
         motivo: motivo.trim(),
         monto: montoNum,
+        ...(operationId ? { operationId } : {}),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error || body?.message || "Error al emitir ND");
+      if (operationId) window.sessionStorage.removeItem(correctionKey);
 
       setEmittedNd(body);
       toast({ title: `ND emitida: ${body.tipoComprobante ?? body.tipo_comprobante} ${String(body.puntoVenta ?? body.punto_venta ?? 0).padStart(4,"0")}-${String(body.numero ?? 0).padStart(8,"0")}` });
@@ -3646,7 +3653,7 @@ function NotaDebitoDialog({
 
         <div className="space-y-4 py-1">
           <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/20 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
-            Esta Nota de Débito revierte total o parcialmente una Nota de Crédito. Restaura la factura original sin registrar un nuevo cobro.
+            {isDebitAnnulmentCredit(selectedCreditNote) ? "Esta Nota de Crédito anuló una Nota de Débito. Su reversión restaura esa Nota de Débito por el total y conserva el historial y el cobro." : "Esta Nota de Débito revierte total o parcialmente una Nota de Crédito. Restaura la factura original sin registrar un nuevo cobro."}
             (Para sumar un importe nuevo que no revierte nada, se emite desde el Centro de Comprobantes.)
           </div>
 
@@ -3654,7 +3661,7 @@ function NotaDebitoDialog({
           {creditNotes.length > 1 ? (
             <div>
               <Label className="text-xs text-muted-foreground mb-1 block">Nota de Crédito a revertir</Label>
-              <Select value={selectedCreditNoteId} onValueChange={setSelectedCreditNoteId}>
+              <Select value={selectedCreditNoteId} onValueChange={value => { setSelectedCreditNoteId(value); const note = creditNotes.find(row => String(row.id) === value); setMonto(isDebitAnnulmentCredit(note) ? String(Number(note?.monto_total) - Number(note?.monto_revertido || 0)) : ""); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar Nota de Crédito..." />
                 </SelectTrigger>
@@ -3723,6 +3730,7 @@ function NotaDebitoDialog({
                   min="0.01"
                   max={reversibleBalance}
                   value={monto}
+                  readOnly={isDebitAnnulmentCredit(selectedCreditNote)}
                   onChange={e => setMonto(e.target.value)}
                   placeholder="0.00"
                   className="text-sm"
