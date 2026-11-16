@@ -1,6 +1,6 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Fecha: 16 de noviembre de 2026. Etapa activa: **0, relevamiento y preparación**.
+Fecha: 16 de noviembre de 2026. Frentes activos: **relevamiento y preparación de Maran; marca y home de Xenia**.
 
 ## Completado en esta etapa
 
@@ -21,11 +21,11 @@ Las direcciones observadas en workflows no prueban por sí solas la rama realmen
 
 ## Próximo paquete
 
-1. Completar inventario de servicios, bases, archivos, correo, tareas, dominios e integraciones, con titular y responsable.
-2. Completar matriz funcional, empezando por sesiones, facturación, Caja y cuentas corrientes; conservar los arreglos recientes de Maran.
-3. Preparar datos ficticios y casos de aceptación para Recepción y Administración.
-4. Confirmar con Marcelo el nombre exacto y titular del dominio para preparar una contratación concreta; todavía no se compra ni configura.
-5. Registrar cobertura y objetivos de recuperación antes de la puesta en marcha oficial; Marcelo concentra hoy los roles y delegará progresivamente.
+1. Revisar con Marcelo la home comercial privada y completar el contacto real y el destino de acceso al PMS.
+2. Preparar la conexión de `xeniapms.com` y las redirecciones de sus tres dominios alternativos desde Donweb, con valores reales del alojamiento.
+3. Completar el inventario y la matriz del producto común conservando los arreglos recientes de Maran.
+4. Continuar la aceptación operativa, la cobertura y la recuperación de Maran en paralelo.
+5. Retomar el asistente después de esta primera base de marca y web.
 
 ## Continuación de soporte y control con IA
 
@@ -39,9 +39,17 @@ Se preparó un catálogo de fuentes oficiales y cinco casos anonimizados para ac
 
 Se verificaron 18 pruebas existentes de chat, límites y avisos con proveedores simulados. Pasaron las 18, sin llamadas pagas ni envíos reales. Las verificaciones del servicio publicado, persistencia y entrega real siguen pendientes.
 
+## Continuación de marca y home
+
+Marcelo priorizó la marca y la home antes del asistente. Confirmó la compra de `xeniapms.com`, `xeniapms.com.ar`, `xeniapms.store` y `xeniapms.online` en Donweb. El plan pasa a versión 1.2; se conserva el tablero de 56 tareas y se actualizan registro y primera entrega web.
+
+Se confirmó el acceso al código de Xenia por GitHub y se encontraron sus tres logos originales. Se preparó y publicó una home privada en https://xenia-pms-home.chalky-yak-9675.chatgpt.site, con datos ficticios y contacto propuesto pendiente de activar. No fue necesario acceso de Railway para este trabajo.
+
+Se verificaron controles y disposición responsive en cinco anchos de pantalla. El código quedó preparado para una rama separada de GitHub, sin fusionar a `main`. La publicación privada fue confirmada por el alojamiento. No se modificaron los DNS de los dominios comprados ni la aplicación de Maran.
+
 ## Alcance de los cambios realizados
 
-Todos los archivos de esta etapa están dentro de `docs/xenia/` y corresponden a documentación, evidencias y una herramienta de lectura. No se modificó código de la aplicación, datos operativos, numeradores, comprobantes, cobros, configuración de producción, DNS, proveedores ni publicación automática. No se fusiona esta rama con `main` como parte de la entrega del plan.
+La rama de planificación cambia archivos de `docs/xenia/`: documentación, evidencias y una herramienta de lectura. La home se preparó en un proyecto estático separado y se conserva en otra rama de GitHub bajo `web/xenia/`. La publicación de la home es privada e independiente. No se modificó código operativo de Maran, datos, numeradores, comprobantes, cobros, configuración de producción, DNS ni publicación automática del PMS. Ninguna de estas ramas se fusiona con `main` como parte de esta entrega.
 
 ## Cómo actualizar la evidencia
 

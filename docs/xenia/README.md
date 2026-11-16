@@ -8,7 +8,7 @@ La base documentada es una fotografía del 16 de noviembre de 2026. El objetivo 
 
 ## Contenido
 
-- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.1.
+- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.2.
 - `ESTADO_EJECUCION.md`: trabajos realizados, límites del relevamiento y próximo paquete.
 - `TABLERO_TAREAS.csv`: 56 tareas del plan, con Marcelo como responsable actual y campos para fechas y evidencia.
 - `MATRIZ_DIFERENCIAS.md`: comparación inicial de rutas por área; falta validación funcional por módulo.
@@ -18,5 +18,6 @@ La base documentada es una fotografía del 16 de noviembre de 2026. El objetivo 
 - `AUDITORIA_PILOTO_IA_2026-11-16.md`: estado del código del piloto, límites de acceso y primer hito de soporte.
 - `FUENTES_FISCALES_ARCA.json`: catálogo preparatorio de fuentes oficiales; no activa una tarea programada.
 - `evidencia/inventario-arranque-ia-2026-11-16.json`: referencias actualizadas en la continuación de soporte e IA.
+- `DOMINIOS_Y_HOME_XENIA_2026-11-16.md`: cuatro dominios comprados en Donweb, logos originales, primera home privada y próximos pasos de publicación.
 
 Los Word y PDF se entregan como archivos del plan. No es necesario publicar ni reiniciar el hotel para consultarlos. Los secretos se mantienen fuera de estos documentos.

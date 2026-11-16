@@ -2,11 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "16 de noviembre de 2026 · Versión 1.1"
+date: "16 de noviembre de 2026 · Versión 1.2"
 lang: es-AR
 ---
 
 **Estado:** plan de trabajo y primera etapa iniciada. Las decisiones de producto acordadas están incorporadas; los proveedores, importes, fechas y dominios todavía no elegidos quedan expresamente pendientes.
+
+**Prioridad actual:** consolidar Xenia como marca y preparar su home comercial; después continuar con el producto común y el asistente. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Regla de ejecución:** Maran PMS está en uso. Cada avance debe conservar la operación del hotel y las correcciones recientes. Este documento no autoriza por sí solo una migración, una compra ni una publicación en producción.
 
@@ -53,8 +55,8 @@ El relevamiento del 16 de noviembre se hizo sobre las referencias actualizadas d
 | Rama de Xenia | `feature/xenia-channex-staging`, revisión `0bf36df2`. | Auditar las mejoras antes de integrarlas al producto común. |
 | Rama del asistente | `advance/assistant-pilot-20261114`, revisión `63b34fcc`. | Hay desarrollo para revisar; la rama no demuestra que todo esté publicado o configurado. |
 | Dirección asociada a Xenia en el workflow | `https://demo.maranpms.com.ar`. | Es un destino observado en automatización; falta confirmar su función y configuración real en Railway. |
-| Acceso Railway de Xenia | No se detectó `RAILWAY_XENIA_TOKEN` en este entorno. | Quedan pendientes la identidad de servicios, bases, backups, dominios y rama vinculada de Xenia. |
-| Dominio propio de Xenia | Marcelo confirma que aún no está registrado y que conoce una opción disponible. No indicó el nombre exacto. | Registrar el nombre y verificar disponibilidad al comprar; todavía no hay una dirección nueva confirmada. |
+| Acceso a Xenia | Lectura del código y los archivos de marca confirmada por GitHub. La infraestructura del PMS se revisará por separado. | La marca y la home pueden avanzar sin condicionar su desarrollo al acceso de Railway. |
+| Dominios de Xenia | Marcelo confirmó la compra en Donweb de `xeniapms.com`, `xeniapms.com.ar`, `xeniapms.store` y `xeniapms.online`. | Principal: `.com`; los otros tres se proponen como redirecciones. DNS, HTTPS y correo todavía requieren configuración. |
 | Disponibilidad pública | La primera consulta desde este entorno falló al resolver DNS. | No permite concluir que el hotel esté caído; la comprobación externa queda separada del inventario de código. |
 
 La consulta de salud, si se completa después, se registra con su hora en el acta de ejecución y en la evidencia JSON. Un resultado de salud correcto acredita disponibilidad puntual; no demuestra por sí solo que funcionen todos los circuitos del hotel.
@@ -144,8 +146,8 @@ Las etapas comerciales y multihotel dependen de resultados, accesos y capacidad 
 |---|---|---|
 | 0 · Relevamiento, iniciada | Referencias de código, entornos, accesos, integraciones, riesgos y matriz de diferencias. | Inventario contrastado; vacíos y responsables identificados. |
 | 1 · Preparación de Maran | Circuitos críticos, recuperación, contingencia, capacitación y versión de apertura. | Conformidad de áreas y evidencia de los criterios de la sección 11. |
-| 2 · Base común de Xenia | Integración por módulo, configuración por instalación y proceso de versiones. | Una versión común probada conserva las mejoras críticas de Maran. |
-| 3 · Web y demo comercial | Dominio propio, sitio, correo y demo aislada. | Web comprobada, información aprobada y demo sin datos reales. |
+| 2 · Marca y home de Xenia | Identidad existente, web comercial, dominios y primera vista previa. | Home revisada; contacto y publicación pública definidos. El asistente se retoma después. |
+| 3 · Producto común y demo | Integración por módulo, configuración por instalación, versiones y demo aislada. | Una versión común probada conserva los arreglos de Maran y usa datos ficticios en la demo. |
 | 4 · Fundamentos multihotel | Identidad, membresías, selector y alta repetible del segundo hotel ficticio. | Pruebas de aislamiento y recuperación superadas. |
 | 5 · Piloto comercial | Un cliente adicional, alcance acotado, formación y seguimiento. | Operación y costos medidos; incidencias resueltas. |
 | 6 · Crecimiento | Aprovisionamiento, versiones por grupos, soporte y facturación del servicio. | Procedimientos repetibles y capacidad operativa demostrada. |
@@ -195,21 +197,24 @@ La marca común se extraerá a configuración: nombre comercial, logo, colores, 
 
 # 7. Direcciones web y estructura propuesta
 
-**Todavía no hay un dominio nuevo registrado.** Para evitar confusiones, esta sección usa `xenia.example`, una dirección de documentación que se reemplazará por el nombre que Marcelo elija y registre. No implica disponibilidad ni propiedad de un dominio comercial.
+**Dominios adquiridos en Donweb, según confirmación de Marcelo:** `xeniapms.com`, `xeniapms.com.ar`, `xeniapms.store` y `xeniapms.online`. Se establece `xeniapms.com` como principal. Los otros tres tendrán redirecciones al principal cuando se configure la publicación. Las direcciones de app, demo, QA y ayuda son destinos previstos, no servicios ya conectados.
 
 ## 7.1 Mapa de direcciones
 
-| Dirección ilustrativa | Función | Destino y acceso |
+| Dirección definida o prevista | Función | Destino y acceso |
 |---|---|---|
-| `xenia.example` | Web comercial principal. | Servicio del sitio, contenido público. |
-| `www.xenia.example` | Variante de la web. | Redirección a la dirección principal elegida. |
-| `app.xenia.example` | Acceso al producto y selector de hoteles. | Portal autenticado; puede incorporarse después del sitio. |
-| `demo.xenia.example` | Demostración comercial estable. | Instalación con datos ficticios, permisos limitados y reinicio controlado. |
-| `qa.xenia.example` | Pruebas de versiones candidatas. | Acceso restringido; integraciones de prueba. |
-| `dev.xenia.example` | Desarrollo, si se necesita una URL pública. | Preferentemente privado o restringido. |
-| `ayuda.xenia.example` | Documentación pública o portal de ayuda. | Puede comenzar como `/ayuda` en el sitio. |
-| `estado.xenia.example` | Estado de servicio e incidentes. | Preferentemente hospedado de forma independiente del PMS. |
-| `maran.xenia.example` | Alias opcional futuro de Maran. | Se evalúa después de la apertura; no exige retirar `maranpms.com.ar`. |
+| `xeniapms.com` | Web comercial principal. | Servicio del sitio, contenido público. |
+| `www.xeniapms.com` | Variante de la web. | Redirección a la dirección principal elegida. |
+| `app.xeniapms.com` | Acceso al producto y selector de hoteles. | Portal autenticado; puede incorporarse después del sitio. |
+| `demo.xeniapms.com` | Demostración comercial estable. | Instalación con datos ficticios, permisos limitados y reinicio controlado. |
+| `qa.xeniapms.com` | Pruebas de versiones candidatas. | Acceso restringido; integraciones de prueba. |
+| `dev.xeniapms.com` | Desarrollo, si se necesita una URL pública. | Preferentemente privado o restringido. |
+| `ayuda.xeniapms.com` | Documentación pública o portal de ayuda. | Puede comenzar como `/ayuda` en el sitio. |
+| `estado.xeniapms.com` | Estado de servicio e incidentes. | Preferentemente hospedado de forma independiente del PMS. |
+| `maran.xeniapms.com` | Alias opcional futuro de Maran. | Se evalúa después de la apertura; no exige retirar `maranpms.com.ar`. |
+| `xeniapms.com.ar` | Dominio alternativo adquirido. | Redirección al principal, con HTTPS. |
+| `xeniapms.store` | Dominio alternativo adquirido. | Redirección al principal, con HTTPS. |
+| `xeniapms.online` | Dominio alternativo adquirido. | Redirección al principal, con HTTPS. |
 
 No hay que crear todos los subdominios el primer día. El primer objetivo comercial puede ser **web, www y demo**; `app` se activa cuando esté listo el acceso común. Cada dirección tendrá un registro en el inventario, responsable, servicio de destino y fecha de validación.
 
@@ -225,7 +230,7 @@ Si un cliente solicita su propio dominio, por ejemplo `pms.hotelcliente.example`
 
 # 8. Paso a paso para obtener y publicar la web de Xenia
 
-Esta secuencia permite revisar el resultado antes de cada acción con costo o impacto. Los registros DNS reales se copiarán desde los proveedores seleccionados; aquí no se inventan direcciones IP, destinos CNAME, claves ni servidores de nombres.
+La compra de los cuatro dominios ya fue confirmada por Marcelo en Donweb. La guía conserva el procedimiento de registro para futuras altas; ahora corresponde revisar la home y preparar DNS, HTTPS, contacto y redirecciones. Los registros reales se copiarán desde el alojamiento elegido, sin inventar IP, CNAME o servidores de nombres.
 
 ## 8.1 Elegir y registrar el dominio
 
@@ -238,11 +243,11 @@ Esta secuencia permite revisar el resultado antes de cada acción con costo o im
 7. **Comprar y conservar comprobante.** Confirmar que aparezca como registrado en la cuenta correcta. Registrar vencimiento y activar renovación automática si se decide así.
 8. **Proteger la continuidad.** Activar bloqueo de transferencia si el registrador lo ofrece; documentar cómo recuperar el acceso y programar una revisión antes del vencimiento.
 
-**Evidencia de cierre:** dominio registrado, titular correcto, acceso recuperable, 2FA y fecha de renovación. El plan actual no registra ni compra ningún dominio.
+**Estado del registro:** compra confirmada por Marcelo. Falta anotar titular, vencimientos, renovación y recuperación de cuenta con evidencia del panel de Donweb. No se da por verificado ese detalle por el solo hecho de haber comprado.
 
 ## 8.2 Preparar DNS sin afectar Maran
 
-9. **Elegir quién administra DNS.** Se propone Cloudflare por continuidad con las herramientas conocidas; la elección final puede ser otra. Separar registrador, DNS y alojamiento, aunque una empresa preste más de un servicio.
+9. **Confirmar quién administra DNS.** Revisar la gestión de los dominios comprados en Donweb. Mantener allí la zona si permite los registros necesarios; si se elige otro proveedor, documentar la delegación y preservar los servicios existentes. Registrar por separado registrador, DNS y alojamiento.
 10. **Crear la zona de Xenia.** Agregar exclusivamente el dominio nuevo a la cuenta empresarial elegida. Revisar qué registros existen antes de cambiar nada. Si ya tuviera servicios, exportar su zona y preservarlos.
 11. **Configurar responsables y acceso.** Asignar permisos mínimos, 2FA y respaldo de recuperación. Guardar el identificador de cuenta y zona sin publicar tokens.
 12. **Configurar la delegación.** Copiar los servidores de nombres que indique el proveedor DNS y cargarlos en el registrador. Si el registrador ya gestiona esa delegación automáticamente, seguir su procedimiento.
@@ -255,7 +260,7 @@ Durante estos pasos **no se cambia la zona ni los servidores de nombres de `mara
 
 15. **Elegir alojamiento del sitio.** Puede ser un servicio estático o una aplicación independiente. La web comercial no necesita acceso a la base operativa del hotel. Documentar proveedor, cuenta, repositorio y costo.
 16. **Crear el entorno del sitio.** Configurar compilación, salida, variables estrictamente necesarias y publicación de prueba. Los secretos no se incorporan al código del navegador.
-17. **Identificar el destino real de Xenia.** En Railway, confirmar proyecto `observant-possibility`, ambiente, servicio, rama, revisión publicada y base asociada. No basarse solamente en el nombre de una pestaña o en una URL antigua.
+17. **Identificar cada destino.** El código de Xenia se consulta por GitHub. La home tiene una publicación independiente; el servicio operativo del PMS se verifica por separado con su revisión, base y configuración. Auditar Railway cuando corresponda a ese servicio, sin bloquear el desarrollo de la marca o la web.
 18. **Separar demo y QA.** Crear o validar servicios y bases distintos. Revisar correo, tareas programadas, archivos, proveedores y credenciales para que una prueba no actúe sobre Maran.
 19. **Añadir cada dominio personalizado en su servicio.** Ejemplo: web raíz y www al sitio; demo al servicio de demostración. El proveedor devolverá las instrucciones de validación y DNS.
 20. **Copiar los valores reales al inventario.** Tipo de registro, nombre, destino, prioridad si aplica, TTL, modo proxy y servicio de origen. Verificar que el puerto del dominio coincida con el que atiende la aplicación cuando el proveedor lo requiera.
@@ -500,12 +505,12 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 | ID | Tarea y evidencia de cierre | Responsable propuesto | Estado / dependencia |
 |---|---|---|---|
-| W01 · P1 | Registrar nombre exacto, titular y alternativa de dominio. | Marcelo | Pendiente de nombre. |
-| W02 · P1 | Preparar costo y registrador; comprar con decisión concreta. | Marcelo e infraestructura | Pendiente; W01. |
+| W01 · P1 | Registrar nombres, titular y administración de los dominios. | Marcelo | En curso; cuatro nombres confirmados, titular y recuperación por verificar. |
+| W02 · P1 | Registrar la compra de los dominios y el proveedor. | Marcelo e infraestructura | Hecha; compra de cuatro dominios en Donweb confirmada por Marcelo. |
 | W03 · P1 | Configurar recuperación, 2FA y renovación. | Infraestructura | Pendiente; W02. |
 | W04 · P1 | Crear zona DNS y verificar delegación. | Infraestructura | Pendiente; W02 y W03. |
 | W05 · P1 | Aprobar mapa de URLs y propietarios de servicios. | Marcelo y técnico | Pendiente; sección 7. |
-| W06 · P1 | Preparar sitio comercial y vista previa. | Diseño y desarrollo | Pendiente; contenido y marca. |
+| W06 · P1 | Preparar sitio comercial y vista previa. | Diseño y desarrollo | Hecha; home privada navegable con logos originales y revisión responsive. |
 | W07 · P1 | Preparar demo estable sin datos reales. | Técnico | Pendiente; A04 y aislamiento. |
 | W08 · P1 | Configurar destinos DNS y certificados reales. | Infraestructura | Pendiente; W04 a W07. |
 | W09 · P1 | Configurar buzones, remitentes y autenticación de correo. | Infraestructura | Pendiente; W04. |
@@ -525,7 +530,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | Pendiente; H04 y H05. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
-| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | En curso; código revisado, publicación y configuración pendientes. |
+| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar publicación y configuración después de la home. |
 | I02 · P1 | Validar presupuesto US$1, concurrencia e incertidumbre. | Técnico | Pendiente; I01. |
 | I03 · P1 | Validar aprobaciones, bandeja y correo de Marcelo. | Técnico y Marcelo | Pendiente; I01. |
 | I04 · P1 | Evaluar calidad con casos reales anonimizados. | Marcelo y colaboradores | Pendiente; I02 e I03. |
@@ -541,7 +546,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 | Decisión | Información necesaria | Quién resuelve |
 |---|---|---|
-| Nombre y titular del dominio Xenia | Nombre exacto, extensión, disponibilidad actual y costo de renovación. | Marcelo. |
+| Administración de los dominios adquiridos | Confirmar titular, vencimientos, renovación y recuperación en Donweb. Principal y alternativas ya identificados. | Marcelo. |
 | Cuenta empresarial y responsables de infraestructura | Titularidad, accesos recuperables y reemplazos. | Marcelo e infraestructura. |
 | Base técnica y orden de integración | Matriz funcional y dependencias, no sólo conteos de commits. | Técnico con Marcelo. |
 | Objetivos de recuperación y soporte | Impacto aceptable, costo del servicio y resultado del ensayo. | Marcelo, hotel e infraestructura. |
@@ -550,13 +555,13 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 ## 15.2 Primer paquete de ejecución
 
-**Ya iniciado:** rama aislada, referencias actualizadas, comparación de ramas, inspección inicial y este plan con tablero y guías. En la versión 1.1 se incorporó la responsabilidad actual de Marcelo, la primera revisión de código del piloto y el alcance de soporte y controles asistidos por IA.
+**Ya realizado:** relevamiento inicial, roles actuales y revisión del código del piloto. En esta versión se incorporan los cuatro dominios comprados en Donweb, la prioridad de marca y home y una primera web navegable que usa los logos originales de Xenia.
 
-**Siguiente trabajo técnico:** validar el soporte existente en Xenia: revisión servida, chat con capturas, presupuesto efectivo de US$1 y avisos. Completar A04 y A06 conservando las correcciones recientes de Maran. Preparar después las consultas de diagnóstico de solo lectura y un primer control contable con datos ficticios. La vigilancia normativa comienza por fuentes y perfil fiscal, antes de programar consultas o activar consumo.
+**Siguiente trabajo:** revisar diseño, contenido y navegación de la home con Marcelo. Completar el contacto real y el destino del acceso al PMS; después preparar la conexión de `xeniapms.com` y las redirecciones de los otros tres dominios. El trabajo del producto común y del asistente continúa después de esta base de marca y web, conservando los arreglos de Maran.
 
-**Primer hito verificable:** cinco casos de soporte anonimizados resueltos o correctamente escalados en Xenia, con evidencia, gasto medido y avisos comprobados; un caso con datos insuficientes debe pedir la información necesaria sin inventar una causa. Antes de esa prueba se confirma el acceso y la configuración efectiva de Xenia. El trabajo de preparación conserva la operación de Maran.
+**Primera entrega para revisar:** [home privada de Xenia](https://xenia-pms-home.chalky-yak-9675.chatgpt.site). Se verificaron navegación, controles y ausencia de desbordes en anchos de 360, 390, 768, 1024 y 1440 píxeles. Los ejemplos son ficticios. El formulario prepara un borrador local; `contacto@xeniapms.com` es un dato de maqueta pendiente de activar.
 
-**Primer hito comercial:** dominio bajo control de la empresa, sitio revisado y demo aislada. No exige cambiar las direcciones que usa hoy Recepción.
+**Primer hito comercial:** home aprobada y pública bajo `xeniapms.com`, correo activo, redirecciones y acceso al PMS verificados. La demo comercial tendrá su propio circuito y datos aislados. Maran conserva las direcciones que usa hoy Recepción.
 
 # 16. Fuentes, alcance y mantenimiento del plan
 
