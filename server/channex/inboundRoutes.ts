@@ -1,3 +1,4 @@
+import { inboundBookingDetail } from './bookingDetail';
 import { inboxQuerySchema, listInboundBookings, inboundBookingHistory } from './inbox';
 import {requireChannex} from './access';
 import {workerEnvironment,operationAllowed,PRODUCTION_URL} from './connectionPolicy';
@@ -45,8 +46,17 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
     res.setHeader("Cache-Control", "private, no-store");
     const parsed = inboxQuerySchema.safeParse(req.query);
     if (!parsed.success) return res.status(400).json({ error: "Filtro o página inválidos" });
-    try { res.type("application/json").send(JSON.stringify(await listInboundBookings(pool, req.params.id, parsed.data.view, parsed.data.page))); }
+    try { res.type("application/json").send(JSON.stringify(await listInboundBookings(pool, req.params.id, parsed.data.view, parsed.data.page, parsed.data))); }
     catch { res.status(503).json({ error: "No se pudo consultar la bandeja de reservas" }); }
+  });
+  app.get(`${root}/booking-detail/:revisionId`, requireChannex("read"), async (req,res)=>{
+    res.setHeader("Cache-Control","private, no-store");
+    if(req.params.revisionId.length>160)return res.status(400).json({error:"Revisión inválida"});
+    try{
+      const detail=await inboundBookingDetail(pool,req.params.id,req.params.revisionId,{id:req.user?.id,name:req.user?.username||req.user?.fullName||"Sistema",ip:req.ip});
+      if(!detail)return res.status(404).json({error:"Reserva no encontrada"});
+      res.type("application/json").send(JSON.stringify(detail));
+    }catch{res.status(503).json({error:"No se pudo consultar el detalle de la reserva"});}
   });
   app.get(`${root}/history/:revisionId`, requireChannex("read"), async (req, res) => {
     res.setHeader("Cache-Control", "private, no-store");

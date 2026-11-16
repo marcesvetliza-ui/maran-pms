@@ -14,7 +14,7 @@ Source: the customer-forwarded Channex notice, 11 November 2026. External linked
 
 ## Operations and remaining account actions
 
-- **16 November 2026**: guest contact data disappears from booking emails and APIs after ACK. Use locally saved contacts. Do not rely on refetching acknowledged data. If archived notes need operator-facing access, add a separately authorized/audited retrieval flow; this release provides internal decryption only.
+- **16 November 2026**: guest contact data disappears from booking emails and APIs after ACK. Use locally saved contacts. Do not rely on refetching acknowledged data. Operator-facing notes are retrieved only by the separately authorized single-booking detail endpoint, which commits an access audit before returning them. Bulk lists, status and revision-history APIs still exclude them. The audit stores identifiers and availability status, never note contents. Archive/key failures do not fall back to raw source messages.
 - **30 November 2026**: iframe mode loses contact details; do not use the embedded view as the source of retained contact data.
 - **14 December 2026**: rate and entity limits become enforced. Check actual account counts (50 channels, 10 webhooks/property) and unique tax/tax-set/cancellation-policy titles before provisioning more entities. Live counts were not accessible during implementation. Existing webhooks were not recreated.
 - **14 December 2026–15 February 2027**: issue new `chx` API keys, pause receiving before changing connection credentials, replace the key through the encrypted credential configuration, test, then resume. Revoke the old remote key after verification. No new key was available or rotated in this change. Never place keys in source code.

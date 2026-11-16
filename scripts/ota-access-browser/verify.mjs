@@ -11,12 +11,12 @@ try{
   if(role==='reception'){
    assert.equal(await page.getByRole('tab').count(),1);await page.getByText('Reserva de prueba',{exact:true}).waitFor();
    assert.equal(await page.getByRole('button',{name:/webhook|Pausar recepción|Reintentar/}).count(),0);
-  }else{await page.getByText('Tarifas de esta categoría',{exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Permisos'}).count(),role==='admin'?1:0);}
+  }else{await page.getByRole('tab',{name:'Configuración y mapeos'}).click();await page.getByText('Tarifas de esta categoría',{exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Permisos'}).count(),role==='admin'?1:0);}
   await page.screenshot({path:`${out}/${role}.png`,fullPage:true});await page.close();
  }
  for(const width of [1440,768,390]){
   const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',error=>errors.push(error.message));
-  await page.goto('http://127.0.0.1:5018/?role=admin');await page.getByRole('button',{name:'Calendario',exact:true}).click();
+  await page.goto('http://127.0.0.1:5018/?role=admin');await page.getByRole('tab',{name:'Configuración y mapeos'}).click();await page.getByRole('button',{name:'Calendario',exact:true}).click();
   await page.getByRole('button',{name:/2026-11-14:/}).waitFor();
   await page.getByRole('button',{name:/2026-11-14:/}).click();await page.getByRole('button',{name:/2026-11-16:/}).click();
   assert.equal(await page.getByLabel('Desde período 1',{exact:true}).inputValue(),'2026-11-14');
@@ -41,7 +41,7 @@ try{
  }
  for(const width of [1440,390]){
   const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',error=>errors.push(error.message));
-  await page.goto('http://127.0.0.1:5018/?role=manager');await page.getByRole('button',{name:'Cotización',exact:true}).click();
+  await page.goto('http://127.0.0.1:5018/?role=manager');await page.getByRole('tab',{name:'Configuración y mapeos'}).click();await page.getByRole('button',{name:'Cotización',exact:true}).click();
   await page.getByText('Cotización ARS / USD',{exact:true}).waitFor();
   await page.getByText('Importar precios ARS a USD (opcional, para carga inicial)',{exact:true}).click();
   await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Revisar conversión a USD'}).click();
@@ -53,7 +53,7 @@ try{
   assert.equal(await page.evaluate(()=>window.__otaRequests.filter(r=>r.url.endsWith('/usd/apply')).length),1);await page.close();
  }
  const native=await browser.newPage({viewport:{width:1440,height:1000}});native.on('pageerror',error=>errors.push(error.message));
- await native.goto('http://127.0.0.1:5018/?role=manager');await native.getByRole('button',{name:'Tarifas USD',exact:true}).click();
+ await native.goto('http://127.0.0.1:5018/?role=manager');await native.getByRole('tab',{name:'Configuración y mapeos'}).click();await native.getByRole('button',{name:'Tarifas USD',exact:true}).click();
  await native.getByRole('button',{name:'Nueva tarifa USD'}).click();await native.getByTestId('input-rate-plan-name').fill('Canales USD');
  await native.getByTestId('select-room-type').click();await native.getByRole('option',{name:'Premium',exact:true}).click();
  await native.getByTestId('input-base-rate').fill('119.09');await native.getByTestId('input-rate-1pax').fill('119.09');await native.getByTestId('input-rate-2pax').fill('144.98');
@@ -63,7 +63,7 @@ try{
  assert.equal(created.currency,'USD');assert.equal(created.rate2pax,'144.98');await native.close();
  for(const width of [1440,390]){
   const page=await browser.newPage({viewport:{width,height:1000}});page.on('pageerror',error=>errors.push(error.message));
-  await page.goto('http://127.0.0.1:5018/?role=manager');
+  await page.goto('http://127.0.0.1:5018/?role=manager');await page.getByRole('tab',{name:'Configuración y mapeos'}).click();
   await page.getByRole('tab',{name:'Estado y sincronizaciones'}).click();
   await page.getByRole('button',{name:'Habitaciones específicas',exact:true}).click();
   assert(await page.getByRole('button',{name:'Guardar alcance',exact:true}).isDisabled());

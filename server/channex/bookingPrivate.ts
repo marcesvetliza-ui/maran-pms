@@ -22,7 +22,8 @@ export function archiveBookingNotes(raw: any, connectionId: string, revisionId: 
   const body = Buffer.concat([cipher.update(JSON.stringify({ notes: safeNotes }), "utf8"), cipher.final()]);
   return ["v1", iv.toString("base64"), cipher.getAuthTag().toString("base64"), body.toString("base64")].join(".");
 }
-/** Internal access only; do not expose ciphertext/decrypted notes in status APIs. */
+/** Internal decryption; only the authorized, audited single-booking detail may
+ * release operational notes. Never expose ciphertext or notes in status/list APIs. */
 export function readBookingNotes(envelope: string, connectionId: string, revisionId: string): { notes: string } {
   try {
     const [version, iv, tag, body, ...extra] = envelope.split(".");

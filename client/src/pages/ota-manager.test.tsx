@@ -42,9 +42,10 @@ it.each(['room-type-mappings','rate-plan-mappings'])('refreshes only the affecte
  roomMappings=[{id:'room-map',channexRoomTypeTitle:'Suite OTA',channexRoomTypeId:'remote-room',roomTypeId:null}];
  planMappings=[{id:'plan-map',channexRatePlanTitle:'Flexible OTA',channexRoomTypeId:'remote-room',ratePlanId:null}];
  const dependentKeys=[['channex-readiness','conn'],['channex-inbound','conn'],['/api/channex/bookings','conn'],['/api/channex/connections','conn','ari'],['/api/channex/connections','conn',kind]];
- dependentKeys.forEach(key=>{queryClient.setQueryData<{synthetic:boolean}>(key,{synthetic:true});});
+ dependentKeys.forEach(key=>{queryClient.setQueryData(key,key[0]==='channex-inbound'?{synthetic:true,serverEnabled:false,settings:{enabled:false,has_token:false},revisions:[]}:key[0]==='channex-readiness'?{synthetic:true,checks:[]}:{synthetic:true});});
  queryClient.setQueryData<{synthetic:boolean}>(['channex-readiness','other'],{synthetic:true});
  render(<QueryClientProvider client={queryClient}><OtaManager/></QueryClientProvider>);const user=userEvent.setup();
+ await user.click(await screen.findByRole('tab',{name:'Configuración y mapeos'}));
  await screen.findByRole('button',{name:'Guardar mapeo de Suite OTA'});
  const counts=()=>Object.fromEntries(['/api/channex/access','/api/channex/runtime','/api/channex/connections','/api/channex/connections/conn/room-options','/api/channex/connections/conn/room-type-mappings','/api/channex/connections/conn/rate-plan-mappings'].map(path=>[path,vi.mocked(fetch).mock.calls.filter(([url,init])=>String(url)===path&&(!init?.method||init.method==='GET')).length]));
  const before=counts();
@@ -60,13 +61,14 @@ it.each(['room-type-mappings','rate-plan-mappings'])('refreshes only the affecte
  await waitFor(()=>expect(screen.getByRole('button',{name:'Guardar mapeo de Suite OTA'})).toBeEnabled());
  const after=counts();
  for(const path of Object.keys(before)) expect(after[path]-before[path]).toBe(path.endsWith('/'+kind)?1:0);
- dependentKeys.forEach(key=>expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true));
+ dependentKeys.forEach(key=>{if(key[0]==='channex-inbound')expect(queryClient.getQueryData(key)).toMatchObject({settings:{enabled:false}});else expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);});
  expect(queryClient.getQueryState(['channex-readiness','other'])?.isInvalidated).toBe(false);
 });
 afterEach(()=>{cleanup();queryClient.clear();vi.unstubAllGlobals();});
 it('gives admin all sections and saves only an inactive production connection with a masked credential',async()=>{
  render(<QueryClientProvider client={queryClient}><OtaManager/></QueryClientProvider>);const user=userEvent.setup();
  expect(await screen.findByRole('tab',{name:'Configuración y mapeos'})).toBeInTheDocument();expect(screen.getByRole('tab',{name:'Permisos'})).toBeInTheDocument();
+ await user.click(screen.getByRole('tab',{name:'Configuración y mapeos'}));
  await user.click(screen.getByText('Cuenta y credenciales de Channex'));
  await user.type(screen.getByLabelText('Property ID de producción'),'real-property');const key=screen.getByLabelText('Clave API de producción');expect(key).toHaveAttribute('type','password');await user.type(key,'test-only-key');
  await user.click(screen.getByRole('button',{name:'Guardar conexión desactivada'}));
@@ -78,7 +80,7 @@ it('hides configuration and permission management from an authorized read-only u
  render(<QueryClientProvider client={queryClient}><OtaManager/></QueryClientProvider>);
  await screen.findByRole('tab',{name:'Reservas recibidas'});expect(screen.queryByRole('tab',{name:'Configuración y mapeos'})).not.toBeInTheDocument();expect(screen.queryByRole('tab',{name:'Permisos'})).not.toBeInTheDocument();
  expect(screen.queryByRole('tab',{name:'Estado y sincronizaciones'})).not.toBeInTheDocument();
- await screen.findByText(/Recepción de reservas de Channex/);
+ await screen.findByRole('heading',{name:'Reservas recibidas'});
  expect(screen.queryByRole('button',{name:/Pausar recepción|Habilitar recepción|acceso del webhook/})).not.toBeInTheDocument();expect(screen.queryByLabelText(/Piso incluido/)).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'Sincronización completa de recuperación'})).not.toBeInTheDocument();
 });
 it('does not load connection data for a user without module access',async()=>{
@@ -93,4 +95,10 @@ it.each(['manager','jefe_recepcion','comercial'])('shows daily OTA controls with
  expect(screen.getByRole('tab',{name:'Estado y sincronizaciones'})).toBeInTheDocument();
  expect(screen.getByRole('tab',{name:'Reservas recibidas'})).toBeInTheDocument();
  expect(screen.queryByRole('tab',{name:'Permisos'})).not.toBeInTheDocument();
+});
+
+it('opens the operational inbox first even for an administrator, keeping setup controls secondary',async()=>{
+ created=true;render(<QueryClientProvider client={queryClient}><OtaManager/></QueryClientProvider>);
+ expect(await screen.findByRole('tab',{name:'Reservas recibidas'})).toHaveAttribute('aria-selected','true');await screen.findByRole('table',{name:'Reservas recibidas de canales OTAs'});
+ expect(screen.queryByRole('button',{name:'Habilitar recepción'})).not.toBeInTheDocument();expect(screen.queryByLabelText('Clave API de producción')).not.toBeInTheDocument();
 });
