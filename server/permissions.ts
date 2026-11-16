@@ -300,6 +300,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   "api:admin:countries-list": ["admin", "manager"],
   "api:account-movements:void": ["admin", "manager"],
+  "api:account-movements:reallocate": ["admin", "manager", "resp_administracion", "reception", "jefe_recepcion"],
   "api:admin:audit-logs": ["admin", "manager"],
   // Recorre TODO el historial de pagos en Cta. Cte. y puede crear muchos
   // movimientos de golpe (ver incidente del 6/10) — restringido a admin.
@@ -471,6 +472,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:events:reset-nc": { label: "Restablecer estado de NC de un evento o mesa", section: "API — Operaciones" },
 
   "api:admin:countries-list": { label: "Ver el listado completo de Países (ARCA)", section: "API — Administración" },
+  "api:account-movements:reallocate": { label: "Corregir facturas aplicadas de recibos CC sin cambiar Caja", section: "API — Administración" },
   "api:account-movements:void": { label: "Anular movimientos de cuenta corriente", section: "API — Administración" },
   "api:admin:audit-logs": { label: "Ver el registro de auditoría", section: "API — Administración" },
   "api:admin:reconcile-cc-payments": { label: "Reconciliar pagos de Cuenta Corriente", section: "API — Administración" },

@@ -4826,6 +4826,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     }
   }
 
+  await seedResourcePermissionsOnce({
+    "api:account-movements:reallocate": ["admin", "manager", "resp_administracion", "reception", "jefe_recepcion"],
+  });
+
   // Seed OTA role permissions once. Later revocations survive every deploy.
   const { CHANNEX_ROLE_DEFAULTS } = await import("@shared/channexAccess");
   await seedResourcePermissionsOnce(Object.fromEntries(

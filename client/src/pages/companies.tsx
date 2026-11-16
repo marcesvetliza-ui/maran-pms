@@ -1,3 +1,4 @@
+import { CcCorrectAllocationsAction } from "@/components/cc-correct-allocations-action";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
@@ -807,7 +808,8 @@ export default function CompaniesPage() {
                             >
                               <FileText className="h-3 w-3" /> Recibo PDF
                             </a>
-                            <CcVoidReceiptAction movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
+                            <CcCorrectAllocationsAction movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
+                          <CcVoidReceiptAction movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
                           </div>
                         )}
                       </TableCell>
