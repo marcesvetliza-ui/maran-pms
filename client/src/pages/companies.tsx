@@ -721,7 +721,7 @@ export default function CompaniesPage() {
       </Dialog>
 
       <Sheet open={!!viewingAccountCompany} onOpenChange={(open) => { if (!open) setViewingAccountCompany(null); }}>
-        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent className="w-full sm:w-[95vw] sm:max-w-[1200px] overflow-y-auto p-4 sm:p-6">
           <SheetHeader className="mb-4">
             <SheetTitle className="flex items-center gap-2 flex-wrap">
               <Building2 className="h-5 w-5" />
@@ -736,7 +736,7 @@ export default function CompaniesPage() {
             </div>
           )}
 
-          <div className={`rounded-md p-4 mb-4 flex items-center justify-between gap-4 ${
+          <div className={`rounded-md p-4 mb-4 flex flex-wrap items-center justify-between gap-4 ${
             (accountData?.balance || 0) > 0
               ? "bg-red-50 border border-red-200 dark:bg-red-950/30 dark:border-red-800"
               : "bg-green-50 border border-green-200 dark:bg-green-950/30 dark:border-green-800"
@@ -767,29 +767,30 @@ export default function CompaniesPage() {
 
           {accountData?.movements && accountData.movements.length > 0 ? (
             <div className="border rounded-md overflow-hidden">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Descripción</TableHead>
-                    <TableHead>Ref.</TableHead>
-                    <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="w-24 p-2 sm:w-28 sm:p-4">Fecha</TableHead>
+                    <TableHead className="p-2 sm:p-4">Descripción</TableHead>
+                    <TableHead className="hidden w-1/4 p-4 md:table-cell">Ref.</TableHead>
+                    <TableHead className="w-36 p-2 text-right sm:w-72 sm:p-4">Monto / acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {accountData.movements.map((mov) => (
                     <TableRow key={mov.id} data-testid={`movement-row-${mov.id}`}>
-                      <TableCell className="text-sm">{formatDisplayDate(mov.date)}</TableCell>
-                      <TableCell>
+                      <TableCell className="p-2 text-sm whitespace-nowrap sm:p-4">{formatDisplayDate(mov.date)}</TableCell>
+                      <TableCell className="p-2 sm:p-4 [overflow-wrap:anywhere]">
                         <div>
                           <p className="text-sm">{cleanAccountMovementDescription(mov.description, mov.reservationCode)}</p>
                           {mov.guestName && (
                             <p className="text-xs text-muted-foreground">{mov.guestName}</p>
                           )}
+                          <p className="mt-1 text-xs text-muted-foreground font-mono break-all md:hidden">{mov.reservationCode || mov.reference || "—"}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground font-mono">{mov.reservationCode || mov.reference || "—"}</TableCell>
-                      <TableCell className={`text-right font-medium tabular-nums ${
+                      <TableCell className="hidden p-4 text-xs text-muted-foreground font-mono break-all md:table-cell">{mov.reservationCode || mov.reference || "—"}</TableCell>
+                      <TableCell className={`p-2 sm:p-4 text-right font-medium tabular-nums ${
                         parseFloat(mov.amount) > 0 ? "text-red-600" : "text-green-600"
                       }`}>
                         {parseFloat(mov.amount) > 0 ? "+" : ""}${fmtMoney(Math.abs(parseFloat(mov.amount)))}
@@ -797,7 +798,7 @@ export default function CompaniesPage() {
                           {parseFloat(mov.amount) > 0 ? "cargo" : "pago"}
                         </span>
                         {parseFloat(mov.amount) < 0 && (
-                          <div className="flex items-center justify-end gap-1">
+                          <div className="mt-1 flex flex-wrap items-center justify-end gap-1">
                             {mov.voided && <Badge variant="destructive" className="text-[9px]">ANULADO</Badge>}
                             <a
                               href={`/api/account-movements/${mov.id}/receipt-pdf`}
@@ -808,8 +809,8 @@ export default function CompaniesPage() {
                             >
                               <FileText className="h-3 w-3" /> Recibo PDF
                             </a>
-                            <CcCorrectAllocationsAction movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
-                          <CcVoidReceiptAction movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
+                            <CcCorrectAllocationsAction className="h-auto max-w-full whitespace-normal text-right" movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
+                            <CcVoidReceiptAction movement={mov} entityLabel={viewingAccountCompany?.nombreFantasia || viewingAccountCompany?.razonSocial || ""} />
                           </div>
                         )}
                       </TableCell>

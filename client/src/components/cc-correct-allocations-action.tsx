@@ -13,7 +13,7 @@ import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 
 type Movement={id:string;type:string;voided?:boolean|null;reservationId?:string|null;paymentId?:string|null;groupPaymentId?:string|null};
-export function CcCorrectAllocationsAction({movement,entityLabel}:{movement:Movement;entityLabel?:string}){
+export function CcCorrectAllocationsAction({movement,entityLabel,className}:{movement:Movement;entityLabel?:string;className?:string}){
  const {hasPermission}=useAuth();
  const allowed=!!hasPermission?.(CC_REALLOCATE_PERMISSION)&&movement.type==='pago'&&!movement.voided&&!movement.reservationId&&!movement.paymentId&&!movement.groupPaymentId;
  const [open,setOpen]=useState(false),[selected,setSelected]=useState<Record<string,string>>({}),[reason,setReason]=useState(''),[review,setReview]=useState(false),[requestId,setRequestId]=useState('');
@@ -29,7 +29,7 @@ export function CcCorrectAllocationsAction({movement,entityLabel}:{movement:Move
  onSuccess:()=>{setOpen(false);void queryClient.invalidateQueries();toast({title:'Facturas aplicadas corregidas',description:'Se conservaron el recibo y el cobro en Caja.'});}});
  if(!allowed)return null;
  const change=(next:boolean)=>{if(save.isPending)return;setOpen(next);setReview(false);setReason('');save.reset();if(next)void q.refetch();};
- return <><Button type="button" size="sm" variant="outline" onClick={()=>change(true)}>Corregir facturas aplicadas</Button>
+ return <><Button type="button" size="sm" variant="outline" className={className} onClick={()=>change(true)}>Corregir facturas aplicadas</Button>
  <Dialog open={open} onOpenChange={change}><DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>Corregir facturas aplicadas</DialogTitle><DialogDescription>Seleccioná los comprobantes que cancela este recibo. Se conservan su número, fecha, importe, medios de pago, retenciones y Caja.</DialogDescription></DialogHeader>
  {q.isLoading?<p>Cargando comprobantes…</p>:q.isError?<div><p role="alert">{q.error.message}</p><Button variant="outline" onClick={()=>void q.refetch()}>Volver a consultar</Button></div>:q.data&&<>
  <p className="font-medium">{entityLabel} · {q.data.receiptNumber||'Recibo'} · ARS {fmtMoney(Number(q.data.amount))}</p>
