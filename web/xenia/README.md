@@ -1,10 +1,13 @@
-# Xenia PMS — primera home comercial
+# Xenia PMS — gestión para la hospitalidad
 
 Vista previa privada de la marca y el producto. Sitio estático: `dist/index.html`, `dist/styles.css`, `dist/app.js` y los logos originales de Xenia extraídos del repositorio `marcesvetliza-ui/maran-pms`, rama `feature/xenia-channex-staging`.
 
 ## Decisiones confirmadas
 
 - Marca: Xenia PMS.
+- Posicionamiento: plataforma de gestión para la hospitalidad, con hotelería como eje comercial.
+- Áreas con presentación propia: alojamiento, restaurant, spa, eventos y grupos.
+- Hostels, apart hoteles y alquileres temporarios: adaptación a definir antes de implementar; las conexiones con Airbnb y otros canales se confirman por instalación.
 - Dominio principal adquirido: `xeniapms.com`.
 - Alternativos adquiridos: `xeniapms.com.ar`, `xeniapms.store`, `xeniapms.online`.
 - Registrador: Donweb.
@@ -14,7 +17,7 @@ Vista previa privada de la marca y el producto. Sitio estático: `dist/index.htm
 
 ## Funcionalidad de esta entrega
 
-Navegación responsive, menú móvil, ejemplo de planning interactivo, detalle de reservas ficticias, vistas de cobros y cuenta corriente, contenidos por área, módulos y preguntas desplegables. La consulta se prepara localmente: permite copiar el mensaje o abrir un borrador de correo. No se envían mensajes desde el sitio, no se guardan leads y no hay analítica.
+Navegación responsive, menú móvil, ejemplo de planning interactivo, detalle de reservas ficticias, vistas de cobros y cuenta corriente, cinco recorridos por actividad, cuatro tipos de alojamiento, ocho módulos y preguntas desplegables. El formulario permite indicar la actividad y preparar consultas sin capacidad de alojamiento para restaurant, spa, eventos o grupos. La consulta se prepara localmente: permite copiar el mensaje o abrir un borrador de correo. No se envían mensajes desde el sitio, no se guardan leads y no hay analítica.
 
 Los importes y las habitaciones son ficticios. El acceso al PMS usa la dirección existente de Xenia, `https://demo.maranpms.com.ar/`, en una pestaña aparte. El sitio no tiene credenciales ni consulta ninguna base del hotel. Multihotel figura como desarrollo, no como capacidad ya validada.
 

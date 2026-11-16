@@ -135,19 +135,33 @@ const roles = {
     label: "UNA ESTADÍA, TODO EL RECORRIDO",
     stages: [["Reserva", "Disponibilidad y fechas"], ["Estadía", "Habitación, cargos y servicios"], ["Cierre de cuenta", "Cobros, comprobantes y saldo"]]
   },
-  administracion: {
-    pill: "Los movimientos, con contexto", title: "Del cobro al comprobante.\nCada vínculo, a la vista.",
-    description: "Caja, comprobantes y cuentas corrientes para revisar cómo se relacionan los movimientos de la operación y los saldos de cada entidad.",
-    features: ["Pagos y movimientos identificados.", "Comprobantes y ajustes con su historial.", "Cuentas de huéspedes, empresas y grupos."],
-    label: "UN MOVIMIENTO, SU TRAZABILIDAD",
-    stages: [["Registro", "Cobro e identificación de origen"], ["Comprobante", "Relación con el circuito fiscal"], ["Seguimiento", "Imputaciones y saldo pendiente"]]
+  restaurant: {
+    pill: "La operación del restaurant", title: "De la mesa al cierre.\nCada pedido, en su lugar.",
+    description: "Mesas, pedidos y consumos para acompañar el servicio del restaurant y relacionarlo con sus cobros, sus comprobantes y la cuenta del huésped cuando corresponde.",
+    features: ["Mesas y pedidos para organizar el servicio.", "Consumos con su origen identificado.", "Cobros, comprobantes y cargos al folio cuando corresponde."],
+    label: "UNA MESA, TODO EL SERVICIO",
+    stages: [["Mesa y pedido", "Atención y consumos"], ["Servicio", "Seguimiento del pedido"], ["Cierre", "Cobro, comprobante o cargo al folio"]]
   },
-  servicios: {
-    pill: "Los servicios del hotel", title: "Cada consumo acompaña\nla cuenta de la estadía.",
-    description: "Restaurante, SPA y cargos de la habitación para relacionar los servicios del establecimiento con el trabajo de recepción y administración.",
-    features: ["Consumos y cargos vinculados al folio.", "Servicios según el alcance de cada instalación.", "Información compartida para continuar el circuito."],
-    label: "UN SERVICIO, SU LUGAR EN LA CUENTA",
-    stages: [["Servicio", "Consumo identificado"], ["Folio", "Relación con la estadía"], ["Cuenta", "Cobro, comprobante y seguimiento"]]
+  spa: {
+    pill: "La atención en el spa", title: "Cada turno, preparado.\nCada servicio, registrado.",
+    description: "Turnos, servicios y clientes para organizar la atención del spa y acompañar el seguimiento de sus consumos y cobros.",
+    features: ["Turnos y servicios para planificar la atención.", "Clientes y consumos con su información relacionada.", "Cobros y relación con el alojamiento cuando corresponde."],
+    label: "UN TURNO, TODA LA ATENCIÓN",
+    stages: [["Turno", "Cliente y servicio"], ["Atención", "Prestación y consumo"], ["Cuenta", "Cobro y seguimiento"]]
+  },
+  eventos: {
+    pill: "La organización de eventos", title: "Del primer presupuesto\nal encuentro que imaginaste.",
+    description: "Presupuestos, servicios y seguimiento para reunir la información de cada evento y acompañar su organización y su gestión administrativa.",
+    features: ["Presupuestos y servicios con su contexto.", "Información de cada evento para coordinar el trabajo.", "Seguimiento de los movimientos y la cuenta."],
+    label: "UN EVENTO, UNA ORGANIZACIÓN CONECTADA",
+    stages: [["Propuesta", "Necesidades y presupuesto"], ["Organización", "Coordinación de servicios"], ["Seguimiento", "Movimientos y cuenta del evento"]]
+  },
+  grupos: {
+    pill: "La gestión de grupos y empresas", title: "Muchas reservas.\nUna coordinación compartida.",
+    description: "Reservas de grupos, anticipos y cuentas de empresas para coordinar el trabajo comercial con la recepción y la administración.",
+    features: ["Reservas y alojamiento del grupo relacionados.", "Anticipos y movimientos identificados.", "Seguimiento de la cuenta del grupo o la empresa."],
+    label: "UN GRUPO, LA INFORMACIÓN REUNIDA",
+    stages: [["Grupo", "Reservas y necesidades"], ["Coordinación", "Alojamiento y anticipos"], ["Cuenta", "Movimientos y saldo pendiente"]]
   }
 };
 function activateRole(button) {
@@ -170,6 +184,10 @@ function activateRole(button) {
 }
 qa(".role-tabs button").forEach((button) => button.addEventListener("click", () => activateRole(button)));
 addTabKeyboard(q(".role-tabs"), activateRole);
+qa("[data-select-role]").forEach((link) => link.addEventListener("click", () => {
+  const tab = document.getElementById(`role-${link.dataset.selectRole}`);
+  if (tab) activateRole(tab);
+}));
 
 let preparedMessage = "";
 q("#contact-form").addEventListener("submit", (event) => {
@@ -178,7 +196,7 @@ q("#contact-form").addEventListener("submit", (event) => {
   if (!form.reportValidity()) return;
   const data = new FormData(form);
   const value = (key) => String(data.get(key) || "").trim();
-  preparedMessage = `Hola, me gustaría conocer Xenia PMS.\n\nNombre: ${value("name")}\nCorreo: ${value("email")}\nEstablecimiento: ${value("hotel")}\nHabitaciones: ${value("rooms")}\n\nConsulta:\n${value("message") || "Me gustaría coordinar una demostración."}`;
+  preparedMessage = `Hola, me gustaría conocer Xenia PMS.\n\nNombre: ${value("name")}\nCorreo: ${value("email")}\nEstablecimiento: ${value("hotel")}\nActividad: ${value("activity")}\nCapacidad de alojamiento: ${value("rooms") || "No aplica o a definir"}\n\nConsulta:\n${value("message") || "Me gustaría coordinar una demostración."}`;
   q("#send-email").href = `mailto:${proposedContact}?subject=${encodeURIComponent("Consulta sobre Xenia PMS")}&body=${encodeURIComponent(preparedMessage)}`;
   form.hidden = true; q("#contact-result").hidden = false; q("#copy-status").textContent = "";
   q("#send-email").focus();
@@ -195,8 +213,8 @@ q("#copy-message").addEventListener("click", async () => {
   } catch { q("#copy-status").textContent = "No se pudo copiar automáticamente. Usá el borrador de correo para seleccionar el texto."; }
 });
 const legal = {
-  privacy: {title: "Privacidad de esta vista previa", paragraphs: ["Los ejemplos de la web usan datos ficticios. No acceden a huéspedes, reservas ni operaciones de ningún hotel.", "El formulario prepara un mensaje en tu navegador. Esta página no lo guarda en una base de datos ni lo envía automáticamente. Si elegís abrir tu correo, el envío se realiza desde tu aplicación y bajo sus condiciones.", "La dirección contacto@xeniapms.com es una propuesta pendiente de activar. Esta vista previa no incorpora herramientas de analítica o seguimiento publicitario."]},
-  terms: {title: "Sobre esta presentación", paragraphs: ["Esta es una primera propuesta de la web comercial de Xenia PMS. Las pantallas son ejemplos ilustrativos para explicar sus circuitos.", "El alcance, la configuración, la disponibilidad de funciones y las condiciones de cada implementación se confirman con el establecimiento. La gestión multihotel está en desarrollo.", "El sitio principal previsto es xeniapms.com. Sus dominios alternativos son xeniapms.com.ar, xeniapms.store y xeniapms.online. La conexión pública y los canales de contacto se completarán después de revisar esta propuesta."]}
+  privacy: {title: "Privacidad de esta vista previa", paragraphs: ["Los ejemplos de la web usan datos ficticios. No acceden a huéspedes, clientes, reservas ni operaciones de ningún establecimiento.", "El formulario prepara un mensaje en tu navegador. Esta página no lo guarda en una base de datos ni lo envía automáticamente. Si elegís abrir tu correo, el envío se realiza desde tu aplicación y bajo sus condiciones.", "La dirección contacto@xeniapms.com es una propuesta pendiente de activar. Esta vista previa no incorpora herramientas de analítica o seguimiento publicitario."]},
+  terms: {title: "Sobre esta presentación", paragraphs: ["Esta vista previa presenta Xenia como una plataforma de gestión para la hospitalidad, con base hotelera y módulos de restaurant, spa, eventos y grupos. Las pantallas son ejemplos ilustrativos para explicar sus circuitos.", "El alcance, las adaptaciones a cada tipo de alojamiento, las conexiones con canales, la disponibilidad de funciones y las condiciones de cada implementación se confirman con el establecimiento. La gestión multihotel está en desarrollo.", "El dominio principal es xeniapms.com. Sus dominios alternativos son xeniapms.com.ar, xeniapms.store y xeniapms.online. La apertura pública y los canales de contacto se completarán después de revisar esta propuesta."]}
 };
 qa("[data-legal]").forEach((button) => button.addEventListener("click", () => {
   const info = legal[button.dataset.legal];

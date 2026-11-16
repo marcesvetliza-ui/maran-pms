@@ -15,3 +15,31 @@ dialog{border:1px solid #dae4da;border-radius:15px;padding:30px;max-width:610px;
 
 .arrow-icon{display:inline-block;width:14px;height:14px;vertical-align:-2px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.mock-tabs button{min-height:25px}
 @media(max-width:720px){h1{font-size:clamp(38px,10.5vw,66px)}}
+
+/* Hospitality positioning: keep the hotel preview and give each activity a place. */
+.hero-areas{display:flex;flex-wrap:wrap;gap:7px;margin:-8px 0 27px;max-width:420px}
+.hero-areas a{border:1px solid #d0dfd3;border-radius:20px;padding:5px 10px;font-size:10px;line-height:1.5;color:#496e60;background:#ffffff80;transition:background .2s,border-color .2s}
+.hero-areas a:hover{background:#e3efe7;border-color:#91b49e}
+.role-tabs{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.role-tabs button{gap:9px;min-width:0}
+.role-tabs button>span{font-size:14px}
+.shared-admin{display:flex;align-items:center;justify-content:space-between;gap:45px;border-top:1px solid var(--line);padding-top:29px;margin-top:48px}
+.shared-admin .eyebrow{font-size:9px;margin-bottom:10px}
+.shared-admin h3{color:var(--ink);font-size:22px;line-height:1.3;letter-spacing:-.025em;font-weight:500;margin-bottom:8px}
+.shared-admin p{font-size:12px;color:var(--muted);margin-bottom:0}
+.shared-admin ul{display:grid;grid-template-columns:1fr 1fr;gap:9px 25px;list-style:none;margin:0;padding:0;min-width:310px}
+.shared-admin li{font-size:12px;color:#547363;padding-left:17px;position:relative}
+.shared-admin li:before{content:"✓";position:absolute;left:0;color:#7b9a70;font-size:10px}
+.lodging-section{background:#f0f5ef;border-top:1px solid #e2e9de;padding-top:85px;padding-bottom:65px}
+.lodging-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:28px}
+.lodging-grid article{border-top:1px solid #bdcfbf;padding-top:18px}
+.lodging-grid .lodging-primary{border-top:2px solid var(--ink);padding-top:17px}
+.lodging-index{font-size:8px;letter-spacing:.08em;line-height:1.8;color:#6b8770;display:block;min-height:24px}
+.lodging-grid h3{font-size:22px;font-weight:500;letter-spacing:-.03em;color:var(--ink);line-height:1.3;margin:15px 0 12px}
+.lodging-grid p{font-size:12px;line-height:1.9;color:#68806c;margin-bottom:0}
+.adaptation-note{margin:32px 0 0;padding-top:19px;border-top:1px solid #d6e2d5;color:#6c826e;font-size:11px;line-height:1.8;max-width:100%}
+.form-wide{grid-column:1/-1}
+@media(max-width:1180px){.desktop-nav{gap:17px}.header-inner{gap:22px}.desktop-nav a{white-space:nowrap}.role-tabs button>span{font-size:13px}.lodging-grid{gap:22px}.lodging-index{font-size:7px}}
+@media(max-width:960px){.shared-admin{gap:25px}.shared-admin ul{min-width:250px;gap:9px 17px}.shared-admin li{font-size:11px}.lodging-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}.lodging-index{font-size:8px}.role-tabs button{gap:6px}.role-tabs button>span{font-size:12px}}
+@media(max-width:720px){.hero-areas{gap:6px;margin:-7px 0 25px}.hero-areas a{font-size:10px;padding:5px 9px}.role-tabs{grid-template-columns:repeat(5,minmax(94px,1fr));gap:13px;overflow-x:auto;scrollbar-width:thin;scrollbar-color:#a6bca7 transparent;padding:0 0 6px}.role-tabs button{min-height:44px;font-size:8px;gap:7px;white-space:nowrap}.role-tabs button>span{font-size:12px}.shared-admin{display:block;margin-top:31px;padding-top:25px}.shared-admin h3{font-size:22px}.shared-admin ul{min-width:0;gap:10px 16px;margin-top:20px}.shared-admin li{font-size:12px}.lodging-section{padding:58px 0}.lodging-grid{gap:28px 22px}.lodging-grid h3{font-size:21px;margin:12px 0 10px}.lodging-grid p{font-size:12px}.lodging-index{font-size:7px;min-height:30px}.adaptation-note{font-size:10px;line-height:1.9;margin-top:27px}.form-wide{grid-column:auto}}
+@media(max-width:380px){.lodging-grid{grid-template-columns:1fr;gap:25px}.lodging-index{min-height:0}.lodging-grid h3{margin-top:10px}.hero-areas a{font-size:9px}}
