@@ -8,7 +8,7 @@ import { ensureChannexAriSchema } from "../channex/ariSchema";
 import { addDays, buildAriValues, STAGING_URL } from "../channex/ari";
 import { getChannexReadiness } from "../channex/readiness";
 import { saveSettlementRate } from "../channex/settlementConfig";
-const allowed = ["postgresql://postgres@127.0.0.1:55448/rate_calendar_boot_20261029", "postgresql://postgres@127.0.0.1:55448/channex_inbound_test"].includes(process.env.DATABASE_URL || "") ||
+const allowed = ["postgresql://postgres@127.0.0.1:55449/ota_assignment_test", "postgresql://postgres@127.0.0.1:55448/rate_calendar_boot_20261029", "postgresql://postgres@127.0.0.1:55448/channex_inbound_test"].includes(process.env.DATABASE_URL || "") ||
  (process.env.CI==="true"&&/^postgres(?:ql)?:\/\/[^@]*@(?:localhost|127\.0\.0\.1):5432\/maran_test$/.test(process.env.DATABASE_URL||""));
 const suite=allowed?describe:describe.skip;
 let pool:import("pg").Pool, service:typeof import("../channex/inbound"), storage:typeof import("../db-storage").storage;

@@ -91,6 +91,9 @@ jobs:
       - name: Verificar confirmación y guardado atómico de bloques grupales
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/group-block-confirmation.pg.test.ts
 
+      - name: Verificar asignación OTA con confirmación de categoría y auditoría atómica
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-assignment.pg.test.ts
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 
