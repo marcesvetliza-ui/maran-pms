@@ -1,3 +1,4 @@
+import { inboundBookingDetail } from '../channex/bookingDetail';
 import { listInboundBookings, inboundBookingHistory } from '../channex/inbox';
 import {previewChannexAri} from '../channex/ariPreview';
 import { randomUUID } from "node:crypto";
@@ -79,6 +80,49 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   expect((await inboundBookingHistory(pool,f.id,'bad1',1)).total).toBe(1);
   expect(JSON.stringify(attention)).not.toMatch(/NEVER_RETURN|private@example|payload|encrypted/);
   expect((await pool.query('SELECT revision_id,status,acked_at FROM channex_inbound_revisions WHERE connection_id=$1 ORDER BY revision_id',[f.id])).rows).toEqual(before);
+ });
+ it('filters the OTA table across all pages and keeps minimal cancellations identifiable',async()=>{
+  const f=await fixture(1);
+  for(let i=0;i<27;i++){
+   const id=`filter-${f.id}-${i}`,raw=revision(f.id,`booking-${i}`,id,'new','2026-11-15T14:00:00Z') as any;
+   raw.attributes.customer={name:i===26?'Target %_ Guest':'Another',surname:'Person'};raw.attributes.ota_name=i===26?'Expedia':'Booking.com';raw.attributes.ota_reservation_code=`OTA-${i}`;
+   raw.attributes.arrival_date='2026-12-10';raw.attributes.departure_date='2026-12-13';
+   await pool.query(`INSERT INTO channex_inbound_revisions(connection_id,revision_id,booking_id,payload,payload_hash,status,inserted_at,created_at)
+    VALUES($1,$2,$3,$4,'hash','applied','2026-11-15T14:00:00Z','2026-11-16T02:30:00Z')`,[f.id,id,raw.attributes.booking_id,raw]);
+  }
+  const cancelled={id:`cancel-${f.id}`,attributes:{booking_id:'booking-26',property_id:f.id,status:'cancelled',inserted_at:'2026-11-15T15:00:00Z'}};
+  await pool.query(`INSERT INTO channex_inbound_revisions(connection_id,revision_id,booking_id,payload,payload_hash,status,inserted_at,created_at)
+   VALUES($1,$2,'booking-26',$3,'hash','applied','2026-11-15T15:00:00Z','2026-11-16T02:30:00Z')`,[f.id,cancelled.id,cancelled]);
+  const filtered=await listInboundBookings(pool,f.id,'all',1,{search:'target %_',channel:'Expedia'});
+  expect(filtered.counts.all).toBe(1);expect(filtered.counts.cancelled).toBe(1);expect(filtered.bookings[0]).toMatchObject({booking_status:'cancelled',guest_name:'Target %_ Guest Person',reference:'OTA-26',channel:'Expedia',amount:'250',arrival:'2026-12-10'});
+  expect(filtered.channels).toEqual(['Booking.com','Expedia']);
+  expect((await listInboundBookings(pool,f.id,'all',1,{dateType:'received',from:'2026-11-15',to:'2026-11-15'})).counts.all).toBe(27);
+  expect((await listInboundBookings(pool,f.id,'all',1,{dateType:'received',from:'2026-11-16',to:'2026-11-16'})).counts.all).toBe(0);
+  expect((await listInboundBookings(pool,f.id,'all',1,{dateType:'stay',from:'2026-12-12',to:'2026-12-12'})).counts.all).toBe(27);
+  expect((await listInboundBookings(pool,f.id,'all',1,{dateType:'stay',from:'2026-12-13',to:'2026-12-15'})).counts.all).toBe(0);
+ });
+ it('opens audited OTA details with frozen ARS conversion and isolated operational notes',async()=>{
+  vi.stubEnv('CHANNEX_CREDENTIALS_ENCRYPTION_KEY','table-detail-test-key-'.repeat(3));
+  const f=await fixture(1),r=revision(f.id,`detail-${f.id}`,`detail-new-${f.id}`) as any;
+  r.attributes.currency='USD';r.attributes.notes='Llegada después de las 22 hs';
+  await pool.query("UPDATE rate_plans SET currency='USD' WHERE id=$1",[f.plan]);await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);
+  await saveSettlementRate(pool,f.id,{rate:'1545.000000',reason:'Cotización del hotel'},'Test');
+  expect((await apply(f,r)).status).toBe('applied');
+  const before=(await pool.query('SELECT revision_id,status,acked_at FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows;
+  const detail=await inboundBookingDetail(pool,f.id,r.id,{name:'Recepción prueba'});
+  expect(detail).toMatchObject({notes:'Llegada después de las 22 hs',notesStatus:'available',settlements:[{source_currency:'USD',source_total:'250.00',exchange_rate:'1545.000000',settlement_total:'386250.00'}]});
+  expect(JSON.stringify(await listInboundBookings(pool,f.id,'all',1))).not.toContain('Llegada después');
+  expect(JSON.stringify(await inboundBookingHistory(pool,f.id,r.id,1))).not.toContain('Llegada después');
+  expect(await inboundBookingDetail(pool,'other-property',r.id,{name:'Test'})).toBeNull();
+  const audit=(await pool.query("SELECT details FROM audit_logs WHERE entity_type='channex_booking_detail' AND entity_id=$1",[r.id])).rows;
+  expect(audit).toHaveLength(1);expect(audit[0].details).not.toContain('Llegada después');
+  const broken={connect:async()=>{const c=await pool.connect();return {release:()=>c.release(),query:(sql:string,args?:unknown[])=>{if(sql.includes('INSERT INTO audit_logs'))throw Error('Synthetic audit failure');return c.query(sql,args);}};}} as any;
+  await expect(inboundBookingDetail(broken,f.id,r.id,{name:'Test'})).rejects.toThrow('Synthetic audit failure');
+  expect((await pool.query('SELECT revision_id,status,acked_at FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows).toEqual(before);
+  const omitted=revision(f.id,`notes-omitted-${f.id}`,`notes-omitted-rev-${f.id}`) as any;omitted.attributes.notes='Tarjeta de crédito para garantizar';
+  await service.persistInboundRevision(pool,f.id,omitted);
+  const omittedDetail=await inboundBookingDetail(pool,f.id,omitted.id,{name:'Recepción prueba'});expect(omittedDetail).toMatchObject({notes:null,notesStatus:'payment_omitted'});
+  await pool.query("DELETE FROM audit_logs WHERE entity_type='channex_booking_detail' AND entity_id=ANY($1::varchar[])",[[r.id,omitted.id]]);vi.unstubAllEnvs();
  });
  it('assigns a split category only to its selected physical room and reviews when it is unavailable',async()=>{
   const f=await fixture(2);

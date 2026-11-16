@@ -82,6 +82,9 @@ jobs:
       - name: Verificar corrección de imputaciones CC sin modificar Caja
         run: npx vitest run --config vitest.server.pg.config.ts server/tests/cc-receipt-allocations.pg.test.ts
 
+      - name: Verificar filtros y detalle auditado de reservas OTA
+        run: npx vitest run --config vitest.server.pg.config.ts server/tests/channex-inbound.pg.test.ts -t "filters the OTA|opens audited OTA"
+
       - name: Correr npm test (client + server + PostgreSQL)
         run: npm test
 

@@ -12,7 +12,7 @@ afterEach(()=>{cleanup();state.allowed=true;});
 describe("Channex inbound operating controls",()=>{
  it("makes disabled external reception and review reasons explicit",()=>{
   render(<ChannexInboundSettings connectionId="conn"/>);
-  expect(screen.getByText("Conexión entrante desactivada en el servidor.")).toBeInTheDocument();
+  expect(screen.getByText("Recepción automática: pausada.")).toBeInTheDocument();
   expect(screen.getByText("Bandeja de reservas recibidas")).toBeInTheDocument();
  });
  it("does not expose configuration controls without permission",()=>{

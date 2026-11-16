@@ -14,7 +14,7 @@ describe("inbound authenticated notifications and configuration",()=>{
   for(const path of ['/bookings','/history/revision']) {
    expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`)).status).toBe(401);
   }
-  for(const path of ['/bookings?view=invalid','/bookings?page=0','/history/revision?page=-1']) {
+  for(const path of ['/bookings?view=invalid','/bookings?page=0','/bookings?from=2026-02-30','/bookings?from=2026-12-20&to=2026-12-01','/history/revision?page=-1']) {
    expect((await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{headers:{'x-role':'reception'}})).status).toBe(400);
   }
   expect(query).not.toHaveBeenCalled();
@@ -22,7 +22,7 @@ describe("inbound authenticated notifications and configuration",()=>{
    const response=await fetch(`${base}/api/channex/connections/conn/inbound${path}`,{headers:{'x-role':'reception'}});
    expect(response.status).toBe(200);expect(response.headers.get('cache-control')).toBe('private, no-store');
   }
-  expect(query.mock.calls[0][1]).toEqual(['conn','attention',25]);
+  expect(query.mock.calls[0][1]).toEqual(['conn','attention',25,'','',null,null,'received']);
   expect(query.mock.calls[1][1]).toEqual(['conn','revision',0]);
   for(const [sql] of query.mock.calls) expect(sql).not.toMatch(/\b(UPDATE|INSERT|DELETE)\b/);
  });

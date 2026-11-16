@@ -12,6 +12,12 @@ const access={owner:role==='admin',entry:true,...Object.fromEntries(Object.keys(
 const rooms=[{id:'301',roomNumber:'301',roomTypeId:'premium',floor:3},{id:'307',roomNumber:'307',roomTypeId:'premium',floor:3}];
 const plans=[{id:'rack',name:'RACK',roomTypeId:'premium',roomType:{name:'Premium'},currency:'USD',baseRate:'119.09',rate1pax:'119.09',rate2pax:'144.98',rate3pax:'152.75'},{id:'ars',name:'RACK ARS',roomTypeId:'premium',roomType:{name:'Premium'},currency:'ARS'}];
 (window as any).__otaRequests=[];
+const demoBookings=Array.from({length:5},(_,i)=>({revision_id:`rev-${i}`,booking_id:`booking-${i}`,revision_count:i===1?3:1,
+ booking_status:i===2?'cancelled':i===1?'modified':'new',status:i===3?'review':'applied',review_code:i===3?'INVALID_ROOM_MAPPING':null,
+ acked_at:'2026-11-16T12:30:00Z',created_at:'2026-11-16T12:30:00Z',inserted_at:'2026-11-16T12:25:00Z',
+ channel:i===4?'Expedia':'Booking.com',reference:`BK-96001${i}`,guest_name:['Reserva de prueba','María González','Carlos López','Lucía Fernández','Pablo Rodríguez'][i],
+ arrival:'2026-12-10',departure:'2026-12-12',amount:i===4?'320.00':'290.00',currency:'USD',
+ reservations:i===3?[]:[{id:`pms-${i}`,code:`RES-${100+i}`,guestName:'Huésped de prueba',roomNumber:String(307-i),category:'Premium',checkInDate:'2026-12-10',checkOutDate:'2026-12-12'}]}));
 const saved=new Map();
 window.fetch=async(input:any,init?:RequestInit)=>{const url=String(input);let data:any=[];const body=init?.body?JSON.parse(String(init.body)):null;(window as any).__otaRequests.push({url,method:init?.method||'GET',body});
  if(url==='/api/channex/access')data=access;
@@ -33,6 +39,14 @@ window.fetch=async(input:any,init?:RequestInit)=>{const url=String(input);let da
  else if(url.endsWith('/room-options'))data=rooms;
  else if(url.endsWith('/room-type-mappings'))data=[{id:'m1',channexRoomTypeTitle:'Premium hasta 3 personas',channexRoomTypeId:'remote',roomTypeId:'premium',roomIds:['301']}];
  else if(url.endsWith('/rate-plan-mappings'))data=[{id:'p1',channexRatePlanTitle:'Premium con desayuno',channexRoomTypeId:'remote',ratePlanId:'rack'}];
+ else if(url.includes('/inbound/bookings?')){
+  const q=new URL(url,location.origin).searchParams;let bookings=demoBookings.filter(r=>(!q.get('search')||`${r.guest_name} ${r.reference}`.toLowerCase().includes(q.get('search')!.toLowerCase()))&&(!q.get('channel')||r.channel===q.get('channel')));
+  const counts={all:bookings.length,attention:bookings.filter(r=>r.status==='review').length,new:bookings.filter(r=>r.booking_status==='new').length,modified:bookings.filter(r=>r.booking_status==='modified').length,cancelled:bookings.filter(r=>r.booking_status==='cancelled').length};
+  const view=q.get('view');if(view!=='all')bookings=bookings.filter(r=>view==='attention'?r.status==='review':r.booking_status===view);
+  data={counts,channels:['Booking.com','Expedia'],bookings,page:1,pageSize:25};
+ }
+ else if(url.includes('/inbound/booking-detail/'))data={notes:'Llegada estimada después de las 22:00. Solicita habitación tranquila.',notesStatus:'available',settlements:[{reservation_id:'pms-0',source_currency:'USD',source_total:'290.00',exchange_rate:'1545.000000',settlement_currency:'ARS',settlement_total:'448050.00',created_at:'2026-11-16T12:30:00Z'}]};
+ else if(url.includes('/inbound/history/'))data={total:1,revisions:[demoBookings[0]]};
  else if(url.endsWith('/inbound'))data={serverEnabled:true,settings:{enabled:true,has_token:true},revisions:[{revision_id:'revision-test',booking_id:'booking-test',status:'applied',acked_at:'2026-11-09',reservations:[{id:'r1',guestName:'Reserva de prueba',roomNumber:'301',checkInDate:'2026-11-14',checkOutDate:'2026-11-15'}]}]};
  else if(/\/ari(?:\?|$)/.test(url))data={settings:{floor:3,currency:'ARS',enabled:false,room_ids:null},dispatchEnabled:true,rooms:rooms.map(r=>({...r,roomTypeName:'Premium',channexRoomTypeId:'remote'})),summary:[{status:'pending',count:28}],events:[]};
  return new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});
