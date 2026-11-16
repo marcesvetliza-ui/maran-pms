@@ -19,7 +19,7 @@ export async function getChannexReadiness(pool: Pool, connectionId: string) {
     await c.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     await c.query("SET LOCAL statement_timeout='15s'");
     const connection = (await c.query(`SELECT c.id,c.environment,c.base_url,c.is_active,c.channex_property_id,c.api_key_encrypted,
-      a.connection_id AS scope_id,a.floor,a.currency,a.enabled AS ari_enabled,
+      a.connection_id AS scope_id,a.floor,a.currency,a.room_ids,a.enabled AS ari_enabled,
       i.enabled AS inbound_enabled,i.token_hash IS NOT NULL AS has_webhook_token,i.settlement_exchange_rate
       FROM channex_connections c LEFT JOIN channex_ari_settings a ON a.connection_id=c.id
       LEFT JOIN channex_inbound_settings i ON i.connection_id=c.id WHERE c.id=$1`, [connectionId])).rows[0];
@@ -34,7 +34,7 @@ export async function getChannexReadiness(pool: Pool, connectionId: string) {
     try { credentialUsable = Boolean(connection.api_key_encrypted && decryptChannexApiKey(connection.api_key_encrypted).trim()); } catch { /* Return no credential or crypto details. */ }
     add("credential", "configuration", credentialUsable, "Guardar una credencial que este servidor pueda descifrar. Su validez remota aún debe comprobarse.");
     add("scope", "configuration", Boolean(connection.scope_id), "Guardar el alcance y la moneda de la propiedad.");
-    const rooms = connection.scope_id ? await inventoryPreview(c, connectionId, connection.floor) : [];
+    const rooms = connection.scope_id ? await inventoryPreview(c, connectionId, connection.floor, connection.room_ids ?? null) : [];
     const physicalRooms = new Set(rooms.map(room => room.id));
     add("inventory", "configuration", physicalRooms.size > 0 && rooms.every(room => room.channexRoomTypeId),
       "El alcance necesita habitaciones físicas activas y sus categorías mapeadas.");

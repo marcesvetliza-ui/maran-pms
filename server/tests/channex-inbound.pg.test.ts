@@ -258,6 +258,29 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   expect((await pool.query("SELECT settlement_exchange_rate FROM channex_inbound_settings WHERE connection_id=$1",[f.id])).rows[0].settlement_exchange_rate).toBeNull();
   expect((await pool.query("SELECT id FROM channex_settlement_rate_edits WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
  });
+ it("readiness respects a single selected room without requiring unrelated tariffs",async()=>{
+  const f=await fixture(2),selected=`${f.id}-1`,outside=`${f.id}-0`;
+  await pool.query("UPDATE channex_ari_settings SET enabled=false,room_ids=$2::text[] WHERE connection_id=$1",[f.id,[selected]]);
+  await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1",[f.id]);
+  await pool.query("UPDATE channex_room_type_mappings SET room_ids=$2::text[] WHERE connection_id=$1",[f.id,[selected]]);
+  await pool.query("INSERT INTO channex_room_type_mappings(id,connection_id,channex_room_type_id,channex_room_type_title,room_type_id,room_ids) VALUES($1,$2,'outside-type','Outside pilot',$3,$4::text[])",[randomUUID(),f.id,f.type,[outside]]);
+  await pool.query("INSERT INTO channex_rate_plan_mappings(id,connection_id,channex_room_type_id,channex_rate_plan_id,channex_rate_plan_title) VALUES($1,$2,'outside-type','outside-plan','Unmapped outside pilot')",[randomUUID(),f.id]);
+  const count=async()=>Number((await pool.query("SELECT count(*) AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n);
+  const before=await count();
+  const scoped=await getChannexReadiness(pool,f.id);
+  expect(scoped!.roomCount).toBe(1);
+  expect(scoped!.checks.find(c=>c.id==='inventory')?.ok).toBe(true);
+  expect(scoped!.checks.find(c=>c.id==='ari_values')?.ok).toBe(true);
+  await pool.query("UPDATE channex_rate_plan_mappings SET rate_plan_id=NULL WHERE connection_id=$1 AND channex_rate_plan_id='remote-plan'",[f.id]);
+  expect((await getChannexReadiness(pool,f.id))!.checks.find(c=>c.id==='ari_values')?.ok).toBe(false);
+  await pool.query("UPDATE channex_rate_plan_mappings SET rate_plan_id=$2 WHERE connection_id=$1 AND channex_rate_plan_id='remote-plan'",[f.id,f.plan]);
+  await pool.query("UPDATE channex_ari_settings SET room_ids=NULL WHERE connection_id=$1",[f.id]);
+  const whole=await getChannexReadiness(pool,f.id);
+  expect(whole!.roomCount).toBeGreaterThanOrEqual(2);
+  expect(whole!.checks.find(c=>c.id==='ari_values')?.ok).toBe(false);
+  expect(await count()).toBe(before);
+  expect(await linked(f)).toHaveLength(0);
+ });
  it("checks the actual 500-day transformation without writing or declaring certification",async()=>{
   const f=await fixture();
   const before=(await pool.query("SELECT count(*)::int AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n;
