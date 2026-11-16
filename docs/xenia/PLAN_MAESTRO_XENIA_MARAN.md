@@ -2,7 +2,7 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "16 de noviembre de 2026 · Versión 1.0"
+date: "16 de noviembre de 2026 · Versión 1.1"
 lang: es-AR
 ---
 
@@ -79,18 +79,28 @@ Estas observaciones definen tareas. No se ejecuta una migración de esquema dent
 
 # 3. Organización, responsables y forma de seguimiento
 
-| Rol | Responsabilidad | Persona o estado |
+**Hoy Marcelo concentra la dirección del producto, la responsabilidad técnica, infraestructura, revisión fiscal y contable y soporte de apertura.** Los roles describen funciones; no requieren contratar una persona para cada una. El crecimiento del equipo se decidirá al incorporar más establecimientos y medir la carga real.
+
+| Rol | Responsabilidad | Responsable actual y apoyo |
 |---|---|---|
 | Dueño del producto | Prioridades, presupuesto, alcance comercial y decisiones finales. | Marcelo. |
-| Responsable técnico | Arquitectura, cambios, pruebas, publicaciones y evidencia. | Equipo de desarrollo; asignar titular y reemplazo. |
-| Infraestructura | Dominios, cuentas, Railway, DNS, respaldos y recuperación. | Asignar titular y reemplazo. |
-| Referentes del hotel | Validar casos reales de Recepción, Administración, Grupos, Restaurante y SPA. | Designar una persona por área. |
-| Revisión fiscal y contable | Confirmar CUIT, ambientes, series, puntos de venta y circuitos de corrección. | Administración y responsable contable. |
-| Soporte de apertura | Recibir incidentes, clasificar impacto y coordinar resolución. | Definir cobertura y contactos antes de la apertura. |
+| Responsable técnico | Arquitectura, cambios, pruebas, publicaciones y evidencia. | Marcelo, con asistencia de IA y herramientas de desarrollo. |
+| Infraestructura | Dominios, cuentas, Railway, DNS, respaldos y recuperación. | Marcelo; automatizaciones verificadas y accesos recuperables. |
+| Validación de la operación | Confirmar casos reales de Recepción, Administración, Grupos, Restaurante y SPA. | Marcelo, con la devolución de los colaboradores que usan cada circuito. |
+| Revisión fiscal y contable | Revisar conciliaciones, configuración fiscal, comprobantes y novedades aplicables. | Marcelo, apoyado por controles automáticos e IA; consultas profesionales puntuales cuando correspondan. |
+| Soporte diario y de apertura | Atender consultas, registrar incidentes, investigar y escalar lo que requiere una decisión. | Asistente piloto como primera línea, una vez validado; Marcelo como responsable de escalamiento y aprobación. |
+
+## 3.1 Trabajo diario con asistencia de IA
+
+El colaborador consulta dentro de Soporte, con texto y capturas. El asistente orienta con documentación y evidencia autorizada, conserva el caso y prepara propuestas cuando corresponde. Marcelo recibe los asuntos que requieren aprobación, los incidentes sin resolver y las alertas de presupuesto. La comunicación rutinaria puede automatizarse; la responsabilidad y las decisiones de publicación permanecen identificadas.
+
+El control contable combina comprobaciones programadas de saldos, cobros, comprobantes e imputaciones con explicaciones de la IA. La vigilancia normativa revisa fuentes oficiales de ARCA y el Boletín Oficial, registra fechas y advierte posibles impactos. Cada hallazgo debe indicar qué observó, su fuente, el alcance y el siguiente paso; no se presenta una hipótesis como diferencia confirmada.
+
+La primera implementación será de lectura. Las correcciones de datos, alícuotas, reglas de emisión, publicaciones y presentaciones fiscales pasan por una propuesta revisable y el circuito autorizado correspondiente. Una interpretación dudosa o una gestión que requiera intervención profesional se deriva en ese caso concreto. Esta organización permite comenzar con Marcelo e IA y delegar funciones a medida que crezca Xenia.
 
 Cada tarea tendrá identificador, responsable, dependencia, estado y evidencia de cierre. Estados: **pendiente, en curso, verificada, bloqueada por acceso o decisión**. Una tarea no pasa a verificada solamente porque su código está escrito.
 
-Antes de la apertura se revisará diariamente el tablero de circuitos críticos. Las reuniones pueden ser breves: incidentes abiertos, riesgo para la operación, cambios del día y próximos pasos. Marcelo revisará los hitos de producto y las decisiones que impliquen gasto o cambios relevantes de producción.
+Antes de la apertura, Marcelo revisará diariamente un tablero breve de circuitos críticos: incidentes abiertos, controles pendientes, cambios del día y decisiones requeridas. Las comprobaciones y los resúmenes se automatizarán progresivamente; el tablero debe mostrar la última revisión exitosa y los controles que no pudieron completarse. Se documentarán cuentas, recuperación y procedimientos para poder delegarlos sin depender de conocimiento informal.
 
 # 4. Arquitectura objetivo del multihotel
 
@@ -338,6 +348,8 @@ Cada conversación, captura, documento y búsqueda pertenecerá a un hotel y res
 
 El presupuesto inicial es **US$1 por día para todo el hotel piloto**, con día de corte propuesto en `America/Argentina/Buenos_Aires`. Es un techo de consumo del proveedor de IA, no un gasto fijo ni una tarifa que incluya alojamiento, correo o impuestos. El modelo, los precios vigentes y cualquier otra herramienta facturada se registrarán antes de activarlo.
 
+Ese mismo techo incluye el chat, las investigaciones y los futuros resúmenes contables o normativos que llamen a un modelo. No se habilita otro presupuesto paralelo. Los controles deterministas y la descarga de fuentes no necesitan tokens de IA, aunque usan infraestructura y pueden tener otros costos. Si se agota el cupo, los controles ya implementados y el registro de incidentes continúan; se pausan las nuevas interpretaciones pagas y se informa su estado.
+
 El control reservará el costo máximo permitido antes de iniciar una consulta y conciliará el consumo real. Debe contemplar solicitudes simultáneas. Si hay una interrupción y no puede confirmarse el consumo, se pausarán nuevos gastos hasta revisar esa incertidumbre. El presupuesto de otros hoteles será independiente y podrá existir además un límite global de la empresa.
 
 Se propone aviso preventivo al 80% y aviso de agotamiento al llegar al límite, junto con el estado visible en el chat. Al agotarse, seguirán disponibles el historial y el circuito de soporte sin nuevas consultas pagas hasta el reinicio o una decisión autorizada.
@@ -347,6 +359,25 @@ Los pedidos de aprobación y alertas se registrarán en la bandeja del PMS y se 
 ## 10.3 Criterios antes de llevarlo a Maran
 
 Probar respuestas sobre casos conocidos, permisos, capturas, conversaciones largas, límites simultáneos, día de corte, proveedor caído, consumo incierto, correos fallidos y aprobación rechazada. El usuario debe poder entender la recomendación y su siguiente paso. Medir costo y utilidad; no prometer respuestas idénticas a este chat sin evaluar modelo, herramientas, contexto y reglas concretas.
+
+## 10.4 Control contable y seguimiento de ARCA
+
+Se agregarán como capacidades del módulo de Soporte, con hallazgos en la misma bandeja y permisos por hotel. Son dos circuitos distintos:
+
+| Circuito | Primera implementación | Resultado visible |
+|---|---|---|
+| Control contable de la operación | Comprobar en lectura relaciones entre folio, cargos vigentes, cobros, Caja, cuentas corrientes y comprobantes; contemplar anticipos, transferencias y ajustes válidos. | Diferencia sustentada, evidencia mínima y circuito de revisión. Una diferencia entre total facturado y cobrado no constituye por sí sola un error. |
+| Vigilancia normativa y técnica | Revisar publicaciones y documentación oficiales, comparar contenido relevante y verificar aplicación al perfil fiscal del hotel. | Fuente, publicación, vigencia, cambio observado, posible impacto y propuesta de revisión. |
+
+El primer paso para acceder a datos del hotel serán consultas de diagnóstico específicas y de solo lectura, con validación del usuario y hotel en el servidor. Se devolverán los datos mínimos necesarios, sin habilitar SQL libre ni acceso a otros hoteles. La IA no recibirá claves fiscales, certificados ni credenciales de proveedores.
+
+Se propone comenzar con un control contable diario y una revisión normativa cada 24 horas, complementados por investigación manual de incidentes y las señales operativas disponibles. La periodicidad se ajustará después de medir carga y utilidad. El estado mostrará última ejecución correcta, fuentes cubiertas, fallas y próxima revisión. “Seguimiento continuo” significa un proceso programado verificable; no una garantía de detectar instantáneamente cualquier publicación.
+
+Fuentes iniciales: documentación de webservices de factura electrónica de [ARCA](https://www.arca.gob.ar/ws/documentacion/ws-factura-electronica.asp), [Biblioteca Electrónica de ARCA](https://biblioteca.arca.gob.ar/) y [Boletín Oficial](https://www.boletinoficial.gob.ar/). Antes de activar el proceso se validarán los mecanismos de consulta de cada fuente y el perfil fiscal aplicable. Se guardará una referencia y huella de la versión revisada. El cambio de contenido de una página no se tratará automáticamente como un cambio normativo aplicable.
+
+Una novedad genera un caso para Marcelo con fuente completa, fechas, alcance, pruebas propuestas y decisión pendiente. Los cambios aceptados se implementan en pruebas, se verifican contra la norma y se publican por el circuito de versiones. La detección y las explicaciones no modifican automáticamente impuestos, comprobantes, numeradores ni declaraciones.
+
+La revisión inicial del código del piloto encontró chat con capturas, control de presupuesto, avisos y flujo de revisión. Sus reglas actuales excluyen acceso a movimientos reales del hotel y a ARCA; por eso el control contable y la vigilancia normativa requieren desarrollo y validación adicionales. La existencia del código no demuestra que la configuración publicada esté habilitada o use el presupuesto correcto.
 
 # 11. Preparación operativa y aceptación de Maran
 
@@ -433,7 +464,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | A04 · P0 | Completar inventario real de Railway y dependencias de Maran/Xenia. | Infraestructura | Pendiente; acceso Xenia. |
 | A05 · P0 | Confirmar salud externa, revisión servida y configuración por entorno. | Infraestructura | En curso; contraste externo pendiente. |
 | A06 · P0 | Completar matriz funcional de diferencias por módulo. | Técnico y áreas | Pendiente; A01 a A04. |
-| A07 · P0 | Asignar titulares, reemplazos y canal de incidentes. | Marcelo | Pendiente. |
+| A07 · P0 | Registrar a Marcelo como responsable actual y definir delegación progresiva. | Marcelo | Hecha; roles confirmados en la versión 1.1. |
 | A08 · P0 | Confirmar fecha, alcance y criterios de apertura. | Marcelo y hotel | Pendiente; sección 11. |
 | A09 · P0 | Inventariar respaldos, adjuntos y recuperación de claves. | Infraestructura | Pendiente; A04. |
 | A10 · P0 | Restaurar en entorno aislado y medir recuperación. | Infraestructura y hotel | Pendiente; A09. |
@@ -494,12 +525,15 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | Pendiente; H04 y H05. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
-| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; acceso y referencia del piloto. |
+| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | En curso; código revisado, publicación y configuración pendientes. |
 | I02 · P1 | Validar presupuesto US$1, concurrencia e incertidumbre. | Técnico | Pendiente; I01. |
 | I03 · P1 | Validar aprobaciones, bandeja y correo de Marcelo. | Técnico y Marcelo | Pendiente; I01. |
 | I04 · P1 | Evaluar calidad con casos reales anonimizados. | Marcelo y colaboradores | Pendiente; I02 e I03. |
 | I05 · P1 | Habilitar piloto acotado en Xenia y medir resultado. | Marcelo y técnico | Pendiente; I04 y publicación revisada. |
 | I06 · P2 | Llevar módulo validado a Maran con permisos y límites. | Marcelo y técnico | Pendiente; I05 y aceptación del hotel. |
+| I07 · P1 | Preparar consultas de diagnóstico de solo lectura por hotel y usuario. | Técnico | Pendiente; I01, permisos y casos de prueba. |
+| I08 · P1 | Implementar controles contables con hallazgos y evidencia, sin modificar operaciones. | Técnico y revisión contable | Pendiente; I07 y reglas de conciliación revisadas. |
+| I09 · P1 | Implementar vigilancia de ARCA y Boletín Oficial con fuentes, vigencia y aprobación. | Técnico y revisión fiscal | Pendiente; fuentes verificadas, perfil fiscal e integración con el presupuesto. |
 
 # 15. Decisiones pendientes y próximos pasos
 
@@ -516,11 +550,11 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 ## 15.2 Primer paquete de ejecución
 
-**Ya iniciado:** rama aislada, referencias actualizadas, comparación de ramas, inspección inicial y este plan con tablero y guías. Se guarda un script reproducible de relevamiento sin datos operativos.
+**Ya iniciado:** rama aislada, referencias actualizadas, comparación de ramas, inspección inicial y este plan con tablero y guías. En la versión 1.1 se incorporó la responsabilidad actual de Marcelo, la primera revisión de código del piloto y el alcance de soporte y controles asistidos por IA.
 
-**Siguiente trabajo técnico:** completar A04 y A06, comenzando por servicios reales y matriz de diferencias de sesiones, facturación y cuentas corrientes. En paralelo se preparan los casos de aceptación de Maran y se identifica el dominio exacto para dejar una compra concreta lista para revisar.
+**Siguiente trabajo técnico:** validar el soporte existente en Xenia: revisión servida, chat con capturas, presupuesto efectivo de US$1 y avisos. Completar A04 y A06 conservando las correcciones recientes de Maran. Preparar después las consultas de diagnóstico de solo lectura y un primer control contable con datos ficticios. La vigilancia normativa comienza por fuentes y perfil fiscal, antes de programar consultas o activar consumo.
 
-**Primer hito verificable:** inventario de Maran y Xenia completado, riesgos priorizados, responsables de apertura asignados y propuesta del primer módulo a integrar. No requiere modificar la producción.
+**Primer hito verificable:** cinco casos de soporte anonimizados resueltos o correctamente escalados en Xenia, con evidencia, gasto medido y avisos comprobados; un caso con datos insuficientes debe pedir la información necesaria sin inventar una causa. Antes de esa prueba se confirma el acceso y la configuración efectiva de Xenia. El trabajo de preparación conserva la operación de Maran.
 
 **Primer hito comercial:** dominio bajo control de la empresa, sitio revisado y demo aislada. No exige cambiar las direcciones que usa hoy Recepción.
 

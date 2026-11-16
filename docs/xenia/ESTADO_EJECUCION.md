@@ -25,7 +25,19 @@ Las direcciones observadas en workflows no prueban por sí solas la rama realmen
 2. Completar matriz funcional, empezando por sesiones, facturación, Caja y cuentas corrientes; conservar los arreglos recientes de Maran.
 3. Preparar datos ficticios y casos de aceptación para Recepción y Administración.
 4. Confirmar con Marcelo el nombre exacto y titular del dominio para preparar una contratación concreta; todavía no se compra ni configura.
-5. Asignar referentes de áreas, cobertura y objetivos de recuperación antes de la puesta en marcha oficial.
+5. Registrar cobertura y objetivos de recuperación antes de la puesta en marcha oficial; Marcelo concentra hoy los roles y delegará progresivamente.
+
+## Continuación de soporte y control con IA
+
+Marcelo confirmó que hoy concentra los roles de dirección, técnica, infraestructura, revisión fiscal y contable y soporte. La versión 1.1 del plan incorpora esta organización, la IA como primera línea una vez validada y tres tareas adicionales para lectura operativa, control contable y vigilancia normativa: el tablero pasa de 53 a 56 tareas.
+
+Se realizó la primera revisión de código del piloto en `63b34fcc`. Hay chat con capturas, presupuesto persistido, avisos y revisión de propuestas. El alcance actual excluye movimientos reales del hotel y ARCA; las nuevas capacidades requieren herramientas de lectura y seguimiento específicas. El presupuesto predeterminado no demuestra el presupuesto efectivo de una base ya inicializada.
+
+La nueva consulta de referencias remotas encontró `main` en `1aa45fb9`, con PR 113 y PR 114. Se conserva ese corte en una evidencia separada del inventario inicial. Las consultas públicas siguieron fallando por resolución DNS local. El estado del entorno confirmó únicamente un secreto del proyecto Maran; sigue pendiente el acceso de Railway de Xenia.
+
+Se preparó un catálogo de fuentes oficiales y cinco casos anonimizados para aceptar el soporte. El catálogo es documentación de preparación: no se activó vigilancia periódica, acceso a datos reales ni gasto de IA. Los controles automáticos y el chat compartirán el techo de US$1 diario cuando se implementen.
+
+Se verificaron 18 pruebas existentes de chat, límites y avisos con proveedores simulados. Pasaron las 18, sin llamadas pagas ni envíos reales. Las verificaciones del servicio publicado, persistencia y entrega real siguen pendientes.
 
 ## Alcance de los cambios realizados
 

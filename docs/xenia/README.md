@@ -8,12 +8,15 @@ La base documentada es una fotografía del 16 de noviembre de 2026. El objetivo 
 
 ## Contenido
 
-- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.0.
+- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.1.
 - `ESTADO_EJECUCION.md`: trabajos realizados, límites del relevamiento y próximo paquete.
-- `TABLERO_TAREAS.csv`: 53 tareas del plan, con campos para responsable real, fechas y evidencia.
+- `TABLERO_TAREAS.csv`: 56 tareas del plan, con Marcelo como responsable actual y campos para fechas y evidencia.
 - `MATRIZ_DIFERENCIAS.md`: comparación inicial de rutas por área; falta validación funcional por módulo.
 - `evidencia/inventario-2026-11-16.json`: referencias y observaciones fechadas.
 - `evidencia/diferencias-por-area.json`: rutas comparadas y clasificación inicial.
 - `relevar_entorno.py`: consulta local Git y endpoints de salud públicos, sin operaciones de administración.
+- `AUDITORIA_PILOTO_IA_2026-11-16.md`: estado del código del piloto, límites de acceso y primer hito de soporte.
+- `FUENTES_FISCALES_ARCA.json`: catálogo preparatorio de fuentes oficiales; no activa una tarea programada.
+- `evidencia/inventario-arranque-ia-2026-11-16.json`: referencias actualizadas en la continuación de soporte e IA.
 
 Los Word y PDF se entregan como archivos del plan. No es necesario publicar ni reiniciar el hotel para consultarlos. Los secretos se mantienen fuera de estos documentos.

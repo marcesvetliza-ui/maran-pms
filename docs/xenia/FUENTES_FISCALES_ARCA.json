@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "status": "catalogo_preparatorio_no_programado",
+  "reviewed_on": "2026-11-16",
+  "timezone": "America/Argentina/Cordoba",
+  "country": "AR",
+  "responsible": "Marcelo",
+  "proposed_check_interval_hours": 24,
+  "shared_ai_daily_limit_usd": 1,
+  "fiscal_profile": "pendiente_confirmar_por_entidad_y_hotel",
+  "sources": [
+    {
+      "id": "arca_ws_factura_electronica",
+      "url": "https://www.arca.gob.ar/ws/documentacion/ws-factura-electronica.asp",
+      "purpose": "Manuales y referencias técnicas de emisión electrónica",
+      "observed": "Contenido oficial consultado; falta implementar y comprobar extracción periódica y seguimiento de documentos enlazados"
+    },
+    {
+      "id": "arca_biblioteca_electronica",
+      "url": "https://biblioteca.arca.gob.ar/",
+      "purpose": "Texto de normas y referencias complementarias",
+      "observed": "El índice no ofreció texto extraíble en la consulta; validar acceso a normas concretas y mecanismo de búsqueda"
+    },
+    {
+      "id": "boletin_oficial",
+      "url": "https://www.boletinoficial.gob.ar/",
+      "purpose": "Publicación oficial y fecha de las disposiciones",
+      "observed": "Resultados oficiales localizados; la apertura del portal agotó el tiempo de espera. Validar un mecanismo fiable antes de activar"
+    }
+  ],
+  "required_evidence": [
+    "URL y organismo emisor",
+    "Identificador de norma o versión del manual",
+    "Fecha de publicación y vigencia diferenciadas",
+    "Referencia al texto completo y modificaciones pertinentes",
+    "Huella del contenido y última comprobación exitosa",
+    "Alcance posible según perfil fiscal y servicio utilizado",
+    "Revisión y decisión de Marcelo"
+  ],
+  "execution_boundaries": [
+    "Sin publicaciones, cambios fiscales, emisiones ni presentaciones automáticas",
+    "Fuentes inaccesibles se registran como no revisadas",
+    "Sólo URLs oficiales aprobadas, con control de destinos y redirecciones en el recolector",
+    "Sin claves fiscales, certificados o credenciales en el contexto del modelo",
+    "Cualquier llamada a IA pasa por el mismo control de presupuesto que el chat"
+  ]
+}

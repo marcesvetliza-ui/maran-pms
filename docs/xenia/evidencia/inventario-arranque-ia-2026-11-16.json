@@ -1,0 +1,43 @@
+{
+  "checked_at_utc": "2026-11-16T19:57:52.400211+00:00",
+  "scope": "Lectura de referencias Git, fuentes locales, DNS y health públicos. Sin datos de huéspedes ni valores de secretos.",
+  "branch": "plan/xenia-product-multihotel-20261116",
+  "checkout_revision": "9dc21d65b287ceae6be768a2d1e4c2eb13b4731c",
+  "remote_refs": {
+    "main": "1aa45fb9c301448017841dcc53973d1208175af8",
+    "feature/xenia-channex-staging": "0bf36df28b1f77e28e247cb44581da6775a5e713",
+    "advance/assistant-pilot-20261114": "63b34fcc6d3e3bc94d04c8e71a76d48102625ebe"
+  },
+  "comparisons": {
+    "feature/xenia-channex-staging": {
+      "commits_only_main": 120,
+      "commits_only_other_branch": 190,
+      "merge_base": "daebf645c7f1402199f2c8de26b64d6485a4fbbc",
+      "diff_summary": "533 files changed, 17242 insertions(+), 13947 deletions(-)",
+      "meaning": "Conteos de commits, no de funcionalidades ni de calidad."
+    },
+    "advance/assistant-pilot-20261114": {
+      "commits_only_main": 120,
+      "commits_only_other_branch": 254,
+      "merge_base": "daebf645c7f1402199f2c8de26b64d6485a4fbbc",
+      "diff_summary": "429 files changed, 22610 insertions(+), 8063 deletions(-)",
+      "meaning": "Conteos de commits, no de funcionalidades ni de calidad."
+    }
+  },
+  "hosts": [
+    {
+      "host": "maranpms.com.ar",
+      "checked_at_utc": "2026-11-16T19:57:53.110125+00:00",
+      "error": "gaierror"
+    },
+    {
+      "host": "demo.maranpms.com.ar",
+      "checked_at_utc": "2026-11-16T19:57:53.115579+00:00",
+      "error": "gaierror"
+    }
+  ],
+  "credential_presence_only": {
+    "RAILWAY_TOKEN": true,
+    "RAILWAY_XENIA_TOKEN": false
+  }
+}
