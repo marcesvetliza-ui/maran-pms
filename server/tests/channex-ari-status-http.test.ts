@@ -4,6 +4,8 @@ import {afterEach,expect,it,vi} from 'vitest';
 vi.mock('../channex/access',()=>({requireChannex:()=>(req:any,res:any,next:any)=>req.headers['x-role']==='admin'?next():res.sendStatus(403)}));
 vi.mock('../auth',()=>({requireAuth:vi.fn(),requirePermission:()=>vi.fn()}));
 vi.mock('../channex/ari',()=>({inventoryPreview:async()=>[],STAGING_URL:'https://staging.channex.io/api/v1',addDays:vi.fn(),buildAriValues:vi.fn()}));
+const preview=vi.hoisted(()=>vi.fn());
+vi.mock('../channex/ariPreview',()=>({previewChannexAri:preview}));
 import {registerChannexAriRoutes} from '../channex/ariRoutes';
 let server:Server;
 afterEach(async()=>{if(server)await new Promise<void>(resolve=>server.close(()=>resolve()));});
@@ -37,4 +39,14 @@ it('rejects invalid filters and unauthorized access before connecting to the dat
  expect((await fetch(base+'/api/channex/connections/c/ari?eventStatus=invalid',{headers:{'x-role':'admin'}})).status).toBe(400);
  expect((await fetch(base+'/api/channex/connections/c/ari?eventStatus=blocked')).status).toBe(403);
  expect(connect).not.toHaveBeenCalled();
+});
+
+it('protects the preview and returns a local snapshot without executing queue queries',async()=>{
+ const {base,query}=await setup();preview.mockReset().mockResolvedValue({currency:'USD',rooms:[{number:'307'}],availability:[],restrictions:[],remoteVerified:false});
+ expect((await fetch(base+'/api/channex/connections/c/ari/preview')).status).toBe(403);expect(preview).not.toHaveBeenCalled();
+ const response=await fetch(base+'/api/channex/connections/c/ari/preview',{headers:{'x-role':'admin'}});
+ expect(response.status).toBe(200);expect(await response.json()).toMatchObject({currency:'USD',remoteVerified:false});
+ expect(response.headers.get('cache-control')).toContain('no-store');expect(query).not.toHaveBeenCalled();
+ preview.mockResolvedValueOnce(null);
+ expect((await fetch(base+'/api/channex/connections/unknown/ari/preview',{headers:{'x-role':'admin'}})).status).toBe(404);
 });

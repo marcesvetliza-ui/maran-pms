@@ -1,3 +1,4 @@
+import {previewChannexAri} from '../channex/ariPreview';
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ensureChannexInboundSchema } from "../channex/inboundSchema";
@@ -257,6 +258,25 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   await expect(saveSettlementRate(failingPool as any,f.id,{rate:"1250",reason:"Rollback de prueba"},"Test operator")).rejects.toThrow("Synthetic save failure");
   expect((await pool.query("SELECT settlement_exchange_rate FROM channex_inbound_settings WHERE connection_id=$1",[f.id])).rows[0].settlement_exchange_rate).toBeNull();
   expect((await pool.query("SELECT id FROM channex_settlement_rate_edits WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
+ });
+ it("previews selected USD occupancy prices and Stop Sell without changing paused dispatch or the queue",async()=>{
+  const f=await fixture(2),selected=`${f.id}-1`;
+  await pool.query("UPDATE channex_ari_settings SET enabled=false,currency='USD',room_ids=$2::text[] WHERE connection_id=$1",[f.id,[selected]]);
+  await pool.query("UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1",[f.id]);
+  await pool.query("UPDATE rate_plans SET currency='USD',base_rate=145,rate_1pax=120,rate_2pax=145 WHERE id=$1",[f.plan]);
+  await pool.query("UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies='[1,2]'::jsonb WHERE connection_id=$1",[f.id]);
+  await pool.query("INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,stop_sell) VALUES($1,$2::date,true)",[f.plan,databaseToday]);
+  const before=(await pool.query("SELECT count(*) AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n;
+  const preview=await previewChannexAri(pool,f.id);
+  expect(preview).toMatchObject({currency:'USD',from:databaseToday,through:addDays(databaseToday,499),rooms:[{number:selected}],remoteVerified:false});
+  expect(preview!.availability.every(value=>value.availability===1)).toBe(true);
+  expect(preview!.restrictions[0]).toMatchObject({date_from:databaseToday,date_to:databaseToday,stop_sell:true,rates:[{occupancy:1,rate:'120.00'},{occupancy:2,rate:'145.00'}]});
+  expect(preview!.restrictions.some(value=>value.stop_sell===false)).toBe(true);
+  expect((await pool.query("SELECT count(*) AS n FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows[0].n).toBe(before);
+  expect((await pool.query("SELECT enabled FROM channex_ari_settings WHERE connection_id=$1",[f.id])).rows[0].enabled).toBe(false);
+  expect(await linked(f)).toHaveLength(0);
+  expect(JSON.stringify(preview)).not.toContain('api_key');
+  expect(await previewChannexAri(pool,randomUUID())).toBeNull();
  });
  it("readiness respects a single selected room without requiring unrelated tariffs",async()=>{
   const f=await fixture(2),selected=`${f.id}-1`,outside=`${f.id}-0`;

@@ -1,3 +1,5 @@
+import {previewChannexAri} from './ariPreview';
+import {AriConfigurationError} from './ari';
 import {requireChannex} from './access';
 import {operationAllowed,workerEnvironment} from './connectionPolicy';
 import type { Express } from 'express';
@@ -30,6 +32,14 @@ export function registerChannexAriRoutes(app: Express, pool: Pool) {
         res.json({ settings, rooms, summary, events, dispatchEnabled: !!workerEnvironment('ari') });
       } finally { c.release(); }
     } catch (error) { res.status(error instanceof z.ZodError ? 400 : 503).json({ error: 'No se pudo consultar el alcance y la cola de Channex' }); }
+  });
+  app.get('/api/channex/connections/:id/ari/preview', configure, async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    try{
+      const preview=await previewChannexAri(pool,req.params.id);
+      if(!preview)return res.status(404).json({error:'Configurá el alcance de esta conexión antes de consultar la vista previa'});
+      res.json(preview);
+    }catch(error){res.status(error instanceof AriConfigurationError?409:503).json({error:error instanceof AriConfigurationError?error.message:'No se pudo calcular la vista previa. No se enviaron cambios.'});}
   });
   app.patch('/api/channex/connections/:id/ari', configure, async (req, res) => {
     const parsed = settingsInput.safeParse(req.body); if (!parsed.success) return res.status(400).json({ error: 'Indicá piso, moneda de tres letras y estado de captura' });
