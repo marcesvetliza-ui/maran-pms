@@ -65,6 +65,24 @@ describe("DatabaseStorage.assignRoomToGroup guest selection", () => {
     ];
   });
 
+  it('requires acceptance before creating a guest and carries it to the reservation', async () => {
+    const storage = await makeStorage();
+    const warning={code:'GROUP_BLOCK_WARNING',canOverride:true,warnings:[{groupId:'other',groupStatus:'confirmed',date:'2026-09-01'}]};
+    storage.evaluateReservationInventory.mockResolvedValue(warning);
+    await expect(storage.assignRoomToGroup(GROUP_ID,ROOM_ID,'Nuevo','Pasajero')).rejects.toMatchObject({response:{code:'GROUP_BLOCK_WARNING',canOverride:true}});
+    expect(storage.createGuest).not.toHaveBeenCalled();expect(storage.createReservation).not.toHaveBeenCalled();
+    mockDbSelectRows=[[{id:GROUP_ID,groupCode:'GS001',checkInDate:'2026-09-01',checkOutDate:'2026-09-03'}],[{id:ROOM_ID,roomTypeId:'room-type-001',roomNumber:'101'}]];
+    await storage.assignRoomToGroup(GROUP_ID,ROOM_ID,'Nuevo','Pasajero',{overrideTentativeGroupWarning:true});
+    expect(storage.evaluateReservationInventory).toHaveBeenLastCalledWith(expect.objectContaining({hasSpecificRoom:true,override:true}));
+    expect(storage.createReservation).toHaveBeenCalledWith(expect.objectContaining({_inventoryOverrideTentativeGroupWarning:true}));
+  });
+
+  it('never confirms an actual physical overlap after accepting group warnings', async () => {
+    const storage=await makeStorage();storage.checkOverbooking.mockResolvedValue(true);
+    await expect(storage.assignRoomToGroup(GROUP_ID,ROOM_ID,'Nuevo','Pasajero',{overrideTentativeGroupWarning:true})).rejects.toThrow('ya tiene una reserva');
+    expect(storage.createGuest).not.toHaveBeenCalled();expect(storage.createReservation).not.toHaveBeenCalled();
+  });
+
   it("uses an existing guestId without creating a duplicate guest", async () => {
     const storage = await makeStorage();
 

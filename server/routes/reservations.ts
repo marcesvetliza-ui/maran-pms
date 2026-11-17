@@ -61,8 +61,8 @@ export { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
 async function assertGroupInventoryForReservation(input: {
   roomTypeId: string; checkInDate: string; checkOutDate: string;
   excludeReservationId?: string; contextGroupId?: string; override?: boolean;
-  // A free physical room can confirm aggregate deficits only when no hard
-  // group commitments remain unassigned on any night. Shared policy decides.
+  // The shared policy warns about unassigned group commitments. Acknowledging
+  // them never replaces the physical room overlap checks.
   hasSpecificRoom?: boolean;
 }) {
   const conflict = await storage.evaluateReservationInventory(input);
@@ -77,7 +77,7 @@ async function assertGroupInventoryForReservation(input: {
     error = `La categoría ${roomType?.name || input.roomTypeId} ya está al límite de su inventario operativo, pero la habitación elegida está libre.`;
     warning = { ...conflict, roomTypeName: roomType?.name };
   } else if (conflict.code === GROUP_BLOCK_WARNING_CODE) {
-    error = "La operación invade el cupo blando de un grupo.";
+    error = "La operación consume cupos de grupos pendientes de asignar. Confirmá para continuar.";
   } else {
     error = conflict.unassignedConfirmedGroupUnits
       ? `Hay ${conflict.unassignedConfirmedGroupUnits} habitación(es) comprometidas para grupos confirmados pendientes de asignar${conflict.date ? ` el ${formatDisplayDate(conflict.date)}` : ""}. El movimiento excede el inventario operativo.`

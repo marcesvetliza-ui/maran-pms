@@ -22,7 +22,7 @@ import { buildGroupInvoiceComposition, buildUnavailableGroupInvoiceComposition }
 import { exposeInvoiceReconciliation } from "../billing/reconciliationPresentation";
 import { buildGroupRoomFinancialSnapshot, groupInvoiceCollectionMatches, requiredGroupInvoiceCollection } from "@shared/groupFinancial";
 import { allocateBalanceCappedGroupRooms } from "@shared/groupRoomAllocation";
-import { hasCanonicalRoomType, isRoomAvailableForInterval } from "@shared/room-availability";
+import { hasCanonicalRoomType, isRoomAvailableForInterval, isOperationalInventoryRoom } from "@shared/room-availability";
 import { formatArgentinaDateTime } from "../utils/argentinaDateTime";
 import { emitirFactura } from "../billing/invoiceService";
 import { assertInvoiceEmittedForLink, canonicalInvoiceReference } from "../billing/invoiceLinkIntegrity";
@@ -856,22 +856,7 @@ export function registerGroupsRoutes(app: Express) {
       }
       const effectiveRoomTypeId = roomTypeId || currentRes.roomTypeId;
       const changesInventoryType = effectiveRoomTypeId !== currentRes.roomTypeId;
-      // Replacing the placeholder guest does not alter room demand. Revalidating
-      // the whole group here used to block harmless guest updates whenever the
-      // group already had an unrelated inventory shortage.
-      if (changesInventoryType) {
-        const inventoryConflict = await storage.evaluateReservationInventory({
-          roomTypeId: effectiveRoomTypeId,
-          checkInDate: currentRes.checkInDate,
-          checkOutDate: currentRes.checkOutDate,
-          excludeReservationId: reservationId,
-          contextGroupId: groupId,
-        });
-        if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE") {
-          return res.status(409).json({ error: "El bloque grupal excede el inventario operativo", code: "GROUP_BLOCK_SHORTAGE", warning: inventoryConflict, canOverride: false });
-        }
-      }
-
+      let verifiedRoom = false;
       if (roomId) {
         if (roomId !== currentRes.roomId) {
           const hasConflict = await storage.checkOverbooking(roomId, currentRes.checkInDate, currentRes.checkOutDate, reservationId);
@@ -884,10 +869,32 @@ export function registerGroupsRoutes(app: Express) {
           if (!hasCanonicalRoomType(newRoom, canonicalRoomTypeId)) {
             return res.status(400).json({ error: "La habitación no corresponde al tipo del bloque" });
           }
+          if (!isOperationalInventoryRoom(newRoom) || ["maintenance", "oos"].includes(newRoom.status)) {
+            return res.status(409).json({ error: "La habitación no está habilitada para asignaciones.", code: "PHYSICAL_ROOM_UNAVAILABLE", canOverride: false });
+          }
+          verifiedRoom = true;
           reservationUpdates.roomId = roomId;
           reservationUpdates.roomTypeId = canonicalRoomTypeId;
           oldRoomId = currentRes.roomId || null;
           newRoomId = roomId;
+        }
+      }
+
+      // Guest-only edits consume no new inventory. A room/type change must
+      // obtain acceptance before creating a guest, and carry it to storage.
+      const overrideGroupWarning = req.body.overrideTentativeGroupWarning === true;
+      if (changesInventoryType || newRoomId) {
+        const inventoryConflict = await storage.evaluateReservationInventory({
+          roomTypeId: effectiveRoomTypeId,
+          checkInDate: currentRes.checkInDate,
+          checkOutDate: currentRes.checkOutDate,
+          excludeReservationId: reservationId,
+          contextGroupId: groupId,
+          hasSpecificRoom: verifiedRoom,
+          override: overrideGroupWarning,
+        });
+        if (inventoryConflict && !(inventoryConflict.code === "GROUP_BLOCK_WARNING" && overrideGroupWarning)) {
+          return res.status(409).json({ error: "La asignación consume cupos de grupos pendientes de asignar.", code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.canOverride });
         }
       }
 
@@ -920,6 +927,7 @@ export function registerGroupsRoutes(app: Express) {
       const updated = await storage.updateReservation(reservationId, {
         ...reservationUpdates,
         _inventoryContextGroupId: groupId,
+        _inventoryOverrideTentativeGroupWarning: overrideGroupWarning,
       } as any);
 
       if (!updated) {
@@ -979,6 +987,7 @@ export function registerGroupsRoutes(app: Express) {
           ratePlanId: ratePlanId !== undefined ? ratePlanId : undefined,
           guestId: guestId || undefined,
           canonicalRoomTypeId: roomTypeId || undefined,
+          overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
         }
       );
       if (!reservation) {
@@ -987,7 +996,7 @@ export function registerGroupsRoutes(app: Express) {
       res.status(201).json(reservation);
     } catch (error: any) {
       const msg = error?.message || "Error assigning room to group";
-      res.status(error?.statusCode || 400).json({
+      res.status(error?.statusCode || 400).json(error?.response || {
         error: msg,
         ...(error?.statusCode === 409 ? { code: "GROUP_BLOCK_SHORTAGE", canOverride: false } : {}),
       });

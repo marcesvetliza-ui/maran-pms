@@ -14,6 +14,7 @@ export type GroupInventoryWarning = {
   date: string;
   groupId: string;
   groupName?: string;
+  groupStatus?: string;
   requested: number;
   blockQuantity: number;
   availableOperational: number;
@@ -188,7 +189,7 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
 
     let hardDemand = normalDemand;
     let unassignedHardCommitment = 0;
-    const softRows: Array<{
+    const pendingRows: Array<{
       group: InventoryGroup;
       quantity: number;
       remaining: number;
@@ -203,15 +204,23 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       const remainingCommitment=Math.max(0,quantity-releasedGroupUnits(completedStays,groupId,date,intervals,active));
       if (HARD_GROUP_STATUSES.has(group.status)) {
         hardDemand += Math.max(remainingCommitment, effectiveLinkedCount);
-        unassignedHardCommitment += Math.max(remainingCommitment - effectiveLinkedCount, 0);
+        const remaining = Math.max(remainingCommitment - effectiveLinkedCount, 0);
+        unassignedHardCommitment += remaining;
+        if (remaining > 0) pendingRows.push({ group, quantity, remaining });
       } else if (SOFT_GROUP_STATUSES.has(group.status)) {
         hardDemand += effectiveLinkedCount;
         const remaining = Math.max(remainingCommitment - effectiveLinkedCount, 0);
-        if (remaining > 0) softRows.push({ group, quantity, remaining });
+        if (remaining > 0) pendingRows.push({ group, quantity, remaining });
       }
     }
     if (hardDemand > input.operationalInventory) {
-      const overridable = input.hasSpecificRoom === true && unassignedHardCommitment === 0;
+      // Unassigned commitments remain visible, but an operator can consume
+      // them after accepting the warning. Assigned rooms are checked for real
+      // overlap by the caller; without a verified room, keep the assigned
+      // category capacity as a hard limit.
+      const assignedDemand = hardDemand - unassignedHardCommitment;
+      const overridable = input.hasSpecificRoom === true ||
+        (unassignedHardCommitment > 0 && assignedDemand <= input.operationalInventory);
       const conflict: GroupInventoryConflict = {
         code: overridable ? GROUP_BLOCK_WARNING_CODE : GROUP_BLOCK_SHORTAGE_CODE,
         canOverride: overridable,
@@ -224,17 +233,19 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       };
       if (!overridable) return conflict;
       if (!input.override && !categoryWarning) categoryWarning = conflict;
-      // Keep checking all later nights: acceptance never bypasses hard groups.
+      // Keep checking later nights for assigned demand that cannot be accepted.
     }
-    const totalSoftRemaining = softRows.reduce((sum, row) => sum + row.remaining, 0);
+    const totalSoftRemaining = pendingRows.filter(row => SOFT_GROUP_STATUSES.has(row.group.status))
+      .reduce((sum, row) => sum + row.remaining, 0);
     if (hardDemand + totalSoftRemaining > input.operationalInventory) {
-      for (const { group, quantity, remaining } of softRows) {
+      for (const { group, quantity, remaining } of pendingRows) {
         warningRows.push({
           code: GROUP_BLOCK_WARNING_CODE,
           roomTypeId: input.roomTypeId,
           date,
           groupId: group.id,
           groupName: group.name,
+          groupStatus: group.status,
           requested: remaining,
           blockQuantity: quantity,
           availableOperational: input.operationalInventory,
@@ -243,7 +254,7 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
       }
     }
   }
-  if (categoryWarning) return categoryWarning;
+  if (categoryWarning) return { ...categoryWarning, warnings: warningRows };
   return warningRows.length && !input.override ? {
     code: GROUP_BLOCK_WARNING_CODE,
     canOverride: true,

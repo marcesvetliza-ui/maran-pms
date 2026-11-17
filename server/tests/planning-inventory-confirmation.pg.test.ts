@@ -34,8 +34,9 @@ suite('Planning physical inventory confirmation on disposable PostgreSQL',()=>{
   expect(checkedIn?.status).toBe('checked_in');
   const current=await storage.getReservation(id);
   expect(current?.roomId).toBe(f.type+'occupied');
-  // A new booking must still respect the unassigned hard group commitment.
-  await expect(storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_SHORTAGE',canOverride:false}});
+  // A new booking warns about the unassigned commitment and proceeds on acceptance.
+  await expect(storage.createReservation(f.data)).rejects.toMatchObject({response:{code:'GROUP_BLOCK_WARNING',canOverride:true}});
+  expect((await storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true})).roomId).toBe(f.data.roomId);
  });
  it('checks in a grouped reservation without counting it outside its own block',async()=>{
   const f=await fixture(true);
@@ -48,12 +49,13 @@ suite('Planning physical inventory confirmation on disposable PostgreSQL',()=>{
   const f=await fixture(true);
   const id=(await pool.query('SELECT id FROM reservations WHERE room_id=$1',[f.type+'occupied'])).rows[0].id;
   await storage.updateReservation(id,{status:'cancelled'});
-  await expect(storage.updateReservation(id,{status:'confirmed'})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_SHORTAGE',canOverride:false}});
+  await expect(storage.updateReservation(id,{status:'confirmed'})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_WARNING',canOverride:true}});
   expect((await storage.getReservation(id))?.status).toBe('cancelled');
  });
- it('never bypasses a hard unassigned group commitment on a later night',async()=>{
+ it('warns about unassigned confirmed commitments on later nights and accepts the free room',async()=>{
   const f=await fixture(true);
-  for(const override of [false,true])await expect(storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:override})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_SHORTAGE',canOverride:false,warning:{date:'2031-01-02'}}});
+  await expect(storage.createReservation(f.data)).rejects.toMatchObject({response:{code:'GROUP_BLOCK_WARNING',canOverride:true}});
   expect((await pool.query('SELECT id FROM reservations WHERE room_id=$1',[f.type+'free'])).rows).toHaveLength(0);
+  expect((await storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true})).roomId).toBe(f.data.roomId);
  });
 });
