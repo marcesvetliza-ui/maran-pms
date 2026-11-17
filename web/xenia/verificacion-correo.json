@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "checked": [
+    "active_contact_link",
+    "obsolete_contact_notices_removed",
+    "contact_draft_recipient_and_content",
+    "non_lodging_inquiry",
+    "privacy_contact",
+    "desktop_and_mobile_overflow"
+  ],
+  "viewport_widths": [
+    1440,
+    390
+  ],
+  "page_errors": [],
+  "external_messages_sent": false,
+  "hotel_data_accessed": false,
+  "mailbox_receipt": "confirmed_by_user",
+  "mailbox_reply": "awaiting_user_confirmation"
+}

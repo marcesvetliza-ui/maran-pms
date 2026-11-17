@@ -3,7 +3,7 @@
 const q = (selector, parent = document) => parent.querySelector(selector);
 const qa = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const currency = (value) => "$ " + new Intl.NumberFormat("es-AR", {maximumFractionDigits: 0}).format(value);
-const proposedContact = "contacto@xeniapms.com";
+const contactEmail = "contacto@xeniapms.com";
 let returnFocus = null;
 
 function openDialog(dialog, trigger) {
@@ -197,7 +197,7 @@ q("#contact-form").addEventListener("submit", (event) => {
   const data = new FormData(form);
   const value = (key) => String(data.get(key) || "").trim();
   preparedMessage = `Hola, me gustaría conocer Xenia PMS.\n\nNombre: ${value("name")}\nCorreo: ${value("email")}\nEstablecimiento: ${value("hotel")}\nActividad: ${value("activity")}\nCapacidad de alojamiento: ${value("rooms") || "No aplica o a definir"}\n\nConsulta:\n${value("message") || "Me gustaría coordinar una demostración."}`;
-  q("#send-email").href = `mailto:${proposedContact}?subject=${encodeURIComponent("Consulta sobre Xenia PMS")}&body=${encodeURIComponent(preparedMessage)}`;
+  q("#send-email").href = `mailto:${contactEmail}?subject=${encodeURIComponent("Consulta sobre Xenia PMS")}&body=${encodeURIComponent(preparedMessage)}`;
   form.hidden = true; q("#contact-result").hidden = false; q("#copy-status").textContent = "";
   q("#send-email").focus();
 });
@@ -213,8 +213,8 @@ q("#copy-message").addEventListener("click", async () => {
   } catch { q("#copy-status").textContent = "No se pudo copiar automáticamente. Usá el borrador de correo para seleccionar el texto."; }
 });
 const legal = {
-  privacy: {title: "Privacidad de esta vista previa", paragraphs: ["Los ejemplos de la web usan datos ficticios. No acceden a huéspedes, clientes, reservas ni operaciones de ningún establecimiento.", "El formulario prepara un mensaje en tu navegador. Esta página no lo guarda en una base de datos ni lo envía automáticamente. Si elegís abrir tu correo, el envío se realiza desde tu aplicación y bajo sus condiciones.", "La dirección contacto@xeniapms.com es una propuesta pendiente de activar. Esta vista previa no incorpora herramientas de analítica o seguimiento publicitario."]},
-  terms: {title: "Sobre esta presentación", paragraphs: ["Esta vista previa presenta Xenia como una plataforma de gestión para la hospitalidad, con base hotelera y módulos de restaurant, spa, eventos y grupos. Las pantallas son ejemplos ilustrativos para explicar sus circuitos.", "El alcance, las adaptaciones a cada tipo de alojamiento, las conexiones con canales, la disponibilidad de funciones y las condiciones de cada implementación se confirman con el establecimiento. La gestión multihotel está en desarrollo.", "El dominio principal es xeniapms.com. Sus dominios alternativos son xeniapms.com.ar, xeniapms.store y xeniapms.online. La apertura pública y los canales de contacto se completarán después de revisar esta propuesta."]}
+  privacy: {title: "Privacidad de esta vista previa", paragraphs: ["Los ejemplos de la web usan datos ficticios. No acceden a huéspedes, clientes, reservas ni operaciones de ningún establecimiento.", "El formulario prepara un mensaje en tu navegador. Esta página no lo guarda en una base de datos ni lo envía automáticamente. Si elegís abrir tu correo, el envío se realiza desde tu aplicación y bajo sus condiciones.", "El correo de contacto es contacto@xeniapms.com. Esta vista previa no incorpora herramientas de analítica o seguimiento publicitario."]},
+  terms: {title: "Sobre esta presentación", paragraphs: ["Esta vista previa presenta Xenia como una plataforma de gestión para la hospitalidad, con base hotelera y módulos de restaurant, spa, eventos y grupos. Las pantallas son ejemplos ilustrativos para explicar sus circuitos.", "El alcance, las adaptaciones a cada tipo de alojamiento, las conexiones con canales, la disponibilidad de funciones y las condiciones de cada implementación se confirman con el establecimiento. La gestión multihotel está en desarrollo.", "El dominio principal es xeniapms.com. Sus dominios alternativos son xeniapms.com.ar, xeniapms.store y xeniapms.online. La apertura pública de esta web se completará después de revisar esta propuesta."]}
 };
 qa("[data-legal]").forEach((button) => button.addEventListener("click", () => {
   const info = legal[button.dataset.legal];

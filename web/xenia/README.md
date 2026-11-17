@@ -12,7 +12,7 @@ Vista previa privada de la marca y el producto. Sitio estático: `dist/index.htm
 - Alternativos adquiridos: `xeniapms.com.ar`, `xeniapms.store`, `xeniapms.online`.
 - Registrador: Donweb.
 - Los alternativos se proponen como redirecciones al principal; no son sitios distintos.
-- Contacto propuesto, autorizado como dato de maqueta: `contacto@xeniapms.com`. No hay evidencia de que ese buzón exista o esté activo.
+- Contacto comercial: `contacto@xeniapms.com`. Cuenta creada en Correo Profesional de Donweb; recepción confirmada por Marcelo el 16 de noviembre de 2026. La prueba de respuesta desde la casilla queda pendiente de confirmar.
 - El asistente queda detrás de marca y home en el orden de trabajo.
 
 ## Funcionalidad de esta entrega
@@ -21,10 +21,10 @@ Navegación responsive, menú móvil, ejemplo de planning interactivo, detalle d
 
 Los importes y las habitaciones son ficticios. El acceso al PMS usa la dirección existente de Xenia, `https://demo.maranpms.com.ar/`, en una pestaña aparte. El sitio no tiene credenciales ni consulta ninguna base del hotel. Multihotel figura como desarrollo, no como capacidad ya validada.
 
-## Antes de conectar el dominio comercial
+## Antes de abrir la web al público
 
-1. Revisar y aprobar contenido, diseño y alcance comercial.
-2. Crear o confirmar un canal de contacto y sustituir las indicaciones de maqueta.
+1. El enfoque y la home de hospitalidad fueron aprobados por Marcelo. Revisar los ajustes finales antes de la apertura.
+2. Confirmar la respuesta desde el correo comercial. Las indicaciones de contacto provisional ya se retiraron; el formulario prepara el borrador para ese correo.
 3. Confirmar el destino definitivo del ingreso al PMS y de una demo comercial.
 4. Revisar textos legales de la versión pública y el tratamiento del formulario si cambia su comportamiento.
 5. Habilitar la audiencia pública únicamente al publicar la versión aprobada.
