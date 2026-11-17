@@ -74,8 +74,10 @@ export async function editPaymentOrder(tx: Executor, id: number, input: z.infer<
     efectivo=CASE WHEN ${methodChanged} THEN ${input.formaPago === "efectivo" ? before.total_abonado : "0"} ELSE efectivo END,
     dep_bancario=CASE WHEN ${methodChanged} THEN ${input.formaPago === "dep_bancario" ? before.total_abonado : "0"} ELSE dep_bancario END,
     cheques=CASE WHEN ${methodChanged} THEN ${input.formaPago === "cheque" ? before.total_abonado : "0"} ELSE cheques END WHERE id=${id}`);
+  const after = await readPaymentOrderEdit(tx, id);
+  const distribution = (row: any) => ({ efectivo: row.efectivo, depBancario: row.dep_bancario, cheques: row.cheques });
   await tx.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
     VALUES(${actor.id || null},${actor.name || "Sistema"},'update','purchase_invoices','payment_order_edit',${String(id)},
-      ${'Corrección de OP ' + before.numero},${JSON.stringify({ reason: input.motivo, before: previous, after: next })},now())`);
-  return readPaymentOrderEdit(tx, id);
+      ${'Corrección de OP ' + before.numero},${JSON.stringify({ reason: input.motivo, before: { ...previous, paymentDistribution: distribution(before) }, after: { ...next, paymentDistribution: distribution(after) } })},now())`);
+  return after;
 }

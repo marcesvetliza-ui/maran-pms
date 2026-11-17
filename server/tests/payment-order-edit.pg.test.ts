@@ -105,6 +105,9 @@ describe.skipIf(!enabled)("Edición acotada de órdenes de pago", () => {
       expect(funding.every((line: any) => line.codigo === (method === "efectivo" ? "1.1.1.01" : "1.1.1.02"))).toBe(true);
       expect(after.lines.reduce((sum: number, line: any) => sum + Number(line.debe) - Number(line.haber), 0)).toBe(0);
       expect(after.lines.map((line: any) => [line.id, line.debe, line.haber])).toEqual(before.lines.map((line: any) => [line.id, line.debe, line.haber]));
+      const correction = JSON.parse((await snapshot(f)).history[0].details);
+      expect(correction.after.paymentDistribution).toEqual({ efectivo: after.op.efectivo, depBancario: after.op.dep_bancario, cheques: after.op.cheques });
+      expect(correction.before.paymentDistribution).toEqual({ efectivo: op.efectivo, depBancario: op.dep_bancario, cheques: op.cheques });
     }
   });
   it("rechaza fecha imposible, medio desconocido, motivo vacío e importes/facturas/proveedor/retenciones enviados por fuera de la pantalla", async () => {
