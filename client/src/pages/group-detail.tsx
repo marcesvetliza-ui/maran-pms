@@ -1401,7 +1401,7 @@ export default function GroupDetailPage() {
 
   const changeRoomMutation = useMutation({
     mutationFn: async ({ reservationId, roomId, roomTypeId }: { reservationId: string; roomId: string; roomTypeId: string }) => {
-      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId, contextGroupId: groupId });
+      return apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId, contextGroupId: groupId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
