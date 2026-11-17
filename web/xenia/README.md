@@ -11,7 +11,8 @@ Versión de apertura de la web comercial. El propietario autorizó la apertura p
 - Dominio principal adquirido: `xeniapms.com`.
 - Alternativos adquiridos: `xeniapms.com.ar`, `xeniapms.store`, `xeniapms.online`.
 - Registrador: Donweb.
-- Los alternativos se proponen como redirecciones al principal; no son sitios distintos.
+- `.store` y `.online`: redirecciones al principal configuradas por Marcelo y comprobadas por él en una ventana privada el 17 de noviembre de 2026.
+- `.com.ar`: la última captura de Donweb muestra registro pendiente con NIC Argentina; su redirección se completará cuando el dominio se active.
 - Contacto comercial: `contacto@xeniapms.com`. Cuenta creada en Correo Profesional de Donweb. Marcelo confirmó recepción y respuesta desde Webmail el 17 de noviembre de 2026.
 - El asistente queda detrás de marca y home en el orden de trabajo.
 
@@ -29,13 +30,13 @@ Los importes y las habitaciones son ficticios. El acceso al PMS usa la direcció
 - La versión de apertura retira el cartel de vista previa y usa el dominio principal en canonical, Open Graph, robots y sitemap.
 - Las pantallas e importes de ejemplo siguen identificados como ilustrativos.
 - El formulario prepara una consulta local y un borrador para el correo comercial; no incorpora envío automático ni una base de leads.
-- Acceso público habilitado con autorización expresa del propietario y confirmado por Sites. La prueba HTTP anónima desde este entorno quedó bloqueada por su proxy; corresponde completar la comprobación desde un navegador externo.
+- Acceso público habilitado con autorización expresa del propietario y confirmado por Sites. Marcelo confirmó que abre sin sesión en una ventana privada. La comprobación HTTP automática desde este entorno sigue bloqueada por su proxy.
 
 ## Próximos pasos
 
 1. Apertura pública completada el 17 de noviembre de 2026. Sitio principal: `https://xeniapms.com/`.
-2. Configurar y comprobar redirecciones de `.com.ar`, `.store` y `.online` al dominio principal desde Donweb. No están dadas por configuradas.
-3. Verificar la navegación de un visitante sin sesión al abrir la audiencia.
+2. Retomar la redirección de `.com.ar` cuando Donweb complete el registro. Las de `.store` y `.online` ya fueron configuradas y comprobadas por el propietario.
+3. Acceso de visitante sin sesión y redirecciones de `.store` y `.online` comprobados por Marcelo en una ventana privada.
 4. Mantener el ingreso actual al PMS en `https://demo.maranpms.com.ar/`; una dirección propia para la aplicación requiere su configuración separada.
 
 Esta home se desarrolla fuera de la aplicación operativa de Maran. No modifica sus datos ni su publicación.

@@ -20,5 +20,28 @@
     }
   ],
   "anonymous_external_http_check": "blocked_by_environment_proxy_403",
-  "alternative_redirects": "not_confirmed"
+  "alternative_redirects": {
+    "xeniapms.store": {
+      "configuration": "completed_by_owner",
+      "browser_result": "confirmed_by_owner_in_private_window",
+      "destination": "https://xeniapms.com/",
+      "date": "2026-11-17"
+    },
+    "xeniapms.online": {
+      "configuration": "completed_by_owner",
+      "browser_result": "confirmed_by_owner_in_private_window",
+      "destination": "https://xeniapms.com/",
+      "date": "2026-11-17"
+    },
+    "xeniapms.com.ar": {
+      "last_observed_registration_status": "pending_with_NIC_Argentina",
+      "evidence": "Donweb_user_screenshot_2026-11-17",
+      "redirect": "awaiting_domain_activation"
+    }
+  },
+  "anonymous_browser_check": {
+    "status": "confirmed_by_owner",
+    "date": "2026-11-17",
+    "method": "private_browser_window"
+  }
 }
