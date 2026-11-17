@@ -105,25 +105,24 @@ describe.skipIf(!enabled)('manual OTA inbox assignment with category warning and
   expect((await pool.query('SELECT status FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0].status).toBe('pending');
   expect((await service.applyInboundRevision(f.id,f.rev,body))?.applied).toBe(true);expect(await state(f)).toHaveLength(2);
  });
- it('does not bypass overlapping reservations or confirmed group commitments',async()=>{
+ it('does not bypass an overlapping physical reservation even after accepting a group warning',async()=>{
   const f=await fixture();const options=await manual.getInboundAssignmentOptions(f.id,f.rev,true);
-  const group=randomUUID();
-  await pool.query("INSERT INTO groups(id,group_code,name,status,check_in_date,check_out_date,created_at) VALUES($1::text,$1,'Synthetic confirmed commitment','confirmed',$2,$3,now())",[group,arrival,departure]);
-  await pool.query('INSERT INTO group_room_blocks(id,group_id,room_type_id,quantity) VALUES($1,$2,$3,1)',[randomUUID(),group,f.type]);
-  try{await expect(service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-0`,{overrideTentativeGroupWarning:true}))).rejects.toMatchObject({response:{canOverride:false}});expect(await state(f)).toHaveLength(0);}
-  finally{await pool.query('DELETE FROM group_room_blocks WHERE group_id=$1',[group]);await pool.query('DELETE FROM groups WHERE id=$1',[group]);}
   const otherBooking={...f,booking:randomUUID(),rev:randomUUID()};await service.persistInboundRevision(pool,f.id,payload(otherBooking));await service.applyInboundRevision(f.id,otherBooking.rev);
-  await expect(service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-0`))).rejects.toMatchObject({code:'ASSIGNMENT_ROOM_UNAVAILABLE'});expect(await state(f)).toHaveLength(1);
+  await expect(service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-0`,{overrideTentativeGroupWarning:true}))).rejects.toMatchObject({code:'ASSIGNMENT_ROOM_UNAVAILABLE'});expect(await state(f)).toHaveLength(1);
  });
 
- it('confirms a tentative group warning once through the inbox API without a repeated warning or partial writes',async()=>{
+ it.each(['blocked','confirmed'])('confirms an unassigned %s group commitment once through the inbox API',async status=>{
   const f=await fixture();const options=await manual.getInboundAssignmentOptions(f.id,f.rev,true),body=request(options,`${f.type}-0`);const {actor:ignored,canOverrideScope:ignored2,...clean}=body;
-  const group=randomUUID();await pool.query("INSERT INTO groups(id,group_code,name,status,check_in_date,check_out_date,created_at) VALUES($1::text,$1,'Synthetic tentative commitment','blocked',$2,$3,now())",[group,arrival,departure]);
+  const group=randomUUID();await pool.query("INSERT INTO groups(id,group_code,name,status,check_in_date,check_out_date,created_at) VALUES($1::text,$1,'Synthetic unassigned commitment',$4,$2,$3,now())",[group,arrival,departure,status]);
   await pool.query('INSERT INTO group_room_blocks(id,group_id,room_type_id,quantity) VALUES($1,$2,$3,1)',[randomUUID(),group,f.type]);
   identity=actor;
   try{
+   await service.applyInboundRevision(f.id,f.rev);expect(await state(f)).toHaveLength(0);
+   expect((await pool.query('SELECT status FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2',[f.id,f.rev])).rows[0].status).toBe('review');
    const warning=await post(f,clean);expect(warning).toMatchObject({status:409,body:{code:'GROUP_BLOCK_WARNING',canOverride:true}});expect(await state(f)).toHaveLength(0);
+   expect(warning.body.warning.warnings).toEqual(expect.arrayContaining([expect.objectContaining({groupId:group,groupStatus:status})]));
    expect(await post(f,{...clean,overrideTentativeGroupWarning:true})).toMatchObject({status:200,body:{applied:true}});expect(await state(f)).toHaveLength(1);
+   expect((await pool.query('SELECT quantity FROM group_room_blocks WHERE group_id=$1',[group])).rows).toEqual([{quantity:1}]);
   }finally{await pool.query('DELETE FROM group_room_blocks WHERE group_id=$1',[group]);await pool.query('DELETE FROM groups WHERE id=$1',[group]);}
  });
 
