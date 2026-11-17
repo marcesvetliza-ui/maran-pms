@@ -154,21 +154,133 @@ test("configuration errors identify only missing or short fields without exposin
   ];
   for (const item of cases) {
     const env = { ...fixture.env, ...item.overrides };
-    assert.throws(() => readControlConfig(env), (error: Error) => {
-      for (const text of item.expected) assert.ok(error.message.includes(text));
-      for (const key of [
+    assert.throws(
+      () => readControlConfig(env),
+      (error: Error) => {
+        for (const text of item.expected)
+          assert.ok(error.message.includes(text));
+        for (const key of [
+          "XENIA_CONTROL_DATABASE_URL",
+          "XENIA_CONTROL_SESSION_SECRET",
+        ])
+          if (!item.expected.includes(key))
+            assert.ok(!error.message.includes(key));
+        for (const value of [
+          fixture.env.XENIA_CONTROL_DATABASE_URL,
+          fixture.env.XENIA_CONTROL_SESSION_SECRET,
+          "short-test-only-secret",
+        ])
+          assert.ok(!error.message.includes(value));
+        return true;
+      },
+    );
+  }
+});
+test("unresolved Railway placeholders are rejected before database access without exposing credentials", () => {
+  const badConnections = [
+    "postgresql://fixture-user:private-test-password@${{xenia-control-db.RAILWAY_PRIVATE_DOMAIN}}:5432/fixture",
+    "postgresql://fixture-user:${{xenia-control-db.POSTGRES_PASSWORD}}@fixture.invalid/fixture",
+  ];
+  const properties = JSON.parse(fixture.env.XENIA_PROPERTY_DATABASES);
+  for (const url of badConnections) {
+    for (const [env, field] of [
+      [
+        { ...fixture.env, XENIA_CONTROL_DATABASE_URL: url },
         "XENIA_CONTROL_DATABASE_URL",
-        "XENIA_CONTROL_SESSION_SECRET",
-      ])
-        if (!item.expected.includes(key)) assert.ok(!error.message.includes(key));
-      for (const value of [
-        fixture.env.XENIA_CONTROL_DATABASE_URL,
-        fixture.env.XENIA_CONTROL_SESSION_SECRET,
-        "short-test-only-secret",
-      ])
-        assert.ok(!error.message.includes(value));
-      return true;
-    });
+      ],
+      [
+        {
+          ...fixture.env,
+          XENIA_PROPERTY_DATABASES: JSON.stringify({
+            ...properties,
+            aurora: url,
+          }),
+        },
+        "XENIA_PROPERTY_DATABASES.aurora",
+      ],
+    ] as const) {
+      assert.throws(
+        () => readControlConfig(env),
+        (error: Error) => {
+          assert.ok(error.message.includes(field));
+          assert.match(error.message, /sin resolver/);
+          assert.ok(!error.message.includes(url));
+          assert.doesNotMatch(
+            error.message,
+            /private-test-password|fixture-user|\$\{\{/,
+          );
+          return true;
+        },
+      );
+    }
+  }
+});
+test("malformed central URLs and malformed property JSON identify their own field safely", () => {
+  const cases = [
+    {
+      env: {
+        ...fixture.env,
+        XENIA_CONTROL_DATABASE_URL:
+          "https://private-test-password@fixture.invalid/database",
+      },
+      field: "XENIA_CONTROL_DATABASE_URL",
+      reason: /PostgreSQL válida/,
+    },
+    {
+      env: {
+        ...fixture.env,
+        XENIA_PROPERTY_DATABASES: '{"aurora":"private-test-password"',
+      },
+      field: "XENIA_PROPERTY_DATABASES",
+      reason: /JSON válido/,
+    },
+    {
+      env: { ...fixture.env, XENIA_PROPERTY_DATABASES: "[]" },
+      field: "XENIA_PROPERTY_DATABASES",
+      reason: /objeto JSON/,
+    },
+  ];
+  for (const { env, field, reason } of cases) {
+    assert.throws(
+      () => readControlConfig(env),
+      (error: Error) => {
+        assert.ok(error.message.includes(field));
+        assert.match(error.message, reason);
+        assert.doesNotMatch(
+          error.message,
+          /private-test-password|fixture\.invalid/,
+        );
+        return true;
+      },
+    );
+  }
+});
+test("empty property URLs and repeated databases keep their own diagnostic and isolation guard", () => {
+  const properties = JSON.parse(fixture.env.XENIA_PROPERTY_DATABASES);
+  for (const [url, reason] of [
+    ["", /vacía/],
+    [fixture.env.XENIA_CONTROL_DATABASE_URL, /distintas/],
+    [properties.brisa, /distintas/],
+  ] as const) {
+    assert.throws(
+      () =>
+        readControlConfig({
+          ...fixture.env,
+          XENIA_PROPERTY_DATABASES: JSON.stringify({
+            ...properties,
+            extra: url,
+          }),
+        }),
+      (error: Error) => {
+        assert.match(error.message, /XENIA_PROPERTY_DATABASES.extra/);
+        assert.match(error.message, reason);
+        assert.ok(
+          !error.message.includes(fixture.env.XENIA_CONTROL_DATABASE_URL),
+        );
+        assert.ok(!error.message.includes(properties.brisa));
+        return true;
+      },
+    );
   }
 });
 test("anonymous visitors cannot list properties or read reservations", async () => {

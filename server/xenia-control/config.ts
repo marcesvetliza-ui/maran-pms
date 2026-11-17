@@ -21,6 +21,20 @@ export function databaseIdentity(value: string): string {
   return `${url.searchParams.get("host") ?? url.hostname.toLowerCase()}:${url.searchParams.get("port") ?? (url.port || "5432")}${url.pathname}`;
 }
 
+function configuredDatabaseIdentity(value: string, field: string): string {
+  if (!value.trim()) throw new Error(`${field}: la conexión está vacía.`);
+  if (value.includes("${{"))
+    throw new Error(
+      `${field}: contiene una referencia de Railway sin resolver. Configurá una conexión PostgreSQL resuelta antes de desplegar.`,
+    );
+  try {
+    return databaseIdentity(value);
+  } catch {
+    // URL parser errors can include the full input, including database passwords.
+    throw new Error(`${field}: no es una conexión PostgreSQL válida.`);
+  }
+}
+
 export function readControlConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ControlConfig {
@@ -46,28 +60,42 @@ export function readControlConfig(
     // Include only the failing variable names, never connection strings or secret values.
     throw new Error("Configuración de Xenia incompleta. " + missing.join(" "));
   }
-  let propertyUrls: Record<string, string>;
+  const identities = new Set([
+    configuredDatabaseIdentity(controlUrl, "XENIA_CONTROL_DATABASE_URL"),
+  ]);
+  let parsed: unknown;
   try {
-    propertyUrls = JSON.parse(env.XENIA_PROPERTY_DATABASES ?? "{}");
-    if (
-      !propertyUrls ||
-      Array.isArray(propertyUrls) ||
-      typeof propertyUrls !== "object" ||
-      !Object.keys(propertyUrls).length
-    )
-      throw new Error();
-    const identities = new Set([databaseIdentity(controlUrl)]);
-    for (const [key, url] of Object.entries(propertyUrls)) {
-      if (!/^[a-z][a-z0-9_-]{0,39}$/.test(key) || typeof url !== "string")
-        throw new Error();
-      const identity = databaseIdentity(url);
-      if (identities.has(identity)) throw new Error();
-      identities.add(identity);
-    }
+    parsed = JSON.parse(env.XENIA_PROPERTY_DATABASES ?? "{}");
   } catch {
     throw new Error(
-      "XENIA_PROPERTY_DATABASES debe contener conexiones PostgreSQL distintas entre sí y de la base central.",
+      "XENIA_PROPERTY_DATABASES: el valor no es JSON válido. Configurá un objeto con una conexión por establecimiento.",
     );
+  }
+  if (
+    !parsed ||
+    Array.isArray(parsed) ||
+    typeof parsed !== "object" ||
+    !Object.keys(parsed).length
+  )
+    throw new Error(
+      "XENIA_PROPERTY_DATABASES: debe ser un objeto JSON con al menos una conexión de establecimiento.",
+    );
+  const propertyUrls: Record<string, string> = {};
+  for (const [key, url] of Object.entries(parsed)) {
+    if (!/^[a-z][a-z0-9_-]{0,39}$/.test(key))
+      throw new Error(
+        "XENIA_PROPERTY_DATABASES: hay un identificador de instalación inválido.",
+      );
+    const field = `XENIA_PROPERTY_DATABASES.${key}`;
+    if (typeof url !== "string")
+      throw new Error(`${field}: la conexión debe ser un texto.`);
+    const identity = configuredDatabaseIdentity(url, field);
+    if (identities.has(identity))
+      throw new Error(
+        `${field}: las conexiones deben ser distintas entre sí y de la base central.`,
+      );
+    identities.add(identity);
+    propertyUrls[key] = url;
   }
   const demo = env.XENIA_CONTROL_DEMO === "true";
   const production = env.NODE_ENV === "production";

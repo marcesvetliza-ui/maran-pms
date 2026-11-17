@@ -82,8 +82,8 @@ El archivo `railway.xenia-control.json` selecciona el Dockerfile del panel, su p
 
    | Variable del panel | Valor / referencia |
    | --- | --- |
-   | `XENIA_CONTROL_DATABASE_URL` | `${{xenia-control-db.DATABASE_URL}}` |
-   | `XENIA_PROPERTY_DATABASES` | `{"aurora":"${{xenia-aurora-db.DATABASE_URL}}","brisa":"${{xenia-brisa-db.DATABASE_URL}}"}` |
+   | `XENIA_CONTROL_DATABASE_URL` | Referencia copiada con el botón de **Connect → Private Network** de la base central. En esta instalación Railway ofrece `DATABASE_PRIVATE_URL`. |
+   | `XENIA_PROPERTY_DATABASES` | Objeto JSON con las claves `aurora` y `brisa`, cada una con la referencia privada copiada de su propia base. Comprobar que Railway entregue URLs resueltas al proceso. |
    | `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.xenia-control` |
    | `NODE_ENV` | `production` |
    | `PORT` | `4186` |
@@ -103,6 +103,14 @@ El archivo `railway.xenia-control.json` selecciona el Dockerfile del panel, su p
 12. Después de verificar y guardar la contraseña, retirar `XENIA_INITIAL_ADMIN_PASSWORD` del servicio. La preparación detecta la cuenta existente y no necesita volver a recibir esa contraseña. Conservar el secreto de sesión y las conexiones protegidas.
 
 La publicación de prueba queda completa al comprobar el acceso remoto y los cuatro perfiles. La integración con el PMS operativo y la incorporación de Maran tienen sus propias validaciones posteriores. Ante una incidencia de esta instalación se detiene únicamente `xenia-control`; no se sustituyen bases ni se cambia la rama de los servicios hoteleros actuales.
+
+### Conexiones con referencias sin resolver
+
+El proceso necesita recibir URLs PostgreSQL resueltas. En el editor de Railway, una variable de la base puede mostrar una plantilla; el contenedor debe recibir su resultado, con servidor privado, usuario, contraseña y base reales. Que el valor empiece por `postgresql://` no acredita que sus componentes estén resueltos.
+
+Si un registro muestra un servidor literal como `${{servicio.RAILWAY_PRIVATE_DOMAIN}}`, revisar el valor renderizado de la conexión en Railway. El panel rechaza estos marcadores durante la validación, antes de abrir conexiones, e identifica el campo central o la entrada de `XENIA_PROPERTY_DATABASES` que falla. Las URLs y sus credenciales no se imprimen en ese diagnóstico.
+
+Copiar la referencia desde **Database → Connect → Private Network** de cada base y comprobar su resultado renderizado. Cuando ese diálogo indica `DATABASE_PRIVATE_URL`, utilizar ese campo; no asumir que `DATABASE_URL` corresponde a la conexión privada de todas las plantillas. El botón de copiar conserva los nombres exactos de los servicios. Como alternativa, cargar la URL privada completa obtenida en la conexión de la base, conservándola como secreto del servicio. Para `XENIA_PROPERTY_DATABASES`, el valor recibido debe ser un objeto JSON cuyos valores sean las URLs completas y distintas de los establecimientos. Reemplazar sólo el servidor no alcanza si el usuario o la contraseña también conservan marcadores sin resolver. Las conexiones privadas completas se manipulan únicamente dentro del proveedor o del gestor de secretos, nunca por chat ni en Git.
 
 ## Validación
 
