@@ -9,13 +9,12 @@ on:
       - "tsconfig.xenia-control.json"
       - "package*.json"
       - ".github/workflows/xenia-multihotel.yml"
-  push:
-    branches: [feat/xenia-multihotel-foundation-20261117]
 permissions:
   contents: read
 jobs:
   isolated-control:
-    runs-on: ubuntu-latest
+    # Keep the OS within the existing Playwright version's supported platforms.
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
