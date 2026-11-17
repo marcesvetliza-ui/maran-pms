@@ -1,6 +1,6 @@
 import { GuestStayProfileEditor } from "@/components/guest-stay-profile";
 import { emptyStayProfile, guestStayProfileSchema } from "@shared/guestStayProfile";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,7 @@ interface GuestSelectorProps {
 }
 
 export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, cardClassName, initialCreateGuest }: GuestSelectorProps) {
+  const surnameRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [mode, setMode] = useState<"search" | "create">("search");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -112,6 +113,13 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
   });
 
   const isJuridicaGuest = newGuest.tipoPersona === "juridica";
+
+  useEffect(() => {
+    if (mode !== "create" || isJuridicaGuest) return;
+    // Tabs restores focus to its trigger during the click. Move it after that.
+    const frame = requestAnimationFrame(() => surnameRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [mode, isJuridicaGuest]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300);
@@ -417,12 +425,12 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
             {!isJuridicaGuest && (<>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="firstName">Nombre *</Label>
-                  <Input id="firstName" value={newGuest.firstName} onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })} placeholder="Nombre" data-testid="input-guest-firstname" />
+                  <Label htmlFor="lastName">Apellido *</Label>
+                  <Input ref={surnameRef} id="lastName" value={newGuest.lastName} onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })} placeholder="Apellido" data-testid="input-guest-lastname" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="lastName">Apellido *</Label>
-                  <Input id="lastName" value={newGuest.lastName} onChange={(e) => setNewGuest({ ...newGuest, lastName: e.target.value })} placeholder="Apellido" data-testid="input-guest-lastname" />
+                  <Label htmlFor="firstName">Nombre *</Label>
+                  <Input id="firstName" value={newGuest.firstName} onChange={(e) => setNewGuest({ ...newGuest, firstName: e.target.value })} placeholder="Nombre" data-testid="input-guest-firstname" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">

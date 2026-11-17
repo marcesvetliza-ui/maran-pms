@@ -562,6 +562,21 @@ export function GuestFormDialog({
             {!isJuridica && (<>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="grid gap-2">
+                  <Label htmlFor="lastName">Apellido <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="lastName"
+                    value={formData.lastName || ""}
+                    onChange={(e) => {
+                      setFormData({ ...formData, lastName: e.target.value });
+                      if (e.target.value.trim()) setFormErrors(p => { const n = {...p}; delete n.lastName; return n; });
+                    }}
+                    placeholder="Pérez"
+                    className={formErrors.lastName ? "border-red-500 focus-visible:ring-red-500" : ""}
+                    data-testid="input-last-name" autoFocus
+                  />
+                  {formErrors.lastName && <p className="text-xs text-red-500">{formErrors.lastName}</p>}
+                </div>
+                <div className="grid gap-2">
                   <Label htmlFor="firstName">Nombre <span className="text-red-500">*</span></Label>
                   <Input
                     id="firstName"
@@ -575,21 +590,6 @@ export function GuestFormDialog({
                     data-testid="input-first-name"
                   />
                   {formErrors.firstName && <p className="text-xs text-red-500">{formErrors.firstName}</p>}
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="lastName">Apellido <span className="text-red-500">*</span></Label>
-                  <Input
-                    id="lastName"
-                    value={formData.lastName || ""}
-                    onChange={(e) => {
-                      setFormData({ ...formData, lastName: e.target.value });
-                      if (e.target.value.trim()) setFormErrors(p => { const n = {...p}; delete n.lastName; return n; });
-                    }}
-                    placeholder="Pérez"
-                    className={formErrors.lastName ? "border-red-500 focus-visible:ring-red-500" : ""}
-                    data-testid="input-last-name"
-                  />
-                  {formErrors.lastName && <p className="text-xs text-red-500">{formErrors.lastName}</p>}
                 </div>
 
                 <div className="grid gap-2">

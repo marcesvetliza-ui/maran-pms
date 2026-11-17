@@ -4077,12 +4077,12 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             </>) : (
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Nombre <span className="text-red-500">*</span></Label>
-                  <Input value={clientForm.firstName} onChange={(e) => setClientForm({ ...clientForm, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
+                  <Label>Apellido <span className="text-red-500">*</span></Label>
+                  <Input value={clientForm.lastName} onChange={(e) => setClientForm({ ...clientForm, lastName: e.target.value })} placeholder="Pérez" data-testid="input-client-last-name" autoFocus />
                 </div>
                 <div className="space-y-2">
-                  <Label>Apellido <span className="text-red-500">*</span></Label>
-                  <Input value={clientForm.lastName} onChange={(e) => setClientForm({ ...clientForm, lastName: e.target.value })} placeholder="Pérez" data-testid="input-client-last-name" />
+                  <Label>Nombre <span className="text-red-500">*</span></Label>
+                  <Input value={clientForm.firstName} onChange={(e) => setClientForm({ ...clientForm, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
                 </div>
               </div>
             )}
