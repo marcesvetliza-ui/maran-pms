@@ -6,6 +6,7 @@ on:
       - "server/xenia-control/**"
       - "script/*xenia-control*"
       - "Dockerfile.xenia-control"
+      - "railway.xenia-control.json"
       - "tsconfig.xenia-control.json"
       - "package*.json"
       - ".github/workflows/xenia-multihotel.yml"
@@ -35,6 +36,7 @@ jobs:
           npm run xenia:check
           npm run xenia:build
           node --check server/xenia-control/public/app.js
+          node -e 'JSON.parse(require("node:fs").readFileSync("railway.xenia-control.json", "utf8"))'
       - name: Probar aislamiento, sesiones y permisos sobre bases independientes
         # The fixture creates a new Unix-socket-only cluster. No operational URL or secret is configured.
         run: npm run xenia:test
