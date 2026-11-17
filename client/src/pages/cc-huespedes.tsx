@@ -36,10 +36,11 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
-import type { AccountMovement } from "@shared/schema";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { AccountMovementReference } from "@/components/account-movement-reference";
+import type { AccountMovementWithReservation } from "@shared/account-movement-reference";
 import { isOverdue } from "@/lib/account-aging";
 
 type GuestSummary = {
@@ -51,7 +52,7 @@ type GuestSummary = {
 };
 
 type AccountData = {
-  movements: AccountMovement[];
+  movements: AccountMovementWithReservation[];
   balance: number;
 };
 
@@ -251,7 +252,7 @@ export default function CcHuespedesPage() {
                   <TableRow>
                     <TableHead>Fecha</TableHead>
                     <TableHead>Descripción</TableHead>
-                    <TableHead>Ref.</TableHead>
+                    <TableHead>Reserva / referencia</TableHead>
                     <TableHead className="text-right">Monto</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -262,7 +263,7 @@ export default function CcHuespedesPage() {
                       <TableRow key={m.id} data-testid={`row-movement-${m.id}`}>
                         <TableCell className="text-xs">{formatDisplayDate(m.date)}</TableCell>
                         <TableCell className="text-xs">{cleanAccountMovementDescription(m.description, m.reservationCode)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground font-mono">{m.reservationCode || m.reference || "—"}</TableCell>
+                        <TableCell><AccountMovementReference movement={m} /></TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {parseFloat(m.amount) > 0
