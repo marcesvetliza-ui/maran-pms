@@ -15,6 +15,7 @@
   "page_errors": [],
   "external_messages_sent": false,
   "hotel_data_accessed": false,
-  "mailbox_receipt": "confirmed_by_user",
-  "mailbox_reply": "awaiting_user_confirmation"
+  "mailbox_receipt": "awaiting_test",
+  "mailbox_reply": "awaiting_test",
+  "mailbox_created": "shown_in_user_screenshot"
 }

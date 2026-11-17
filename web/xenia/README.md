@@ -12,7 +12,7 @@ Vista previa privada de la marca y el producto. Sitio estático: `dist/index.htm
 - Alternativos adquiridos: `xeniapms.com.ar`, `xeniapms.store`, `xeniapms.online`.
 - Registrador: Donweb.
 - Los alternativos se proponen como redirecciones al principal; no son sitios distintos.
-- Contacto comercial: `contacto@xeniapms.com`. Cuenta creada en Correo Profesional de Donweb; recepción confirmada por Marcelo el 16 de noviembre de 2026. La prueba de respuesta desde la casilla queda pendiente de confirmar.
+- Contacto comercial: `contacto@xeniapms.com`. La captura de Correo Profesional de Donweb del 16 de noviembre de 2026 muestra la cuenta creada. Las pruebas de recepción y envío desde Webmail quedan pendientes de confirmar.
 - El asistente queda detrás de marca y home en el orden de trabajo.
 
 ## Funcionalidad de esta entrega
@@ -24,7 +24,7 @@ Los importes y las habitaciones son ficticios. El acceso al PMS usa la direcció
 ## Antes de abrir la web al público
 
 1. El enfoque y la home de hospitalidad fueron aprobados por Marcelo. Revisar los ajustes finales antes de la apertura.
-2. Confirmar la respuesta desde el correo comercial. Las indicaciones de contacto provisional ya se retiraron; el formulario prepara el borrador para ese correo.
+2. Probar la recepción y la respuesta desde el correo comercial. Las indicaciones de contacto provisional ya se retiraron; el formulario prepara el borrador para ese correo.
 3. Confirmar el destino definitivo del ingreso al PMS y de una demo comercial.
 4. Revisar textos legales de la versión pública y el tratamiento del formulario si cambia su comportamiento.
 5. Habilitar la audiencia pública únicamente al publicar la versión aprobada.
