@@ -91,6 +91,22 @@ describe.skipIf(!enabled)("atomic group block creation and accepted inventory wa
     expect((await pool.query("SELECT * FROM reservations WHERE id=$1", [`${f.typeId}-external`])).rows[0]).toEqual(externalBefore);
   });
 
+  it("moves a grouped reservation to a free room after acceptance at an overcommitted category, preserving its rate", async () => {
+    const f = await fixture(false, 2), reservationId = `${f.typeId}-move`;
+    await pool.query(`INSERT INTO groups(id,group_code,name,status,check_in_date,check_out_date,created_at)
+      VALUES($1::text,$1,'Confirmed pending group','confirmed','2026-11-23','2026-11-25',now())`, [f.competitorId]);
+    await pool.query("INSERT INTO group_room_blocks(group_id,room_type_id,quantity) VALUES($1,$3,1),($2,$3,3)", [f.groupId, f.competitorId, f.typeId]);
+    await pool.query(`INSERT INTO reservations(id,reservation_code,guest_id,room_id,room_type_id,check_in_date,check_out_date,nights,status,base_rate_per_night,final_rate_per_night,total_room_amount,created_at)
+      VALUES($1::text,$1,$2,$3,$4,'2026-11-23','2026-11-25',2,'confirmed',133000,133000,266000,now())`, [reservationId, f.guestId, `${f.typeId}-room-0`, f.typeId]);
+    await pool.query("INSERT INTO group_reservation_links(group_id,reservation_id) VALUES($1,$2)", [f.groupId, reservationId]);
+    const { storage } = await import("../db-storage");
+    const patch = { roomId: `${f.typeId}-room-1`, roomTypeId: f.typeId, _inventoryContextGroupId: f.groupId };
+    await expect(storage.updateReservation(reservationId, patch as any)).rejects.toMatchObject({ response: { code: "GROUP_BLOCK_WARNING", canOverride: true } });
+    expect((await storage.getReservation(reservationId))?.roomId).toBe(`${f.typeId}-room-0`);
+    expect(await storage.updateReservation(reservationId, { ...patch, _inventoryOverrideTentativeGroupWarning: true } as any)).toMatchObject({ roomId: `${f.typeId}-room-1`, finalRatePerNight: "133000.00", totalRoomAmount: "266000.00" });
+    expect((await pool.query("SELECT quantity FROM group_room_blocks WHERE group_id=$1", [f.competitorId])).rows).toEqual([{ quantity: 3 }]);
+  });
+
   it("rolls back an earlier successful room, its audit, guest, block and projection when a later insert fails", async () => {
     const f = await fixture();
     await pool.query(`CREATE FUNCTION test_group_block_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN

@@ -18,6 +18,7 @@ const storage = {
     return state.reservation;
   }),
   getRoom: vi.fn(),
+  getRoomType: vi.fn(async () => ({ id: "room-type-1", name: "Premium" })),
   createCharge: vi.fn(),
 };
 
@@ -295,6 +296,20 @@ describe("reservation zero-rate API guard", () => {
 
 
 describe("inventory confirmation carried to transactional storage",()=>{
+ it("warns on a grouped room change and carries acceptance without changing the rate",async()=>{
+  state.reservation={...baseReservation,groupId:"johnson",finalRatePerNight:"133000",totalRoomAmount:"266000"};
+  storage.getRoom.mockResolvedValue({id:"room-901",roomTypeId:"room-type-1",roomNumber:"901",isActive:true,isVirtual:false,status:"available"});
+  const warning={code:"GROUP_BLOCK_WARNING",canOverride:true,warnings:[],hardDemand:20,operationalInventory:19,date:"2030-01-01"};
+  storage.evaluateReservationInventory.mockResolvedValueOnce(warning as any).mockResolvedValueOnce(warning as any);
+  await withServer(async baseUrl=>{
+   const patch={roomId:"room-901",roomTypeId:"room-type-1",contextGroupId:"johnson"};
+   const first=await request(baseUrl,"PATCH",patch);
+   expect(first).toMatchObject({status:409,body:{code:"GROUP_BLOCK_WARNING",canOverride:true}});expect(storage.updateReservation).not.toHaveBeenCalled();
+   const accepted=await request(baseUrl,"PATCH",{...patch,overrideTentativeGroupWarning:true});
+   expect(accepted).toMatchObject({status:200,body:{roomId:"room-901",finalRatePerNight:"133000",totalRoomAmount:"266000"}});
+   expect(storage.updateReservation).toHaveBeenCalledWith("reservation-zero",expect.objectContaining({_inventoryContextGroupId:"johnson",_inventoryOverrideTentativeGroupWarning:true}));
+  });
+ });
  it("carries the explicit confirmation and group context on create",async()=>{
   await withServer(async baseUrl=>{
    const result=await request(baseUrl,"POST",{...baseReservation,overrideTentativeGroupWarning:true,contextGroupId:"group-context"});
