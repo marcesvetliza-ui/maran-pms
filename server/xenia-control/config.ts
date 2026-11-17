@@ -27,10 +27,24 @@ export function readControlConfig(
   // Deliberately never use the operational PMS DATABASE_URL or SESSION_SECRET.
   const controlUrl = env.XENIA_CONTROL_DATABASE_URL;
   const sessionSecret = env.XENIA_CONTROL_SESSION_SECRET;
-  if (!controlUrl || !sessionSecret || sessionSecret.length < 32) {
-    throw new Error(
-      "Configurá XENIA_CONTROL_DATABASE_URL y XENIA_CONTROL_SESSION_SECRET (32 caracteres o más).",
-    );
+  if (
+    !controlUrl ||
+    !controlUrl.trim() ||
+    !sessionSecret ||
+    !sessionSecret.trim() ||
+    sessionSecret.length < 32
+  ) {
+    const missing: string[] = [];
+    if (!controlUrl || !controlUrl.trim())
+      missing.push("XENIA_CONTROL_DATABASE_URL: falta o está vacía.");
+    if (!sessionSecret || !sessionSecret.trim())
+      missing.push("XENIA_CONTROL_SESSION_SECRET: falta o está vacía.");
+    else if (sessionSecret.length < 32)
+      missing.push(
+        "XENIA_CONTROL_SESSION_SECRET: debe tener 32 caracteres o más.",
+      );
+    // Include only the failing variable names, never connection strings or secret values.
+    throw new Error("Configuración de Xenia incompleta. " + missing.join(" "));
   }
   let propertyUrls: Record<string, string>;
   try {

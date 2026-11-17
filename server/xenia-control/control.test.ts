@@ -116,6 +116,61 @@ test("configuration never falls back to the operating hotel's DATABASE_URL", () 
     /demostración/,
   );
 });
+test("configuration errors identify only missing or short fields without exposing values", () => {
+  const cases = [
+    {
+      overrides: { XENIA_CONTROL_DATABASE_URL: "" },
+      expected: ["XENIA_CONTROL_DATABASE_URL"],
+    },
+    {
+      overrides: { XENIA_CONTROL_SESSION_SECRET: undefined },
+      expected: ["XENIA_CONTROL_SESSION_SECRET"],
+    },
+    {
+      overrides: {
+        XENIA_CONTROL_SESSION_SECRET: undefined,
+        XENIA_CONTOL_SESSION_SECRET: fixture.env.XENIA_CONTROL_SESSION_SECRET,
+      },
+      expected: ["XENIA_CONTROL_SESSION_SECRET"],
+    },
+    {
+      overrides: { XENIA_CONTROL_SESSION_SECRET: "short-test-only-secret" },
+      expected: ["XENIA_CONTROL_SESSION_SECRET", "32 caracteres"],
+    },
+    {
+      overrides: {
+        XENIA_CONTROL_DATABASE_URL: undefined,
+        XENIA_CONTROL_SESSION_SECRET: undefined,
+      },
+      expected: ["XENIA_CONTROL_DATABASE_URL", "XENIA_CONTROL_SESSION_SECRET"],
+    },
+    {
+      overrides: {
+        XENIA_CONTROL_DATABASE_URL: " ",
+        XENIA_CONTROL_SESSION_SECRET: " ".repeat(64),
+      },
+      expected: ["XENIA_CONTROL_DATABASE_URL", "XENIA_CONTROL_SESSION_SECRET"],
+    },
+  ];
+  for (const item of cases) {
+    const env = { ...fixture.env, ...item.overrides };
+    assert.throws(() => readControlConfig(env), (error: Error) => {
+      for (const text of item.expected) assert.ok(error.message.includes(text));
+      for (const key of [
+        "XENIA_CONTROL_DATABASE_URL",
+        "XENIA_CONTROL_SESSION_SECRET",
+      ])
+        if (!item.expected.includes(key)) assert.ok(!error.message.includes(key));
+      for (const value of [
+        fixture.env.XENIA_CONTROL_DATABASE_URL,
+        fixture.env.XENIA_CONTROL_SESSION_SECRET,
+        "short-test-only-secret",
+      ])
+        assert.ok(!error.message.includes(value));
+      return true;
+    });
+  }
+});
 test("anonymous visitors cannot list properties or read reservations", async () => {
   const visitor = new Client();
   assert.equal((await visitor.request("/api/properties")).status, 401);
