@@ -206,6 +206,8 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de evento revierte el cargo CC
       expect(posted.status).toBe(201);
 
       const folioBeforeNc = await readFolio(fixture.eventId);
+      expect(folioBeforeNc).not.toBeNull();
+      expect(parseFloat(folioBeforeNc.total_payments)).toBeCloseTo(5000, 2);
       expect(parseFloat(folioBeforeNc.balance)).toBeCloseTo(-5000, 2);
 
       const ncResult = await postNc(fixture);
@@ -213,13 +215,15 @@ runIfDatabaseIsConfigured("PostgreSQL real: la NC de evento revierte el cargo CC
       expect(ncResult.body.ncId).toBeTruthy();
 
       const folioAfterNc = await readFolio(fixture.eventId);
+      expect(parseFloat(folioAfterNc.total_payments)).toBeCloseTo(0, 2);
       expect(parseFloat(folioAfterNc.balance)).toBeCloseTo(0, 2);
 
       const movements = await readAccountMovements(fixture.companyId);
       expect(movements).toHaveLength(2);
       const netTotal = movements.reduce((sum, row) => sum + parseFloat(row.amount), 0);
       expect(netTotal).toBeCloseTo(0, 2);
-      expect(movements.some((row) => row.type === "ajuste")).toBe(true);
+      expect(movements).toContainEqual(expect.objectContaining({ type: "cargo", amount: "5000.00" }));
+      expect(movements).toContainEqual(expect.objectContaining({ type: "ajuste", amount: "-5000.00" }));
     } finally {
       await cleanupFixture(fixture);
     }
