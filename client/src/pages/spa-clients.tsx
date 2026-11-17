@@ -313,12 +313,12 @@ export default function SpaClientsPage() {
             </>) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Nombre <span className="text-red-500">*</span></Label>
-                  <Input value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
+                  <Label>Apellido</Label>
+                  <Input value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} placeholder="Pérez" data-testid="input-client-last-name" autoFocus />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Apellido</Label>
-                  <Input value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} placeholder="Pérez" data-testid="input-client-last-name" />
+                  <Label>Nombre <span className="text-red-500">*</span></Label>
+                  <Input value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} placeholder="Juan" data-testid="input-client-first-name" />
                 </div>
               </div>
             )}

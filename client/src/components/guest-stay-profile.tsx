@@ -11,7 +11,7 @@ type Kind = keyof GuestStayProfile;
 const labels: Record<Kind, string> = { vehicles: "Vehículos", family: "Grupo familiar", pets: "Mascotas" };
 const fields: Record<Kind, Array<[string, string, string?]>> = {
   vehicles: [["plate", "Patente"], ["brand", "Marca"], ["model", "Modelo"], ["color", "Color"]],
-  family: [["firstName", "Nombre"], ["lastName", "Apellido"], ["relationship", "Parentesco"], ["documentType", "Tipo de documento"], ["documentNumber", "Documento"], ["dateOfBirth", "Fecha de nacimiento", "date"], ["nationality", "Nacionalidad"]],
+  family: [["lastName", "Apellido"], ["firstName", "Nombre"], ["relationship", "Parentesco"], ["documentType", "Tipo de documento"], ["documentNumber", "Documento"], ["dateOfBirth", "Fecha de nacimiento", "date"], ["nationality", "Nacionalidad"]],
   pets: [["name", "Nombre"], ["species", "Especie"], ["notes", "Observaciones"]],
 };
 function newRow(kind: Kind): any {

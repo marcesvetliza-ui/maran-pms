@@ -267,22 +267,21 @@ export function ReservationWaitlistDialog({
             <div className="grid gap-4 py-2">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label htmlFor="waitlist-first-name">Nombre *</Label>
-                  <Input
-                    id="waitlist-first-name"
-                    value={form.firstName}
-                    onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
-                    autoFocus
-                    data-testid="input-waitlist-first-name"
-                  />
-                </div>
-                <div className="grid gap-2">
                   <Label htmlFor="waitlist-last-name">Apellido *</Label>
                   <Input
                     id="waitlist-last-name"
                     value={form.lastName}
                     onChange={(e) => setForm((prev) => ({ ...prev, lastName: e.target.value }))}
-                    data-testid="input-waitlist-last-name"
+                    data-testid="input-waitlist-last-name" autoFocus
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="waitlist-first-name">Nombre *</Label>
+                  <Input
+                    id="waitlist-first-name"
+                    value={form.firstName}
+                    onChange={(e) => setForm((prev) => ({ ...prev, firstName: e.target.value }))}
+                    data-testid="input-waitlist-first-name"
                   />
                 </div>
               </div>

@@ -771,20 +771,20 @@ export function AssignBlockDialog({
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <Input
+                              placeholder="Apellido"
+                              value={row.lastName}
+                              name={`passenger-lastname-${index}`}
+                              autoComplete="off"
+                              onChange={(e) => updateRow({ lastName: e.target.value })}
+                              data-testid={`input-lastname-${index}`} autoFocus
+                            />
+                            <Input
                               placeholder="Nombre"
                               value={row.firstName}
                               name={`passenger-firstname-${index}`}
                               autoComplete="off"
                               onChange={(e) => updateRow({ firstName: e.target.value })}
                               data-testid={`input-firstname-${index}`}
-                            />
-                            <Input
-                              placeholder="Apellido"
-                              value={row.lastName}
-                              name={`passenger-lastname-${index}`}
-                              autoComplete="off"
-                              onChange={(e) => updateRow({ lastName: e.target.value })}
-                              data-testid={`input-lastname-${index}`}
                             />
                           </div>
                         </div>

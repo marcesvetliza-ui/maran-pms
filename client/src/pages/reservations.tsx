@@ -2158,12 +2158,12 @@ export function ReservationFormDialog({
                       <>
                         <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
-                            <Input placeholder="Nombre" value={newCompForm.firstName} onChange={e => setNewCompForm(p => ({ ...p, firstName: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-firstname" />
+                            <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                            <Input placeholder="Apellido" value={newCompForm.lastName} onChange={e => setNewCompForm(p => ({ ...p, lastName: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-lastname" autoFocus />
                           </div>
                           <div>
-                            <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
-                            <Input placeholder="Apellido" value={newCompForm.lastName} onChange={e => setNewCompForm(p => ({ ...p, lastName: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-lastname" />
+                            <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                            <Input placeholder="Nombre" value={newCompForm.firstName} onChange={e => setNewCompForm(p => ({ ...p, firstName: e.target.value }))} className="h-8 text-sm" data-testid="input-new-comp-firstname" />
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -3328,12 +3328,12 @@ export function ReservationDetailDialog({
                 <p className="text-sm font-medium text-muted-foreground">Editar datos del titular</p>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
-                    <Input className="h-8 text-sm" value={guestEditData.firstName} onChange={e => setGuestEditData(p => ({ ...p, firstName: e.target.value }))} data-testid="input-edit-firstname" />
+                    <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                    <Input className="h-8 text-sm" value={guestEditData.lastName} onChange={e => setGuestEditData(p => ({ ...p, lastName: e.target.value }))} data-testid="input-edit-lastname" autoFocus />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
-                    <Input className="h-8 text-sm" value={guestEditData.lastName} onChange={e => setGuestEditData(p => ({ ...p, lastName: e.target.value }))} data-testid="input-edit-lastname" />
+                    <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                    <Input className="h-8 text-sm" value={guestEditData.firstName} onChange={e => setGuestEditData(p => ({ ...p, firstName: e.target.value }))} data-testid="input-edit-firstname" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -3540,12 +3540,12 @@ export function ReservationDetailDialog({
                     <>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
-                          <Input placeholder="Nombre" value={newCompanion.firstName} onChange={e => setNewCompanion(p => ({ ...p, firstName: e.target.value }))} data-testid="input-companion-firstname" className="h-8 text-sm" />
+                          <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                          <Input placeholder="Apellido" value={newCompanion.lastName} onChange={e => setNewCompanion(p => ({ ...p, lastName: e.target.value }))} data-testid="input-companion-lastname" className="h-8 text-sm" autoFocus />
                         </div>
                         <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
-                          <Input placeholder="Apellido" value={newCompanion.lastName} onChange={e => setNewCompanion(p => ({ ...p, lastName: e.target.value }))} data-testid="input-companion-lastname" className="h-8 text-sm" />
+                          <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
+                          <Input placeholder="Nombre" value={newCompanion.firstName} onChange={e => setNewCompanion(p => ({ ...p, firstName: e.target.value }))} data-testid="input-companion-firstname" className="h-8 text-sm" />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
@@ -3602,6 +3602,16 @@ export function ReservationDetailDialog({
                         <div className="p-3 bg-muted/10 space-y-2">
                           <div className="grid grid-cols-2 gap-2">
                             <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
+                              <Input
+                                placeholder="Apellido"
+                                value={editCompanionData.lastName}
+                                onChange={e => setEditCompanionData(p => ({ ...p, lastName: e.target.value }))}
+                                className="h-8 text-sm"
+                                data-testid={`input-edit-comp-lastname-${c.id}`} autoFocus
+                              />
+                            </div>
+                            <div>
                               <label className="text-xs text-muted-foreground mb-1 block">Nombre *</label>
                               <Input
                                 placeholder="Nombre"
@@ -3609,16 +3619,6 @@ export function ReservationDetailDialog({
                                 onChange={e => setEditCompanionData(p => ({ ...p, firstName: e.target.value }))}
                                 className="h-8 text-sm"
                                 data-testid={`input-edit-comp-firstname-${c.id}`}
-                              />
-                            </div>
-                            <div>
-                              <label className="text-xs text-muted-foreground mb-1 block">Apellido *</label>
-                              <Input
-                                placeholder="Apellido"
-                                value={editCompanionData.lastName}
-                                onChange={e => setEditCompanionData(p => ({ ...p, lastName: e.target.value }))}
-                                className="h-8 text-sm"
-                                data-testid={`input-edit-comp-lastname-${c.id}`}
                               />
                             </div>
                           </div>

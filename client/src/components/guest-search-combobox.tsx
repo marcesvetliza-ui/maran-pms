@@ -318,21 +318,21 @@ export function GuestSearchCombobox({
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
+                <Label className="text-sm">Apellido</Label>
+                <Input
+                  value={newLastName}
+                  onChange={(e) => setNewLastName(e.target.value)}
+                  placeholder="Apellido"
+                  data-testid="new-guest-lastname" autoFocus
+                />
+              </div>
+              <div>
                 <Label className="text-sm">Nombre *</Label>
                 <Input
                   value={newFirstName}
                   onChange={(e) => setNewFirstName(e.target.value)}
                   placeholder="Nombre"
                   data-testid="new-guest-firstname"
-                />
-              </div>
-              <div>
-                <Label className="text-sm">Apellido</Label>
-                <Input
-                  value={newLastName}
-                  onChange={(e) => setNewLastName(e.target.value)}
-                  placeholder="Apellido"
-                  data-testid="new-guest-lastname"
                 />
               </div>
             </div>
