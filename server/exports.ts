@@ -1,6 +1,7 @@
 import { sircarLine, sircarAlicuota } from './sircar';
 import { addPurchaseIvaModelSheet } from "./libro-iva-compras-excel";
 import {registerPurchaseReportRoutes} from "./purchase-invoice-report";
+import {registerReceivedRetentionReportRoutes} from "./received-retention-report";
 import { purchaseDocumentLabel } from "@shared/purchase-remito";
 import type { Express } from "express";
 import { db } from "./db";
@@ -314,6 +315,7 @@ function alicuotasVentasLine(sale: any): string[] {
 
 export function registerExportRoutes(app: Express) {
   registerPurchaseReportRoutes(app);
+  registerReceivedRetentionReportRoutes(app);
   // ── SIRCAR ────────────────────────────────────────────────────────────────
 
   app.get("/api/exports/sircar", requireAuth, async (req, res) => {
