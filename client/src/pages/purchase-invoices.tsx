@@ -1,4 +1,5 @@
 import { PurchaseInvoiceMetadataDialog } from '@/components/purchase-invoice-metadata-dialog';
+import { ReceivedRetentionsReport } from '@/components/received-retentions-report';
 import { PurchaseRemitoEditor, type RemitoDraft } from "@/components/purchase-remito-editor";
 import { PURCHASE_CREDIT_NOTE_PAYMENT_METHODS } from '@shared/purchase-credit-note-payment';
 import { iibbRateFromAmount } from '@shared/iibbRate';
@@ -3127,7 +3128,7 @@ export default function PurchaseInvoices() {
     <div className="min-h-screen bg-background">
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
+        <div className="flex flex-wrap items-center gap-3 mb-6">
           <Link href="/admin">
             <Button variant="ghost" size="icon" data-testid="btn-back-admin">
               <ArrowLeft className="h-4 w-4" />
@@ -3138,7 +3139,7 @@ export default function PurchaseInvoices() {
             <h1 className="text-2xl font-bold">Comprobantes de Compra</h1>
             <p className="text-sm text-muted-foreground">Facturas, NC, resúmenes bancarios y liquidaciones</p>
           </div>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex flex-wrap gap-2">
             <Link href="/accounting-suppliers">
               <Button variant="outline" data-testid="btn-go-suppliers">
                 <Building2 className="h-4 w-4 mr-2" />Proveedores
@@ -3181,12 +3182,17 @@ export default function PurchaseInvoices() {
         </div>
 
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
+          <TabsList className="h-auto flex-wrap justify-start">
             <TabsTrigger value="comprobantes" data-testid="tab-comprobantes">Comprobantes</TabsTrigger>
             <TabsTrigger value="cc" data-testid="tab-cc">Cuenta Corriente</TabsTrigger>
             <TabsTrigger value="pagos" data-testid="tab-pagos">Pagos a Proveedores</TabsTrigger>
             <TabsTrigger value="ordenes-pago" data-testid="tab-ordenes-pago">Historial de OPs</TabsTrigger>
+            <TabsTrigger value="retenciones" data-testid="tab-retenciones">Retenciones</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="retenciones" className="mt-4 min-w-0">
+            <ReceivedRetentionsReport />
+          </TabsContent>
 
           {/* Tab: Comprobantes */}
           <TabsContent value="comprobantes">
