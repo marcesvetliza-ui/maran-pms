@@ -444,6 +444,7 @@ export interface IStorage {
       agreedRate?: string;
       ratePlanId?: string | null;
       guestId?: string | null;
+      overrideTentativeGroupWarning?: boolean;
     }
   ): Promise<Reservation | undefined>;
 

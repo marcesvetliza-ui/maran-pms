@@ -56,7 +56,7 @@ type GroupInventoryWarningPayload = {
   error?: string;
   canOverride?: boolean;
   warning?: {
-    warnings?: Array<{ groupId: string; groupName?: string; date: string }>;
+    warnings?: Array<{ groupId: string; groupName?: string; groupStatus?: string; date: string }>;
     date?: string;
     roomTypeId?: string;
     roomTypeName?: string;
@@ -80,6 +80,7 @@ export async function apiRequestWithGroupInventoryWarning(
   method: "POST" | "PATCH",
   url: string,
   data: Record<string, unknown>,
+  options?: { onGroupWarningAccepted?: () => void },
 ): Promise<Response> {
   try {
     const response=await apiRequest(method,url,data);
@@ -90,26 +91,27 @@ export async function apiRequestWithGroupInventoryWarning(
     if(payload?.code === 'HOUSEKEEPING_PREPARATION_WARNING' && payload.canOverride===true){
       if(data.acknowledgeHousekeepingPreparation===(payload as any).preparationVersion)throw error;
       if(!await confirmHousekeepingMove(payload.error||'Preparación especial en la habitación de origen'))throw error;
-      return apiRequestWithGroupInventoryWarning(method,url,{...data,acknowledgeHousekeepingPreparation:(payload as any).preparationVersion});
+      return apiRequestWithGroupInventoryWarning(method,url,{...data,acknowledgeHousekeepingPreparation:(payload as any).preparationVersion},options);
     }
     if (payload?.code !== "GROUP_BLOCK_WARNING" || payload.canOverride !== true) throw error;
     if(data.overrideTentativeGroupWarning===true)throw error;
     const rows = payload.warning?.warnings ?? [];
     let message: string;
     if (rows.length > 0) {
-      const groups = [...new Set(rows.map(row => row.groupName || row.groupId))].join(", ");
+      const statuses: Record<string, string> = { confirmed: "confirmado", inhouse: "alojado", tentative: "tentativo", blocked: "bloqueado" };
+      const groups = [...new Set(rows.map(row => `${row.groupName || row.groupId}${row.groupStatus ? ` (${statuses[row.groupStatus] || row.groupStatus})` : ""}`))].join(", ");
       const dates = [...new Set(rows.map(row => row.date))].sort();
       const dateText = dates.length === 1 ? formatDisplayDate(dates[0]) : `${formatDisplayDate(dates[0])} a ${formatDisplayDate(dates[dates.length - 1])}`;
       message = [
-        "Esta operación consume disponibilidad comprometida para un grupo tentativo.",
+        "Esta operación consume cupos todavía pendientes de asignación.",
         groups ? `Grupo(s): ${groups}.` : "",
         dates.length ? `Fecha(s): ${dateText}.` : "",
+        "Al aceptar, esos cupos podrían quedarse sin habitaciones. Recepción/comercial deberá gestionar esa disponibilidad.",
         "¿Desea continuar de todos modos?",
       ].filter(Boolean).join("\n");
     } else {
       // No hay filas de "warnings" de grupo: este aviso viene de un déficit
-      // de categoría (GROUP_BLOCK_SHORTAGE) rebajado a confirmable porque la
-      // habitación puntual elegida está libre — ver server/routes/reservations.ts.
+      // de categoría confirmable porque la habitación puntual elegida está libre.
       const w = payload.warning as any;
       const roomTypeLabel = w?.roomTypeName || w?.roomTypeId;
       message = [
@@ -121,7 +123,8 @@ export async function apiRequestWithGroupInventoryWarning(
       ].filter(Boolean).join("\n");
     }
     if (!window.confirm(message)) throw error;
-    return apiRequestWithGroupInventoryWarning(method, url, { ...data, overrideTentativeGroupWarning: true });
+    options?.onGroupWarningAccepted?.();
+    return apiRequestWithGroupInventoryWarning(method, url, { ...data, overrideTentativeGroupWarning: true }, options);
   }
 }
 

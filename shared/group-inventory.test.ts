@@ -12,7 +12,7 @@ const base = {
 describe("group inventory accounting", () => {
   it("commits confirmed blocks per night", () => {
     expect(evaluateGroupInventory({ ...base, operationalInventory: 3 })).toBeNull();
-    expect(evaluateGroupInventory({ ...base, operationalInventory: 2 })).toMatchObject({ code: "GROUP_BLOCK_SHORTAGE", canOverride: false });
+    expect(evaluateGroupInventory({ ...base, operationalInventory: 2 })).toMatchObject({ code: "GROUP_BLOCK_WARNING", canOverride: true });
   });
   it("does not double count linked reservations", () => {
     expect(evaluateGroupInventory({
@@ -35,7 +35,7 @@ describe("group inventory accounting", () => {
     };
     expect(evaluateGroupInventory({ ...input, operationalInventory: 28 })).toBeNull();
     expect(evaluateGroupInventory({ ...input, operationalInventory: 27 })).toMatchObject({
-      code: "GROUP_BLOCK_SHORTAGE", hardDemand: 28,
+      code: "GROUP_BLOCK_WARNING", hardDemand: 28,
     });
     const soft = { ...input, groups: [{ ...base.groups[0], status: "blocked" }] };
     expect(evaluateGroupInventory({ ...soft, operationalInventory: 28 })).toBeNull();
@@ -67,7 +67,7 @@ describe("group inventory accounting", () => {
     };
     expect(evaluateGroupInventory({ ...input, operationalInventory: 2 })).toBeNull();
     expect(evaluateGroupInventory({ ...input, operationalInventory: 1 })).toMatchObject({
-      code: "GROUP_BLOCK_SHORTAGE", date: "2026-10-10", hardDemand: 2,
+      code: "GROUP_BLOCK_WARNING", date: "2026-10-10", hardDemand: 2,
     });
   });
   it("returns an overridable warning for a soft block invaded by demand", () => {
@@ -108,13 +108,41 @@ describe("physical room confirmation policy", () => {
   it("does not override a deficit without a concrete free operational room", () => {
     expect(evaluateGroupInventory({...input,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",canOverride:false});
   });
-  it("preserves unassigned confirmed group commitments even after acceptance", () => {
-    expect(evaluateGroupInventory({...input,groups:base.groups,blocks:base.blocks,hasSpecificRoom:true,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",canOverride:false});
+  it("warns about confirmed commitments and accepts a verified free room", () => {
+    const withGroup={...input,groups:base.groups,blocks:base.blocks,hasSpecificRoom:true};
+    expect(evaluateGroupInventory(withGroup)).toMatchObject({code:"GROUP_BLOCK_WARNING",canOverride:true});
+    expect(evaluateGroupInventory(withGroup)?.warnings).toContainEqual(expect.objectContaining({groupId:"g",groupStatus:"confirmed",requested:2}));
+    expect(evaluateGroupInventory({...withGroup,override:true})).toBeNull();
   });
   it("checks later nights before offering confirmation", () => {
     const groups=[{...base.groups[0],checkInDate:"2026-10-11"}];
-    expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",date:"2026-10-11",canOverride:false});
-    expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true,override:true})).toMatchObject({code:"GROUP_BLOCK_SHORTAGE",date:"2026-10-11"});
+    expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true})?.warnings).toContainEqual(expect.objectContaining({groupId:"g",date:"2026-10-11",groupStatus:"confirmed"}));
+    expect(evaluateGroupInventory({...input,groups,blocks:base.blocks,hasSpecificRoom:true,override:true})).toBeNull();
+  });
+});
+
+describe('operator acceptance of unassigned confirmed commitments', () => {
+  it.each(['blocked', 'confirmed'])('assigns all three JOHNSON rooms after one acknowledgement, group=%s', status => {
+    const dates={checkInDate:'2026-11-24',checkOutDate:'2026-11-29'};
+    const input={roomTypeId:'premium',checkIn:'2026-11-23',checkOut:'2026-11-25',operationalInventory:19,
+      groups:[{id:'ficer',name:'FICER',status:'confirmed',...dates},{id:'johnson',name:'JOHNSON ACERO',status,checkInDate:'2026-11-23',checkOutDate:'2026-11-25'}],
+      blocks:[{groupId:'ficer',roomTypeId:'premium',quantity:17},{groupId:'ficer',roomTypeId:'premium',quantity:1,blockCheckInDate:'2026-11-24',blockCheckOutDate:'2026-11-26'},{groupId:'johnson',roomTypeId:'premium',quantity:3}],
+      reservations:Array.from({length:13},(_,i)=>({id:`ficer-${i}`,roomId:`room-${i}`,groupId:'ficer',roomTypeId:'premium',status:'confirmed',...dates})),contextGroupId:'johnson'};
+    const original=structuredClone(input);
+    const warning=evaluateGroupInventory({...input,candidateUnits:0});
+    expect(warning).toMatchObject({code:'GROUP_BLOCK_WARNING',canOverride:true});
+    expect(warning?.warnings).toContainEqual(expect.objectContaining({groupId:'ficer',groupStatus:'confirmed',requested:5,date:'2026-11-24'}));
+    expect(evaluateGroupInventory({...input,candidateUnits:0,override:true})).toBeNull();
+    const assignments=[...input.reservations];
+    for(let i=0;i<3;i++){
+      expect(evaluateGroupInventory({...input,reservations:assignments,hasSpecificRoom:true,override:true})).toBeNull();
+      assignments.push({id:`johnson-${i}`,roomId:`free-${i}`,groupId:'johnson',roomTypeId:'premium',status:'confirmed',checkInDate:'2026-11-23',checkOutDate:'2026-11-25'});
+    }
+    expect(input).toEqual(original);
+  });
+  it('keeps assigned demand hard without a verified free physical room', () => {
+    const input={...base,operationalInventory:2,blocks:[{...base.blocks[0],quantity:4}],reservations:Array.from({length:2},(_,i)=>({id:`assigned-${i}`,roomId:`room-${i}`,groupId:'g',roomTypeId:'std',status:'confirmed',checkInDate:base.checkIn,checkOutDate:base.checkOut}))};
+    expect(evaluateGroupInventory({...input,override:true})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',canOverride:false});
   });
 });
 
@@ -131,14 +159,17 @@ describe('completed group assignments release their occupied units',()=>{
   expect(evaluateGroupInventory({...input,candidateUnits:4})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',hardDemand:18,unassignedConfirmedGroupUnits:0});
   expect(input).toEqual(before);
  });
- it('still protects an actually unassigned confirmed unit even with an override',()=>{
-  expect(evaluateGroupInventory({...input,blocks:[{...input.blocks[0],quantity:16}],candidateUnits:3,hasSpecificRoom:true,override:true})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',canOverride:false,unassignedConfirmedGroupUnits:1});
+ it('requires acknowledgement for an unassigned confirmed unit, preserving the group commitment',()=>{
+  const pending={...input,blocks:[{...input.blocks[0],quantity:16}],candidateUnits:3,hasSpecificRoom:true};
+  expect(evaluateGroupInventory(pending)).toMatchObject({code:'GROUP_BLOCK_WARNING',canOverride:true,unassignedConfirmedGroupUnits:1});
+  expect(evaluateGroupInventory({...pending,override:true})).toBeNull();
+  expect(pending.blocks[0].quantity).toBe(16);
  });
  it.each(['cancelled','no_show'])('does not turn %s into a group release',status=>{
-  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,status}))]})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',unassignedConfirmedGroupUnits:3});
+  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,status}))]})).toMatchObject({code:'GROUP_BLOCK_WARNING',unassignedConfirmedGroupUnits:3});
  });
  it('does not free a unit before the actual Argentine departure day',()=>{
-  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,checkedOutAt:to+'T15:00:00Z'}))]})).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',unassignedConfirmedGroupUnits:3});
+  expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,checkedOutAt:to+'T15:00:00Z'}))]})).toMatchObject({code:'GROUP_BLOCK_WARNING',unassignedConfirmedGroupUnits:3});
   expect(evaluateGroupInventory({...input,reservations:[...current,...individual,...departed.map(r=>({...r,checkedOutAt:'2026-11-13T02:30:00'}))]})).toBeNull();
  });
  it('conservatively uses the scheduled departure for legacy checkouts without a timestamp',()=>{
@@ -146,7 +177,7 @@ describe('completed group assignments release their occupied units',()=>{
  });
  it('does not release the same physical room twice across sequential stays',()=>{
   const small={...input,operationalInventory:1,blocks:[{...input.blocks[0],quantity:2}],reservations:departed.slice(0,2).map(r=>({...r,roomId:'one-room'}))};
-  expect(evaluateGroupInventory(small)).toMatchObject({code:'GROUP_BLOCK_SHORTAGE',unassignedConfirmedGroupUnits:1});
+  expect(evaluateGroupInventory(small)).toMatchObject({code:'GROUP_BLOCK_WARNING',unassignedConfirmedGroupUnits:1});
  });
  it('does not call a room released if another active assignment of that group is using it',()=>{
   const reused={...input,operationalInventory:2,blocks:[{...input.blocks[0],quantity:2}],reservations:[departed[0],{...current[0],roomId:departed[0].roomId}]};

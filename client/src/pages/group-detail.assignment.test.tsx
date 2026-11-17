@@ -11,7 +11,9 @@ const { apiRequestMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>("@/lib/queryClient");
-  return { ...actual, apiRequest: apiRequestMock };
+  return { ...actual, apiRequest: apiRequestMock,
+    apiRequestWithGroupInventoryWarning: (method: string, url: string, data: any) => apiRequestMock(method, url, data),
+  };
 });
 
 const EXISTING_GUEST_ID = "guest-existing-003";

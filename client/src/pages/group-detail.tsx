@@ -614,19 +614,22 @@ export function AssignBlockDialog({
     let successCount = 0;
     let failCount = 0;
     const errors: string[] = [];
+    let groupWarningAccepted = false;
+    const rememberGroupWarning = { onGroupWarningAccepted: () => { groupWarningAccepted = true; } };
 
     for (const row of validRows) {
       try {
         if (row.reservationId) {
-          await apiRequest("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
+          await apiRequestWithGroupInventoryWarning("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
             guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             roomId: row.roomId !== row.originalRoomId ? row.roomId : undefined,
             roomTypeId: canonicalRoomTypeId,
-          });
+            ...(groupWarningAccepted ? { overrideTentativeGroupWarning: true } : {}),
+          }, rememberGroupWarning);
         } else {
-          await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
+          await apiRequestWithGroupInventoryWarning("POST", `/api/groups/${group.id}/assign-room`, {
             roomId: row.roomId,
             roomTypeId: canonicalRoomTypeId,
             guestId: row.guestId || undefined,
@@ -636,7 +639,8 @@ export function AssignBlockDialog({
             checkInDate: defaultCheckIn,
             checkOutDate: defaultCheckOut,
             agreedRate: block.agreedRate,
-          });
+            ...(groupWarningAccepted ? { overrideTentativeGroupWarning: true } : {}),
+          }, rememberGroupWarning);
         }
         successCount++;
       } catch (err: any) {

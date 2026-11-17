@@ -68,9 +68,10 @@ runIfDatabaseIsConfigured("reprogramación atómica de grupos", () => {
       })).rejects.toMatchObject({ statusCode: 409, message: "Dos reservas no pueden ocupar la misma habitación." });
     } else {
       await expect(storage.updateGroupAtomic(ids.group, { patch: { status: "confirmed" } })).rejects.toMatchObject({
-        statusCode: 409, response: { code: "GROUP_BLOCK_SHORTAGE", warning: { hardDemand: 3, operationalInventory: 2 } },
+        statusCode: 409, response: { code: "GROUP_BLOCK_WARNING", canOverride: true, warning: { hardDemand: 3, operationalInventory: 2 } },
       });
       expect((await db.select().from(groups).where(eq(groups.id, ids.group)))[0].status).toBe("blocked");
+      expect(await storage.updateGroupAtomic(ids.group, { patch: { status: "confirmed" }, overrideTentativeGroupWarning: true })).toMatchObject({ status: "confirmed" });
     }
     expect(await db.select().from(reservations).where(inArray(reservations.id, [ids.reservation1, ids.reservation2]))).toEqual(originalReservations);
   });
