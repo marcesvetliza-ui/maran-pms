@@ -695,8 +695,8 @@ export function registerGroupsRoutes(app: Express) {
           const placeholderGuest = await getOrCreatePlaceholderGuest(group.id, group.name);
           const reservation = await storage.createReservation({
             _inventoryContextGroupId: group.id,
-            // Acceptance applies to every reservation in this same operation;
-            // physical overlaps and confirmed group shortages still reject it.
+            // Acceptance covers unassigned commitments for every reservation
+            // in this operation. Physical room overlaps are still checked.
             _inventoryOverrideTentativeGroupWarning: overrideTentativeGroupWarning,
             reservationCode: `G${group.groupCode}-${room.roomNumber}`,
             guestId: placeholderGuest.id,
