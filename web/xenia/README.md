@@ -1,6 +1,6 @@
 # Xenia PMS — gestión para la hospitalidad
 
-Versión de apertura de la web comercial. El acceso sigue siendo privado hasta la indicación expresa de apertura pública. Sitio estático: `dist/index.html`, `dist/styles.css`, `dist/app.js` y los logos originales de Xenia extraídos del repositorio `marcesvetliza-ui/maran-pms`, rama `feature/xenia-channex-staging`.
+Versión de apertura de la web comercial. El propietario autorizó la apertura pública el 17 de noviembre de 2026; Sites confirmó la audiencia pública y la versión 5. Sitio estático: `dist/index.html`, `dist/styles.css`, `dist/app.js` y los logos originales de Xenia extraídos del repositorio `marcesvetliza-ui/maran-pms`, rama `feature/xenia-channex-staging`.
 
 ## Decisiones confirmadas
 
@@ -29,11 +29,11 @@ Los importes y las habitaciones son ficticios. El acceso al PMS usa la direcció
 - La versión de apertura retira el cartel de vista previa y usa el dominio principal en canonical, Open Graph, robots y sitemap.
 - Las pantallas e importes de ejemplo siguen identificados como ilustrativos.
 - El formulario prepara una consulta local y un borrador para el correo comercial; no incorpora envío automático ni una base de leads.
-- La audiencia actual continúa siendo privada y sólo permite al propietario.
+- Acceso público habilitado con autorización expresa del propietario y confirmado por Sites. La prueba HTTP anónima desde este entorno quedó bloqueada por su proxy; corresponde completar la comprobación desde un navegador externo.
 
 ## Próximos pasos
 
-1. Habilitar la audiencia pública cuando Marcelo lo indique expresamente.
+1. Apertura pública completada el 17 de noviembre de 2026. Sitio principal: `https://xeniapms.com/`.
 2. Configurar y comprobar redirecciones de `.com.ar`, `.store` y `.online` al dominio principal desde Donweb. No están dadas por configuradas.
 3. Verificar la navegación de un visitante sin sesión al abrir la audiencia.
 4. Mantener el ingreso actual al PMS en `https://demo.maranpms.com.ar/`; una dirección propia para la aplicación requiere su configuración separada.

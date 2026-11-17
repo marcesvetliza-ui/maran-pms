@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-17",
+  "primary_url": "https://xeniapms.com/",
+  "access_mode": "public",
+  "version": 5,
+  "authorization": "explicit_owner_request_in_chat",
+  "deployment_id": "appgdep_6afc31fda7a08191912a147bb313ba39",
+  "version_id": "appgprj_6afb690e46448191b52839b58cf121d0~appgver_d550ca2eb670819188100e82f2bddef6",
+  "source_commit": "06db905b9fdd65fb87e04aa20b3865d518b4f50c",
+  "domains": [
+    {
+      "hostname": "www.xeniapms.com",
+      "status": "active",
+      "ssl_status": "active"
+    },
+    {
+      "hostname": "xeniapms.com",
+      "status": "active",
+      "ssl_status": "active"
+    }
+  ],
+  "anonymous_external_http_check": "blocked_by_environment_proxy_403",
+  "alternative_redirects": "not_confirmed"
+}
