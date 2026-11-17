@@ -20,11 +20,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Search, Plane, Pencil, Loader2, Trash2, BarChart3, DollarSign, CalendarDays, TrendingUp, Receipt, Eye, Users, Calendar, ChevronDown, ChevronUp, Hotel, FileText, Ban, CheckCircle } from "lucide-react";
-import { insertAgencySchema, type Agency, type AccountMovement, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
+import { insertAgencySchema, type Agency, type ReservationWithDetails, type ReservationStatus } from "@shared/schema";
 import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { CCPaymentDialog } from "@/components/cc-payment-dialog";
 import { CcVoidReceiptAction } from "@/components/cc-void-receipt-action";
 import { cleanAccountMovementDescription } from "@/lib/account-movement-display";
+import { AccountMovementReference } from "@/components/account-movement-reference";
+import type { AccountMovementWithReservation } from "@shared/account-movement-reference";
 import { TARIFA_CONVENIO_LABEL, TARIFA_CONVENIO_SHORT } from "@/lib/tarifa-convenio";
 import { isOverdue } from "@/lib/account-aging";
 
@@ -213,7 +215,7 @@ export default function AgenciesPage() {
   });
 
   const { data: accountData, refetch: refetchAccount } = useQuery<{
-    movements: AccountMovement[];
+    movements: AccountMovementWithReservation[];
     balance: number;
   }>({
     queryKey: ["/api/agencies", viewingAccountAgency?.id, "account"],
@@ -774,7 +776,7 @@ export default function AgenciesPage() {
                   <TableRow>
                     <TableHead className="w-24 p-2 sm:w-28 sm:p-4">Fecha</TableHead>
                     <TableHead className="p-2 sm:p-4">Descripción</TableHead>
-                    <TableHead className="hidden w-1/4 p-4 md:table-cell">Ref.</TableHead>
+                    <TableHead className="hidden w-1/4 p-4 md:table-cell">Reserva / referencia</TableHead>
                     <TableHead className="w-36 p-2 text-right sm:w-72 sm:p-4">Monto / acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -785,13 +787,10 @@ export default function AgenciesPage() {
                       <TableCell className="p-2 sm:p-4 [overflow-wrap:anywhere]">
                         <div>
                           <p className="text-sm">{cleanAccountMovementDescription(mov.description, mov.reservationCode)}</p>
-                          {mov.guestName && (
-                            <p className="text-xs text-muted-foreground">{mov.guestName}</p>
-                          )}
-                          <p className="mt-1 text-xs text-muted-foreground font-mono break-all md:hidden">{mov.reservationCode || mov.reference || "—"}</p>
+                          <div className="mt-1 md:hidden"><AccountMovementReference movement={mov} /></div>
                         </div>
                       </TableCell>
-                      <TableCell className="hidden p-4 text-xs text-muted-foreground font-mono break-all md:table-cell">{mov.reservationCode || mov.reference || "—"}</TableCell>
+                      <TableCell className="hidden p-4 md:table-cell"><AccountMovementReference movement={mov} /></TableCell>
                       <TableCell className={`p-2 sm:p-4 text-right font-medium tabular-nums ${
                         parseFloat(mov.amount) > 0 ? "text-red-600" : "text-green-600"
                       }`}>
