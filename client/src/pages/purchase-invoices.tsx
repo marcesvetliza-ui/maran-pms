@@ -1,4 +1,5 @@
 import { PurchaseInvoiceMetadataDialog } from '@/components/purchase-invoice-metadata-dialog';
+import { PaymentOrderEditDialog } from '@/components/payment-order-edit-dialog';
 import { ReceivedRetentionsReport } from '@/components/received-retentions-report';
 import { PurchaseRemitoEditor, type RemitoDraft } from "@/components/purchase-remito-editor";
 import { PURCHASE_CREDIT_NOTE_PAYMENT_METHODS } from '@shared/purchase-credit-note-payment';
@@ -2874,7 +2875,10 @@ function PagosProveedoresTab({ onEmitirOP }: { onEmitirOP: (prov: CCItem) => voi
 
 // ─── Órdenes de Pago Tab ─────────────────────────────────────────────────────
 
-function OrdenesDePagoTab() {
+export function OrdenesDePagoTab() {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission("api:purchase-invoices:write");
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [filterPeriodo, setFilterPeriodo] = useState("");
 
@@ -2937,6 +2941,7 @@ function OrdenesDePagoTab() {
               <TableHead className="text-right">Total Facturas</TableHead>
               <TableHead className="text-right">Total Abonado</TableHead>
               <TableHead className="w-[120px]">Documentos</TableHead>
+              {canEdit && <TableHead>Acciones</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2976,12 +2981,14 @@ function OrdenesDePagoTab() {
                     )}
                   </div>
                 </TableCell>
+                {canEdit && <TableCell><Button size="sm" variant="outline" onClick={() => setEditingId(op.id)} data-testid={`btn-edit-op-${op.id}`}><Pencil className="h-3.5 w-3.5 mr-1" />Editar</Button></TableCell>}
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
 
+      {editingId !== null && <PaymentOrderEditDialog id={editingId} onClose={() => setEditingId(null)} />}
       {filtered.length > 0 && (
         <div className="flex justify-end gap-6 text-sm border-t pt-3">
           <span className="text-muted-foreground">

@@ -54,6 +54,7 @@ import { enterPurchaseInvoiceStock, parsePurchaseStockRows } from "./purchase-in
 import { updatePurchaseRemito } from "./purchase-remito";
 import { isPurchaseRemito } from "@shared/purchase-remito";
 import { createPaymentOrder } from "./paymentOrder";
+import { registerPaymentOrderEditRoutes } from "./routes/paymentOrderEdits";
 import { registerExportRoutes } from "./exports";
 import { registerAdminCashRoutes } from "./adminCash";
 import { registerBillingRoutes } from "./billing/routes";
@@ -3564,6 +3565,8 @@ export async function registerRoutes(
   // ═══════════════════════════════════════════════════════════════
   // MÓDULO CONTABLE — Órdenes de Pago
   // ═══════════════════════════════════════════════════════════════
+
+  registerPaymentOrderEditRoutes(app);
 
   app.get("/api/payment-orders", requireAuth, async (req, res) => {
     try {
