@@ -50,7 +50,8 @@ const cents = (value: string) => BigInt(value.replace('.', ''));
 const fromCents = (value: bigint) => `${value < BigInt(0) ? '-' : ''}${(value < BigInt(0) ? -value : value) / BigInt(100)}.${String((value < BigInt(0) ? -value : value) % BigInt(100)).padStart(2, '0')}`;
 export function retentionMoney(value: string): string {
   const [whole, fraction] = decimal(value).split('.');
-  return `${BigInt(whole).toLocaleString('es-AR')},${fraction}`;
+  const sign = cents(decimal(value)) < BigInt(0) ? '-' : '';
+  return `${sign}${BigInt(whole.replace('-', '')).toLocaleString('es-AR')},${fraction}`;
 }
 export function receivedRetentionRow(raw: any): ReceivedRetentionRow | null {
   if (raw.tipo_comprobante !== 'RETENCION') return null;

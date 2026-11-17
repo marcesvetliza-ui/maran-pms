@@ -32,6 +32,7 @@ describe('Informe de retenciones recibidas', () => {
     expect(matchesRetentionFilters(rows[2], { estado: 'todas' })).toBe(true);
     expect(matchesRetentionFilters(rows[0], { estado: 'anuladas' })).toBe(false);
     expect(retentionMoney('123456789.01')).toBe('123.456.789,01');
+    expect(retentionMoney('-0.01')).toBe('-0,01');
   });
   it.each([{ desde: '2026-02-30' }, { desde: '2026-11-02', hasta: '2026-11-01' }, { cuit: 'abc' }, { cuit: '123456789012' }, { dateType: 'otro' }, { impuesto: 'otro' }, { estado: 'pagado' }, { periodo: '2026-13' }])('rechaza filtros inválidos %j', filters => expect(() => validateRetentionFilters(filters)).toThrow());
 });
