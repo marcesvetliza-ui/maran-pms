@@ -17,7 +17,16 @@
     "test:dates": "bash script/test-check-date-patterns.sh",
     "test:e2e:timezone": "if [ -z \"$DATABASE_URL\" ]; then echo 'DATABASE_URL es obligatoria para la prueba E2E de zona horaria.' >&2; exit 1; fi; playwright test --config playwright.timezone.config.ts",
     "lint:workflows": "node script/check-workflows.mjs",
-    "test:workflows": "node script/test-check-workflows.mjs"
+    "test:workflows": "node script/test-check-workflows.mjs",
+    "xenia:dev": "tsx server/xenia-control/index.ts",
+    "xenia:setup": "tsx server/xenia-control/setup.ts",
+    "xenia:build": "node script/build-xenia-control.mjs",
+    "xenia:start": "NODE_ENV=production node dist/xenia-control/index.js",
+    "xenia:check": "tsc --project tsconfig.xenia-control.json",
+    "xenia:test": "tsx --test server/xenia-control/control.test.ts",
+    "xenia:demo": "node script/xenia-control-demo.mjs",
+    "xenia:test:browser": "tsx --test server/xenia-control/browser.test.ts",
+    "xenia:setup:production": "NODE_ENV=production node dist/xenia-control/setup.js"
   },
   "dependencies": {
     "saxes": "^5.0.1",

@@ -1,0 +1,94 @@
+# Primera entrega multihotel de Xenia
+
+Fecha: 17 de noviembre de 2026. Base: `main` en `2301ffb6` (incluye la PR 118).
+
+Prioridad confirmada por Marcelo: construir la base multihotel antes de retomar el asistente.
+
+Esta entrega construye el panel central como una aplicación separada dentro del repositorio. Los comandos y el servidor actuales del PMS conservan su comportamiento. El panel administra clientes, establecimientos, usuarios y permisos y permite probar reservas ficticias en bases independientes. Todavía no conecta el selector con el PMS operativo completo.
+
+## Qué se puede probar
+
+- Alta de clientes o cadenas y establecimientos con módulos habilitados.
+- Preparación de una base exclusiva por establecimiento. Si una conexión contiene tablas ajenas, se rechaza sin modificar ese esquema. Un alta fallida conserva su instalación reservada y permite reintentar.
+- Inicio de sesión con contraseña, sesiones HTTP-only, protección de solicitudes y permisos revisados por el servidor en cada petición.
+- Administración general, responsable de grupo con acceso a sus dos establecimientos sin permisos de administración de Xenia, recepción con acceso a Hotel Aurora y consulta de Apart Brisa sin permiso de escritura.
+- Asignar, cambiar y revocar permisos. La revocación alcanza sesiones que ya estaban abiertas.
+- Selector de establecimiento por pestaña. Las peticiones incluyen el contexto explícito y el servidor comprueba la membresía; cambiar una URL no habilita otro hotel.
+- Reservas ficticias guardadas en bases diferentes, con lectura, alta y anulación. Se mantiene el historial de las anuladas.
+
+Los módulos de restaurant, spa, eventos y grupos quedan registrados como capacidades por establecimiento. Esta entrega no afirma que sus circuitos operativos estén conectados al panel central.
+
+## Demostración local
+
+Requisitos: Node 22 o superior, dependencias del repositorio (`npm ci`) y binarios locales de PostgreSQL (`initdb`, `pg_ctl` y `createdb`). Se detecta la carpeta con `pg_config`; también puede indicarse con `XENIA_PG_BIN`.
+
+```sh
+npm run xenia:demo
+```
+
+Abrir `http://127.0.0.1:4186`. El modo de demostración muestra cuatro accesos identificados. Crea un clúster nuevo y descartable, accesible sólo mediante un socket Unix, una base central y tres bases de establecimientos. Dos contienen datos ficticios; la tercera permite probar un alta. Al detener la demostración se destruye exclusivamente ese clúster temporal.
+
+La demostración no lee `DATABASE_URL`, no copia datos de Maran y no envía facturas, tarifas, correos ni solicitudes a ARCA o Channex. El acceso por personaje se rechaza fuera del modo local de demostración y en producción.
+
+## Instalación propia del panel
+
+Las bases deben ser nuevas y exclusivas. No utilizar una base del PMS operativo. Las conexiones se cargan como secretos del servicio, nunca en el navegador ni en Git.
+
+Variables obligatorias:
+
+| Variable                       | Uso                                                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `XENIA_CONTROL_DATABASE_URL`   | Base PostgreSQL exclusiva del panel central.                                                            |
+| `XENIA_PROPERTY_DATABASES`     | Objeto JSON de referencias internas a conexiones de bases independientes. No se devuelve a la interfaz. |
+| `XENIA_CONTROL_SESSION_SECRET` | Secreto aleatorio de 32 caracteres o más, independiente del PMS.                                        |
+| `XENIA_CONTROL_ORIGIN`         | Origen exacto del panel; HTTPS en producción.                                                           |
+| `XENIA_CONTROL_PORT`           | Puerto propio; por defecto 4186.                                                                        |
+| `XENIA_INITIAL_ADMIN_USERNAME` | Usuario de la administración inicial.                                                                   |
+| `XENIA_INITIAL_ADMIN_NAME`     | Nombre visible de esa cuenta.                                                                           |
+| `XENIA_INITIAL_ADMIN_PASSWORD` | Contraseña inicial de 12 caracteres o más. Se utiliza en la preparación inicial.                        |
+
+Ejemplo de estructura de `XENIA_PROPERTY_DATABASES`, completado sólo dentro del gestor de secretos:
+
+```json
+{
+  "instalacion-a": "<conexión de la base exclusiva A>",
+  "instalacion-b": "<conexión de la base exclusiva B>"
+}
+```
+
+Una vez cargadas las variables:
+
+```sh
+npm run xenia:setup
+npm run xenia:build
+npm run xenia:start
+```
+
+`xenia:setup` es una acción explícita. El arranque habitual no crea tablas ni migra bases. Si ya existe una cuenta, la preparación conserva usuarios, contraseñas y datos. Los comandos no recurren a `DATABASE_URL` ni al secreto de sesión del PMS.
+
+`Dockerfile.xenia-control` prepara una imagen independiente con el panel y su comando de inicialización compilado. Para una imagen ya construida, la preparación explícita se ejecuta con `npm run xenia:setup:production`. El servicio usa `XENIA_CONTROL_PORT` o el `PORT` asignado por el proveedor y expone `/healthz` para comprobar la conexión central.
+
+El panel requiere un servicio propio y nuevas bases en el proyecto de pruebas de Xenia. No basta con cambiar el comando de arranque del servicio hotelero existente. `app.xeniapms.com` es el destino previsto y todavía debe conectarse al servicio que se prepare.
+
+## Validación
+
+```sh
+npm run xenia:check
+npm run xenia:test
+npm run xenia:test:browser
+npm run xenia:build
+```
+
+Para la prueba de navegador, instalar Chromium con `npx playwright install chromium` o indicar un ejecutable ya disponible en `XENIA_BROWSER_PATH`. Las pruebas crean y destruyen su propio clúster PostgreSQL; no aceptan una URL operativa. Se ejercitan solicitudes HTTP autenticadas, IDs iguales en dos hoteles, lecturas concurrentes, intentos de acceso cruzado, permisos de consulta, escritura y revocación, rotación de sesión, protección de solicitudes, conexiones intercambiadas y recuperación de un alta que no pudo prepararse. La prueba de interfaz ejecuta dos pestañas, cambios de cuenta, respuestas tardías del hotel anterior, formularios pendientes, alta de establecimiento, creación de usuario y vista móvil.
+
+Las lecturas anónimas no crean cookies de sesión. El ingreso exige origen exacto y JSON; las escrituras autenticadas requieren además el token de protección de la sesión. Las cookies tienen un vencimiento de 12 horas y no se renuevan con lecturas, para evitar que una respuesta antigua de otra pestaña reemplace la sesión recién iniciada. Los cambios de cuenta se comunican a las demás pestañas y borran sus datos de la cuenta anterior.
+
+## Siguiente integración
+
+1. Revisar esta primera entrega en el entorno de pruebas de Xenia y conectar `app.xeniapms.com` a su servicio propio.
+2. Consolidar los desarrollos del PMS de Xenia con los arreglos recientes de Maran por módulo. Las ramas siguen divergiendo; no se propone una fusión masiva.
+3. Diseñar el enlace de identidad con las instalaciones completas del PMS y sus usuarios locales. No se comparte una cookie de hotel entre dominios ni se envían credenciales de base al navegador.
+4. Extender la validación a archivos, cachés, procesos, tareas e integraciones por establecimiento.
+5. Resolver continuidad y revocación cuando el panel central no esté disponible antes de incorporar hoteles operativos. Esta primera aplicación central falla cerrada y no implementa todavía el mecanismo de continuidad del PMS.
+6. Validar la configuración fiscal por CUIT, ambiente, comprobante y punto de venta. Una serie fiscal compartida necesita coordinación de emisión.
+7. Probar recuperación y distribución de versiones antes de incorporar Maran. El asistente se retoma sobre esta estructura de permisos.
