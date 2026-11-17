@@ -1,3 +1,4 @@
+import { buildCashClosingHtml, compactClosingIdentity } from '@/lib/cash-closing-print';
 import { CashCardRectificationHistory } from '@/components/cash-card-rectification';
 import { CASH_DOCUMENT_LABELS, cashDocumentSummary, type CashDocumentEvidence } from "@shared/cash-document-classification";
 import { ReservationCancellationHistory } from "@/components/reservation-cancellation-history";
@@ -484,27 +485,16 @@ export function printClosingSummary(
   efectivoContado: number | null,
   closingSnapshot?: CashClosingSnapshot | null,
 ) {
-  const activos = movements.filter(m => !m.anulado);
-  const anulados = movements.filter(m => m.anulado);
   const summary = buildSummaryFromMovements(movements);
   const totalGeneral = closingSnapshot
     ? Number(closingSnapshot.totalGeneral || 0)
     : Object.values(summary).reduce((s, v) => s + v.total, 0);
   const totalTx = closingSnapshot?.transactionCount
     ?? Object.values(summary).reduce((s, v) => s + v.count, 0);
-  const informational = activos.filter(m => m.movementType === "informational");
-  const informationalGroups = informationalSummary(movements, normalizePaymentMethod);
   const areaLabel = AREA_LABEL_MAP[shift.area] || shift.area;
-  const diferencia = efectivoContado != null && efectivoSistema != null
-    ? efectivoContado - efectivoSistema
-    : null;
-  const shiftDateObj = new Date(shift.openedAt);
-  const shiftDateStr = shiftDateObj.toLocaleDateString("es-AR", {
+  const shiftDateStr = new Date(shift.openedAt).toLocaleDateString("es-AR", {
     weekday: "long", day: "2-digit", month: "2-digit", year: "numeric", timeZone: ARGENTINA_TIME_ZONE,
   });
-  const escapeHtml = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character] || character);
   const documentReference = (movement: CashMovement): string => {
     if (movement.documentReference) return movement.documentReference;
     if (movement.sourceType === "restaurant_order") {
@@ -522,161 +512,30 @@ export function printClosingSummary(
         : formatAdvanceReference(movement) || "Sin comprobante vinculado");
   };
 
-  // Group active movements by payment method (normalized to avoid duplicates)
-  const byMethod: Record<string, CashMovement[]> = {};
-  for (const m of activos) {
-    const key = normalizePaymentMethod(m.paymentMethod);
-    if (!byMethod[key]) byMethod[key] = [];
-    byMethod[key].push(m);
-  }
-
-  const documentBreakdown = `<h2>Efectivo por comprobante</h2><table style="width:100%">${cashDocumentSummary(movements).map(row=>`<tr><td>${row.label}</td><td style="text-align:right">${formatCurrency(row.total)}</td></tr>`).join("")}</table><p style="font-size:11px">Desglose de ingresos en efectivo; los egresos se descuentan en el total neto.</p>`;
-  const methodBoxes = Object.entries(byMethod).map(([method, movs]) => {
-    const label = PAYMENT_METHOD_MAP[method] || method;
-    const total = movs.filter(m => m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
-    const info = informationalGroups[method];
-    const hasMonetary = movs.some(m=>m.movementType !== "informational");
-    const isEfectivo = method === "cash";
-    const borderColor = isEfectivo ? "#2b6cb0" : "#553c9a";
-    const headerBg = isEfectivo ? "#ebf8ff" : "#faf5ff";
-    const rows = movs.map(m => {
-      const amt = parseFloat(String(m.amount));
-      const esInformational = m.movementType === "informational";
-      const esIngreso = m.movementType === "income";
-      return `<tr style="${esInformational ? "opacity:0.65;font-style:italic;" : ""}">
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;color:#666">${formatTime(m.createdAt)}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px">${escapeHtml(m.description || m.sourceLabel || "-")}</td>
-        ${`<td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:10px">${escapeHtml(documentReference(m))} · ${escapeHtml(m.documentClass ? CASH_DOCUMENT_LABELS[m.documentClass] : "Sin clasificar")}</td>`}
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:11px;text-align:center">
-          ${closingSnapshot
-            ? escapeHtml(cashReceiptTypes(m).map(({ code }) => code).join(" / ") || "—")
-            : esInformational
-            ? `<span style="background:#e2e8f0;color:#64748b;padding:1px 6px;border-radius:3px;font-size:10px">Solo registro</span>`
-            : `<span style="background:${esIngreso ? "#c6f6d5" : "#fed7d7"};color:${esIngreso ? "#276749" : "#9b2c2c"};padding:1px 6px;border-radius:3px;font-size:10px">${esIngreso ? "Ingreso" : "Egreso"}</span>`
-          }
-        </td>
-        <td style="padding:5px 8px;border-bottom:1px solid #eee;font-size:12px;text-align:right;font-weight:${esIngreso ? "600" : "normal"};color:${esInformational ? "#94a3b8" : esIngreso ? "#276749" : "#9b2c2c"}">${esIngreso ? "" : ""}${formatCurrency(amt)}</td>
-      </tr>`;
-    }).join("");
-
-    const diferenciaEfectivo = isEfectivo && diferencia != null ? `
-      <div style="margin-top:8px;padding:8px;background:${Math.abs(diferencia) > 0 ? "#fff5f5" : "#f0fff4"};border:1px solid ${Math.abs(diferencia) > 0 ? "#fc8181" : "#9ae6b4"};border-radius:4px">
-        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Sistema:</span><span>${formatCurrency(efectivoSistema ?? 0)}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:11px"><span>Contado:</span><span>${formatCurrency(efectivoContado ?? 0)}</span></div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:${diferencia !== 0 ? "#c53030" : "#276749"};margin-top:4px">
-          <span>Diferencia:</span><span>${diferencia > 0 ? "+" : ""}${formatCurrency(diferencia)}</span>
-        </div>
-      </div>` : "";
-
-    return `
-    <div style="border:2px solid ${borderColor};border-radius:8px;margin-bottom:16px;overflow:hidden;page-break-inside:avoid">
-      <div style="background:${headerBg};padding:10px 14px;border-bottom:1px solid ${borderColor};display:flex;justify-content:space-between;align-items:center">
-        <span style="font-weight:bold;font-size:14px;color:${borderColor}">${label}</span>
-        <span style="font-weight:bold;font-size:15px">${hasMonetary ? `Cobrado neto: ${formatCurrency(total)}` : ""}${info ? `${hasMonetary ? " · " : ""}Informativo: ${formatCurrency(info.total)} (${info.count})` : ""}</span>
-      </div>
-      <div style="padding:8px 0">
-        <table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="background:#f9f9f9">
-              <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Hora</th>
-              <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Descripción</th>
-              <th style="padding:4px 8px;font-size:10px;text-align:left;color:#888;font-weight:600;text-transform:uppercase">Comprobante / origen</th>
-              <th style="padding:4px 8px;font-size:10px;text-align:center;color:#888;font-weight:600;text-transform:uppercase">${closingSnapshot ? "Tipo de comprobante" : "Tipo"}</th>
-              <th style="padding:4px 8px;font-size:10px;text-align:right;color:#888;font-weight:600;text-transform:uppercase">Monto</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      ${isEfectivo ? `<div style="padding:0 12px 12px 12px">${diferenciaEfectivo}</div>` : ""}
-    </div>`;
-  }).join("");
-
-  const anulSection = anulados.length > 0 ? `
-<div style="border:1px solid #ccc;border-radius:6px;margin-top:8px;overflow:hidden">
-  <div style="background:#f5f5f5;padding:8px 12px;font-weight:bold;font-size:12px;color:#666">
-    Movimientos Anulados (${anulados.length})
-  </div>
-  <table style="width:100%;border-collapse:collapse">
-    <thead><tr style="background:#fafafa">
-      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Hora</th>
-      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Descripción</th>
-      ${closingSnapshot ? `<th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Comprobante / tipo</th>` : ""}
-      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Método</th>
-      <th style="padding:5px 8px;font-size:10px;text-align:right;border-bottom:1px solid #eee">Monto</th>
-      <th style="padding:5px 8px;font-size:10px;text-align:left;border-bottom:1px solid #eee">Motivo</th>
-    </tr></thead>
-    <tbody>${anulados.map(m => `<tr style="color:#aaa">
-      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${formatTime(m.createdAt)}</td>
-      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-decoration:line-through">${escapeHtml(m.description || m.sourceLabel || "-")}</td>
-      ${closingSnapshot ? `<td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0">${escapeHtml(documentReference(m))} · ${escapeHtml(cashReceiptTypes(m).map(({ code }) => code).join(" / ") || "—")}</td>` : ""}
-      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0">${PAYMENT_METHOD_MAP[m.paymentMethod] || m.paymentMethod}</td>
-      <td style="padding:5px 8px;font-size:11px;border-bottom:1px solid #f0f0f0;text-align:right;text-decoration:line-through">${formatCurrency(Math.abs(parseFloat(String(m.amount))))}</td>
-      <td style="padding:5px 8px;font-size:10px;border-bottom:1px solid #f0f0f0;color:#999">${escapeHtml(m.motivoAnulacion || "-")}</td>
-    </tr>`).join("")}</tbody>
-  </table>
-</div>` : "";
-
-  const html = `<!DOCTYPE html><html><head><title>Cierre de Turno - ${areaLabel}</title>
-<style>
-  body{font-family:Arial,Helvetica,sans-serif;padding:20px;max-width:680px;margin:0 auto;color:#222}
-  @media print{body{padding:10px}}
-</style>
-</head><body>
-<div style="text-align:center;margin-bottom:16px;padding-bottom:12px;border-bottom:2px solid #333">
-  <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px">Maran Suites & Towers</div>
-  <div style="font-size:20px;font-weight:bold;margin:4px 0">Cierre de Turno</div>
-  <div style="font-size:14px;color:#555">${areaLabel} — ${shift.turnoTipo ? formatShiftLabel(shift) : `Turno #${shift.shiftNumber}`}</div>
-  <div style="font-size:13px;font-weight:600;color:#444;margin-top:4px">Apertura: ${shiftDateStr}${shift.closedAt ? ` · Cierre: ${formatDate(shift.closedAt)}` : ""}</div>
-</div>
-
-<div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:12px;gap:16px">
-  <div>
-    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Abierto por</div>
-    <div><strong>${shift.openedBy || "-"}</strong> ${formatTime(shift.openedAt)}</div>
-  </div>
-  <div>
-    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Cerrado por</div>
-    <div><strong>${shift.closedBy || "-"}</strong> ${shift.closedAt ? formatTime(shift.closedAt) : "-"}</div>
-  </div>
-  <div style="text-align:right">
-    <div style="color:#888;font-size:10px;text-transform:uppercase;margin-bottom:2px">Total cobrado neto</div>
-    <div style="font-size:16px;font-weight:bold">${formatCurrency(totalGeneral)}</div>
-    <div style="color:#888;font-size:10px">${totalTx} transacciones</div>
-  </div>
-</div>
-
-${closingSnapshot ? `<div style="font-size:11px;margin-bottom:14px;padding:10px;border:1px solid #ddd">
-  <strong>Totales registrados en el cierre:</strong>
-  Efectivo ${formatCurrency(Number(closingSnapshot.totalCash || 0))} ·
-  Débito ${formatCurrency(Number(closingSnapshot.totalDebitCard || 0))} ·
-  Crédito ${formatCurrency(Number(closingSnapshot.totalCreditCard || 0))} ·
-  Transferencia ${formatCurrency(Number(closingSnapshot.totalTransfer || 0))} ·
-  MercadoPago ${formatCurrency(Number(closingSnapshot.totalMercadopago || 0))} ·
-  No monetarias ${formatCurrency(Number(closingSnapshot.nonCashSettlementsTotal || 0))}
-</div>` : ""}
-
-<div style="font-size:12px;font-weight:600;color:#444;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;padding-bottom:4px;border-bottom:1px solid #ddd">
-  ${closingSnapshot ? "Detalle de movimientos registrados" : "Detalle por Forma de Pago"}
-</div>
-
-${informational.length ? `<div style="margin:12px 0;padding:10px;background:#f8fafc;border:1px solid #cbd5e1">
-  <div style="font-weight:bold">Comprobantes y liquidaciones informativas</div>
-  ${Object.entries(informationalGroups).map(([method,group])=>`<div style="font-size:11px;margin-top:4px">${PAYMENT_METHOD_MAP[method] || method} — ${group.count} transacciones — ${formatCurrency(group.total)}</div>`).join("")}
-  <div style="font-size:11px;margin-top:4px">Importes informativos: no modifican el dinero de caja.</div>
-  ${informational.map(m => `<div style="font-size:11px;margin-top:3px">${PAYMENT_METHOD_MAP[normalizePaymentMethod(m.paymentMethod)] || m.paymentMethod}: ${m.sourceLabel || m.description || "-"}${m.registeredBy ? ` (${m.registeredBy})` : ""} — ${formatCurrency(Number(m.amount))}</div>`).join("")}
-</div>` : ""}
-
-${documentBreakdown}
-${methodBoxes}
-
-${anulSection}
-
-<div style="text-align:center;margin-top:20px;padding-top:10px;border-top:1px solid #eee;font-size:10px;color:#aaa">
-  Generado el ${formatHotelDateTime(new Date())} | Maran Suites & Towers
-</div>
-<script>window.onload=function(){window.print();}<\/script>
-</body></html>`;
+  const methodLabel = (method: string) => ({retencion_suss:"Retención SUSS",retencion_tishpys:"Retención TISHPYS"} as Record<string,string>)[method] || PAYMENT_METHOD_MAP[method] || method;
+  const html = buildCashClosingHtml({
+    area:areaLabel,shift:formatShiftLabel(shift),date:shiftDateStr,
+    openedBy:shift.openedBy || "—",openedTime:formatTime(shift.openedAt),
+    closedBy:shift.closedBy || "—",closedTime:shift.closedAt?formatTime(shift.closedAt):"—",
+    closedDate:shift.closedAt?formatDate(shift.closedAt):undefined,generatedAt:formatHotelDateTime(new Date()),
+    total:totalGeneral,count:totalTx,systemCash:efectivoSistema,countedCash:efectivoContado,
+    methods:Object.entries(summary).filter(([,group])=>group.count>0).map(([method,group])=>({label:methodLabel(method),total:group.total,count:group.count})),
+    documents:cashDocumentSummary(movements),
+    movements:movements.map(m=>({
+      ...compactClosingIdentity(m,methodLabel(normalizePaymentMethod(m.paymentMethod))),
+      time:formatTime(m.createdAt),method:methodLabel(normalizePaymentMethod(m.paymentMethod)),amount:Number(m.amount),
+      kind:m.sourceType === "non_fiscal_void" ? "informational" : m.movementType,document:documentReference(m),documentClass:m.documentClass?CASH_DOCUMENT_LABELS[m.documentClass]:"Sin clasificar",
+      cancelled:m.anulado,cancelReason:m.motivoAnulacion,
+    })),
+    snapshot:closingSnapshot?[
+      {label:"Efectivo",total:Number(closingSnapshot.totalCash || 0)},
+      {label:"Débito",total:Number(closingSnapshot.totalDebitCard || 0)},
+      {label:"Crédito",total:Number(closingSnapshot.totalCreditCard || 0)},
+      {label:"Transferencia",total:Number(closingSnapshot.totalTransfer || 0)},
+      {label:"MercadoPago",total:Number(closingSnapshot.totalMercadopago || 0)},
+      {label:"No monetarias",total:Number(closingSnapshot.nonCashSettlementsTotal || 0)},
+    ]:undefined,
+  });
 
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); }
