@@ -1,6 +1,6 @@
 # Xenia PMS — gestión para la hospitalidad
 
-Vista previa privada de la marca y el producto. Sitio estático: `dist/index.html`, `dist/styles.css`, `dist/app.js` y los logos originales de Xenia extraídos del repositorio `marcesvetliza-ui/maran-pms`, rama `feature/xenia-channex-staging`.
+Versión de apertura de la web comercial. El acceso sigue siendo privado hasta la indicación expresa de apertura pública. Sitio estático: `dist/index.html`, `dist/styles.css`, `dist/app.js` y los logos originales de Xenia extraídos del repositorio `marcesvetliza-ui/maran-pms`, rama `feature/xenia-channex-staging`.
 
 ## Decisiones confirmadas
 
@@ -12,7 +12,7 @@ Vista previa privada de la marca y el producto. Sitio estático: `dist/index.htm
 - Alternativos adquiridos: `xeniapms.com.ar`, `xeniapms.store`, `xeniapms.online`.
 - Registrador: Donweb.
 - Los alternativos se proponen como redirecciones al principal; no son sitios distintos.
-- Contacto comercial: `contacto@xeniapms.com`. La captura de Correo Profesional de Donweb del 16 de noviembre de 2026 muestra la cuenta creada. Las pruebas de recepción y envío desde Webmail quedan pendientes de confirmar.
+- Contacto comercial: `contacto@xeniapms.com`. Cuenta creada en Correo Profesional de Donweb. Marcelo confirmó recepción y respuesta desde Webmail el 17 de noviembre de 2026.
 - El asistente queda detrás de marca y home en el orden de trabajo.
 
 ## Funcionalidad de esta entrega
@@ -21,14 +21,21 @@ Navegación responsive, menú móvil, ejemplo de planning interactivo, detalle d
 
 Los importes y las habitaciones son ficticios. El acceso al PMS usa la dirección existente de Xenia, `https://demo.maranpms.com.ar/`, en una pestaña aparte. El sitio no tiene credenciales ni consulta ninguna base del hotel. Multihotel figura como desarrollo, no como capacidad ya validada.
 
-## Antes de abrir la web al público
+## Estado de apertura al 17 de noviembre de 2026
 
-1. El enfoque y la home de hospitalidad fueron aprobados por Marcelo. Revisar los ajustes finales antes de la apertura.
-2. Probar la recepción y la respuesta desde el correo comercial. Las indicaciones de contacto provisional ya se retiraron; el formulario prepara el borrador para ese correo.
-3. Confirmar el destino definitivo del ingreso al PMS y de una demo comercial.
-4. Revisar textos legales de la versión pública y el tratamiento del formulario si cambia su comportamiento.
-5. Habilitar la audiencia pública únicamente al publicar la versión aprobada.
-6. Obtener del alojamiento los registros exactos; configurar la zona de Donweb, validar HTTPS y redirecciones para los cuatro dominios y sus variantes necesarias.
-7. Actualizar canonical/og:url a `https://xeniapms.com/` y retirar `noindex` cuando la web pública esté lista.
+- Enfoque y diseño de hospitalidad aprobados por Marcelo.
+- Correo comercial probado por el titular para recepción y respuesta.
+- Alojamiento confirma `xeniapms.com` y `www.xeniapms.com` activos, con HTTPS.
+- La versión de apertura retira el cartel de vista previa y usa el dominio principal en canonical, Open Graph, robots y sitemap.
+- Las pantallas e importes de ejemplo siguen identificados como ilustrativos.
+- El formulario prepara una consulta local y un borrador para el correo comercial; no incorpora envío automático ni una base de leads.
+- La audiencia actual continúa siendo privada y sólo permite al propietario.
 
-El desarrollo de esta home no modifica código, datos, dominio, DNS ni publicación de Maran PMS.
+## Próximos pasos
+
+1. Habilitar la audiencia pública cuando Marcelo lo indique expresamente.
+2. Configurar y comprobar redirecciones de `.com.ar`, `.store` y `.online` al dominio principal desde Donweb. No están dadas por configuradas.
+3. Verificar la navegación de un visitante sin sesión al abrir la audiencia.
+4. Mantener el ingreso actual al PMS en `https://demo.maranpms.com.ar/`; una dirección propia para la aplicación requiere su configuración separada.
+
+Esta home se desarrolla fuera de la aplicación operativa de Maran. No modifica sus datos ni su publicación.

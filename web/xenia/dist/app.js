@@ -41,7 +41,6 @@ menuButton.addEventListener("click", () => {
 qa("a", mobileMenu).forEach((a) => a.addEventListener("click", closeMenu));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 window.matchMedia("(min-width: 721px)").addEventListener("change", (e) => { if (e.matches) closeMenu(); });
-q("#hide-review").addEventListener("click", () => { q("#review-strip").hidden = true; });
 
 function addTabKeyboard(container, callback) {
   const tabs = qa('[role="tab"]', container);
@@ -213,8 +212,8 @@ q("#copy-message").addEventListener("click", async () => {
   } catch { q("#copy-status").textContent = "No se pudo copiar automáticamente. Usá el borrador de correo para seleccionar el texto."; }
 });
 const legal = {
-  privacy: {title: "Privacidad de esta vista previa", paragraphs: ["Los ejemplos de la web usan datos ficticios. No acceden a huéspedes, clientes, reservas ni operaciones de ningún establecimiento.", "El formulario prepara un mensaje en tu navegador. Esta página no lo guarda en una base de datos ni lo envía automáticamente. Si elegís abrir tu correo, el envío se realiza desde tu aplicación y bajo sus condiciones.", "El correo de contacto es contacto@xeniapms.com. Esta vista previa no incorpora herramientas de analítica o seguimiento publicitario."]},
-  terms: {title: "Sobre esta presentación", paragraphs: ["Esta vista previa presenta Xenia como una plataforma de gestión para la hospitalidad, con base hotelera y módulos de restaurant, spa, eventos y grupos. Las pantallas son ejemplos ilustrativos para explicar sus circuitos.", "El alcance, las adaptaciones a cada tipo de alojamiento, las conexiones con canales, la disponibilidad de funciones y las condiciones de cada implementación se confirman con el establecimiento. La gestión multihotel está en desarrollo.", "El dominio principal es xeniapms.com. Sus dominios alternativos son xeniapms.com.ar, xeniapms.store y xeniapms.online. La apertura pública de esta web se completará después de revisar esta propuesta."]}
+  privacy: {title: "Privacidad", paragraphs: ["Los ejemplos de la web usan datos ficticios. No acceden a huéspedes, clientes, reservas ni operaciones de ningún establecimiento.", "El formulario prepara un mensaje en tu navegador. Esta página no lo guarda en una base de datos ni lo envía automáticamente. Si elegís abrir tu correo, el envío se realiza desde tu aplicación y bajo sus condiciones.", "El correo de contacto es contacto@xeniapms.com. Este sitio no incorpora herramientas de analítica o seguimiento publicitario."]},
+  terms: {title: "Sobre esta presentación", paragraphs: ["Xenia es una plataforma de gestión para la hospitalidad, con base hotelera y módulos de restaurant, spa, eventos y grupos. Las pantallas son ejemplos ilustrativos para explicar sus circuitos.", "El alcance, las adaptaciones a cada tipo de alojamiento, las conexiones con canales, la disponibilidad de funciones y las condiciones de cada implementación se confirman con el establecimiento. La gestión multihotel está en desarrollo.", "El dominio principal es xeniapms.com. Para consultas sobre esta web o sobre el producto, podés escribir a contacto@xeniapms.com."]}
 };
 qa("[data-legal]").forEach((button) => button.addEventListener("click", () => {
   const info = legal[button.dataset.legal];

@@ -1,0 +1,27 @@
+{
+  "status": "passed",
+  "checked": [
+    "assets",
+    "preview_banner_removed",
+    "primary_domain_metadata",
+    "robots_and_sitemap",
+    "solution_tabs_and_keyboard",
+    "contact_draft_recipient",
+    "non_lodging_inquiry",
+    "privacy_text",
+    "responsive_layout",
+    "mobile_navigation"
+  ],
+  "viewport_widths": [
+    1440,
+    1024,
+    768,
+    390,
+    360
+  ],
+  "page_errors": [],
+  "external_messages_sent": false,
+  "hotel_data_accessed": false,
+  "mail_receipt_and_reply": "confirmed_by_owner_2026-11-17",
+  "audience": "owner_private_until_explicit_request"
+}
