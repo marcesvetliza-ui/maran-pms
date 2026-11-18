@@ -1,3 +1,4 @@
+import { compareReservationsByRoom } from "@/lib/reservation-list-order";
 import { isPostCheckoutCharge } from "@shared/postCheckout";
 import {GroupRoomAccount} from './group-room-account';
 import { chargeUnits, expandChargeUnitCoverage, unitParent } from '@shared/chargeUnits';
@@ -4138,7 +4139,7 @@ function BulkTransferDialog({
       return all.filter((r: any) =>
         r.status === "checked_in" &&
         String(r.id) !== String(reservationId)
-      );
+      ).sort(compareReservationsByRoom);
     },
     enabled: open,
   });
@@ -4367,7 +4368,7 @@ function TransferChargeDialog({
       return all.filter((r: any) =>
         r.status === "checked_in" &&
         String(r.id) !== String(reservationId)
-      );
+      ).sort(compareReservationsByRoom);
     },
     enabled: open,
   });
