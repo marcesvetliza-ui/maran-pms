@@ -39,7 +39,7 @@ beforeEach(()=>{
 
 it.each(['room-type-mappings','rate-plan-mappings'])('refreshes only the affected %s after a save',async(kind)=>{
  created=true;
- roomMappings=[{id:'room-map',channexRoomTypeTitle:'Suite OTA',channexRoomTypeId:'remote-room',roomTypeId:null}];
+ roomMappings=[{id:'room-map',channexRoomTypeTitle:'Suite OTA',channexRoomTypeId:'remote-room',roomTypeId:kind==='rate-plan-mappings'?'type':null}];
  planMappings=[{id:'plan-map',channexRatePlanTitle:'Flexible OTA',channexRoomTypeId:'remote-room',ratePlanId:null}];
  const dependentKeys=[['channex-readiness','conn'],['channex-inbound','conn'],['/api/channex/bookings','conn'],['/api/channex/connections','conn','ari'],['/api/channex/connections','conn',kind]];
  dependentKeys.forEach(key=>{queryClient.setQueryData(key,key[0]==='channex-inbound'?{synthetic:true,serverEnabled:false,settings:{enabled:false,has_token:false},revisions:[]}:key[0]==='channex-readiness'?{synthetic:true,checks:[]}:{synthetic:true});});
