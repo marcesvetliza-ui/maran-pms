@@ -46,9 +46,36 @@ const insertedAt = z.string().transform(value =>
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$/.test(value) ? `${value}Z` : value
 ).pipe(z.string().datetime({ offset: true }));
 const roomSchema = z.object({
-  id: id.optional(), booking_room_id: id.optional(), room_type_id: id, rate_plan_id: id,
+  id: id.optional(), booking_room_id: id.optional(), room_type_id: id, rate_plan_id: id.nullish().transform(value => value ?? null),
+  amount: money.optional(), taxes: z.array(z.unknown()).nullish(),
   days: z.record(day, money), occupancy: z.object({ adults: z.number().int().min(1).max(20), children: z.number().int().min(0).max(20).default(0), infants: z.number().int().min(0).max(20).default(0) }),
 });
+/** Channex can send nightly net rates and an explicit room total including VAT.
+ * Reconcile only declared VAT; never guess a percentage or discard a difference. */
+function roomPrices(room: z.infer<typeof roomSchema>, dates: string[]) {
+  const sourceNetCents = dates.reduce((sum, date) => sum + room.days[date], 0);
+  const totalCents = room.amount ?? sourceNetCents;
+  const sourceVatCents = totalCents - sourceNetCents;
+  const prices = dates.map(date => ({ date, rateCents: room.days[date], discountCents: 0 }));
+  if (sourceVatCents === 0) return { nights: prices, totalCents, sourceNetCents, sourceVatCents };
+  const taxes = z.array(z.object({ is_inclusive: z.boolean(), type: z.string(), total_price: money })).safeParse(room.taxes);
+  if (sourceVatCents < 0 || !taxes.success || taxes.data.some(t => !t.is_inclusive && t.type !== 'Value Added Tax (VAT)')
+      || taxes.data.filter(t => !t.is_inclusive).reduce((sum, tax) => sum + tax.total_price, 0) !== sourceVatCents) {
+    return review('ROOM_TAX_TOTAL_REQUIRES_REVIEW');
+  }
+  const weight = BigInt(sourceNetCents || dates.length);
+  const pieces = prices.map((night, index) => {
+    const numerator = BigInt(sourceVatCents) * BigInt(sourceNetCents ? night.rateCents : 1);
+    return { index, cents: numerator / weight, remainder: numerator % weight };
+  });
+  let extra = BigInt(sourceVatCents) - pieces.reduce((sum, piece) => sum + piece.cents, 0n);
+  for (const piece of [...pieces].sort((a, b) => a.remainder === b.remainder ? 0 : a.remainder > b.remainder ? -1 : 1)) {
+    if (extra-- > 0n) piece.cents++;
+  }
+  return { nights: prices.map((night, i) => ({ ...night, rateCents: night.rateCents + Number(pieces[i].cents) })),
+    totalCents, sourceNetCents, sourceVatCents };
+}
+
 export function parseBookingRevision(raw: any, property: string) {
   const head = z.object({
     id, attributes: z.object({
@@ -81,8 +108,7 @@ export function parseBookingRevision(raw: any, property: string) {
     return {
       key: keys[index], remoteType: room.room_type_id, remotePlan: room.rate_plan_id,
       occupancy: room.occupancy.adults + room.occupancy.children + room.occupancy.infants,
-      nights: dates.map(date => ({ date, rateCents: room.days[date], discountCents: 0 })),
-      totalCents: dates.reduce((sum, date) => sum + room.days[date], 0)
+      ...roomPrices(room, dates)
     };
   });
   if (rooms.reduce((sum, room) => sum + room.totalCents, 0) !== b.amount) return review("TOTAL_REQUIRES_REVIEW");

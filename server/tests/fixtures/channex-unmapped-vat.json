@@ -1,0 +1,49 @@
+{
+  "id": "legacy-revision",
+  "attributes": {
+    "property_id": "test-property",
+    "booking_id": "legacy-booking",
+    "inserted_at": "2026-11-12T20:52:57.782016",
+    "status": "new",
+    "currency": "USD",
+    "amount": "142.04",
+    "arrival_date": "2026-11-28",
+    "departure_date": "2026-11-29",
+    "customer": {
+      "name": "Synthetic",
+      "surname": "Assignment",
+      "mail": "guest@example.invalid",
+      "phone": null
+    },
+    "rooms": [
+      {
+        "booking_room_id": "legacy-room",
+        "room_type_id": "remote-type",
+        "rate_plan_id": null,
+        "days": {
+          "2026-11-28": "117.39"
+        },
+        "occupancy": {
+          "ages": [],
+          "adults": 2,
+          "infants": 0,
+          "children": 0
+        },
+        "amount": "142.04",
+        "taxes": [
+          {
+            "name": "IVA (21%)",
+            "type": "Value Added Tax (VAT)",
+            "nights": 1,
+            "persons": 2,
+            "version": 2,
+            "price_mode": "Per booking",
+            "total_price": "24.65",
+            "is_inclusive": false,
+            "price_per_unit": "24.65"
+          }
+        ]
+      }
+    ]
+  }
+}

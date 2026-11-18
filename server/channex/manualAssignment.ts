@@ -108,7 +108,9 @@ export async function assignmentContext(connectionId: string, revisionId: string
       }).filter(r => canOverrideScope || !r.scopeOverride);
       return { key: remote.key, category: typeMap?.channex_room_type_title || 'Categoría del canal sin identificar',
         mappedCategory: typeMap?.category || null, occupancy: remote.occupancy,
-        sourceTotal: amountString(remote.totalCents), choices };
+        sourceTotal: amountString(remote.totalCents),
+        ...(remote.sourceVatCents > 0 ? { sourceNetAmount: amountString(remote.sourceNetCents), sourceVatAmount: amountString(remote.sourceVatCents) } : {}),
+        ...(remote.remotePlan === null ? { ratePlanMissing: true } : {}), choices };
     }),
   };
   return { source, config, booking, options };

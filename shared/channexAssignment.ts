@@ -10,7 +10,7 @@ export type InboundAssignmentOptions = {
   canOverrideScope: boolean;
   rooms: {
     key: string; category: string; mappedCategory: string | null;
-    occupancy: number; sourceTotal: string; choices: InboundAssignmentRoom[];
+    occupancy: number; sourceTotal: string; sourceNetAmount?: string; sourceVatAmount?: string; ratePlanMissing?: boolean; choices: InboundAssignmentRoom[];
   }[];
 };
 export type InboundAssignmentRequest = {

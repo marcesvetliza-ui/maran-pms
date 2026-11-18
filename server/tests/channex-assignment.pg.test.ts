@@ -12,8 +12,8 @@ vi.mock('../auth',()=>({requireAuth:(req:any,res:any,next:any)=>{if(!identity)re
 let pool:typeof import('../db').pool, service:typeof import('../channex/inbound'), manual:typeof import('../channex/manualAssignment');
 let arrival:string,departure:string,server:any,base:string,actor:string,reader:string;
 const fixtures:any[]=[];
-async function fixture(count=1){
- const id=randomUUID(),type=randomUUID(),other=randomUUID(),plan=randomUUID();const f={id,type,other,plan,rev:randomUUID(),booking:randomUUID()};fixtures.push(f);
+async function fixture(count=1,legacyVat=false){
+ const id=randomUUID(),type=randomUUID(),other=randomUUID(),plan=randomUUID();const f={id,type,other,plan,legacyVat,rev:randomUUID(),booking:randomUUID()};fixtures.push(f);
  for(const [t,name] of [[type,'Synthetic Premium'],[other,'Synthetic Suite']])await pool.query('INSERT INTO room_types(id,code,name,max_occupancy) VALUES($1::text,$1,$2,3)',[t,name]);
  await pool.query("INSERT INTO rate_plans(id,name,room_type_id,base_rate,currency) VALUES($1,'Synthetic USD',$2,999,'USD')",[plan,type]);
  for(let i=0;i<count;i++)for(const t of [type,other])await pool.query("INSERT INTO rooms(id,room_number,room_type_id,floor,status,is_active,is_virtual,max_occupancy) VALUES($1,$2,$3,3,'available',true,false,3)",[`${t}-${i}`,`${t}-${i}`,t]);
@@ -24,7 +24,7 @@ async function fixture(count=1){
  await pool.query('INSERT INTO channex_inbound_settings(connection_id,enabled,settlement_exchange_rate) VALUES($1,true,1500)',[id]);
  await service.persistInboundRevision(pool,id,payload(f));return f;
 }
-function payload(f:any,status='new',id=f.rev,stamp='2026-11-16T20:46:00Z',count=1){return {id,attributes:{property_id:f.id,booking_id:f.booking,inserted_at:stamp,status,arrival_date:arrival,departure_date:departure,amount:String(142.04*count),currency:'USD',customer:{name:'Synthetic',surname:'Assignment'},rooms:Array.from({length:count},(_,i)=>({id:`remote-${i}`,room_type_id:'remote-type',rate_plan_id:'remote-plan',occupancy:{adults:2},days:{[arrival]:'142.04'}}))}};}
+function payload(f:any,status='new',id=f.rev,stamp='2026-11-16T20:46:00Z',count=1){return {id,attributes:{property_id:f.id,booking_id:f.booking,inserted_at:stamp,status,arrival_date:arrival,departure_date:departure,amount:String(142.04*count),currency:'USD',customer:{name:'Synthetic',surname:'Assignment'},rooms:Array.from({length:count},(_,i)=>(f.legacyVat?{booking_room_id:`remote-${i}`,room_type_id:'remote-type',rate_plan_id:null,occupancy:{adults:2,children:0,infants:0},amount:'142.04',taxes:[{type:'Value Added Tax (VAT)',is_inclusive:false,total_price:'24.65'}],days:{[arrival]:'117.39'}}:{id:`remote-${i}`,room_type_id:'remote-type',rate_plan_id:'remote-plan',occupancy:{adults:2},days:{[arrival]:'142.04'}}))}};}
 function request(options:InboundAssignmentOptions,roomId:string,overrides:any={}){return {...{expectedPayloadHash:options.payloadHash,expectedConfigurationHash:options.configurationHash,assignments:{'remote-0':roomId},reason:'Requested room assignment',confirmCategoryChange:false,confirmScopeChange:false,actor:{id:actor,name:'Synthetic Operator'},canOverrideScope:true},...overrides};}
 async function state(f:any){return (await pool.query('SELECT r.* FROM reservations r JOIN channex_inbound_rooms l ON l.reservation_id=r.id WHERE l.connection_id=$1 ORDER BY l.remote_room_id',[f.id])).rows;}
 async function post(f:any,body:any){const response=await fetch(`${base}/api/channex/connections/${f.id}/inbound/assign/${f.rev}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return {status:response.status,body:await response.json()};}
@@ -50,6 +50,38 @@ describe.skipIf(!enabled)('manual OTA inbox assignment with category warning and
   const f=await fixture();const preview=await manual.getInboundAssignmentOptions(f.id,f.rev,false);
   expect(preview.rooms[0].choices.map(r=>r.id)).toEqual([`${f.type}-0`]);expect(preview).toMatchObject({currency:'USD',amount:'142.04',settlementTotal:'213060.00'});expect(await state(f)).toHaveLength(0);
   expect(JSON.stringify(preview)).not.toMatch(/payload"|token|customer|mail/);
+ });
+ it('assigns the legacy null-plan VAT shape only after an explicit scoped exception, with exact original and peso totals',async()=>{
+  const f=await fixture(1,true);
+  await pool.query('UPDATE channex_inbound_settings SET settlement_exchange_rate=1545 WHERE connection_id=$1',[f.id]);
+  const original=(await pool.query('SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0];
+  await service.applyInboundRevision(f.id,f.rev);
+  expect(await state(f)).toHaveLength(0);
+  expect((await pool.query('SELECT review_code FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0].review_code).toBe('INVALID_ROOM_MAPPING');
+  const ordinary=await manual.getInboundAssignmentOptions(f.id,f.rev,false);
+  expect(ordinary.rooms[0].choices).toEqual([]);
+  identity=actor;
+  const response=await fetch(`${base}/api/channex/connections/${f.id}/inbound/assignment/${f.rev}`);
+  expect(response.status).toBe(200);
+  const preview=await response.json() as InboundAssignmentOptions;
+  expect(preview).toMatchObject({amount:'142.04',settlementTotal:'219451.80',rooms:[{ratePlanMissing:true,sourceNetAmount:'117.39',sourceVatAmount:'24.65'}]});
+  const body=request(preview,`${f.type}-0`);
+  await expect(service.applyInboundRevision(f.id,f.rev,body)).rejects.toMatchObject({code:'MANUAL_SCOPE_CONFIRMATION_REQUIRED'});
+  const applied=await service.applyInboundRevision(f.id,f.rev,{...body,confirmScopeChange:true});
+  expect(applied?.applied).toBe(true);
+  expect((await state(f))[0]).toMatchObject({room_id:`${f.type}-0`,total_room_amount:'219451.80',rate_plan_id:null,nightly_pricing:[{rateCents:21945180}]});
+  expect((await pool.query('SELECT source_total,source_rate_plan_id,settlement_total FROM channex_inbound_settlements WHERE connection_id=$1',[f.id])).rows).toEqual([{source_total:'142.04',source_rate_plan_id:null,settlement_total:'219451.80'}]);
+  expect((await pool.query('SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0]).toEqual(original);
+ });
+ it('explains an unreconciled tax total at the lookup API and creates no reservation',async()=>{
+  const f=await fixture(1,true),raw=payload(f);raw.attributes.rooms[0].taxes![0].total_price='24.64';
+  await pool.query('DELETE FROM channex_inbound_revisions WHERE connection_id=$1',[f.id]);
+  await service.persistInboundRevision(pool,f.id,raw);
+  identity=actor;
+  const response=await fetch(`${base}/api/channex/connections/${f.id}/inbound/assignment/${f.rev}`);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({code:'ROOM_TAX_TOTAL_REQUIRES_REVIEW',error:'El total de la habitación no coincide con las tarifas y el IVA informado por el canal. Revisá el desglose antes de asignar.'});
+  expect(await state(f)).toHaveLength(0);
  });
  it('requires advance category and scope confirmations, then preserves channel price, conversion and immutable source',async()=>{
   const f=await fixture();const before=(await pool.query('SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0];
