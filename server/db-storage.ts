@@ -1395,7 +1395,7 @@ export class DatabaseStorage implements IStorage {
     const safeData: Record<string, any> = {};
     const protectedFields = ["id", "createdAt", "reservationCode", "housekeepingBedPreparation"];
     const fkFields = ["guestId", "roomId", "roomTypeId"];
-    const validStatuses = ["tentative", "pending", "confirmed", "checked_in", "checked_out", "cancelled", "no_show"];
+    const validStatuses = ["tentative", "pending", "confirmed", "web_checkin", "checked_in", "checked_out", "cancelled", "no_show"];
     for (const [key, value] of Object.entries(reservation)) {
       if (protectedFields.includes(key)) continue;
       if (value === undefined) continue;
@@ -7267,7 +7267,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getWebCheckinByReservation(reservationId: string): Promise<WebCheckin | undefined> {
-    const [checkin] = await db.select().from(webCheckins).where(eq(webCheckins.reservationId, reservationId));
+    const [checkin] = await db.select().from(webCheckins).where(eq(webCheckins.reservationId, reservationId))
+      .orderBy(sql`CASE WHEN ${webCheckins.status} = 'completed' THEN 0 ELSE 1 END`, desc(webCheckins.createdAt), desc(webCheckins.id)).limit(1);
     return checkin;
   }
 

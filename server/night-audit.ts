@@ -624,8 +624,7 @@ export function setupNightAuditScheduler(): void {
       // Email reminders at 09:00 Argentina time
       if (hour === 9 && minute === 0) {
         naLog("Ejecutando scheduler de recordatorios de email...");
-        const baseUrl = process.env.BASE_URL || "https://hotelier-pro--marcesvetliza.replit.app";
-        runReminderScheduler(baseUrl)
+        runReminderScheduler()
           .then(stats => naLog(`Recordatorios email: ${stats.sent} enviados, ${stats.skipped} omitidos, ${stats.failed} fallidos`))
           .catch(err => naLog(`Error en scheduler de recordatorios: ${err.message}`));
       }
