@@ -14,13 +14,13 @@ La web comercial ya está pública en `xeniapms.com`; Marcelo confirmó las redi
 
 La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130), en la rama `feat/xenia-pms-integration-20261118`, conecta los PMS ficticios de Aurora y Brisa con el panel. Conserva la primera entrega y las correcciones de `main` hasta `8a6e98cb`, sin fusionar ni publicar en Maran. Marcelo informó que el panel tiene buena salud; la revisión remota exacta sigue pendiente de registrar.
 
-El paquete agrega preparación limpia de bases operativas nuevas, ingreso central con códigos de un uso y sesiones locales, permisos comprobados por el servidor, ficha privada de variables y marca/contexto visibles. Se verificaron localmente dos PMS compilados por HTTPS, planning, creación desde el formulario real, edición, consulta sin escritura, revocación y cierre central. GitHub ejecuta las verificaciones del paquete, incluida la construcción de imágenes, antes de publicarlo.
+El paquete agrega preparación limpia de bases operativas nuevas, ingreso central con códigos de un uso y sesiones locales, permisos comprobados por el servidor, ficha privada de variables y marca/contexto visibles. Se verificaron localmente dos PMS compilados por HTTPS, planning, creación desde el formulario real, edición, consulta sin escritura, revocación y cierre central. GitHub aprobó las cinco verificaciones del código `73f85093`: PMS aislado, fundamentos multihotel, suite general con PostgreSQL, fechas y workflows. Incluyen la construcción de ambas imágenes. La [evidencia de la entrega](evidencia/pms-qa-2026-11-18.json) registra los resultados y sus límites.
 
 La [ficha con el paso a paso de Railway y Donweb](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) contiene los nombres, comandos, puerto, variables y dominios reales previstos. El orden de publicación es: actualizar sólo Xenia-Control; generar la ficha de Aurora; crear su base operativa y servicio nuevos; conectar su dominio; aceptar Aurora; repetir con Brisa.
 
 ## Próximos hitos
 
-1. Completar los controles automáticos de la PR 130 y publicar el paquete de pruebas siguiendo su ficha.
+1. Publicar el paquete de pruebas de la PR 130 siguiendo su ficha; los controles automáticos están aprobados.
 2. Aceptar los PMS en Railway con Marcelo y registrar la revisión servida de cada servicio.
 3. Ensayar actualización independiente y restauración, y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
 4. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.

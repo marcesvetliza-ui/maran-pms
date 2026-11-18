@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-18",
+  "candidate_branch": "feat/xenia-pms-integration-20261118",
+  "code_commit": "73f85093dda1c7d4052cf5272f816337cddc33ca",
+  "pull_request": "https://github.com/marcesvetliza-ui/maran-pms/pull/130",
+  "environments": "Disposable local PostgreSQL clusters; compiled PMS over local HTTPS; Chromium. GitHub CI uses its own disposable PostgreSQL clusters.",
+  "acceptance": {
+    "status": "passed",
+    "environment": "disposable local PostgreSQL and compiled PMS over HTTPS",
+    "checks": [
+      "central sign-in and resume",
+      "planning and lodging APIs",
+      "create and edit reservation",
+      "separate Aurora and Brisa databases",
+      "viewer write refusal",
+      "membership revocation",
+      "central logout revokes PMS"
+    ],
+    "date": "2026-11-18T11:59:10.934Z"
+  },
+  "local_validation": {
+    "node": "22.23.5",
+    "pms_tests": 10,
+    "control_http_tests": 24,
+    "control_browser_scenario": "passed",
+    "client_regression_tests": 29,
+    "auth_startup_regression_tests": 21,
+    "types": "passed",
+    "date_lint": "passed",
+    "workflow_lint": "passed"
+  },
+  "github_validation": [
+    {
+      "name": "PMS aislado de Xenia",
+      "result": "success",
+      "includes": [
+        "compiled PMS browser flow",
+        "clean and repeated setup",
+        "identity and permissions",
+        "artifact contents and private download refusal",
+        "both Docker images"
+      ],
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44299711498"
+    },
+    {
+      "name": "Fundamentos multihotel de Xenia",
+      "result": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44299711433"
+    },
+    {
+      "name": "Workflow Lint",
+      "result": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44299711421"
+    },
+    {
+      "name": "Date Pattern Lint",
+      "result": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44299711434"
+    },
+    {
+      "name": "Test Suite",
+      "result": "success",
+      "includes": [
+        "client and shared tests",
+        "server tests",
+        "PostgreSQL integration tests",
+        "fiscal payment retry checks"
+      ],
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44299711552"
+    }
+  ],
+  "remote_control_health": {
+    "source": "owner report in conversation",
+    "statement": "Marcelo informó buena salud del panel antes de pedir preparar el paso 2.",
+    "independently_observed_in_this_execution": false
+  },
+  "remote_pms_deployment": "not performed",
+  "maran_deployment": "not modified",
+  "pending": [
+    "publish and accept Aurora in Railway",
+    "publish and accept Brisa",
+    "independent version updates",
+    "remote restore rehearsal",
+    "central-outage continuity before any operational hotel",
+    "other operational modules and fiscal/integration circuits"
+  ],
+  "qa_availability_policy": "Every authenticated API verifies access with the control service; central failure temporarily blocks QA operations.",
+  "artifact_policy": {
+    "runtime_assets": "Xenia logo only; Maran stock, manuals and other server assets excluded",
+    "source_archive": "excluded",
+    "private_legacy_download": "404 in QA",
+    "verified_by": "compiled-PMS integration scenario and GitHub QA workflow"
+  },
+  "release_review": {
+    "code": "73f85093dda1c7d4052cf5272f816337cddc33ca",
+    "all_five_github_workflows": "success",
+    "status": "QA package ready for manual Railway deployment; remote acceptance pending"
+  }
+}

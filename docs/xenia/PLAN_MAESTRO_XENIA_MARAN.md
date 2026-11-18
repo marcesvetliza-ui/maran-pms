@@ -8,7 +8,7 @@ lang: es-AR
 
 **Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. El enlace con dos PMS ficticios de Alojamiento ya está implementado y probado localmente en la PR 130; falta publicarlo y aceptarlo en Railway.
 
-**Prioridad actual:** terminar los controles de la PR 130, publicar primero Xenia-Control y después el PMS de pruebas de Aurora; aceptar Aurora antes de incorporar Brisa y continuar por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** publicar primero Xenia-Control con la PR 130 y sus controles aprobados y después el PMS de pruebas de Aurora; aceptar Aurora antes de incorporar Brisa y continuar por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -94,7 +94,7 @@ El acta distingue confirmación manual del propietario, verificaciones automatiz
 
 ## 2.5 Paso 2 implementado el 18 de noviembre
 
-La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130) implementa PMS separados de Aurora y Brisa con datos ficticios y acceso desde Xenia, manteniendo Maran fuera de los cambios publicados. Las pruebas locales cubren la preparación limpia, el ingreso, el planning, la reserva desde el formulario, la edición y la revocación de permisos. La publicación remota y su aceptación siguen pendientes.
+La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130) implementa PMS separados de Aurora y Brisa con datos ficticios y acceso desde Xenia, manteniendo Maran fuera de los cambios publicados. Las pruebas locales cubren la preparación limpia, el ingreso, el planning, la reserva desde el formulario, la edición y la revocación de permisos. Las cinco verificaciones de GitHub y ambas imágenes están aprobadas para `73f85093`; la [evidencia](evidencia/pms-qa-2026-11-18.json) conserva el alcance. La publicación remota y su aceptación siguen pendientes.
 
 La [ficha de publicación](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) entrega los pasos de Railway y Donweb. El modo QA bloquea operaciones si el panel central no puede verificar el acceso; la continuidad ante caídas, los otros circuitos operativos y la restauración remota siguen siendo condiciones pendientes para un hotel en uso.
 
