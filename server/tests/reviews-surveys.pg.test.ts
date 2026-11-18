@@ -530,6 +530,27 @@ suite(
         service: 4,
       });
     });
+    it("asigna a la fecha argentina una respuesta recibida después de medianoche UTC", async () => {
+      const r = await stay(),
+        token = randomUUID();
+      await pool!.query(
+        "INSERT INTO survey_tokens(id,reservation_id,token,completed) VALUES($1::text,$2,$1::text,true)",
+        [token, r.id],
+      );
+      await pool!.query(
+        "INSERT INTO survey_responses(survey_token_id,rating_overall,submitted_at) VALUES($1,4,'2026-11-19 01:30:00')",
+        [token],
+      );
+      await backfillSurveyReviews();
+      expect(
+        (
+          await pool!.query(
+            "SELECT review_date::text FROM guest_reviews WHERE reservation_id=$1",
+            [r.id],
+          )
+        ).rows[0].review_date,
+      ).toBe("2026-11-18");
+    });
     it("el seguimiento y sus notas no sobrescriben el comentario ni las puntuaciones del huésped", async () => {
       const r = await stay();
       await due(r.id);

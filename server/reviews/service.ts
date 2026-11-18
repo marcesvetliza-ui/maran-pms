@@ -47,7 +47,7 @@ async function createSurveyReview(response: any, reservation: any) {
     await db.execute(sql`INSERT INTO guest_reviews(id,reservation_id,guest_id,room_id,review_date,source,rating,title,content,
     survey_response_id,area_ratings,area_questions,nps,contact_requested,followup_status,sentiment)
     VALUES(${"survey-" + response.id},${reservation.id},${reservation.guest_id || "unknown"},${reservation.room_id},
-      ${new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(new Date(response.submitted_at))}::date,
+      ${response.review_day}::date,
       'survey',${response.rating_overall},'Encuesta posestadía',${response.comment || ""},${response.id},${JSON.stringify(areaRatings)}::jsonb,${JSON.stringify(response.area_questions || {})}::jsonb,
       ${response.nps ?? null},${response.contact_requested || false},${attention ? "new" : "resolved"},
       ${response.rating_overall <= 2 ? "negative" : response.rating_overall >= 4 ? "positive" : "neutral"})
@@ -85,7 +85,7 @@ export async function notifyReviewFollowup(
 /** Old responses retain their IDs, tokens and original answers. No invitation is sent. */
 export async function backfillSurveyReviews() {
   const rows = (
-    await db.execute(sql`SELECT s.*,r.id AS reservation_id,r.guest_id,r.room_id FROM survey_responses s
+    await db.execute(sql`SELECT s.*,to_char((s.submitted_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS review_day,r.id AS reservation_id,r.guest_id,r.room_id FROM survey_responses s
     JOIN survey_tokens t ON t.id=s.survey_token_id JOIN reservations r ON r.id=t.reservation_id
     WHERE NOT EXISTS(SELECT 1 FROM guest_reviews g WHERE g.survey_response_id=s.id) ORDER BY s.submitted_at,s.id`)
   ).rows as any[];
@@ -211,9 +211,9 @@ export async function submitSurvey(token: string, input: unknown) {
         .map((q) => [q.key, q.question]),
     );
     const [response] = (
-      await db.execute(sql`INSERT INTO survey_responses(id,survey_token_id,rating_overall,rating_room,rating_cleanliness,rating_service,rating_food,comment,guest_name,area_ratings,area_questions,nps,contact_requested)
+      await db.execute(sql`INSERT INTO survey_responses(id,survey_token_id,rating_overall,rating_room,rating_cleanliness,rating_service,rating_food,comment,guest_name,area_ratings,area_questions,nps,contact_requested,submitted_at)
       VALUES(${randomUUID()},${access.id},${data.ratingOverall},${valid.room ?? null},${valid.cleanliness ?? null},${valid.service ?? null},${valid.food ?? null},
-        ${data.comment || null},${data.guestName || null},${JSON.stringify(valid)}::jsonb,${JSON.stringify(questionSnapshot)}::jsonb,${data.nps ?? null},${data.contactRequested}) RETURNING *`)
+        ${data.comment || null},${data.guestName || null},${JSON.stringify(valid)}::jsonb,${JSON.stringify(questionSnapshot)}::jsonb,${data.nps ?? null},${data.contactRequested},now() AT TIME ZONE 'UTC') RETURNING *,to_char((submitted_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS review_day`)
     ).rows as any[];
     await createSurveyReview(response, reservation);
     await db.execute(
