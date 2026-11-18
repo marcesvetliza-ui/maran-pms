@@ -3,6 +3,10 @@ import {assertIndividualGroupPayment} from '../billing/individualGroupFolio';
 import {groupPersonalExtrasFactsQuery} from "../groupPersonalExtrasFacts";
 import { accommodationNights } from '@shared/accommodationNights';
 import { withReservationFinancialLock } from "../nightlyPricingGuard";
+import { addPostCheckoutCharge } from "../postCheckoutCharges";
+import { checkoutReversalEligibility, reverseCheckout } from "../checkoutReversal";
+import { isPostCheckoutCharge } from "@shared/postCheckout";
+import { hasPermission } from "../permissions";
 import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
 import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
@@ -1094,33 +1098,15 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-  // Revertir check-out: reservation → checked_in, room → occupied (solo mismo día)
-  app.post("/api/reservations/:id/undo-checkout", requireAuth, async (req, res) => {
+  app.get("/api/reservations/:id/checkout-reversal", requireAuth, requirePermission("sidebar:/check-in"), async (req, res) => {
     try {
-      const reservation = await storage.getReservation(req.params.id);
-      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada" });
-      if (reservation.status !== "checked_out") {
-        return res.status(400).json({ error: "La reserva no está en estado check-out" });
-      }
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-      const checkedOutToday = reservation.checkedOutAt &&
-        new Date(reservation.checkedOutAt).toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }) === today;
-      if (!checkedOutToday) {
-        return res.status(400).json({ error: "Solo se puede revertir el check-out el mismo día que se realizó" });
-      }
-      await storage.updateReservation(req.params.id, { status: "checked_in", checkedOutAt: null });
-      if (reservation.roomId) {
-        await storage.updateRoom(reservation.roomId, { status: "occupied" });
-      }
-      await audit(req, "update", "reservations",
-        `Check-out revertido: ${reservation.reservationCode} — el huésped permanece en la habitación`,
-        { entityType: "reservation", entityId: req.params.id }
-      );
-      res.json({ success: true });
-    } catch (error) {
-      console.error("undo-checkout error:", error);
-      res.status(500).json({ error: "Error al revertir el check-out" });
-    }
+      res.json(await checkoutReversalEligibility(req.params.id));
+    } catch (error: any) { res.status(error.statusCode || 500).json({ error: error.message }); }
+  });
+  // Retomar alojamiento real; la cuenta financiera tiene su propio acceso.
+  app.post("/api/reservations/:id/undo-checkout", requireAuth, requirePermission("sidebar:/check-in"), async (req, res) => {
+    try { res.json(await reverseCheckout(req.params.id, req.user!, req.body.overrideTentativeGroupWarning === true)); }
+    catch (error: any) { res.status(error.statusCode || 500).json(error.response || { error: error.message }); }
   });
 
   // Get reservation folio (charges summary)
@@ -1928,6 +1914,20 @@ export function registerReservationsRoutes(app: Express) {
   });
 
   // Charges
+  app.get("/api/reservations/:id/post-checkout/charges", requireAuth, requirePermission("sidebar:/billing"), async (req, res) => {
+    try {
+      const reservation = await storage.getReservation(req.params.id);
+      if (!reservation) return res.status(404).json({ error: "Reserva no encontrada." });
+      if (reservation.status !== "checked_out") return res.status(409).json({ error: "La estadía no tiene check-out realizado." });
+      res.json({ charges: (await storage.getCharges(req.params.id)).filter(charge => isPostCheckoutCharge(charge.id)) });
+    } catch (error: any) { res.status(error.statusCode || 500).json({ error: error.message }); }
+  });
+  app.post("/api/reservations/:id/post-checkout/charges", requireAuth, requirePermission("sidebar:/billing"), async (req, res) => {
+    try {
+      const result = await addPostCheckoutCharge(req.params.id, req.body, req.user!);
+      res.status(result.replayed ? 200 : 201).json(result.charge);
+    } catch (error: any) { res.status(error.statusCode || 500).json({ error: error.message, notApplied: [400, 404, 409].includes(error.statusCode) }); }
+  });
   app.get("/api/reservations/:reservationId/charges", async (req, res) => {
     try {
       const includeAnulados = req.query.includeAnulados === "true";
@@ -1951,6 +1951,7 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/charges", async (req, res) => {
     try {
+      if (isPostCheckoutCharge(req.body.id)) return res.status(400).json({ error: "Los consumos posteriores se registran desde Cuenta y facturación." });
       if (req.body.reservationId) {
         const reservation = await storage.getReservation(req.body.reservationId);
         if (reservation && isReservationLocked(reservation)) {
@@ -2842,6 +2843,7 @@ export function registerReservationsRoutes(app: Express) {
     let groupPaymentLockClient: PoolClient | undefined;
     let lockedReservationId: string | undefined;
     let groupRowTransactionOpen = false;
+    let postCheckoutInvoiceId: number | undefined;
     try {
       const user = (req as any).user;
       const paymentRequest = parseReservationPaymentRequest(req.body, String(user?.id || user?.username || ""));
@@ -2862,7 +2864,14 @@ export function registerReservationsRoutes(app: Express) {
       }
       if (req.body.reservationId) {
         const reservation = await storage.getReservation(req.body.reservationId);
-        if (reservation && isReservationLocked(reservation) && req.body.paymentPurpose!=='group_room_collection' && !((reservation as any).groupId&&req.body.paymentPurpose!=='personal_extras'&&req.body.invoiceRef)) {
+        if (reservation?.status === "checked_out" && req.body.invoiceRef && !(reservation as any).groupId) {
+          if (!hasPermission(String(req.user?.role || ""), "sidebar:/billing")) return res.status(403).json({ error: "No tenés permiso para gestionar la cuenta." });
+          let ref: any;
+          try { ref = JSON.parse(String(req.body.invoiceRef)); } catch { /* invalid identity is rejected below */ }
+          if (!paymentRequest || !Number.isSafeInteger(Number(ref?.id)) || Number(ref.id) <= 0) return res.status(400).json({ error: "Seleccioná una factura vigente y una operación de cobro válida." });
+          postCheckoutInvoiceId = Number(ref.id);
+        }
+        if (reservation && isReservationLocked(reservation) && postCheckoutInvoiceId === undefined && req.body.paymentPurpose!=='group_room_collection' && !((reservation as any).groupId&&req.body.paymentPurpose!=='personal_extras'&&req.body.invoiceRef)) {
           return res.status(403).json({ error: "No se puede agregar pagos a una reserva cerrada de días anteriores" });
         }
       }
@@ -3058,6 +3067,7 @@ export function registerReservationsRoutes(app: Express) {
       }
       const payment = await storage.createReservationPaymentWithLedger({
         paymentRequest,
+        postCheckoutInvoiceId,
         expectedReservationStatus: reservationForPayment?.status,
         payment: req.body,
         sourceLabel: groupPersonalExtras ? `[personal_extras] ${cashLabel}` : cashLabel,
