@@ -121,9 +121,11 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-setupAuth(app, xeniaPms);
 if (xeniaPms) {
+  setupAuth(app, xeniaPms);
   registerXeniaPmsRuntime(app,xeniaPmsPool,xeniaPms);
+} else {
+  setupAuth(app);
 }
 app.use("/api", createApiLimiter());
 

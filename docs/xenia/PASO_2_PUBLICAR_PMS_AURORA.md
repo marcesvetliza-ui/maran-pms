@@ -79,17 +79,17 @@ No hace falta copiar una URL con contraseña a mano. Tampoco habilitar una conex
 
 ## 5. Crear el servicio del PMS de Aurora
 
-1. En el proyecto, pulsá **+ New / Add → GitHub Repo**.
-2. Elegí `marcesvetliza-ui/maran-pms` y renombrá **esa nueva tarjeta** como **xenia-aurora-pms**.
-3. En su **Settings → Source**, elegí la rama `feat/xenia-pms-integration-20261118` y directorio raíz `/`.
-4. En **Config-as-code / Railway Config File**, indicá `/railway.xenia-pms.json`.
-5. En **Variables → Raw Editor**, pegá las líneas de la ficha privada que generaste para Aurora. Son líneas `NOMBRE=valor`; no son un JSON. Guardá los cambios.
-6. Agregá otra variable mediante **New Variable**:
+1. En el proyecto, pulsá **+ New / Add → Empty Service** y nombrá la nueva tarjeta **xenia-aurora-pms**. Puede quedar `Offline` mientras se configura.
+2. En **Variables → Raw Editor**, pegá las líneas de la ficha privada que generaste para Aurora. Son líneas `NOMBRE=valor`; no son un JSON. Guardá los cambios.
+3. Agregá otra variable mediante **New Variable**:
 
    - Nombre: `DATABASE_URL`.
    - Valor: seleccioná la referencia a **xenia-aurora-pms-db → DATABASE_URL**.
    - La referencia esperada es `${{xenia-aurora-pms-db.DATABASE_URL}}`.
 
+4. En **Settings → Source → Connect Repo**, elegí `marcesvetliza-ui/maran-pms`, rama `feat/xenia-pms-integration-20261118` y directorio raíz `/`. Completá la configuración antes de aplicar el despliegue.
+5. En **Config-as-code / Railway Config File**, indicá `/railway.xenia-pms.json`.
+6. Revisá que la tarjeta tenga la ficha de Aurora y la referencia de su base nueva. No importes variables compartidas del PMS existente.
 7. No agregues claves ARCA/AFIP, Channex, correo, IA ni otros servicios reales a esta tarjeta.
 8. Antes de publicar, comprobá que los ajustes efectivos sean:
 
