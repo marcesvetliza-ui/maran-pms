@@ -12,3 +12,14 @@ beforeEach(()=>{queryClient.clear();downloads=[];vi.stubGlobal('fetch',vi.fn(asy
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 it('fechas y proveedor filtran la lista y se envían iguales en Excel y PDF',async()=>{const user=userEvent.setup();render(<QueryClientProvider client={queryClient}><PurchaseInvoices/></QueryClientProvider>);expect(await screen.findByText('FACTURA-1')).toBeInTheDocument();await user.type(screen.getByLabelText('Desde (emisión)'),'2026-11-01');await user.type(screen.getByLabelText('Hasta (emisión)'),'2026-11-15');await user.selectOptions(screen.getByLabelText('Proveedor del reporte'),'1');expect(screen.queryByText('FACTURA-2')).toBeNull();expect(screen.queryByText('FACTURA-3')).toBeNull();expect(screen.getByText('FACTURA-1')).toBeInTheDocument();for(const name of ['Descargar Excel','Descargar PDF']){await user.click(screen.getByRole('button',{name}));await waitFor(()=>expect(screen.getByRole('button',{name})).toBeEnabled());}expect(downloads).toHaveLength(2);downloads.forEach((u,i)=>{const p=new URL(u,'http://localhost').searchParams;expect(p.get('desde')).toBe('2026-11-01');expect(p.get('hasta')).toBe('2026-11-15');expect(p.get('supplierId')).toBe('1');expect(p.get('format')).toBe(i?'pdf':'xlsx');});});
 it('bloquea descarga con rango invertido y muestra motivo',async()=>{const user=userEvent.setup();render(<QueryClientProvider client={queryClient}><PurchaseInvoices/></QueryClientProvider>);await screen.findByText('FACTURA-1');await user.type(screen.getByLabelText('Desde (emisión)'),'2026-11-16');await user.type(screen.getByLabelText('Hasta (emisión)'),'2026-11-01');expect(screen.getByRole('alert')).toHaveTextContent('posterior');expect(screen.getByRole('button',{name:'Descargar Excel'})).toBeDisabled();expect(downloads).toHaveLength(0);});
+it('Retenciones aparece junto a Historial de OPs y consulta solo al abrir esa pestaña',async()=>{
+ const original=fetch;const reportCalls:string[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(url:any,options:any)=>{
+  if(String(url).startsWith('/api/purchase-retentions/report')){reportCalls.push(String(url));return new Response(JSON.stringify({rows:[],count:0,page:1,pageSize:50,totals:{vigentes:0,anuladas:0,totalVigente:'0.00',totalAnulado:'0.00'}}));}
+  return original(url,options);
+ }));
+ const user=userEvent.setup();render(<QueryClientProvider client={queryClient}><PurchaseInvoices/></QueryClientProvider>);await screen.findByText('FACTURA-1');
+ const tabs=screen.getAllByRole('tab');const index=tabs.findIndex(tab=>tab.textContent==='Historial de OPs');expect(tabs[index+1]).toHaveTextContent('Retenciones');
+ expect(reportCalls).toHaveLength(0);await user.click(screen.getByRole('tab',{name:'Retenciones'}));
+ await screen.findByText('No hay retenciones para los filtros elegidos.');expect(reportCalls).toHaveLength(1);
+});

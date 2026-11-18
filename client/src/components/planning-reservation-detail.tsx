@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
-import { getLocalToday, toArgentinaDateStr } from "@/lib/utils";
+import { getLocalToday } from "@/lib/utils";
 import type { ReservationWithDetails } from "@shared/schema";
 
 export function ReservationDetailModal({
@@ -100,39 +100,6 @@ export function ReservationDetailModal({
     },
   });
 
-  const undoCheckOutMutation = useMutation({
-    mutationFn: async () =>
-      apiRequest(
-        "POST",
-        `/api/reservations/${reservationId}/undo-checkout`,
-        {},
-      ),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
-      queryClient.invalidateQueries({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "/api/planning",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
-      toast({
-        title: "Check-out revertido",
-        description:
-          "La reserva volvió a Check-in y la habitación quedó Ocupada.",
-      });
-      onOpenChange(false);
-    },
-    onError: (error: any) => {
-      let description = "No se pudo revertir el check-out.";
-      try {
-        const b = JSON.parse(error.message.replace(/^\d+:\s*/, ""));
-        if (b.error) description = b.error;
-      } catch {}
-      toast({ title: "Error", description, variant: "destructive" });
-    },
-  });
-
   const undoCheckInMutation = useMutation({
     mutationFn: async () =>
       apiRequest("POST", `/api/reservations/${reservationId}/undo-checkin`, {}),
@@ -192,10 +159,6 @@ export function ReservationDetailModal({
   const canUndoCheckIn =
     reservation?.status === "checked_in" &&
     reservation?.checkInDate === todayLocal;
-  const canUndoCheckOut =
-    reservation?.status === "checked_out" &&
-    reservation?.checkedOutAt != null &&
-    toArgentinaDateStr(new Date(reservation.checkedOutAt)) === todayLocal;
   const canCancel =
     reservation?.status === "confirmed" ||
     reservation?.status === "web_checkin" ||
@@ -266,29 +229,6 @@ export function ReservationDetailModal({
                 >
                   <LogOut className="h-4 w-4 mr-2" />
                   Check-out
-                </Button>
-              )}
-              {canUndoCheckOut && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        "¿Revertir el check-out? La reserva volverá a Check-in y la habitación quedará Ocupada.",
-                      )
-                    ) {
-                      undoCheckOutMutation.mutate();
-                    }
-                  }}
-                  disabled={undoCheckOutMutation.isPending}
-                  className="w-full sm:w-auto text-orange-600 border-orange-300 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950/30"
-                  data-testid="button-undo-checkout"
-                >
-                  <Undo2 className="h-4 w-4 mr-2" />
-                  {undoCheckOutMutation.isPending
-                    ? "Revirtiendo..."
-                    : "Revertir Check-out"}
                 </Button>
               )}
               {canUndoCheckIn && (

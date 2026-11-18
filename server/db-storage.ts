@@ -2,6 +2,7 @@ import { normalizeToSpanishPaymentMethod } from "./payment-method";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, parseGroupCreditAdvanceConfirmation, supportsGroupCreditAdvance, groupCreditAdvanceSummary } from "@shared/groupCreditAdvance";
 import {getGroupPaymentRequest} from './groupPaymentRequest';
 import {lockRoomInvoiceCollection,finishRoomInvoiceCollection} from './billing/reservationInvoiceCollection';
+import { lockPostCheckoutInvoicePayment } from "./billing/postCheckoutInvoicePayment";
 import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
 import {withLodgingInventoryMutationLock} from './inventoryMutationLock';
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
@@ -1796,6 +1797,7 @@ export class DatabaseStorage implements IStorage {
   async createReservationPaymentWithLedger(input: {
     paymentRequest?: ReservationPaymentRequest;
     expectedReservationStatus?: string;
+    postCheckoutInvoiceId?: number;
     invoiceCollection?: {invoiceId:number;acknowledgeUnassignedAdvance:boolean;userId?:string};
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;
@@ -1894,6 +1896,10 @@ export class DatabaseStorage implements IStorage {
         if ((current.rows[0] as any)?.status !== input.expectedReservationStatus) {
           throw Object.assign(new Error("La estadía cambió mientras se preparaba el pago. Actualizá el folio antes de continuar."), { statusCode: 409 });
         }
+      }
+      if (input.postCheckoutInvoiceId !== undefined) {
+        if (!input.paymentRequest) throw Object.assign(new Error("El cobro necesita una clave de operación."), { statusCode: 400 });
+        await lockPostCheckoutInvoicePayment(tx, input.payment.reservationId, input.postCheckoutInvoiceId, canonicalAmount);
       }
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this
@@ -2743,12 +2749,14 @@ export class DatabaseStorage implements IStorage {
       roomTypeId: roomType.id,
       checkInDate: log.checkInDate,
       checkOutDate: log.checkOutDate,
+      hasSpecificRoom: true,
+      override: overrideTentativeGroupWarning,
     });
     if (inventoryConflict?.code === "GROUP_BLOCK_SHORTAGE" ||
         (inventoryConflict?.code === "GROUP_BLOCK_WARNING" && !overrideTentativeGroupWarning)) {
       const canOverride = inventoryConflict.code === "GROUP_BLOCK_WARNING";
       const error = canOverride
-        ? "La reserva OTA consume disponibilidad comprometida para un grupo tentativo."
+        ? "La reserva OTA consume cupos de grupos pendientes de asignar."
         : "La reserva OTA excede el inventario comprometido para grupos confirmados.";
       throw Object.assign(new Error(error), {
         statusCode: 409,
@@ -2757,6 +2765,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     const reservation = await this.createReservation({
+      _inventoryOverrideTentativeGroupWarning: overrideTentativeGroupWarning,
       reservationCode: this.generateReservationCode(),
       guestId: guest.id,
       roomTypeId: roomType.id,
@@ -2778,7 +2787,7 @@ export class DatabaseStorage implements IStorage {
       notes: `Reserva importada de ${channel.name}`,
       createdAt: new Date(),
       lastModifiedBy: null,
-    });
+    } as any);
 
     await this.updateOTAReservationLog(logId, {
       status: "synced",
@@ -3220,6 +3229,7 @@ export class DatabaseStorage implements IStorage {
       ratePlanId?: string | null;
       guestId?: string | null;
       canonicalRoomTypeId?: string;
+      overrideTentativeGroupWarning?: boolean;
     }
   ): Promise<Reservation | undefined> {
     const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
@@ -3227,6 +3237,10 @@ export class DatabaseStorage implements IStorage {
 
     const [room] = await db.select().from(rooms).where(eq(rooms.id, roomId));
     if (!room) return undefined;
+    if (!isOperationalInventoryRoom(room) || ["maintenance", "oos"].includes(room.status)) {
+      const error = "La habitación no está habilitada para asignaciones.";
+      throw Object.assign(new Error(error), { statusCode: 409, response: { error, code: "PHYSICAL_ROOM_UNAVAILABLE", canOverride: false } });
+    }
     if (options?.canonicalRoomTypeId && room.roomTypeId !== options.canonicalRoomTypeId) {
       throw new Error("La habitación no corresponde al tipo del bloque");
     }
@@ -3254,9 +3268,12 @@ export class DatabaseStorage implements IStorage {
       checkInDate,
       checkOutDate,
       contextGroupId: groupId,
+      hasSpecificRoom: true,
+      override: options?.overrideTentativeGroupWarning === true,
     });
-    if (inventoryConflict && inventoryConflict.code === "GROUP_BLOCK_SHORTAGE") {
-      throw Object.assign(new Error("El bloque grupal excede el inventario operativo"), { statusCode: 409 });
+    if (inventoryConflict && !(inventoryConflict.code === "GROUP_BLOCK_WARNING" && options?.overrideTentativeGroupWarning)) {
+      const error = "La asignación consume cupos de grupos pendientes de asignar.";
+      throw Object.assign(new Error(error), { statusCode: 409, response: { error, code: inventoryConflict.code, warning: inventoryConflict, canOverride: inventoryConflict.canOverride } });
     }
 
     let guest: Guest | undefined;
@@ -3272,6 +3289,7 @@ export class DatabaseStorage implements IStorage {
 
     const reservation = await this.createReservation({
       _inventoryContextGroupId: groupId,
+      _inventoryOverrideTentativeGroupWarning: options?.overrideTentativeGroupWarning === true,
       reservationCode: `G${group.groupCode}-${room.roomNumber}`,
       guestId: guest.id,
       roomTypeId: canonicalRoomTypeId,

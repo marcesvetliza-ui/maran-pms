@@ -11,7 +11,9 @@ const { apiRequestMock } = vi.hoisted(() => ({
 
 vi.mock("@/lib/queryClient", async () => {
   const actual = await vi.importActual<typeof import("@/lib/queryClient")>("@/lib/queryClient");
-  return { ...actual, apiRequest: apiRequestMock };
+  return { ...actual, apiRequest: apiRequestMock,
+    apiRequestWithGroupInventoryWarning: (method: string, url: string, data: any) => apiRequestMock(method, url, data),
+  };
 });
 
 const EXISTING_GUEST_ID = "guest-existing-003";
@@ -97,6 +99,23 @@ describe("group assignment dialog", () => {
       }
       return new Response("Not found", { status: 404 });
     }));
+  });
+
+  it("carga un pasajero por apellido y TAB a nombre sin intercambiar los datos enviados", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(await screen.findByTestId('guest-selector-0-new-btn'));
+    const surname = await screen.findByTestId('input-lastname-0');
+    await waitFor(() => expect(surname).toHaveFocus());
+    await user.type(surname, 'De la Cruz');
+    await user.tab();
+    expect(screen.getByTestId('input-firstname-0')).toHaveFocus();
+    await user.keyboard('María José');
+    await user.click(screen.getByTestId('button-confirm-assign-all'));
+    await waitFor(() => expect(apiRequestMock).toHaveBeenCalledWith(
+      'PATCH', `/api/groups/${GROUP_ID}/placeholder-reservations/${PLACEHOLDER_RESERVATION_ID}`,
+      expect.objectContaining({ guestFirstName: 'María José', guestLastName: 'De la Cruz' }),
+    ));
   });
 
   it("conserva la ficha elegida al cambiar la habitación de la misma fila", async () => {

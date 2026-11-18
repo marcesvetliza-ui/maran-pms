@@ -396,8 +396,9 @@ export function registerEventsRoutes(app: Express) {
 
       // Eventos no tiene caja propia; no replicar cobros en otro parte.
 
-      // Motor financiero: escribir al folio del evento
-      storage.addFolioPayment(
+      // Esperar el folio antes de responder: una consulta o NC inmediata
+      // debe ver el pago y su saldo, no una actualización todavía pendiente.
+      await storage.addFolioPayment(
         "event", req.params.eventId,
         parseFloat(String(amount)),
         `Pago Evento${isAdvance ? " (Seña)" : ""}`,

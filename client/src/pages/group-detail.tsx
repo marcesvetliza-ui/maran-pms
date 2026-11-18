@@ -614,19 +614,22 @@ export function AssignBlockDialog({
     let successCount = 0;
     let failCount = 0;
     const errors: string[] = [];
+    let groupWarningAccepted = false;
+    const rememberGroupWarning = { onGroupWarningAccepted: () => { groupWarningAccepted = true; } };
 
     for (const row of validRows) {
       try {
         if (row.reservationId) {
-          await apiRequest("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
+          await apiRequestWithGroupInventoryWarning("PATCH", `/api/groups/${group.id}/placeholder-reservations/${row.reservationId}`, {
             guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
             roomId: row.roomId !== row.originalRoomId ? row.roomId : undefined,
             roomTypeId: canonicalRoomTypeId,
-          });
+            ...(groupWarningAccepted ? { overrideTentativeGroupWarning: true } : {}),
+          }, rememberGroupWarning);
         } else {
-          await apiRequest("POST", `/api/groups/${group.id}/assign-room`, {
+          await apiRequestWithGroupInventoryWarning("POST", `/api/groups/${group.id}/assign-room`, {
             roomId: row.roomId,
             roomTypeId: canonicalRoomTypeId,
             guestId: row.guestId || undefined,
@@ -636,7 +639,8 @@ export function AssignBlockDialog({
             checkInDate: defaultCheckIn,
             checkOutDate: defaultCheckOut,
             agreedRate: block.agreedRate,
-          });
+            ...(groupWarningAccepted ? { overrideTentativeGroupWarning: true } : {}),
+          }, rememberGroupWarning);
         }
         successCount++;
       } catch (err: any) {
@@ -771,20 +775,20 @@ export function AssignBlockDialog({
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <Input
+                              placeholder="Apellido"
+                              value={row.lastName}
+                              name={`passenger-lastname-${index}`}
+                              autoComplete="off"
+                              onChange={(e) => updateRow({ lastName: e.target.value })}
+                              data-testid={`input-lastname-${index}`} autoFocus
+                            />
+                            <Input
                               placeholder="Nombre"
                               value={row.firstName}
                               name={`passenger-firstname-${index}`}
                               autoComplete="off"
                               onChange={(e) => updateRow({ firstName: e.target.value })}
                               data-testid={`input-firstname-${index}`}
-                            />
-                            <Input
-                              placeholder="Apellido"
-                              value={row.lastName}
-                              name={`passenger-lastname-${index}`}
-                              autoComplete="off"
-                              onChange={(e) => updateRow({ lastName: e.target.value })}
-                              data-testid={`input-lastname-${index}`}
                             />
                           </div>
                         </div>
@@ -1397,7 +1401,7 @@ export default function GroupDetailPage() {
 
   const changeRoomMutation = useMutation({
     mutationFn: async ({ reservationId, roomId, roomTypeId }: { reservationId: string; roomId: string; roomTypeId: string }) => {
-      return apiRequest("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId, contextGroupId: groupId });
+      return apiRequestWithGroupInventoryWarning("PATCH", `/api/reservations/${reservationId}`, { roomId, roomTypeId, contextGroupId: groupId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });

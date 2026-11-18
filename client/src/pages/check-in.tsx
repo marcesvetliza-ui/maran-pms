@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { getLocalToday, formatDateAR, fmtMoney, toArgentinaDateStr } from "@/lib/utils";
 import { canUseWalkInRate } from "@/lib/walk-in-rate";
+import { compareReservationsByRoom } from "@/lib/reservation-list-order";
 import { isZeroReservationRate, parseReservationRate } from "@shared/reservationRate";
 import {
   LogIn,
@@ -453,7 +454,7 @@ export default function CheckInPage() {
       guestName.includes(searchQuery.toLowerCase()) ||
       res.room?.roomNumber?.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  });
+  }).sort(compareReservationsByRoom);
 
   const handleCheckIn = (reservation: ReservationWithDetails) => {
     setSelectedReservation(reservation);

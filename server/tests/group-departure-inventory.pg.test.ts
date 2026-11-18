@@ -42,9 +42,11 @@ suite('group departures with actual storage on disposable PostgreSQL',()=>{
   await expect(storage.createReservation({...f.data,reservationCode:randomUUID()})).rejects.toMatchObject({response:{code:'PHYSICAL_ROOM_OVERLAP',canOverride:false}});
   expect((await pool.query("SELECT count(*)::int AS n FROM reservations WHERE room_id=$1 AND status='confirmed'",[f.data.roomId])).rows[0].n).toBe(1);
  });
- it('retains a genuinely unassigned group unit even for a free room and an explicit override',async()=>{
+ it('warns about a genuinely unassigned group unit and records explicit acceptance without altering the block',async()=>{
   const f=await fixture(true);
-  await expect(storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true})).rejects.toMatchObject({response:{code:'GROUP_BLOCK_SHORTAGE',canOverride:false,warning:{unassignedConfirmedGroupUnits:1}}});
-  expect((await pool.query("SELECT count(*)::int AS n FROM reservations WHERE room_id=$1 AND status='confirmed'",[f.data.roomId])).rows[0].n).toBe(0);
+  await expect(storage.createReservation(f.data)).rejects.toMatchObject({response:{code:'GROUP_BLOCK_WARNING',canOverride:true,warning:{unassignedConfirmedGroupUnits:1}}});
+  expect((await storage.createReservation({...f.data,_inventoryOverrideTentativeGroupWarning:true})).roomId).toBe(f.data.roomId);
+  expect((await pool.query('SELECT quantity FROM group_room_blocks WHERE group_id=$1',[f.group])).rows[0].quantity).toBe(16);
+  expect((await pool.query("SELECT count(*)::int AS n FROM reservations WHERE room_id=$1 AND status='confirmed'",[f.data.roomId])).rows[0].n).toBe(1);
  });
 });
