@@ -72,7 +72,7 @@ La ficha debe contener:
 | Procesos externos | Qué está desactivado en esta prueba y cómo se verifica. |
 | Reversión | Cómo volver al despliegue anterior y cuándo es necesaria una restauración de base. |
 
-**Condición para pasar al paso 5:** ficha completa y pruebas técnicas aprobadas. La rama, los comandos y las variables del enlace todavía no están disponibles; se completarán al entregar el desarrollo.
+**Condición para pasar al paso 5:** ficha completa y pruebas técnicas aprobadas. La rama, comandos y variables ya están implementados en la [ficha del paso 2](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md). La PR 130 registra los controles del paquete; usar esa ficha actual para publicar los servicios nuevos.
 
 ## 5 Preparar el respaldo de la prueba
 
@@ -269,7 +269,7 @@ Registrar para cada entrega: fecha, responsable de la prueba, código publicado,
 | Versiones y recuperación | Actualización de un hotel y restauración ensayadas sin modificar los demás. |
 | Maran | Pruebas sobre copia aislada, aceptación operativa y publicación de su entrega específica. |
 
-**Acción actual:** completar las consultas del paso 3 y preparar técnicamente el paso 4. La creación del nuevo PMS en Railway comienza después de recibir esa ficha probada.
+**Acción actual, 18 de noviembre:** revisar los controles de la PR 130 y seguir la [ficha actual de publicación de Aurora](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md). Primero se actualiza únicamente Xenia-Control; después se generan las variables privadas y se crean la base y el servicio nuevos del PMS.
 
 ## Documentos del proyecto
 

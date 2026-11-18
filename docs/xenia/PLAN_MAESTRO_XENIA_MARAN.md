@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "17 de noviembre de 2026 · Versión 1.3"
+date: "18 de noviembre de 2026 · Versión 1.4"
 lang: es-AR
 ---
 
-**Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. El PMS completo todavía requiere integración con ese panel.
+**Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. El enlace con dos PMS ficticios de Alojamiento ya está implementado y probado localmente en la PR 130; falta publicarlo y aceptarlo en Railway.
 
-**Prioridad actual:** preparar una instalación completa de prueba para Aurora y su enlace con el panel central; después incorporar Brisa y continuar la integración por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** terminar los controles de la PR 130, publicar primero Xenia-Control y después el PMS de pruebas de Aurora; aceptar Aurora antes de incorporar Brisa y continuar por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -91,6 +91,12 @@ Estas observaciones definen tareas. No se ejecuta una migración de esquema dent
 - La entrega del panel parte de `main` en `2301ffb6` y tiene 24 pruebas PostgreSQL/HTTP, navegador y construcción Docker aprobados para su revisión funcional `02fe8c35`. La [PR 119](https://github.com/marcesvetliza-ui/maran-pms/pull/119) sigue en borrador y no está integrada en Maran.
 
 El acta distingue confirmación manual del propietario, verificaciones automatizadas y comprobaciones todavía pendientes: [aceptación multihotel](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/evidencia/multihotel-aceptacion-2026-11-17.json). La comprobación externa de salud, el SHA exacto servido por Railway y la restauración remota siguen pendientes. El siguiente paquete está definido en [Segunda entrega: PMS aislado](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/SEGUNDA_ENTREGA_PMS_AISLADO.md).
+
+## 2.5 Paso 2 implementado el 18 de noviembre
+
+La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130) implementa PMS separados de Aurora y Brisa con datos ficticios y acceso desde Xenia, manteniendo Maran fuera de los cambios publicados. Las pruebas locales cubren la preparación limpia, el ingreso, el planning, la reserva desde el formulario, la edición y la revocación de permisos. La publicación remota y su aceptación siguen pendientes.
+
+La [ficha de publicación](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) entrega los pasos de Railway y Donweb. El modo QA bloquea operaciones si el panel central no puede verificar el acceso; la continuidad ante caídas, los otros circuitos operativos y la restauración remota siguen siendo condiciones pendientes para un hotel en uso.
 
 # 3. Organización, responsables y forma de seguimiento
 
@@ -538,7 +544,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | H01 · P1 | Diseñar cliente, hotel, entidad fiscal y membresías. | Técnico y Administración | En curso; cliente, establecimientos y membresías probados en el panel; entidad fiscal pendiente. |
 | H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | En curso; identidad del panel verificada; enlace con el PMS y continuidad pendientes. |
 | H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; altas del panel verificadas en Aurora y Brisa; instalación completa del PMS pendiente. |
-| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; verificados en el panel ficticio; extender al PMS completo. |
+| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; verificados en panel y PMS de QA local; aceptación remota pendiente. |
 | H05 · P1 | Separar archivos, colas, cachés, tareas e integraciones. | Técnico | Pendiente; H03. |
 | H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; panel con pruebas automatizadas y manuales aprobadas; repetir con PMS, archivos y trabajos. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |

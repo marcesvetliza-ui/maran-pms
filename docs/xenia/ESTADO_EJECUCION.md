@@ -1,6 +1,6 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Actualización: 17 de noviembre de 2026. Frentes activos: **continuidad de Maran; enlace del panel multihotel con una instalación completa del PMS de pruebas**. Los apartados iniciales conservan la evidencia histórica del 16 de noviembre.
+Actualización: 18 de noviembre de 2026. Frentes activos: **continuidad de Maran; enlace del panel multihotel con una instalación completa del PMS de pruebas**. Los apartados iniciales conservan la evidencia histórica del 16 de noviembre.
 
 ## Hito vigente: panel multihotel probado
 
@@ -10,15 +10,22 @@ El panel usa un servicio independiente y tres bases nuevas en `observant-possibi
 
 La web comercial ya está pública en `xeniapms.com`; Marcelo confirmó las redirecciones de `.store` y `.online` y la recepción y respuesta de `contacto@xeniapms.com`. El registro de `.com.ar` seguía pendiente en el último estado comunicado. La comprobación externa de salud, la revisión exacta servida y la recuperación remota no están cerradas.
 
-## Próximo paquete vigente
+## Paso 2 implementado en revisión
 
-1. Completar la matriz funcional y fijar el código candidato conservando los arreglos recientes de Maran.
-2. Preparar un arranque reproducible del PMS de Aurora con una base operativa nueva y datos ficticios, revisando los datos iniciales y los trabajadores automáticos.
-3. Implementar el enlace entre principal central y usuario local con permisos revisados y una sesión propia del PMS.
-4. Probar Aurora completa, después Brisa, y ensayar separación de archivos, cachés, trabajos y versiones.
-5. Validar recuperación y continuidad antes de proponer incorporar un hotel operativo. El asistente continúa después de esta base.
+La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130), en la rama `feat/xenia-pms-integration-20261118`, conecta los PMS ficticios de Aurora y Brisa con el panel. Conserva la primera entrega y las correcciones de `main` hasta `8a6e98cb`, sin fusionar ni publicar en Maran. Marcelo informó que el panel tiene buena salud; la revisión remota exacta sigue pendiente de registrar.
 
-La revisión inicial del siguiente paquete está en [Segunda entrega: PMS aislado](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/SEGUNDA_ENTREGA_PMS_AISLADO.md). Es preparación técnica; todavía no configura esos comportamientos ni crea servicios adicionales.
+El paquete agrega preparación limpia de bases operativas nuevas, ingreso central con códigos de un uso y sesiones locales, permisos comprobados por el servidor, ficha privada de variables y marca/contexto visibles. Se verificaron localmente dos PMS compilados por HTTPS, planning, creación desde el formulario real, edición, consulta sin escritura, revocación y cierre central. GitHub ejecuta las verificaciones del paquete, incluida la construcción de imágenes, antes de publicarlo.
+
+La [ficha con el paso a paso de Railway y Donweb](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) contiene los nombres, comandos, puerto, variables y dominios reales previstos. El orden de publicación es: actualizar sólo Xenia-Control; generar la ficha de Aurora; crear su base operativa y servicio nuevos; conectar su dominio; aceptar Aurora; repetir con Brisa.
+
+## Próximos hitos
+
+1. Completar los controles automáticos de la PR 130 y publicar el paquete de pruebas siguiendo su ficha.
+2. Aceptar los PMS en Railway con Marcelo y registrar la revisión servida de cada servicio.
+3. Ensayar actualización independiente y restauración, y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
+4. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
+
+El modo QA verifica el acceso central en cada API y bloquea temporalmente las operaciones si el panel no responde. Caja, fiscalidad, correo, OTAs, IA, check-in y checkout no están habilitados en este ensayo. Las reservas de demostración del panel se conservan separadas de las del PMS; no hay una migración de esos datos.
 
 ## Completado en esta etapa
 
