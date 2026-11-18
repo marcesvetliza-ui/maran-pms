@@ -19,3 +19,7 @@ export function hospitalityRequestAreas(category:string,visibleTo:string[]):stri
  const defaults:Record<string,string>={habitacion:'housekeeping',amenities:'housekeeping',alimentacion:'restaurant'};
  return [defaults[category]||'reception'];
 }
+
+export function hospitalityStayIsRelevant(stay:{status:string;checkInDate:string},today:string,through:string){
+ return stay.status==='checked_in'||(['confirmed','reserved','web_checkin'].includes(stay.status)&&stay.checkInDate>=today&&stay.checkInDate<=through);
+}

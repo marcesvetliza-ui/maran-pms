@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest';
-import {hospitalityNotificationAreas,hospitalityNotificationLink,hospitalityRequestAreas} from './hospitalityNotifications';
+import {hospitalityNotificationAreas,hospitalityNotificationLink,hospitalityRequestAreas,hospitalityStayIsRelevant} from './hospitalityNotifications';
 describe('Hospitality bell routing',()=>{
  it('routes to the exact task without interpreting identifiers as URLs',()=>{
   expect(hospitalityNotificationLink({type:'hospitality_alert',relatedEntityType:'hospitality_alert',relatedEntityId:'a/b &x'})).toBe('/hospitality?tab=dashboard&alertId=a%2Fb%20%26x');
@@ -18,4 +18,12 @@ describe('Hospitality bell routing',()=>{
   expect(hospitalityRequestAreas('servicio',['spa','spa','invalid'])).toEqual(['spa']);
   expect(hospitalityRequestAreas('otro',[])).toEqual([]);
  });
+});
+
+it.each(['confirmed','reserved','web_checkin'])('keeps %s arrivals visible when opening a bell task',status=>{
+ expect(hospitalityStayIsRelevant({status,checkInDate:'2034-01-16'},'2034-01-15','2034-01-22')).toBe(true);
+ expect(hospitalityStayIsRelevant({status,checkInDate:'2034-02-01'},'2034-01-15','2034-01-22')).toBe(false);
+});
+it.each(['cancelled','checked_out','no_show','tentative'])('excludes %s stays from the active preparation dashboard',status=>{
+ expect(hospitalityStayIsRelevant({status,checkInDate:'2034-01-16'},'2034-01-15','2034-01-22')).toBe(false);
 });

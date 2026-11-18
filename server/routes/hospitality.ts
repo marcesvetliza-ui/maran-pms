@@ -1,3 +1,4 @@
+import {hospitalityStayIsRelevant} from '@shared/hospitalityNotifications';
 import {requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from '../hospitalityNotifications';
 import {registerHospitalitySpecialDates} from "../hospitalitySpecialDates";
 import type { Express } from "express";
@@ -179,10 +180,7 @@ export function registerHospitalityRoutes(app: Express) {
       const limit = in7days.toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
 
       const allReservations = await storage.getReservations();
-      const relevantReservations = allReservations.filter(r =>
-        r.status === "checked_in" ||
-        (r.status === "confirmed" && r.checkInDate >= today && r.checkInDate <= limit)
-      );
+      const relevantReservations = allReservations.filter(r => hospitalityStayIsRelevant(r,today,limit));
 
       const relevantGuestIds = relevantReservations.map(r => r.guestId).filter(Boolean) as string[];
       const allActivePrefs = relevantGuestIds.length > 0
