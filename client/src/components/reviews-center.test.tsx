@@ -26,6 +26,7 @@ vi.mock("@/lib/queryClient", () => ({
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 import { ReviewsCenter } from "./reviews-center";
 import { SurveyScheduleSettings } from "./survey-schedule-settings";
+import { reviewToday, moveReviewDay } from "@/lib/review-period";
 const review = {
   id: "review",
   guestName: "Huésped Prueba",
@@ -109,14 +110,76 @@ function renderCenter() {
   );
 }
 describe("Reseñas: filtros del servidor y seguimiento separado de la respuesta", () => {
-  it("abre el original y guarda una nota de seguimiento sin enviar cambios al comentario ni los puntajes", async () => {
+  it("abre en las encuestas de ayer y permite pasar a hoy y a otra fecha", async () => {
+    renderCenter();
+    const user = userEvent.setup(),
+      today = reviewToday(),
+      yesterday = moveReviewDay(today, -1);
+    expect(
+      screen.getByRole("tab", { name: "Encuestas recibidas" }),
+    ).toHaveAttribute("data-state", "active");
+    expect(screen.getByRole("button", { name: "Ayer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByLabelText("Área evaluada")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        state.request.mock.calls.some(
+          ([m, u]) =>
+            m === "GET" &&
+            u.startsWith("/api/reviews?") &&
+            u.includes("from=" + yesterday) &&
+            u.includes("to=" + yesterday) &&
+            u.includes("source=survey"),
+        ),
+      ).toBe(true),
+    );
+    await user.click(screen.getByRole("button", { name: "Hoy" }));
+    await waitFor(() =>
+      expect(
+        state.request.mock.calls.some(
+          ([m, u]) =>
+            m === "GET" &&
+            u.startsWith("/api/reviews?") &&
+            u.includes("from=" + today) &&
+            u.includes("to=" + today),
+        ),
+      ).toBe(true),
+    );
+    await user.click(screen.getByRole("button", { name: "Día anterior" }));
+    expect(screen.getByLabelText("Ver encuestas de otra fecha")).toHaveValue(
+      yesterday,
+    );
+  });
+  it("muestra los comentarios con un ojo y abre una lectura separada del seguimiento", async () => {
     renderCenter();
     const user = userEvent.setup();
     await user.click(
-      screen.getByRole("tab", { name: "Opiniones y encuestas" }),
+      await screen.findByRole("button", {
+        name: "Ver comentario de Huésped Prueba",
+      }),
     );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("Comentario original del huésped"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByLabelText("Nota interna"),
+    ).not.toBeInTheDocument();
     await user.click(
-      await screen.findByRole("button", { name: "Ver opinión y seguimiento" }),
+      within(dialog).getByRole("button", { name: "Ver encuesta completa" }),
+    );
+    await within(screen.getByRole("dialog")).findByLabelText("Nota interna");
+  });
+  it("abre el original y guarda una nota de seguimiento sin enviar cambios al comentario ni los puntajes", async () => {
+    renderCenter();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "Encuestas recibidas" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Ver encuesta de Huésped Prueba",
+      }),
     );
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("Comentario original del huésped");
@@ -157,6 +220,7 @@ describe("Reseñas: filtros del servidor y seguimiento separado de la respuesta"
   it("envía el filtro de área al servidor", async () => {
     renderCenter();
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Más filtros/ }));
     await within(screen.getByLabelText("Área evaluada")).findByRole("option", {
       name: "Habitación",
     });
