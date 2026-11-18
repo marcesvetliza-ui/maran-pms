@@ -12,7 +12,7 @@ import { activeSalesRecord } from "./salesArchive";
 import { getCashDayReport } from "./cash-day-report";
 import { enrichCashDocumentEvidence } from "./cash-document-evidence";
 import { assertPurchaseInvoiceNotDuplicate } from "./purchase-invoice-duplicates";
-import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit } from "@shared/purchase-invoice-edit";
+import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit, PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-edit";
 import { requireCashView, cashShiftAccess } from "./cash-user-access";
 import { canViewCash, canOperateCash } from "@shared/cash-user-access";
 import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
@@ -3023,8 +3023,8 @@ export async function registerRoutes(
         const updated = await db.transaction(tx => updatePurchaseRemito(tx, id, req.body, req.user?.id));
         return res.json(updated);
       }
-      if (!canEditPurchaseInvoice(req.user?.role, (existing.rows[0] as any).estado)) {
-        return res.status(403).json({ error: "Solo se pueden editar comprobantes pendientes" });
+      if (!canEditPurchaseInvoice((existing.rows[0] as any).estado, (existing.rows[0] as any).estado !== "pendiente" && !!req.user?.role && hasPermission(req.user.role, PURCHASE_INVOICE_EDIT_ALL_PERMISSION))) {
+        return res.status(403).json({ error: "Para editar este comprobante necesitás el permiso «Editar todos los comprobantes de compra, incluidos pagados»" });
       }
       const tipoComprobante = (existing.rows[0] as any).tipo_comprobante;
       if((existing.rows[0] as any).descuento && req.body.descuentoTipo===undefined)return res.status(409).json({error:'Actualizá la pantalla para conservar o modificar el descuento de este comprobante.'});
@@ -3055,8 +3055,8 @@ export async function registerRoutes(
         return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
       }
       const updatedInvoice = await db.transaction(async (tx) => {
-        const locked=(await tx.execute(sql`SELECT estado,envio,descuento,monto_total,saldo_pendiente,condicion_pago,tipo_comprobante FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
-        if(!locked||!canEditPurchaseInvoice(req.user?.role, locked.estado))throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
+        const locked=(await tx.execute(sql`SELECT * FROM purchase_invoices WHERE id=${id} FOR UPDATE`)).rows[0] as any;
+        if(!locked||!canEditPurchaseInvoice(locked.estado, locked.estado !== "pendiente" && !!req.user?.role && hasPermission(req.user.role, PURCHASE_INVOICE_EDIT_ALL_PERMISSION)))throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
         if(locked.descuento&&req.body.descuentoTipo===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el descuento del comprobante'),{statusCode:409});
         if(locked.envio&&req.body.envioImporte===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el envío'),{statusCode:409});
         const balance = purchaseInvoiceBalanceAfterEdit(locked, montoTotal, isSupplierPayableDocument(tipoComprobante));
@@ -3129,6 +3129,12 @@ export async function registerRoutes(
         let entryId = previousEntryId ?? null;
         if (tipoComprobante !== "REMITO" && raw.estado !== "anulado") {
           entryId = await generarAsiento(invoiceForEntry, tx);
+          if (["pagado", "parcial"].includes(locked.estado)) {
+            const [totals] = (await tx.execute(sql`SELECT COALESCE(SUM(debe),0) AS debe,COALESCE(SUM(haber),0) AS haber FROM accounting_entry_lines WHERE entry_id=${entryId}`)).rows as any[];
+            if (Math.abs(Number(totals.debe) - Number(totals.haber)) > 0.005) {
+              throw Object.assign(new Error("El asiento contable no cierra. Revisá la cuenta de gasto y las cuentas de impuestos antes de guardar."), { statusCode: 409 });
+            }
+          }
           await tx.execute(sql`UPDATE purchase_invoices SET asiento_id = ${entryId} WHERE id = ${id}`);
           if (previousEntryId && previousEntryId !== entryId) {
             await tx.execute(sql`DELETE FROM accounting_entry_lines WHERE entry_id = ${previousEntryId}`);
@@ -3171,6 +3177,12 @@ export async function registerRoutes(
           }
         }
 
+        // Include the exceptional edit in the same transaction as its accounting correction.
+        if (locked.estado !== "pendiente") {
+          await tx.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
+            VALUES(${req.user?.id || null},${req.user?.fullName || req.user?.username || "Sistema"},'update','purchase_invoices','purchase_invoice',${String(id)},
+              'Edición de comprobante de compra con permiso especial',${JSON.stringify({ permission: PURCHASE_INVOICE_EDIT_ALL_PERMISSION, before: locked, after: { ...raw, asiento_id: entryId } })},NOW())`);
+        }
         return { ...raw, asiento_id: entryId };
       });
       res.json(updatedInvoice);

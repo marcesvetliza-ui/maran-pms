@@ -1,10 +1,11 @@
 export function canCorrectPurchaseInvoiceMetadata(type:string,state:string):boolean {
   return /^(FACT|NC|ND)-[ABCM]$/.test(type) && ['pagado','parcial'].includes(state);
 }
-/** Settled invoices use documentary correction only. Other historical state
- * exceptions for the administration lead retain their existing policy. */
-export function canEditPurchaseInvoice(role: string | undefined, state: string): boolean {
-  return state === "pendiente" || role === "resp_administracion" && !["pagado", "parcial"].includes(state);
+export const PURCHASE_INVOICE_EDIT_ALL_PERMISSION = "api:purchase-invoices:edit-all";
+
+/** The caller must also have the ordinary purchase write permission. */
+export function canEditPurchaseInvoice(state: string, canEditAll = false): boolean {
+  return state === "pendiente" || canEditAll && ["parcial", "pagado", "registrado", "anulado"].includes(state);
 }
 export function purchaseInvoiceBalanceAfterEdit(
   invoice: { estado: string; monto_total: string | number; saldo_pendiente: string | number; condicion_pago?: string; tipo_comprobante?: string },

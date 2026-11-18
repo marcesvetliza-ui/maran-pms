@@ -1,3 +1,4 @@
+import { PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-edit";
 import { GROUP_CREDIT_ADVANCE_PERMISSION } from "@shared/groupCreditAdvance";
 import { CHANNEX_CAPABILITIES, CHANNEX_ROLE_DEFAULTS } from "@shared/channexAccess";
 import { ACCOMMODATION_PERMISSION } from "@shared/accommodationPermission";
@@ -274,6 +275,7 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
 
   // server/routes.ts — 3 endpoints de alta/edición/baja de Facturas de Compra.
   "api:purchase-invoices:write": ["admin", "manager", "resp_deposito", "resp_administracion"],
+  [PURCHASE_INVOICE_EDIT_ALL_PERMISSION]: ["resp_administracion"],
 
   // server/routes.ts — POST /api/night-audit/run.
   "api:night-audit:run": ["admin", "manager", "reception", "jefe_recepcion"],
@@ -459,6 +461,7 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:revenue:configure": { label: "Configurar sugerencias y planes tarifarios de referencia", section: "Revenue Management" },
   "api:dashboard:breakfasts": { label: "Lista de desayunos", section: "API — Operaciones" },
   "api:purchase-invoices:write": { label: "Alta, edición y baja de Facturas de Compra", section: "API — Operaciones" },
+  [PURCHASE_INVOICE_EDIT_ALL_PERMISSION]: { label: "Editar todos los comprobantes de compra, incluidos pagados", section: "API — Operaciones" },
   "api:night-audit:run": { label: "Ejecutar auditoría nocturna", section: "API — Operaciones" },
 
   "api:admin:users": { label: "Alta, edición y baja de usuarios del sistema", section: "API — Administración" },
