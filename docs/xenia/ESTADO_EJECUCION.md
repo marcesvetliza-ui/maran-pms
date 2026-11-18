@@ -18,6 +18,10 @@ El paquete agrega preparación limpia de bases operativas nuevas, ingreso centra
 
 La [ficha con el paso a paso de Railway y Donweb](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) contiene los nombres, comandos, puerto, variables y dominios reales previstos. El orden de publicación es: actualizar sólo Xenia-Control; generar la ficha de Aurora; crear su base operativa y servicio nuevos; conectar su dominio; aceptar Aurora; repetir con Brisa.
 
+## Corrección de la ficha de Railway, 18 de noviembre
+
+La captura de Settings aportada por Marcelo informa la retirada de Config as Code el 1 de diciembre y la imposibilidad de activarlo en servicios que no lo usaban. La guía de publicación versión 2 utiliza ajustes manuales: `RAILWAY_DOCKERFILE_PATH` en Variables y los comandos de preparación, arranque y salud en Settings → Deploy. Se deja Railway Config File sin ruta personalizada. Esto corrige los puntos 2.5 y 5 de la guía; no cambia el código probado ni administra servicios desde esta conversación.
+
 ## Próximos hitos
 
 1. Publicar el paquete de pruebas de la PR 130 siguiendo su ficha; los controles automáticos están aprobados.
