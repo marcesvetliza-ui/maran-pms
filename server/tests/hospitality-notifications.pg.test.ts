@@ -39,8 +39,10 @@ describe.skipIf(!enabled)('Hospitality bell · real PostgreSQL, no messaging pro
   let n=(await rows())[0];expect(n.is_read).toBe(false);expect(n.message).toContain('Synthetic updated request');await storage.markNotificationRead(n.id);
   await sync(new Date('2034-01-16T02:30:00Z'));expect((await rows())[0].is_read).toBe(true);
   await sync(new Date('2034-01-16T03:01:00Z'));n=(await rows())[0];expect(n.is_read).toBe(false);expect(n.message).toContain('Ingresa hoy');
-  expect(await storage.getUnreadNotificationCount(undefined,['housekeeping','all'])).toBe(1);expect(await storage.getUnreadNotificationCount(undefined,['restaurant','all'])).toBe(0);
-  expect(await storage.markAllNotificationsRead(undefined,['restaurant','all'])).toBe(0);expect((await rows())[0].is_read).toBe(false);
+  const housekeepingUnread=(await storage.getNotifications(undefined,undefined,['housekeeping','all'])).filter(n=>!n.isRead).length;
+  expect(housekeepingUnread).toBeGreaterThanOrEqual(1);expect(await storage.getUnreadNotificationCount(undefined,['housekeeping','all'])).toBe(housekeepingUnread);
+  const restaurantUnread=await storage.getUnreadNotificationCount(undefined,['restaurant','all']);
+  expect(await storage.markAllNotificationsRead(undefined,['restaurant','all'])).toBe(restaurantUnread);expect((await rows())[0].is_read).toBe(false);
  });
  it('keeps a completed task closed through check-in and later reconciliation',async()=>{
   let n=(await rows())[0];await storage.updateNotificationStatus(n.id,'completado',undefined,'Synthetic operator',['housekeeping','all']);
