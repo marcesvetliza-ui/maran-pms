@@ -56,6 +56,8 @@ describe('Aviso sin bloqueo cuando el cobro supera el comprobante',()=>{
   expect(writes).toEqual([]);expect(sessionStorage.getItem(`prefactura-pending:${id}`)).toBeNull();
   await user.click(screen.getByTestId('confirm-collection-difference'));await waitFor(()=>expect(payments).toHaveLength(2));
   expect(invoices[0].source_charge_ids).toEqual([night]);expect(invoices[0].monto_total).toBe(235800);expect(payments.reduce((sum,p)=>sum+Number(p.amount),0)).toBe(471600);
+  await waitFor(()=>expect(window.open).toHaveBeenCalledWith(expect.stringMatching(/collection-receipts\/[^/]+\/pdf$/),'_blank'));
+  expect(window.open).not.toHaveBeenCalledWith('/api/billing/invoices/506/pdf','_blank');
  });
 
  it('reintenta la preparación confirmada si su respuesta se perdió y el intento anterior ya fue retirado',async()=>{

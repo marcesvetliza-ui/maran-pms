@@ -1,3 +1,4 @@
+import {inflateSync} from 'node:zlib';
 import {randomUUID} from 'node:crypto';
 import express from 'express';
 import type {Server} from 'node:http';
@@ -68,6 +69,7 @@ suite('Cobros superiores a los conceptos seleccionados',()=>{
   const path=`/api/billing/reservations/${id}/prepare-excess-collection`;
   const [first,retry]=await Promise.all([post(path,{acknowledge:true,attempt:original}),post(path,{acknowledge:true,attempt:original})]);
   expect(first.status,JSON.stringify(first.body)).toBe(200);expect(retry.body).toEqual(first.body);
+  expect(await(await fetch(base+`/api/reservations/${id}/collection-receipts`)).json()).toEqual([]);
   const replacement=first.body;expect(replacement.invoiceRequest.items).toEqual(original.invoiceRequest.items);expect(replacement.invoiceRequest.cashFormaPagoDetalle).toEqual([{method:'efectivo',amount:235800}]);
   expect(replacement.payments.map((p:any)=>p.amount)).toEqual(['235800.00','235800.00']);expect(replacement.payments[1].unlinkedAdvance).toBe(true);
   const issued=await post('/api/billing/invoices',replacement.invoiceRequest);expect(issued.status,JSON.stringify(issued.body)).toBe(201);
@@ -83,6 +85,17 @@ suite('Cobros superiores a los conceptos seleccionados',()=>{
   expect(status.financiallyComplete,JSON.stringify(status)).toBe(true);expect(status.acknowledgedPaymentIds).toHaveLength(2);
   expect((await pool.query('SELECT count(*)::int n FROM sales_invoices WHERE reserva_id=$1',[id])).rows[0].n).toBe(1);
 
+  const receiptPath=`/api/reservations/${id}/collection-receipts/${replacement.invoiceRequest.creditOperationId}/pdf`;
+  const beforeReceipt={payments:(await pool.query('SELECT * FROM payments WHERE reservation_id=$1 ORDER BY id',[id])).rows,invoices:(await pool.query('SELECT * FROM sales_invoices WHERE reserva_id=$1 ORDER BY id',[id])).rows,cash:(await pool.query('SELECT * FROM cash_movements WHERE payment_id IN (SELECT id FROM payments WHERE reservation_id=$1) ORDER BY id',[id])).rows};
+  const receipts=await(await fetch(base+`/api/reservations/${id}/collection-receipts`)).json();
+  expect(receipts).toEqual([expect.objectContaining({operationId:replacement.invoiceRequest.creditOperationId,total:471600,paymentIds:expect.any(Array)})]);
+  const printed=await fetch(base+receiptPath);expect(printed.status).toBe(200);expect(printed.headers.get('Content-Type')).toContain('application/pdf');
+  const pdf=Buffer.from(await printed.arrayBuffer());let text='';
+  for(const match of pdf.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)){try{for(const op of inflateSync(Buffer.from(match[1],'latin1')).toString('latin1').matchAll(/\[([\s\S]*?)\]\s*TJ/g))text += [...op[1].matchAll(/<([0-9a-f]+)>/gi)].map(m=>Buffer.from(m[1],'hex').toString('latin1')).join('')+'\n';}catch{}}
+  expect(text).toContain('TOTAL DEL COBRO: $471.600,00');expect(text).toContain('Efectivo: $471.600,00');
+  expect({payments:(await pool.query('SELECT * FROM payments WHERE reservation_id=$1 ORDER BY id',[id])).rows,invoices:(await pool.query('SELECT * FROM sales_invoices WHERE reserva_id=$1 ORDER BY id',[id])).rows,cash:(await pool.query('SELECT * FROM cash_movements WHERE payment_id IN (SELECT id FROM payments WHERE reservation_id=$1) ORDER BY id',[id])).rows}).toEqual(beforeReceipt);
+  expect((await fetch(base+receiptPath.replace(id,'another-reservation'))).status).toBe(409);
+
   // The excess funds the second night later, without collecting the same money again.
   const advance=(await pool.query('SELECT id FROM payments WHERE reservation_id=$1 AND invoice_ref IS NULL',[id])).rows[0].id;
   const secondRequest={...replacement.invoiceRequest,creditOperationId:randomUUID(),sourceChargeIds:['accommodation:2026-11-18'],sourceChargeAmounts:{'accommodation:2026-11-18':235800},ordinaryAdvanceApplications:[{paymentId:advance,amount:235800}],prefacturaRecovery:{version:2,payments:[],checkoutRequested:false}};
@@ -90,6 +103,14 @@ suite('Cobros superiores a los conceptos seleccionados',()=>{
   expect((await pool.query('SELECT count(*)::int n FROM payments WHERE reservation_id=$1',[id])).rows[0].n).toBe(2);
   const finalStatus=await(await fetch(base+`/api/billing/reservations/${id}/operations/${replacement.invoiceRequest.creditOperationId}/reception-status`)).json();
   expect(finalStatus.financiallyComplete,JSON.stringify(finalStatus)).toBe(true);expect(finalStatus.paymentConflicts).toEqual([]);
+  // The 506's current state: the selected non-fiscal document was voided,
+  // while both payments remain active. Reprinting must still prove $471,600.
+  await pool.query("UPDATE sales_invoices SET estado='anulada' WHERE id=$1",[invoice.id]);
+  const afterVoid=(await pool.query('SELECT id,amount,status,invoice_ref FROM payments WHERE reservation_id=$1 ORDER BY id',[id])).rows;
+  expect((await fetch(base+receiptPath)).status).toBe(200);
+  expect((await pool.query('SELECT id,amount,status,invoice_ref FROM payments WHERE reservation_id=$1 ORDER BY id',[id])).rows).toEqual(afterVoid);
+  expect((await pool.query('SELECT estado FROM sales_invoices WHERE id=$1',[invoice.id])).rows[0].estado).toBe('anulada');
+
   expect(Number((await pool.query("SELECT sum(amount) total FROM cash_movements WHERE payment_id IN (SELECT id FROM payments WHERE reservation_id=$1) AND movement_type='income'",[id])).rows[0].total)).toBe(471600);
  });
 });

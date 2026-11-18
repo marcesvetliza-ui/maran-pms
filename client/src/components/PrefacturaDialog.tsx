@@ -1,5 +1,5 @@
 import { compareReservationsByRoom } from "@/lib/reservation-list-order";
-import { prefacturaCollectionDifference } from '@shared/prefacturaCollection';
+import { prefacturaCollectionDifference,reservationCollectionReceiptPath } from '@shared/prefacturaCollection';
 import { isPostCheckoutCharge } from "@shared/postCheckout";
 import {GroupRoomAccount} from './group-room-account';
 import { chargeUnits, expandChargeUnitCoverage, unitParent } from '@shared/chargeUnits';
@@ -613,6 +613,7 @@ export function PrefacturaDialog({
 
   // Step 3: result
   const [emittedInvoice, setEmittedInvoice] = useState<any>(null);
+  const [collectionReceiptPath,setCollectionReceiptPath]=useState<string|null>(null);
   const [checkoutDone, setCheckoutDone] = useState(false);
   // True when payment+invoice succeeded but the checkout API call itself failed —
   // staff must complete checkout manually; the folio data is already persisted.
@@ -815,6 +816,7 @@ export function PrefacturaDialog({
       setCheckoutFailed(false);
       setRecoveryPendingWork(null);
       setPaymentRegistered(false);
+      setCollectionReceiptPath(null);
       setIsSubmitting(false);
       setSubmitError(null);
       selectionValue.current = new Set();
@@ -1944,8 +1946,11 @@ export function PrefacturaDialog({
       assertCurrentView();
       invoiceData = completed.invoice;
       if (completed.paymentCount > 0) setPaymentRegistered(true);
+      const receiptPath=submittedAttempt.payments.some(payment=>payment.unlinkedAdvance===true) && submittedAttempt.invoiceRequest?.creditOperationId
+        ? reservationCollectionReceiptPath(reservationId,submittedAttempt.invoiceRequest.creditOperationId) : null;
+      setCollectionReceiptPath(receiptPath);
       if (invoiceData) {
-        setTimeout(() => { if (isCurrentView()) window.open(`/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"); }, 300);
+        setTimeout(() => { if (isCurrentView()) window.open(receiptPath || `/api/billing/invoices/${invoiceData.id}/pdf`, "_blank"); }, 300);
       }
 
       // 3. Checkout if applicable
@@ -2104,6 +2109,7 @@ export function PrefacturaDialog({
   }
 
   function resetForAnother() {
+    setCollectionReceiptPath(null);
     setStep(1);
     setEmittedInvoice(null);
     setCheckoutDone(false);
@@ -3026,7 +3032,8 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            {emittedInvoice && (
+            {collectionReceiptPath && <Button variant="outline" size="sm" onClick={()=>window.open(collectionReceiptPath,'_blank')}><Printer className="h-4 w-4 mr-1"/>Ver / reimprimir recibo del cobro completo</Button>}
+            {emittedInvoice && (!collectionReceiptPath || !NON_FISCAL.has(emittedInvoice.tipo_comprobante ?? emittedInvoice.tipoComprobante)) && (
               <Button
                 variant="outline"
                 size="sm"

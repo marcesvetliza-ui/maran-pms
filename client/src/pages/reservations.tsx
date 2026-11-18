@@ -1,3 +1,4 @@
+import {ReservationCollectionReceipts} from '@/components/reservation-collection-receipts';
 import { GroupRoomAdvanceInvoice } from '@/components/group-room-advance-invoice';
 import {GroupRoomAccount} from '@/components/group-room-account';
 import { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
@@ -4714,6 +4715,7 @@ export function ReservationDetailDialog({
                     Prefactura
                   </Button>
                 )}
+                <ReservationCollectionReceipts reservationId={reservation.id}/>
               </div>
             </div>
 
