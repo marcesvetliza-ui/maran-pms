@@ -1,6 +1,7 @@
 import { canCloseCancelledReceptionOperation } from "./cancelledReceptionOperation";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { prepareExcessReservationCollection } from "./excessReservationCollection";
+import {reservationCollectionReceipts,generateReservationCollectionReceiptPdf} from './reservationCollectionReceipt';
 import type { Express } from "express";
 import { sql } from "drizzle-orm";
 import { db, pool } from "../db";
@@ -72,6 +73,20 @@ export async function receptionOperationStatus(operation: BillingOperation) {
 }
 
 export function registerReceptionOperationRoutes(app: Express) {
+  app.get('/api/reservations/:reservationId/collection-receipts',requireAuth,requirePermission('sidebar:/reservations'),async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    try{const receipts=await reservationCollectionReceipts(req.params.reservationId);res.json(receipts.map(r=>({operationId:r.operationId,total:r.total,date:r.date,paymentIds:r.payments.map(p=>p.id)})));}
+    catch{res.status(503).json({error:'No se pudieron consultar los recibos de cobro.'});}
+  });
+  app.get('/api/reservations/:reservationId/collection-receipts/:operationId/pdf',requireAuth,requirePermission('sidebar:/reservations'),async(req,res)=>{
+    res.setHeader('Cache-Control','private, no-store');
+    try{
+      const [receipt]=await reservationCollectionReceipts(req.params.reservationId,req.params.operationId);
+      if(!receipt)return res.status(409).json({error:'El cobro completo no está registrado o alguno de sus pagos cambió. Revisá la operación antes de imprimir.'});
+      const config=await getBillingConfig();const pdf=await generateReservationCollectionReceiptPdf(receipt,config.razonSocial || 'Maran Suites & Towers');
+      res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`inline; filename="Recibo_cobro_${receipt.operationId.replace(/[^a-zA-Z0-9-]/g,'')}.pdf"`);res.send(pdf);
+    }catch{res.status(503).json({error:'No se pudo generar el recibo. No se modificó el cobro.'});}
+  });
   app.post('/api/billing/reservations/:reservationId/prepare-excess-collection', requireAuth, requirePermission('sidebar:/reservations'), async (req,res) => {
     if (req.body?.acknowledge !== true) return res.status(400).json({error:'Confirmá el aviso del cobro excedente.'});
     try { return res.json(await prepareExcessReservationCollection(req.params.reservationId, req.body.attempt, req.user?.id)); }

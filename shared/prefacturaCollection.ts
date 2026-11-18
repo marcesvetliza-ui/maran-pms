@@ -5,3 +5,8 @@ export function prefacturaCollectionDifference(request: any, invoiceTotal?: numb
   return { documented: Math.round(documented * 100) / 100, collected: Math.round(collected * 100) / 100,
     excess: Math.max(0, Math.round((collected - documented) * 100) / 100) };
 }
+
+export interface CollectionReceiptSummary {operationId:string;total:number;date:string;paymentIds:string[];}
+export function reservationCollectionReceiptPath(reservationId:string|number,operationId:string){
+  return `/api/reservations/${encodeURIComponent(String(reservationId))}/collection-receipts/${encodeURIComponent(operationId)}/pdf`;
+}
