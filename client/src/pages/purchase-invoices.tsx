@@ -533,7 +533,7 @@ export function InvoiceDialog({
   };
 
   const isEditing = !!editingInvoice;
-  const isSettledInvoiceEdit = isEditing && ["pagado", "parcial"].includes(editingInvoice?.estado || "");
+  const isSettledInvoiceEdit = isEditing && !isPurchaseRemito(editingInvoice?.tipoComprobante) && ["pagado", "parcial"].includes(editingInvoice?.estado || "");
   const isEditingRemito = isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante);
   const [remitoSnapshot, setRemitoSnapshot] = useState<any>(null);
   const [remitoDraft, setRemitoDraft] = useState<RemitoDraft | null>(null);

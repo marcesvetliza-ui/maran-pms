@@ -7,7 +7,7 @@ import { PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-e
 const state = vi.hoisted(() => ({ permissions: new Set<string>() }));
 vi.mock("@/App", () => ({ useAuth: () => ({ user: { role: "resp_administracion" }, hasPermission: (key: string) => state.permissions.has(key) }) }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
-import PurchaseInvoices from "./purchase-invoices";
+import PurchaseInvoices, { InvoiceDialog } from "./purchase-invoices";
 beforeEach(() => {
   queryClient.clear(); window.history.replaceState({}, "", "/purchase-invoices");
   state.permissions = new Set(["api:purchase-invoices:write"]);
@@ -38,4 +38,11 @@ it("does not grant write access through the extra permission alone", async () =>
   state.permissions = new Set([PURCHASE_INVOICE_EDIT_ALL_PERMISSION]); open();
   await screen.findByTestId("row-invoice-1");
   expect(screen.queryByTestId(/^btn-edit-invoice-/)).not.toBeInTheDocument();
+});
+
+it("preserves the separate documentary editing of a paid non-fiscal purchase", async () => {
+  render(<QueryClientProvider client={queryClient}><InvoiceDialog open embedded unifiedLayout onClose={vi.fn()} suppliers={[]} accounts={[]}
+    editingInvoice={{ id: 999, tipoComprobante: "REMITO-NF", estado: "pagado", numeroComprobante: "999", fechaEmision: "2026-11-18", montoTotal: "100" } as any} /></QueryClientProvider>);
+  expect(await screen.findByTestId("input-fecha-emision")).toBeEnabled();
+  expect(screen.queryByTestId("settled-invoice-edit-notice")).not.toBeInTheDocument();
 });
