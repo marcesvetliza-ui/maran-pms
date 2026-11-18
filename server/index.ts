@@ -9,6 +9,12 @@ import rateLimit from "express-rate-limit";
 import {createApiLimiter} from "./apiRateLimit";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
+import { readXeniaPmsConfig } from "./xenia-pms/config";
+import { registerXeniaPmsRuntime } from "./xenia-pms/runtime";
+import { assertXeniaPmsBinding } from "./xenia-pms/binding";
+import { pool as xeniaPmsPool } from "./db";
+
+const xeniaPms = readXeniaPmsConfig();
 
 // log must be defined first — it's used in the listen callback below
 export function log(message: string, source = "express") {
@@ -41,7 +47,7 @@ app.use((req, res, next) => {
   return res.status(503).json({ message: "La aplicación se está iniciando" });
 });
 
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === "production" || xeniaPms) {
   serveStaticFiles(app); // serves index.html → healthcheck returns 200
 }
 httpServer.listen({ port: PORT, host: "0.0.0.0", reusePort: true }, () => {
@@ -60,7 +66,7 @@ if (missingVars.length > 0) {
   process.exit(1);
 }
 
-initSentry();
+if (!xeniaPms) initSentry();
 
 // Allow embedding /reservar in an iframe from the hotel website
 app.use((req, res, next) => {
@@ -115,7 +121,10 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-setupAuth(app);
+setupAuth(app, xeniaPms);
+if (xeniaPms) {
+  registerXeniaPmsRuntime(app,xeniaPmsPool,xeniaPms);
+}
 app.use("/api", createApiLimiter());
 
 // Diagnóstico temporal de assets — requiere sesión autenticada (antes eran
@@ -152,7 +161,7 @@ app.use((req, res, next) => {
   // ── 1. Register API routes ───────────────────────────────────────────────
   //    Port is already open (listen called at top of file). Just register routes.
   const { beginFinancialSchemaCheck, runMigrations } = await import("./migrate");
-  beginFinancialSchemaCheck();
+  if (!xeniaPms) beginFinancialSchemaCheck();
   await registerRoutes(httpServer, app);
 
   // ── 2. Global error handler ──────────────────────────────────────────────
@@ -175,11 +184,21 @@ app.use((req, res, next) => {
 
   // ── 3. SPA catch-all / Vite dev ─────────────────────────────────────────
   //    Must come AFTER all API routes so /api/* routes are matched first.
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === "production" || xeniaPms) {
     serveSpaFallback(app);
   } else {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
+  }
+
+  if (xeniaPms) {
+    const {pool}=await import("./db");
+    await assertXeniaPmsBinding(pool,xeniaPms);
+    const {loadRolePermissionsCache}=await import("./permissions");
+    await loadRolePermissionsCache();
+    startupReady=true;
+    log("PMS de Xenia listo con Alojamiento y datos ficticios; integraciones externas desactivadas.","xenia-pms");
+    return;
   }
 
   // ── 5. Background startup tasks (DB migrations, seed, schedulers) ────────

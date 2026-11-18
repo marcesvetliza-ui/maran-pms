@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import type { Express, Request, Response, NextFunction } from "express";
 import { createSessionStoreReadiness } from "./sessionStoreSchema";
 import { hasPermission } from "./permissions";
+import type { XeniaPmsConfig } from "./xenia-pms/config";
 
 const SALT_ROUNDS = 10;
 const TEMP_LOCK_THRESHOLD  = 5;   // intentos → bloqueo 1 hora
@@ -74,12 +75,15 @@ async function recordLoginAttempt(
   }
 }
 
-export function setupAuth(app: Express) {
+export function setupAuth(app: Express, xeniaPms?: XeniaPmsConfig) {
   const PgSession = connectPgSimple(session);
 
   // Routes are registered before background migrations finish. Hold session
   // requests until their own schema exists, including on a brand-new database.
-  const sessionStoreReady = createSessionStoreReadiness(pool, () => {
+  const sessionStoreReady = xeniaPms ? async () => {
+    try { await pool.query("SELECT sid FROM sessions LIMIT 0"); return true; }
+    catch { return false; }
+  } : createSessionStoreReadiness(pool, () => {
     console.error("[auth] No se pudo preparar el almacenamiento de sesiones.");
   });
   void sessionStoreReady();
@@ -92,6 +96,7 @@ export function setupAuth(app: Express) {
 
   app.use(
     session({
+      ...(xeniaPms ? {name:(xeniaPms.production ? "__Host-xenia-pms-" : "xenia-pms-")+xeniaPms.clientId} : {}),
       store: new PgSession({
         pool,
         tableName: "sessions",
@@ -113,6 +118,7 @@ export function setupAuth(app: Express) {
         secure: process.env.NODE_ENV === "production",
         httpOnly: true,
         sameSite: "lax",
+        ...(xeniaPms ? {maxAge:60*60*1000,path:"/"} : {}),
         // Sin maxAge → cookie de sesión → se borra al cerrar el navegador
         // El TTL de 8h se aplica solo en el store del servidor
       },

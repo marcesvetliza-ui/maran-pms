@@ -1,4 +1,5 @@
 import {useChannexAccess} from '@/hooks/use-channex-access';
+import { isXeniaPmsQa, useXeniaInstallation } from "@/components/xenia-pms-context";
 import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, useRef } from "react";
 import { useLocation, Link } from "wouter";
@@ -411,6 +412,7 @@ const COLLAPSED_KEY = "sidebar_collapsed_sections";
 const SUB_COLLAPSED_KEY = "sidebar_collapsed_subgroups";
 
 export function AppSidebar() {
+  const {data:installation}=useXeniaInstallation();
   const [location] = useLocation();
   const { user, hasPermission: roleHasPermission } = useAuth();
   const {data:otaAccess}=useChannexAccess({poll:true});
@@ -489,10 +491,10 @@ export function AppSidebar() {
             <Hotel className="h-6 w-6" />
           </div>
           <div className="flex flex-col flex-1 min-w-0">
-            <span className="text-lg font-semibold text-sidebar-foreground leading-tight">Maran Suites</span>
+            <span className="text-lg font-semibold text-sidebar-foreground leading-tight">{isXeniaPmsQa ? (installation?.name ?? "Xenia") : "Maran Suites"}</span>
             <span className="text-xs text-muted-foreground">Sistema de Gestión</span>
           </div>
-          <TurnoAlert />
+          {!isXeniaPmsQa && <TurnoAlert />}
           <NotificationBell />
         </div>
       </SidebarHeader>

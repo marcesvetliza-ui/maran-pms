@@ -12,6 +12,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
+import { isXeniaPmsQa, XeniaPmsBanner } from "@/components/xenia-pms-context";
 import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
@@ -394,6 +395,7 @@ function AppLayout() {
               </div>
             </div>
           </header>
+          <XeniaPmsBanner />
             {import.meta.env.VITE_ENVIRONMENT === "staging" && (
             <div className="bg-amber-400 text-amber-950 text-xs font-semibold text-center py-1 px-4 shrink-0 flex items-center justify-center gap-2">
               <span>⚠ ENTORNO STAGING — los cambios aquí NO afectan producción</span>
@@ -404,12 +406,12 @@ function AppLayout() {
           </main>
         </div>
       </div>
-      <Suspense fallback={null}>
+      {!isXeniaPmsQa && <Suspense fallback={null}>
         <HelpChat />
-      </Suspense>
-      <Suspense fallback={null}>
+      </Suspense>}
+      {!isXeniaPmsQa && <Suspense fallback={null}>
         <GroupFiscalCollectionWatcher />
-      </Suspense>
+      </Suspense>}
     </SidebarProvider>
   );
 }

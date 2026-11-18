@@ -16,7 +16,8 @@ body {
 }
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 button {
@@ -215,7 +216,8 @@ legend {
   color: #4b6a5d;
 }
 input:not([type="checkbox"]),
-select {
+select,
+textarea {
   border: 1px solid #d5e0d5;
   min-height: 42px;
   border-radius: 6px;

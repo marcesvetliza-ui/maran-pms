@@ -123,6 +123,19 @@
             <span id="property-role" class="pill"></span>
           </div>
           <div id="modules" class="module-tags"></div>
+          <section id="pms-workspace" class="card" hidden>
+            <span class="eyebrow">PMS DE PRUEBAS · ALOJAMIENTO</span>
+            <h2 id="pms-title"></h2>
+            <p>
+              Planning, habitaciones, huéspedes y reservas en una instalación
+              independiente. Usá datos ficticios.
+            </p>
+            <a id="open-pms" class="primary" href="#">Abrir PMS</a>
+            <p class="muted">
+              Estas reservas se guardan en el PMS. La demostración del panel
+              conserva sus propias reservas.
+            </p>
+          </section>
           <div id="empty-state" class="card empty" hidden>
             <h2>Todavía no hay un establecimiento disponible.</h2>
             <p>La administración puede preparar el alta o revisar tu acceso.</p>
@@ -199,6 +212,45 @@
           </div>
         </div>
         <section id="administration-view" hidden>
+          <section id="pms-configuration" class="card" hidden>
+            <span class="eyebrow">CONEXIÓN DEL PMS DE PRUEBAS</span>
+            <h2 id="pms-configuration-title"></h2>
+            <form id="pms-form">
+              <div class="field">
+                <label for="pms-origin">Dirección del PMS</label>
+                <input
+                  id="pms-origin"
+                  name="origin"
+                  type="url"
+                  required
+                  placeholder="https://aurora.qa.xeniapms.com"
+                />
+                <small
+                  >La dirección debe ser exclusiva de este establecimiento, sin
+                  rutas.</small
+                >
+              </div>
+              <button class="primary" type="submit">
+                Generar ficha de conexión
+              </button>
+            </form>
+            <div id="pms-credentials" hidden>
+              <p>
+                Guardá esta ficha en un lugar privado. El secreto se muestra una
+                sola vez. Generar otra ficha invalida el secreto y los accesos
+                anteriores.
+              </p>
+              <textarea
+                id="pms-connection-sheet"
+                readonly
+                rows="8"
+                aria-label="Ficha privada de conexión del PMS"
+              ></textarea>
+              <button id="pms-hide-credentials" type="button" class="quiet">
+                Ocultar ficha
+              </button>
+            </div>
+          </section>
           <div class="admin-grid">
             <section class="card">
               <span class="eyebrow">CLIENTES Y CADENAS</span>

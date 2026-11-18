@@ -26,7 +26,11 @@
     "xenia:test": "tsx --test server/xenia-control/control.test.ts",
     "xenia:demo": "node script/xenia-control-demo.mjs",
     "xenia:test:browser": "tsx --test server/xenia-control/browser.test.ts",
-    "xenia:setup:production": "NODE_ENV=production node dist/xenia-control/setup.js"
+    "xenia:setup:production": "NODE_ENV=production node dist/xenia-control/setup.js",
+    "xenia:pms:build": "node script/build-xenia-pms.mjs",
+    "xenia:pms:setup": "node --import tsx server/xenia-pms/setup.ts",
+    "xenia:pms:setup:production": "NODE_ENV=production node dist/xenia-pms/setup.js",
+    "xenia:pms:test": "node --import tsx --test server/xenia-pms/core.test.ts server/xenia-pms/integration.test.ts"
   },
   "dependencies": {
     "saxes": "^5.0.1",

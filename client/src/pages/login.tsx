@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Hotel, LogIn, AlertCircle, ShieldCheck } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { isXeniaPmsQa, XeniaPmsLogin } from "@/components/xenia-pms-context";
 
 interface LoginForm {
   username: string;
@@ -78,6 +79,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   };
 
+  if (isXeniaPmsQa) return <XeniaPmsLogin />;
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
       <Card className="w-full max-w-md" data-testid="card-login">

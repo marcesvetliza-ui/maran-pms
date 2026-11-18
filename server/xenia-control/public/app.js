@@ -21,6 +21,7 @@ const state = {
   section: "operations",
   organizations: [],
   users: [],
+  pmsLinks: [],
 };
 let dirty = false,
   generation = 0,
@@ -67,6 +68,10 @@ function clearAccount() {
   state.selected = null;
   state.organizations = [];
   state.users = [];
+  state.pmsLinks = [];
+  clearPmsCredentials();
+  $("#pms-workspace").hidden = true;
+  $("#open-pms").removeAttribute("href");
   dirty = false;
   for (const id of [
     "reservation-list",
@@ -192,9 +197,13 @@ async function enterWorkspace() {
 }
 async function refreshProperties(preferred) {
   const principalId = state.user?.id;
-  const properties = await api("/properties");
+  const [properties, pmsLinks] = await Promise.all([
+    api("/properties"),
+    api("/pms/installations"),
+  ]);
   if (!state.user || state.user.id !== principalId) return;
   state.properties = properties;
+  state.pmsLinks = pmsLinks;
   const selector = $("#property-selector");
   selector.replaceChildren();
   for (const property of state.properties)
@@ -218,6 +227,24 @@ async function refreshProperties(preferred) {
 async function selectProperty(property) {
   const version = ++generation;
   state.selected = property;
+  clearPmsCredentials();
+  const pms = state.pmsLinks.find((link) => link.propertyId === property?.id);
+  $("#pms-workspace").hidden = !pms;
+  $("#open-pms").removeAttribute("href");
+  if (pms) {
+    $("#pms-title").textContent = property.name;
+    $("#open-pms").href = new URL("/xenia/start", pms.origin).href;
+  }
+  $("#pms-configuration").hidden =
+    !state.user?.platformAdmin ||
+    !property ||
+    !["aurora-demo", "brisa-demo"].includes(property.slug) ||
+    property.status !== "active" ||
+    !property.modules.includes("lodging");
+  $("#pms-configuration-title").textContent = property
+    ? "PMS de " + property.name
+    : "";
+  $("#pms-origin").value = pms?.origin || "";
   dirty = false;
   $("#reservation-form").reset();
   $("#reservation-list").replaceChildren();
@@ -451,6 +478,10 @@ $("#login-form").addEventListener("submit", (event) => {
     state.user = result.user;
     state.csrf = result.csrfToken;
     $("#login-form").reset();
+    if (result.redirectTo) {
+      window.location.assign(result.redirectTo);
+      return;
+    }
     await enterWorkspace();
   });
 });
@@ -467,6 +498,10 @@ document.querySelectorAll("[data-persona]").forEach((button) =>
       accountChanged();
       state.user = result.user;
       state.csrf = result.csrfToken;
+      if (result.redirectTo) {
+        window.location.assign(result.redirectTo);
+        return;
+      }
       await enterWorkspace();
     } catch (error) {
       notice(error.message, true);
@@ -633,6 +668,58 @@ $("#assignment-form").addEventListener("submit", (event) => {
     );
     if (state.selected?.id === property.id) await refreshMemberships();
     notice("Acceso asignado a " + property.name + ".");
+  });
+});
+function clearPmsCredentials() {
+  $("#pms-connection-sheet").value = "";
+  $("#pms-credentials").hidden = true;
+}
+$("#pms-hide-credentials").addEventListener("click", clearPmsCredentials);
+$("#pms-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const property = state.selected;
+  if (!property || !state.user?.platformAdmin) return;
+  const existing = state.pmsLinks.some(
+    (link) => link.propertyId === property.id,
+  );
+  if (
+    existing &&
+    !confirm(
+      "Generar una nueva ficha invalida el secreto y las sesiones del PMS de " +
+        property.name +
+        ". ¿Continuar?",
+    )
+  )
+    return;
+  void submit(event.currentTarget, async (data) => {
+    const result = await api(`/admin/properties/${property.id}/pms`, {
+      method: "POST",
+      body: { origin: data.get("origin") },
+    });
+    await refreshProperties(property.id);
+    if (state.selected?.id !== property.id || !state.user?.platformAdmin)
+      return;
+    $("#pms-connection-sheet").value = [
+      "XENIA_PMS_MODE=qa",
+      "NODE_ENV=production",
+      "PORT=5000",
+      "RAILWAY_DOCKERFILE_PATH=Dockerfile.xenia-pms",
+      "SESSION_SECRET=" +
+        Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join(""),
+      "XENIA_PMS_TEMPLATE=" +
+        (property.slug === "aurora-demo" ? "aurora" : "brisa"),
+      "XENIA_CONTROL_ORIGIN=" + window.location.origin,
+      "XENIA_PMS_ORIGIN=" + result.origin,
+      "XENIA_PMS_PROPERTY_ID=" + result.propertyId,
+      "XENIA_PMS_CLIENT_ID=" + result.clientId,
+      "XENIA_PMS_CLIENT_SECRET=" + result.clientSecret,
+    ].join("\n");
+    $("#pms-credentials").hidden = false;
+    notice(
+      "Ficha generada para " + property.name + ". Guardala antes de salir.",
+    );
   });
 });
 void session().catch((error) => {

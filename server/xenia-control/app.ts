@@ -13,12 +13,14 @@ import { dirname, join } from "node:path";
 import { z, ZodError } from "zod";
 import type { ControlConfig } from "./config";
 import { ControlStore, ControlError, type Principal } from "./store";
+import { PmsBroker } from "./pms";
 
 declare module "express-session" {
   interface SessionData {
     xeniaPrincipalId?: string;
     xeniaSessionVersion?: number;
     xeniaCsrf?: string;
+    xeniaPmsResume?: string;
   }
 }
 
@@ -84,6 +86,7 @@ const actor = (res: express.Response): Principal => res.locals.xeniaPrincipal;
 
 export async function createControlApp(config: ControlConfig) {
   const store = new ControlStore(config);
+  const pms = new PmsBroker(store);
   // Startup checks presence only. All schema/provisioning changes belong to the explicit setup command.
   try {
     await store.central.query(
@@ -112,6 +115,80 @@ export async function createControlApp(config: ControlConfig) {
     }),
   );
   app.use(express.json({ limit: "24kb" }));
+  // Back-channel endpoints authenticate the installation, never a browser
+  // cookie. Register before browser sessions and their Origin/CSRF middleware.
+  const pmsLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 1200,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+  });
+  const pmsClient: RequestHandler = (req, res, next) => {
+    void (async () => {
+      res.set("Cache-Control", "no-store");
+      const raw = req.get("Authorization") ?? "";
+      if (
+        !raw.startsWith("Basic ") ||
+        raw.length > 512 ||
+        !req.is("application/json")
+      )
+        throw new ControlError(401, "La instalación debe autenticarse.");
+      const decoded = Buffer.from(raw.slice(6), "base64").toString("utf8");
+      const separator = decoded.indexOf(":");
+      const clientId = uuid.parse(decoded.slice(0, separator));
+      const secret = decoded.slice(separator + 1);
+      if (separator < 0 || !/^[a-zA-Z0-9_-]{43,128}$/.test(secret))
+        throw new ControlError(401, "La instalación debe autenticarse.");
+      const installation = await pms.authenticate(clientId, secret);
+      if (req.get("Origin") && req.get("Origin") !== installation.origin)
+        throw new ControlError(403, "Origen del PMS inválido.");
+      res.locals.pmsClientId = installation.clientId;
+      next();
+    })().catch(next);
+  };
+  const opaqueToken = z.string().regex(/^[a-zA-Z0-9_-]{43}$/);
+  app.post(
+    "/api/pms/exchange",
+    pmsLimit,
+    pmsClient,
+    route(async (req, res) => {
+      const input = z
+        .object({
+          code: opaqueToken,
+          verifier: z.string().regex(/^[a-zA-Z0-9._~-]{43,128}$/),
+        })
+        .strict()
+        .parse(req.body);
+      res.json(
+        await pms.exchange(res.locals.pmsClientId, input.code, input.verifier),
+      );
+    }),
+  );
+  app.post(
+    "/api/pms/introspect",
+    pmsLimit,
+    pmsClient,
+    route(async (req, res) => {
+      const input = z
+        .object({ leaseToken: opaqueToken })
+        .strict()
+        .parse(req.body);
+      res.json(await pms.introspect(res.locals.pmsClientId, input.leaseToken));
+    }),
+  );
+  app.post(
+    "/api/pms/revoke",
+    pmsLimit,
+    pmsClient,
+    route(async (req, res) => {
+      const input = z
+        .object({ leaseToken: opaqueToken })
+        .strict()
+        .parse(req.body);
+      await pms.revoke(res.locals.pmsClientId, input.leaseToken);
+      res.json({ ok: true });
+    }),
+  );
   app.get("/healthz", (_req, res) => {
     void store.central
       .query("SELECT 1")
@@ -206,6 +283,10 @@ export async function createControlApp(config: ControlConfig) {
     res: express.Response,
     principal: Principal,
   ) => {
+    const redirectTo = req.session.xeniaPmsResume;
+    const previousPrincipal = req.session.xeniaPrincipalId;
+    if (previousPrincipal && previousPrincipal !== principal.id)
+      await pms.logoutPrincipal(previousPrincipal);
     await new Promise<void>((resolve, reject) =>
       req.session.regenerate((error) => (error ? reject(error) : resolve())),
     );
@@ -219,8 +300,48 @@ export async function createControlApp(config: ControlConfig) {
       user: principal,
       csrfToken: req.session.xeniaCsrf,
       demo: config.demo,
+      ...(redirectTo ? { redirectTo } : {}),
     });
   };
+  app.get(
+    "/pms/authorize",
+    route(async (req, res) => {
+      res
+        .set("Cache-Control", "no-store")
+        .set("Referrer-Policy", "no-referrer");
+      const input = z
+        .object({
+          client_id: uuid,
+          state: opaqueToken,
+          code_challenge: opaqueToken,
+        })
+        .strict()
+        .parse(req.query);
+      const principal = req.session.xeniaPrincipalId
+        ? await store.principal(req.session.xeniaPrincipalId)
+        : undefined;
+      if (
+        !principal ||
+        principal.sessionVersion !== req.session.xeniaSessionVersion
+      ) {
+        req.session.xeniaPmsResume =
+          "/pms/authorize?" + new URLSearchParams(input).toString();
+        await new Promise<void>((resolve, reject) =>
+          req.session.save((error) => (error ? reject(error) : resolve())),
+        );
+        return res.redirect(303, "/");
+      }
+      const grant = await pms.grant(
+        principal,
+        input.client_id,
+        input.code_challenge,
+      );
+      const callback = new URL("/xenia/callback", grant.origin);
+      callback.searchParams.set("code", grant.code);
+      callback.searchParams.set("state", input.state);
+      res.redirect(303, callback.toString());
+    }),
+  );
   app.get(
     "/api/session",
     route(async (req, res) => {
@@ -302,6 +423,8 @@ export async function createControlApp(config: ControlConfig) {
   app.post(
     "/api/logout",
     route(async (req, res) => {
+      if (req.session.xeniaPrincipalId)
+        await pms.logoutPrincipal(req.session.xeniaPrincipalId);
       await new Promise<void>((resolve, reject) =>
         req.session.destroy((error) => (error ? reject(error) : resolve())),
       );
@@ -322,6 +445,30 @@ export async function createControlApp(config: ControlConfig) {
     "/api/properties",
     authorize,
     route(async (_req, res) => res.json(await store.properties(actor(res)))),
+  );
+  app.get(
+    "/api/pms/installations",
+    authorize,
+    route(async (_req, res) => res.json(await pms.links(actor(res)))),
+  );
+  app.post(
+    "/api/admin/properties/:propertyId/pms",
+    authorize,
+    route(async (req, res) => {
+      const input = z
+        .object({ origin: z.string().max(250) })
+        .strict()
+        .parse(req.body);
+      res
+        .status(201)
+        .json(
+          await pms.configure(
+            actor(res),
+            uuid.parse(req.params.propertyId),
+            input.origin,
+          ),
+        );
+    }),
   );
   app.get(
     "/api/admin/organizations",
@@ -515,6 +662,7 @@ export async function createControlApp(config: ControlConfig) {
   return {
     app,
     store,
+    pms,
     close: async () => {
       await sessionStore.close();
       await store.close();

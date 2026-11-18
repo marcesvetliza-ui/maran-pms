@@ -103,7 +103,19 @@ export class ControlStore {
       CREATE TABLE IF NOT EXISTS xenia_control.sessions (sid varchar PRIMARY KEY, sess json NOT NULL, expire timestamp(6) NOT NULL);
       CREATE INDEX IF NOT EXISTS sessions_expire ON xenia_control.sessions(expire);
       CREATE TABLE IF NOT EXISTS xenia_control.audit (
-        id bigserial PRIMARY KEY, actor_id uuid, action text NOT NULL, property_id uuid, occurred_at timestamptz NOT NULL DEFAULT now());`);
+        id bigserial PRIMARY KEY, actor_id uuid, action text NOT NULL, property_id uuid, occurred_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS xenia_control.pms_installations (
+        client_id uuid PRIMARY KEY,property_id uuid UNIQUE NOT NULL REFERENCES xenia_control.properties(id),origin text UNIQUE NOT NULL,
+        secret_hash text NOT NULL,enabled boolean NOT NULL DEFAULT true);
+      CREATE TABLE IF NOT EXISTS xenia_control.pms_grants (
+        code_hash text PRIMARY KEY,client_id uuid NOT NULL REFERENCES xenia_control.pms_installations(client_id),
+        principal_id uuid NOT NULL REFERENCES xenia_control.principals(id),principal_version integer NOT NULL,role text NOT NULL,
+        challenge text NOT NULL,expires_at timestamptz NOT NULL,consumed_at timestamptz);
+      CREATE TABLE IF NOT EXISTS xenia_control.pms_leases (
+        token_hash text PRIMARY KEY,client_id uuid NOT NULL REFERENCES xenia_control.pms_installations(client_id),
+        principal_id uuid NOT NULL REFERENCES xenia_control.principals(id),principal_version integer NOT NULL,role text NOT NULL,expires_at timestamptz NOT NULL);
+      CREATE INDEX IF NOT EXISTS pms_grants_expires ON xenia_control.pms_grants(expires_at);
+      CREATE INDEX IF NOT EXISTS pms_leases_expires ON xenia_control.pms_leases(expires_at);`);
       await connection.query("COMMIT");
     } catch (error) {
       await connection.query("ROLLBACK");
