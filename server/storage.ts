@@ -813,12 +813,12 @@ export interface IStorage {
   deletePackageItem(id: string): Promise<boolean>;
 
   // System Notifications
-  getNotifications(area?: NotificationArea, limit?: number): Promise<SystemNotification[]>;
+  getNotifications(area?: NotificationArea, limit?: number, hospitalityAreas?:string[]|null): Promise<SystemNotification[]>;
   createNotification(notification: InsertSystemNotification): Promise<SystemNotification>;
-  markNotificationRead(id: string): Promise<SystemNotification | undefined>;
-  markAllNotificationsRead(area?: NotificationArea): Promise<number>;
-  getUnreadNotificationCount(area?: NotificationArea): Promise<number>;
-  updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string): Promise<SystemNotification | undefined>;
+  markNotificationRead(id: string, hospitalityAreas?:string[]|null): Promise<SystemNotification | undefined>;
+  markAllNotificationsRead(area?: NotificationArea, hospitalityAreas?:string[]|null): Promise<number>;
+  getUnreadNotificationCount(area?: NotificationArea, hospitalityAreas?:string[]|null): Promise<number>;
+  updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string, hospitalityAreas?:string[]|null): Promise<SystemNotification | undefined>;
 
   // Web Check-in
   createWebCheckin(data: InsertWebCheckin): Promise<WebCheckin>;

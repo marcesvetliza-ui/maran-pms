@@ -335,6 +335,9 @@ app.use((req, res, next) => {
     const { setupBirthdayEmailQueue } = await import("./hospitalitySpecialDates");
     setupBirthdayEmailQueue();
 
+    const {setupHospitalityNotificationScheduler}=await import('./hospitalityNotifications');
+    httpServer.once('close',setupHospitalityNotificationScheduler());
+
     const { setupHousekeepingServiceDayScheduler } = await import("./housekeepingServiceDay");
     setupHousekeepingServiceDayScheduler();
 

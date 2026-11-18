@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen,fireEvent,waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { queryClient } from "@/lib/queryClient";
@@ -15,6 +15,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
  */
 
 const authState = vi.hoisted(() => ({
+  navigate:vi.fn(),
   hasPermission: ((_resourceKey: string) => true) as (resourceKey: string) => boolean,
 }));
 
@@ -24,6 +25,8 @@ vi.mock("@/App", () => ({
     hasPermission: authState.hasPermission,
   }),
 }));
+
+vi.mock('wouter',async original=>({...await original<typeof import('wouter')>(),useLocation:()=>['/',authState.navigate]}));
 
 const { AppSidebar } = await import("./app-sidebar");
 
@@ -115,3 +118,14 @@ describe("AppSidebar — filtrado por resourceKey", () => {
     expect(screen.queryByText("Código fuente")).not.toBeInTheDocument();
   });
 });
+
+it.each(['hospitality_alert','hospitality_stay_note'])('opens the exact %s request from the bell and only marks it read',async kind=>{
+ queryClient.clear();authState.hasPermission=()=>true;authState.navigate.mockClear();
+ const n={id:'bell-1',type:'hospitality_alert',title:'Hospitalidad · Pérez Ana · Hab. 802',message:'Ingresa hoy · Preparar cuna',relatedEntityType:kind,relatedEntityId:'source-1',isRead:false,priority:'normal',targetArea:'housekeeping'};
+ vi.stubGlobal('fetch',vi.fn(async(url:any,init?:RequestInit)=>new Response(JSON.stringify(String(url).includes('unread-count')?{count:1}:String(url).includes('/notifications?')?[n]:[]),{status:200,headers:{'Content-Type':'application/json'}})));
+ renderSidebar();fireEvent.click(screen.getByTestId('button-notifications'));await screen.findByText(n.title);fireEvent.click(screen.getByTestId('notification-item-bell-1'));
+ await waitFor(()=>expect(authState.navigate).toHaveBeenCalledWith(kind==='hospitality_alert'?'/hospitality?tab=dashboard&alertId=source-1':'/hospitality?tab=stay-notes&noteId=source-1'));
+ expect(vi.mocked(fetch).mock.calls.filter(([,init])=>init?.method==='PATCH').map(([url])=>String(url))).toEqual(['/api/notifications/bell-1/read']);
+});
+
+afterEach(()=>{queryClient.clear();vi.unstubAllGlobals();});

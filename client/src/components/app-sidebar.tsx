@@ -1,3 +1,4 @@
+import {hospitalityNotificationLink} from '@shared/hospitalityNotifications';
 import {useChannexAccess} from '@/hooks/use-channex-access';
 import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, useRef } from "react";
@@ -260,6 +261,7 @@ function NotificationBell() {
       return res.json();
     },
     enabled: open,
+    refetchInterval: open?30000:false,
   });
 
   const markReadMutation = useMutation({
@@ -289,6 +291,7 @@ function NotificationBell() {
       <PopoverTrigger asChild>
         <button
           className="relative p-1.5 rounded-md hover:bg-sidebar-accent transition-colors"
+          aria-label="Notificaciones"
           data-testid="button-notifications"
         >
           <Bell className="h-5 w-5 text-sidebar-foreground" />
@@ -330,6 +333,8 @@ function NotificationBell() {
                   }`}
                   onClick={() => {
                     if (!n.isRead) markReadMutation.mutate(n.id);
+                    const hospitalityLink=hospitalityNotificationLink(n);
+                    if(hospitalityLink){setOpen(false);navigate(hospitalityLink);}
                     if (n.type.startsWith("chatbot_")) {
                       setOpen(false);
                       navigate("/chatbot");

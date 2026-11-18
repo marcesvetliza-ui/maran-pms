@@ -1,3 +1,4 @@
+import {requestHospitalityNotificationRefresh} from '../hospitalityNotifications';
 import {registerGroupAccountRoutes,groupAccountSnapshot} from '../billing/groupAccount';
 import {assertIndividualGroupPayment} from '../billing/individualGroupFolio';
 import {groupPersonalExtrasFactsQuery} from "../groupPersonalExtrasFacts";
@@ -21,7 +22,7 @@ import { storage, getArgentinaToday } from "../db-storage";
 import { assertFinancialSchemaReady } from "../migrate";
 import { db, pool, withDatabaseTransaction } from "../db";
 import type { PoolClient } from "pg";
-import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, guestPreferences, hospitalityAlerts, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions, cashMovements } from "@shared/schema";
+import { reservationChangelog, reservations, guests, charges, stayNotes, rooms, insertReservationCompanionSchema, roomTypes, groupReservationLinks, groupRoomBlocks, reservationCompanions, cashMovements } from "@shared/schema";
 import { eq, sql, asc, gte, lte, and, lt, inArray } from "drizzle-orm";
 import { buildComprobanteAsociado, emitirFactura } from "../billing/invoiceService";
 import { generarResumenCuentaPDF } from "../billing/invoicePdf";
@@ -446,15 +447,7 @@ export function registerReservationsRoutes(app: Express) {
         sendConfirmationEmail(reservation.id).catch(e => console.error("[email] create confirmation trigger:", e));
       }
 
-      // Generar alertas de hospitalidad para reservas con check-in HOY
-      if (reservation.guestId && reservation.checkInDate) {
-        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
-        if (reservation.checkInDate === todayStr) {
-          generateSameDayHospitalityAlerts(reservation.id, reservation.guestId, reservation.roomId ?? null).catch(
-            (e) => console.error("[hospitality] same-day alert error:", e)
-          );
-        }
-      }
+      requestHospitalityNotificationRefresh();
 
       res.status(201).json(reservation);
     } catch (error: any) {
@@ -1005,27 +998,6 @@ export function registerReservationsRoutes(app: Express) {
       if (reservation.guestId) {
         const preferences = await storage.getActiveGuestPreferences(reservation.guestId);
         for (const pref of preferences) {
-          const areaMap: Record<string, string[]> = {
-            alimentacion: ["restaurant", "reception"],
-            habitacion: ["housekeeping", "reception"],
-            amenities: ["housekeeping"],
-            servicio: ["reception"],
-            fecha_especial: ["reception"],
-            motivo_viaje: ["reception"],
-            nota_interna: ["reception"],
-            otro: ["reception"],
-          };
-          const targetAreas = areaMap[pref.category] || ["reception"];
-          for (const area of targetAreas) {
-            await storage.createHospitalityAlert({
-              reservationId: req.params.id,
-              guestId: reservation.guestId,
-              preferenceId: pref.id,
-              alertMessage: `${pref.title}: ${pref.description || pref.title}`,
-              targetArea: area,
-              priority: pref.priority as any,
-            });
-          }
           db.insert(stayNotes).values({
             id: randomUUID(),
             reservationId: req.params.id,
@@ -1039,20 +1011,11 @@ export function registerReservationsRoutes(app: Express) {
             recordedBy: "sistema (check-in automático)",
             createdAt: new Date(),
           }).catch((e) => console.warn("stayNotes insert failed (non-fatal):", e?.message));
-          if (pref.priority === "critical" || pref.priority === "high") {
-            await storage.createNotification({
-              type: "hospitality_alert",
-              title: `⚠️ Alerta de hospitalidad - Hab. ${room.roomNumber}`,
-              message: `${pref.title}: ${pref.description || ""}`,
-              targetArea: "all" as any,
-              relatedEntityType: "reservation",
-              relatedEntityId: req.params.id,
-              priority: pref.priority === "critical" ? "urgent" : "high",
-            });
-          }
+
         }
       }
 
+      requestHospitalityNotificationRefresh();
       phase = "audit";
       const roomForAudit = await storage.getRoom(reservation.roomId);
       await audit(req, "update", "reservations",
@@ -3819,68 +3782,6 @@ export function registerReservationsRoutes(app: Express) {
     }
   });
 
-}
-
-// Helper: genera alertas de hospitalidad inmediatamente para reservas con check-in el mismo día
-async function generateSameDayHospitalityAlerts(
-  reservationId: string,
-  guestId: string,
-  roomId: string | null
-) {
-  const areaMap: Record<string, string[]> = {
-    alimentacion: ["restaurant", "reception"],
-    habitacion: ["housekeeping", "reception"],
-    amenities: ["housekeeping"],
-    servicio: ["reception"],
-    fecha_especial: ["reception"],
-    motivo_viaje: ["reception"],
-    nota_interna: ["reception"],
-    otro: ["reception"],
-  };
-
-  const activePrefs = await db
-    .select()
-    .from(guestPreferences)
-    .where(and(eq(guestPreferences.guestId, guestId), eq(guestPreferences.isActive, true)));
-
-  if (activePrefs.length === 0) return;
-
-  // Obtener número de habitación si existe
-  let roomNumber: string | null = null;
-  if (roomId) {
-    const [room] = await db.select({ roomNumber: rooms.roomNumber }).from(rooms).where(eq(rooms.id, roomId));
-    roomNumber = room?.roomNumber ?? null;
-  }
-
-  // Evitar duplicados para esta reserva
-  const existingAlerts = await db
-    .select({ preferenceId: hospitalityAlerts.preferenceId })
-    .from(hospitalityAlerts)
-    .where(eq(hospitalityAlerts.reservationId, reservationId));
-  const existingPrefIds = new Set(existingAlerts.map((a) => a.preferenceId));
-
-  const roomLabel = roomNumber ? ` — Hab. ${roomNumber}` : "";
-
-  for (const pref of activePrefs) {
-    if (existingPrefIds.has(pref.id)) continue;
-    const targetAreas = areaMap[pref.category] || ["reception"];
-    for (const area of targetAreas) {
-      await db.insert(hospitalityAlerts).values({
-        id: randomUUID(),
-        reservationId,
-        guestId,
-        preferenceId: pref.id,
-        alertMessage: `[Llegada hoy${roomLabel}] ${pref.title}: ${pref.description || pref.title}`,
-        targetArea: area,
-        priority: pref.priority as any,
-        status: "pending",
-        isAcknowledged: false,
-        createdAt: new Date(),
-      });
-    }
-    existingPrefIds.add(pref.id);
-  }
-  console.log(`[hospitality] ${activePrefs.length} preferencias → alertas de llegada hoy generadas para reserva ${reservationId}`);
 }
 
 // ─── GET /api/reservations/:id/confirmation-pdf ───────────────────────────────

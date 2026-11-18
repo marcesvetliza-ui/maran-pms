@@ -1,3 +1,4 @@
+import {hospitalityNotificationAreas} from '@shared/hospitalityNotifications';
 import { purchaseInvoiceMetadataInput, correctPurchaseInvoiceMetadata } from './purchaseInvoiceMetadata';
 import { normalizePurchaseCreditNotePayment } from '@shared/purchase-credit-note-payment';
 import {productionEnabled} from './channex/connectionPolicy';
@@ -1132,19 +1133,20 @@ export async function registerRoutes(
   });
 
   // ==================== SYSTEM NOTIFICATIONS ====================
+  const notificationAreas=(req:any)=>hospitalityNotificationAreas(req.user?.role||'',!!req.user&&hasPermission(req.user.role,'sidebar:/hospitality'));
 
-  app.get("/api/notifications", async (req, res) => {
+  app.get("/api/notifications", requireAuth, async (req, res) => {
     try {
       const area = req.query.area as string | undefined;
       const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
-      const notifications = await storage.getNotifications(area as any, limit);
+      const notifications = await storage.getNotifications(area as any, limit,notificationAreas(req));
       res.json(notifications);
     } catch (error) {
       res.status(500).json({ error: "Error fetching notifications" });
     }
   });
 
-  app.post("/api/notifications", async (req, res) => {
+  app.post("/api/notifications", requireAuth, async (req, res) => {
     try {
       const notification = await storage.createNotification(req.body);
       res.status(201).json(notification);
@@ -1153,10 +1155,10 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/notifications/:id/read", async (req, res) => {
+  app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
     try {
       const id = req.params.id;
-      const notification = await storage.markNotificationRead(id);
+      const notification = await storage.markNotificationRead(id,notificationAreas(req));
       if (!notification) return res.status(404).json({ error: "Notification not found" });
       res.json(notification);
     } catch (error) {
@@ -1169,7 +1171,7 @@ export async function registerRoutes(
       const { status, staffNote } = req.body;
       if (!status) return res.status(400).json({ error: "status requerido" });
       const resolvedBy = (req.user as any)?.fullName || (req.user as any)?.username;
-      const notification = await storage.updateNotificationStatus(req.params.id, status, staffNote, resolvedBy);
+      const notification = await storage.updateNotificationStatus(req.params.id, status, staffNote, resolvedBy,notificationAreas(req));
       if (!notification) return res.status(404).json({ error: "Notification not found" });
 
       // Send confirmation back to guest via MARA if sessionId is available
@@ -1198,20 +1200,20 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/notifications/read-all", async (req, res) => {
+  app.patch("/api/notifications/read-all", requireAuth, async (req, res) => {
     try {
       const area = req.query.area as string | undefined;
-      const count = await storage.markAllNotificationsRead(area as any);
+      const count = await storage.markAllNotificationsRead(area as any,notificationAreas(req));
       res.json({ markedRead: count });
     } catch (error) {
       res.status(500).json({ error: "Error marking notifications as read" });
     }
   });
 
-  app.get("/api/notifications/unread-count", async (req, res) => {
+  app.get("/api/notifications/unread-count", requireAuth, async (req, res) => {
     try {
       const area = req.query.area as string | undefined;
-      const count = await storage.getUnreadNotificationCount(area as any);
+      const count = await storage.getUnreadNotificationCount(area as any,notificationAreas(req));
       res.json({ count });
     } catch (error) {
       res.status(500).json({ error: "Error getting unread count" });

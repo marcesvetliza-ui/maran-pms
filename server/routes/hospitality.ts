@@ -1,8 +1,9 @@
+import {requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from '../hospitalityNotifications';
 import {registerHospitalitySpecialDates} from "../hospitalitySpecialDates";
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth } from "../auth";
-import { db } from "../db";
+import { db,withDatabaseTransaction } from "../db";
 import { hospitalityAlerts, guestPreferences, reservations, rooms, guests } from "@shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 
@@ -153,11 +154,17 @@ export function registerHospitalityRoutes(app: Express) {
     try {
       const { completedBy } = req.body;
       const operador = completedBy || (req as any).user?.username || "Sistema";
-      const [updated] = await db.update(hospitalityAlerts)
+      const updated=await withDatabaseTransaction(async()=>{
+      await lockHospitalityNotifications();
+      const [row] = await db.update(hospitalityAlerts)
         .set({ status: "completed", isAcknowledged: true, acknowledgedAt: new Date(), acknowledgedBy: operador })
         .where(eq(hospitalityAlerts.id, req.params.alertId))
         .returning();
+      if(row)await closeHospitalityBellItem('hospitality_alert',row.id,operador);
+      return row;
+      });
       if (!updated) return res.status(404).json({ error: "Alert not found" });
+      requestHospitalityNotificationRefresh();
       res.json(updated);
     } catch (error) {
       res.status(500).json({ error: "Error completing alert" });
