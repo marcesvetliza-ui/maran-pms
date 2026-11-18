@@ -14,6 +14,7 @@ import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
 import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
+import { RevertCheckout } from "@/components/revert-checkout";
 import { ClosedReservationBilling } from "@/components/closed-reservation-billing";
 import { ReservationPackageChange } from "@/components/reservation-package-change";
 import { buildPackagePricingPatch } from "@/lib/reservation-package-pricing";
@@ -3261,7 +3262,7 @@ export function ReservationDetailDialog({
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md text-sm text-amber-700 dark:text-amber-300" data-testid="banner-locked-reservation">
             <Lock className="h-4 w-4 shrink-0" />
             <span>Reserva cerrada — datos de estadía en sólo lectura.</span>
-            <ClosedReservationBilling reservationId={reservation.id} />
+            <ClosedReservationBilling reservation={reservation} />
           </div>
         )}
 
@@ -4939,6 +4940,7 @@ export function ReservationDetailDialog({
             {typeof operationalActions === "function"
               ? operationalActions({ onCheckout: requestCheckout })
               : operationalActions}
+            {reservation.status === "checked_out" && <RevertCheckout reservationId={reservation.id} onComplete={() => onOpenChange(false)} />}
             <Button
               variant="outline"
               onClick={printConfirmation}

@@ -2,6 +2,7 @@ import { normalizeToSpanishPaymentMethod } from "./payment-method";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, parseGroupCreditAdvanceConfirmation, supportsGroupCreditAdvance, groupCreditAdvanceSummary } from "@shared/groupCreditAdvance";
 import {getGroupPaymentRequest} from './groupPaymentRequest';
 import {lockRoomInvoiceCollection,finishRoomInvoiceCollection} from './billing/reservationInvoiceCollection';
+import { lockPostCheckoutInvoicePayment } from "./billing/postCheckoutInvoicePayment";
 import {loadLodging,lodgingChannels,lodgingByRoomType,previousYearDate} from "./reports/lodging";
 import {withLodgingInventoryMutationLock} from './inventoryMutationLock';
 import { lockAccountTransferGroup, assertGroupAccountTransferBalance } from "./reservationAccountTransfer";
@@ -1796,6 +1797,7 @@ export class DatabaseStorage implements IStorage {
   async createReservationPaymentWithLedger(input: {
     paymentRequest?: ReservationPaymentRequest;
     expectedReservationStatus?: string;
+    postCheckoutInvoiceId?: number;
     invoiceCollection?: {invoiceId:number;acknowledgeUnassignedAdvance:boolean;userId?:string};
     payment: Omit<InsertPayment, "method"> & { method: string };
     sourceLabel: string;
@@ -1894,6 +1896,10 @@ export class DatabaseStorage implements IStorage {
         if ((current.rows[0] as any)?.status !== input.expectedReservationStatus) {
           throw Object.assign(new Error("La estadía cambió mientras se preparaba el pago. Actualizá el folio antes de continuar."), { statusCode: 409 });
         }
+      }
+      if (input.postCheckoutInvoiceId !== undefined) {
+        if (!input.paymentRequest) throw Object.assign(new Error("El cobro necesita una clave de operación."), { statusCode: 400 });
+        await lockPostCheckoutInvoicePayment(tx, input.payment.reservationId, input.postCheckoutInvoiceId, canonicalAmount);
       }
       // A payment can be retried after the payment/folio/account transaction
       // committed but before its Caja event was observed. Serialize this

@@ -1,3 +1,4 @@
+import { isPostCheckoutCharge } from "@shared/postCheckout";
 import {GroupRoomAccount} from './group-room-account';
 import { chargeUnits, expandChargeUnitCoverage, unitParent } from '@shared/chargeUnits';
 import { expandAccommodationCoverage, isAccommodationSource, type AccommodationNight } from '@shared/accommodationNights';
@@ -115,6 +116,8 @@ export interface PrefacturaDialogProps {
   reservation?: ReservationWithDetails | null;
   mode: "checkout" | "billing";
   onCheckoutComplete?: () => void;
+  /** New consumption only; never select historical accommodation on a departed stay. */
+  postCheckoutOnly?: boolean;
 }
 
 export interface SelectedFolioItem {
@@ -506,7 +509,7 @@ function newRowId() { return `row_${++rowIdCounter}`; }
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PrefacturaDialog({
-  open, onClose, reservationId, reservation, mode, onCheckoutComplete,
+  open, onClose, reservationId, reservation, mode, onCheckoutComplete, postCheckoutOnly = false,
 }: PrefacturaDialogProps) {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -650,7 +653,7 @@ export function PrefacturaDialog({
   const [ndDialogOpen, setNdDialogOpen] = useState(false);
 
   // Queries
-  const { data: folio, isLoading: folioLoading, refetch: refetchFolio } = useQuery<PrefacturaFolioData>({
+  const { data: fullFolio, isLoading: folioLoading, refetch: refetchFolio } = useQuery<PrefacturaFolioData>({
     queryKey: ["/api/reservations", String(reservationId), "folio"],
     queryFn: async () => {
       const res = await fetch(`/api/reservations/${reservationId}/folio`);
@@ -659,6 +662,10 @@ export function PrefacturaDialog({
     },
     enabled: open && !!reservationId,
   });
+  const folio = useMemo(() => fullFolio && postCheckoutOnly ? {
+    ...fullFolio, roomTotal: 0, accommodationNights: [],
+    charges: fullFolio.charges.filter(charge => isPostCheckoutCharge(charge.id)),
+  } : fullFolio, [fullFolio, postCheckoutOnly]);
   const rejectedAttemptKey = ["/api/billing/reservations", reservationId, "rejected-exempt-attempt"];
   const { data: serverRejection, isLoading: rejectionLoading, isError: rejectionError } = useQuery<{ attempt: { operationId: string; recoverable: boolean } | null }>({
     queryKey: rejectedAttemptKey,
@@ -818,14 +825,14 @@ export function PrefacturaDialog({
       setSplitBalanceChanged(false);
       setInvoiceObservations("");
       setShowDiscount(false); setDiscountValue(""); setDiscountReason("");
-      setApplyReleasedCredit(true);
+      setApplyReleasedCredit(!postCheckoutOnly);
       setShowCreditDetail(false);
       const key = settlementOperationKey(reservationId);
       const persisted = typeof window !== "undefined" ? window.sessionStorage.getItem(key) : null;
       const operationId = persisted || newSettlementOperationId();
       if (typeof window !== "undefined") window.sessionStorage.setItem(key, operationId);
       setCreditOperationId(operationId);
-      setSaleCondition("contado");
+      setSaleCondition(postCheckoutOnly ? "cuenta_corriente" : "contado");
       setTransferDialogOpen(false);
       setTransferCharge(null);
       setShowBulkTransfer(false);
@@ -836,7 +843,7 @@ export function PrefacturaDialog({
       setNdDialogOpen(false);
       folioInitializedRef.current = false;
     }
-  }, [open, reservationId]);
+  }, [open, reservationId, postCheckoutOnly]);
 
   // When folio loads or balance changes: sync selected items and payment amount.
   //
@@ -861,6 +868,7 @@ export function PrefacturaDialog({
         const frozen = pendingPrefacturaSourceIds(submission.current!.pending(reservationId));
         const saved = readPrefacturaSelection(window.sessionStorage, reservationId);
         allIds = frozen !== null ? new Set(frozen)
+          : postCheckoutOnly ? new Set(eligibleIds)
           : retainedPrefacturaSelection(saved ?? eligibleIds, eligibleIds);
         setSelectedIds(allIds);
       } catch (error) {
@@ -985,7 +993,7 @@ export function PrefacturaDialog({
       setDocumentType(g.documentType || (cuitVal ? "CUIT" : "DNI"));
       setNationality(g.nationality || "");
       setNationalityCode(g.nationalityCode || "");
-      setSaleCondition(g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
+      setSaleCondition(postCheckoutOnly || g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
       setTipo(suggestTipo(cuitVal, condVal));
     } else if (comp) {
       setBillingTarget("company");
@@ -1014,7 +1022,7 @@ export function PrefacturaDialog({
       setDocumentType(g.documentType || (cuitVal ? "CUIT" : "DNI"));
       setNationality(g.nationality || "");
       setNationalityCode(g.nationalityCode || "");
-      setSaleCondition(g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
+      setSaleCondition(postCheckoutOnly || g.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
       setTipo(suggestTipo(cuitVal, condVal));
     }
   }
@@ -1035,7 +1043,7 @@ export function PrefacturaDialog({
     setDocumentType("CUIT");
     setNationality("");
     setNationalityCode("");
-    setSaleCondition(e.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
+    setSaleCondition(postCheckoutOnly || e.condicionVentaPredeterminada === "cuenta_corriente" ? "cuenta_corriente" : "contado");
     setTipo(suggestTipo(cuitVal, condVal));
   }
 
@@ -2075,7 +2083,7 @@ export function PrefacturaDialog({
       <DialogContent className="w-[calc(100vw-24px)] max-w-[1200px] max-h-[94dvh] flex flex-col overflow-hidden p-0 gap-0 sm:w-[calc(100vw-48px)]">
         <DialogHeader className="shrink-0 border-b px-6 pt-6 pb-4">
           <DialogTitle className="flex items-center gap-2">
-            {step < 3 && <><FileText className="h-5 w-5" />{canCheckoutWithoutCollection ? "Confirmar Check-out" : "Prefactura"}</>}
+            {step < 3 && <><FileText className="h-5 w-5" />{postCheckoutOnly ? "Facturar consumos posteriores" : canCheckoutWithoutCollection ? "Confirmar Check-out" : "Prefactura"}</>}
             {step === 3 && <><CircleCheck className="h-5 w-5 text-green-600" />Resultado</>}
             {reservation && (
               <span className="font-normal text-muted-foreground text-sm ml-2">
@@ -2083,6 +2091,7 @@ export function PrefacturaDialog({
               </span>
             )}
           </DialogTitle>
+          {postCheckoutOnly && <p className="text-sm text-muted-foreground">La estadía permanece cerrada. Esta operación no modifica la ocupación actual de la habitación.</p>}
         </DialogHeader>
 
 
@@ -2246,9 +2255,9 @@ export function PrefacturaDialog({
               {!isFiscalTipo && <p className="mt-2 text-xs text-muted-foreground">Comprobante interno, sin CAE</p>}
             </section>
 
-            {!hasPendingSubmission && !alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
+            {!postCheckoutOnly && !hasPendingSubmission && !alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && (
               <div className="rounded-lg border p-3 space-y-3">
-                <Button variant="outline" size="sm" onClick={() => setShowDiscount(!showDiscount)} disabled={isSubmitting || tipo === "FT" || !isFiscalTipo}>
+                <Button variant="outline" size="sm" onClick={() => setShowDiscount(!showDiscount)} disabled={postCheckoutOnly || isSubmitting || tipo === "FT" || !isFiscalTipo}>
                   {showDiscount ? <X className="mr-1 h-4 w-4" /> : <Plus className="mr-1 h-4 w-4" />}
                   {showDiscount ? "Quitar descuento" : "Agregar descuento"}
                 </Button>
@@ -2364,7 +2373,7 @@ export function PrefacturaDialog({
               {chargesOpen && <div id="prefactura-charges-panel" className="border-t p-3">
             {/* Agregar cargo sin salir del check-out */}
             <div className="flex items-center justify-end">
-              {!showAddCharge && (
+              {!showAddCharge && !postCheckoutOnly && (
                 <Button
                   type="button"
                   variant="outline"
@@ -2497,8 +2506,8 @@ export function PrefacturaDialog({
                         return (
                           <ChargeRow
                             key={charge.id}
-                            editAction={!isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onEditDescription={charge.category === "restaurant" ? () => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description) : undefined} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
-                            voidAction={!isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && charge.status !== "anulado" && !(invoicedAmountsByCharge[String(charge.id)] > 0.005) ? <ReservationChargeVoid reservationId={String(reservationId)} charge={{id:String(charge.id),description:charge.description,amount:String(charge.amount),category:charge.category}} role={user?.role} onSaved={()=>{setItemDescriptions(prev=>{const next={...prev};delete next[String(charge.id)];return next;});}}/> : undefined}
+                            editAction={!postCheckoutOnly && !isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onEditDescription={charge.category === "restaurant" ? () => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description) : undefined} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
+                            voidAction={!postCheckoutOnly && !isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && charge.status !== "anulado" && !(invoicedAmountsByCharge[String(charge.id)] > 0.005) ? <ReservationChargeVoid reservationId={String(reservationId)} charge={{id:String(charge.id),description:charge.description,amount:String(charge.amount),category:charge.category}} role={user?.role} onSaved={()=>{setItemDescriptions(prev=>{const next={...prev};delete next[String(charge.id)];return next;});}}/> : undefined}
                             id={String(charge.id)}
                             amount={Number(charge.amount)}
                             description={itemDescriptions[String(charge.id)] || charge.description}
@@ -2513,7 +2522,7 @@ export function PrefacturaDialog({
                             onEditChange={setEditingValue}
                             onSaveEdit={saveEdit}
                             onCancelEdit={() => setEditingId(null)}
-                            onTransfer={isTransfer || isUnit ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
+                            onTransfer={postCheckoutOnly || isTransfer || isUnit ? undefined : () => { setTransferCharge({ id: String(charge.id), description: charge.description, maxAmount: transferRemaining?.charges?.[String(charge.id)] ?? parseFloat(charge.amount), originalAmount: parseFloat(charge.amount) }); setTransferDialogOpen(true); }}
                             onRevert={(isTransfer && !isReversal && !alreadyReversed) ? () => { setRevertCharge({ id: String(charge.id), description: charge.description, amount: Math.abs(parseFloat(charge.amount)), category: charge.category }); setRevertDialogOpen(true); } : undefined}
                             alreadyReversed={alreadyReversed}
                             category={charge.category}
@@ -2807,9 +2816,9 @@ export function PrefacturaDialog({
               <Button variant="outline" size="sm" onClick={() => window.open(`/api/reservations/${reservationId}/folio/pdf`, "_blank")}>
                 <Printer className="h-4 w-4 mr-1" />Imprimir resumen
               </Button>
-              <Button variant="outline" size="sm" className="text-orange-700 border-orange-300 hover:bg-orange-50" onClick={() => setShowBulkTransfer(true)} disabled={folioLoading || !folio || totalSelected <= 0.01}>
+              {!postCheckoutOnly && <Button variant="outline" size="sm" className="text-orange-700 border-orange-300 hover:bg-orange-50" onClick={() => setShowBulkTransfer(true)} disabled={folioLoading || !folio || totalSelected <= 0.01}>
                 <ArrowRightLeft className="h-4 w-4 mr-1" />Transferir a otra hab.
-              </Button>
+              </Button>}
               {canCheckoutWithoutCollection && <Button onClick={()=>checkoutOnly.mutate()} disabled={checkoutOnly.isPending || isSubmitting || folioLoading} data-testid="button-checkout-without-issuance">{checkoutOnly.isPending ? "Cerrando estadía…" : <><LogOut className="h-4 w-4 mr-1" />Dar check-out</>}</Button>}
               {!hasPendingSubmission && alreadyPaidAndInvoiced && mode !== "checkout" && <Button variant="outline" onClick={handleClose}>Cerrar</Button>}
               {!alreadyPaidAndInvoiced && !canCheckoutWithoutCollection && !accountCheckoutOnly && (
