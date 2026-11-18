@@ -218,6 +218,13 @@ app.use((req, res, next) => {
     }
     startupReady = true;
     try {
+      const {ensureReviewsSchema}=await import('./reviews/schema');await ensureReviewsSchema();
+      const {backfillSurveyReviews}=await import('./reviews/service');await backfillSurveyReviews();
+      const {startSurveyScheduler}=await import('./reviews/dispatch');httpServer.once('close',startSurveyScheduler());
+      log('Reseñas y encuestas posestadía preparadas; cola automática iniciada');
+    } catch(error:any){logger.warn('[reviews] No se pudo preparar encuestas: '+error?.message);}
+
+    try {
       const {pool}=await import('./db');
       const {ensureChannexAccessSchema}=await import('./channex/access');
       await ensureChannexAccessSchema();

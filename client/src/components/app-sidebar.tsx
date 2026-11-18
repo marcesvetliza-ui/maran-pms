@@ -246,6 +246,7 @@ function getAreaLabel(area: string): string {
 }
 
 function NotificationBell() {
+  const {hasPermission}=useAuth();
   const [open, setOpen] = useState(false);
   const [, navigate] = useLocation();
 
@@ -333,6 +334,7 @@ function NotificationBell() {
                   }`}
                   onClick={() => {
                     if (!n.isRead) markReadMutation.mutate(n.id);
+                    if(n.type==='review_followup'&&hasPermission('sidebar:/reviews')){setOpen(false);navigate(`/reviews?review=${encodeURIComponent(n.relatedEntityId || '')}`);}
                     const hospitalityLink=hospitalityNotificationLink(n);
                     if(hospitalityLink){setOpen(false);navigate(hospitalityLink);}
                     if (n.type.startsWith("chatbot_")) {

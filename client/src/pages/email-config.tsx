@@ -1,3 +1,4 @@
+import {SurveyScheduleSettings} from "@/components/survey-schedule-settings";
 import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
@@ -76,9 +77,6 @@ export default function EmailConfigPage() {
   });
   const { data: logs = [], refetch: refetchLogs } = useQuery<any[]>({
     queryKey: ["/api/email/logs"],
-  });
-  const { data: surveyResponses = [] } = useQuery<any[]>({
-    queryKey: ["/api/email/survey-responses"],
   });
 
   const saveMutation = useMutation({
@@ -217,7 +215,7 @@ export default function EmailConfigPage() {
               key: "checkout",
               label: "Post checkout + encuesta",
               icon: Send,
-              desc: "Se envía al hacer el check-out. Incluye link único a la encuesta de satisfacción",
+              desc: "Se envía después de la salida según el horario configurado. Incluye un enlace individual a la encuesta",
               enabledField: "checkoutEnabled",
               subjectField: "checkoutSubject",
               bodyField: "checkoutBody",
@@ -226,6 +224,8 @@ export default function EmailConfigPage() {
           ].map(({ key, ...template }) => (
             <TemplateCard key={key} {...template} cfg={cfg} onSave={save} />
           ))}
+
+          <SurveyScheduleSettings cfg={cfg} onSave={save}/>
 
           {/* Reminder manual trigger */}
           <Card>
@@ -442,66 +442,7 @@ export default function EmailConfigPage() {
         </TabsContent>
 
         {/* ─── ENCUESTAS ─── */}
-        <TabsContent value="encuestas" className="space-y-4 mt-4">
-          {surveyResponses.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center text-muted-foreground">
-                <Star className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                <p>Todavía no hay respuestas de encuesta</p>
-                <p className="text-sm">Los huéspedes recibirán el link al hacer el check-out</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              {/* Average card */}
-              {stats?.avgOverall && (
-                <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
-                  <CardContent className="p-4 flex items-center gap-4">
-                    <div className="text-5xl font-bold text-amber-500">{stats.avgOverall}</div>
-                    <div>
-                      <Stars value={Math.round(parseFloat(stats.avgOverall))} />
-                      <p className="text-sm text-muted-foreground mt-1">{stats.surveyCount} respuesta{stats.surveyCount !== 1 ? "s" : ""}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-              <div className="space-y-3">
-                {surveyResponses.map((r: any) => (
-                  <Card key={r.id}>
-                    <CardContent className="p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2 flex-wrap">
-                        <div>
-                          <p className="font-medium">{r.guestName || "Huésped anónimo"}</p>
-                          <p className="text-xs text-muted-foreground">{r.submittedAt ? new Date(r.submittedAt).toLocaleDateString("es-AR") : ""}</p>
-                        </div>
-                        <Stars value={r.ratingOverall} />
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                        {[
-                          { label: "Habitación", val: r.ratingRoom },
-                          { label: "Limpieza", val: r.ratingCleanliness },
-                          { label: "Servicio", val: r.ratingService },
-                          { label: "Gastronomía", val: r.ratingFood },
-                        ].map(item => item.val && (
-                          <div key={item.label} className="rounded-lg bg-muted p-2 text-center">
-                            <p className="text-xs text-muted-foreground">{item.label}</p>
-                            <Stars value={item.val} />
-                          </div>
-                        ))}
-                      </div>
-                      {r.comment && (
-                        <div className="flex gap-2 rounded-lg bg-muted p-3">
-                          <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-                          <p className="text-sm italic">"{r.comment}"</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </>
-          )}
-        </TabsContent>
+        <TabsContent value="encuestas" className="mt-4"><Card><CardContent className="p-6 space-y-3"><p>Las encuestas, los puntajes por área y su seguimiento se administran en Reseñas.</p><Button asChild><a href="/reviews">Ir a Reseñas y encuestas</a></Button></CardContent></Card></TabsContent>
 
         {/* ─── HISTORIAL ─── */}
         <TabsContent value="logs" className="mt-4">

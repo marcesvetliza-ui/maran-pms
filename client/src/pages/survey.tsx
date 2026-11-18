@@ -6,14 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import {Checkbox} from '@/components/ui/checkbox';
 import { Star, CheckCircle2, AlertTriangle, Hotel } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Star selector
 // ─────────────────────────────────────────────────────────────────────────────
 function StarSelector({
-  label, value, onChange, testId,
-}: { label: string; value: number; onChange: (v: number) => void; testId: string }) {
+  label, value, onChange, testId,optional=false,
+}: { label: string; value: number; onChange: (v: number) => void; testId: string; optional?:boolean }) {
   const [hover, setHover] = useState(0);
   return (
     <div className="space-y-1">
@@ -23,6 +24,8 @@ function StarSelector({
           <button
             key={n}
             type="button"
+            aria-label={`${label}: ${n} de 5`}
+            aria-pressed={value===n}
             onClick={() => onChange(n)}
             onMouseEnter={() => setHover(n)}
             onMouseLeave={() => setHover(0)}
@@ -38,7 +41,8 @@ function StarSelector({
           </button>
         ))}
       </div>
-      {value === 0 && <p className="text-xs text-muted-foreground">Seleccioná una calificación</p>}
+      {optional&&<button type="button" className="text-xs underline text-muted-foreground" onClick={()=>onChange(0)}>No utilicé este servicio / No corresponde</button>}
+      {value === 0 && <p className="text-xs text-muted-foreground">{optional?'Sin evaluar (opcional)':'Seleccioná una calificación'}</p>}
       {value > 0 && (
         <p className="text-xs text-muted-foreground">
           {["", "Muy malo", "Malo", "Regular", "Bueno", "Excelente"][value]}
@@ -64,9 +68,10 @@ export default function SurveyPage() {
   const [, params] = useRoute("/encuesta/:token");
   const token = params?.token;
 
-  const [ratings, setRatings] = useState({
-    overall: 0, room: 0, cleanliness: 0, service: 0, food: 0,
-  });
+  const [ratings, setRatings] = useState({overall:0});
+  const [areaRatings,setAreaRatings]=useState<Record<string,number>>({});
+  const [nps,setNps]=useState('');
+  const [contactRequested,setContactRequested]=useState(false);
   const [comment, setComment] = useState("");
   const [guestName, setGuestName] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -92,10 +97,9 @@ export default function SurveyPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ratingOverall: ratings.overall,
-          ratingRoom: ratings.room,
-          ratingCleanliness: ratings.cleanliness,
-          ratingService: ratings.service,
-          ratingFood: ratings.food || null,
+          areaRatings:Object.fromEntries(Object.entries(areaRatings).filter(([,v])=>v>0)),
+          areaQuestions:Object.fromEntries((data?.areas || []).map((a:any)=>[a.key,a.question])),
+          nps:nps===''?null:Number(nps),contactRequested,
           comment: comment || null,
           guestName: guestName || null,
         }),
@@ -106,7 +110,7 @@ export default function SurveyPage() {
     onSuccess: () => setSubmitted(true),
   });
 
-  const canSubmit = ratings.overall > 0 && ratings.room > 0 && ratings.cleanliness > 0 && ratings.service > 0;
+  const canSubmit = ratings.overall > 0;
 
   // ── Loading ──
   if (isLoading) return (
@@ -127,6 +131,7 @@ export default function SurveyPage() {
               ? "Tus respuestas fueron registradas. Tu feedback nos ayuda a mejorar cada día."
               : "Esta encuesta ya fue completada. ¡Gracias por participar!"}
           </p>
+          {data?.googleMapsUrl&&<a href={data.googleMapsUrl} target="_blank" rel="noopener noreferrer" className="inline-block underline text-primary">Si querés, también podés compartir tu experiencia en Google</a>}
           <div className="pt-2">
             <p className="text-sm text-muted-foreground">Maran Suites & Towers</p>
           </div>
@@ -188,12 +193,15 @@ export default function SurveyPage() {
               testId="stars-overall"
             />
             <div className="border-t pt-4 space-y-5">
-              <StarSelector label="🛏 Habitación" value={ratings.room} onChange={v => setRatings(r => ({ ...r, room: v }))} testId="stars-room" />
-              <StarSelector label="✨ Limpieza" value={ratings.cleanliness} onChange={v => setRatings(r => ({ ...r, cleanliness: v }))} testId="stars-cleanliness" />
-              <StarSelector label="🤝 Atención / servicio" value={ratings.service} onChange={v => setRatings(r => ({ ...r, service: v }))} testId="stars-service" />
-              <StarSelector label="🍽 Gastronomía (opcional)" value={ratings.food} onChange={v => setRatings(r => ({ ...r, food: v }))} testId="stars-food" />
+              {(data?.areas || []).map((a:any)=><StarSelector key={a.key} label={a.question} value={areaRatings[a.key] || 0}
+                onChange={v=>setAreaRatings(p=>({...p,[a.key]:v}))} testId={'stars-'+a.key} optional/>)}
             </div>
 
+            <label className="block space-y-2 text-sm">¿Nos recomendarías? (opcional)
+              <select aria-label="Recomendación" className="w-full rounded border p-2 bg-background" value={nps} onChange={e=>setNps(e.target.value)}>
+                <option value="">Prefiero no responder</option>{Array.from({length:11},(_,n)=><option key={n} value={n}>{n} — {n===0?'Nada probable':n===10?'Muy probable':n}</option>)}
+              </select>
+            </label>
             <div className="space-y-2">
               <Label>¿Querés dejarnos un comentario? (opcional)</Label>
               <Textarea
@@ -201,6 +209,7 @@ export default function SurveyPage() {
                 value={comment}
                 onChange={e => setComment(e.target.value)}
                 rows={3}
+                maxLength={5000}
                 data-testid="textarea-comment"
               />
             </div>
@@ -211,9 +220,12 @@ export default function SurveyPage() {
                 value={guestName}
                 onChange={e => setGuestName(e.target.value)}
                 placeholder="¿Cómo te llamás?"
+                maxLength={160}
                 data-testid="input-guest-name"
               />
             </div>
+
+            <label className="flex gap-2 items-start text-sm"><Checkbox checked={contactRequested} onCheckedChange={value=>setContactRequested(value===true)}/>Quiero que el hotel me contacte por este comentario.</label>
 
             {submitMutation.isError && (
               <p className="text-sm text-red-500">{(submitMutation.error as any)?.message || "Error al enviar"}</p>
@@ -231,7 +243,7 @@ export default function SurveyPage() {
 
             {!canSubmit && (
               <p className="text-xs text-center text-muted-foreground">
-                Completá al menos las calificaciones de general, habitación, limpieza y servicio para continuar
+                Solo la calificación general es obligatoria. Las áreas y la recomendación son opcionales.
               </p>
             )}
           </CardContent>
