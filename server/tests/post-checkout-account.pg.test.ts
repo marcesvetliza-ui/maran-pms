@@ -18,14 +18,14 @@ async function request(path: string, body?: any) {
 }
 async function fixture() {
   const id = `post-stay-test-${randomUUID()}`;
-  const f = { id, other: `${id}-other`, guest: `${id}-guest`, room: `${id}-room`, type: `${id}-type`, shift: `${id}-shift`, operation: randomUUID() };
+  const f = { id, other: `${id}-other`, guest: `${id}-guest`, otherGuest: `${id}-current-guest`, room: `${id}-room`, type: `${id}-type`, shift: `${id}-shift`, operation: randomUUID() };
   created.push(f);
   await pool.query("INSERT INTO room_types(id,code,name) VALUES($1::text,$1::text,'Synthetic type')", [f.type]);
   await pool.query("INSERT INTO rooms(id,room_number,room_type_id,status) VALUES($1::text,$1::text,$2,'occupied')", [f.room, f.type]);
-  await pool.query("INSERT INTO guests(id,first_name,last_name,document_number) VALUES($1,'Anterior','Huésped','12345678')", [f.guest]);
+  await pool.query("INSERT INTO guests(id,first_name,last_name,document_number) VALUES($1,'Anterior','Huésped','12345678'),($2,'Actual','Otro huésped','87654321')", [f.guest, f.otherGuest]);
   await pool.query(`INSERT INTO reservations(id,reservation_code,guest_id,room_id,room_type_id,check_in_date,check_out_date,nights,total_room_amount,status,checked_out_at,created_at)
     VALUES($1::text,$1::text,$3,$4,$5,CURRENT_DATE-2,CURRENT_DATE-1,1,100,'checked_out',NOW(),NOW()),
-      ($2::text,$2::text,$3,$4,$5,CURRENT_DATE,CURRENT_DATE+1,1,100,'checked_in',NULL,NOW())`, [f.id, f.other, f.guest, f.room, f.type]);
+      ($2::text,$2::text,$6,$4,$5,CURRENT_DATE,CURRENT_DATE+1,1,100,'checked_in',NULL,NOW())`, [f.id, f.other, f.guest, f.room, f.type, f.otherGuest]);
   const old = (await pool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,source_charge_ids,source_charge_amounts,items)
     VALUES('FB',998,floor(random()*100000000)::int,CURRENT_DATE,'Historical guest','Consumidor Final',100,100,'emitida',$1,'["accommodation"]','{"accommodation":100}','[]') RETURNING id`, [f.id])).rows[0];
   await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date,status,invoice_ref) VALUES($1,$2,100,'efectivo',CURRENT_DATE-1,'active',$3)", [`${id}-paid`, f.id, JSON.stringify({ id: old.id })]);
@@ -67,7 +67,7 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
       await pool.query("DELETE FROM folio_movements WHERE folio_id IN(SELECT id FROM folios WHERE entity_id=$1)", [f.id]);
       await pool.query("DELETE FROM folios WHERE entity_id=$1", [f.id]);
       await pool.query("DELETE FROM reservations WHERE id IN($1,$2)", [f.id, f.other]);
-      await pool.query("DELETE FROM rooms WHERE id=$1", [f.room]); await pool.query("DELETE FROM room_types WHERE id=$1", [f.type]); await pool.query("DELETE FROM guests WHERE id=$1", [f.guest]); await pool.query("DELETE FROM cash_shifts WHERE id=$1", [f.shift]);
+      await pool.query("DELETE FROM rooms WHERE id=$1", [f.room]); await pool.query("DELETE FROM room_types WHERE id=$1", [f.type]); await pool.query("DELETE FROM guests WHERE id IN($1,$2)", [f.guest,f.otherGuest]); await pool.query("DELETE FROM cash_shifts WHERE id=$1", [f.shift]);
     }
     await pool?.end();
   });
@@ -83,7 +83,7 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
     const emitted = await invoice(f, chargeId); expect(emitted.status, JSON.stringify(emitted.body)).toBe(201);
     const retry = await request("/api/billing/invoices", emitted.request);
     expect(retry.status, JSON.stringify(retry.body)).toBeLessThan(300); expect(retry.body.id).toBe(emitted.body.id);
-    expect((await pool.query("SELECT amount FROM account_movements WHERE reservation_id=$1 AND type='cargo'", [f.id])).rows).toEqual([{ amount: "121.00" }]);
+    expect((await pool.query("SELECT amount,entity_id FROM account_movements WHERE reservation_id=$1 AND type='cargo'", [f.id])).rows).toEqual([{ amount: "121.00", entity_id: f.guest }]);
     expect((await pool.query("SELECT amount FROM payments WHERE reservation_id=$1 AND method='cuenta_corriente'", [f.id])).rows).toEqual([{ amount: "121.00" }]);
     expect(await snapshots(f)).toEqual(before);
   });
@@ -92,8 +92,11 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
     const charge = await request(`/api/reservations/${f.id}/post-checkout/charges`, payload(f));
     const emitted = await invoice(f, charge.body.id, false); expect(emitted.status, JSON.stringify(emitted.body)).toBe(201);
     const body = { reservationId: f.id, amount: "121.00", method: "efectivo", paymentRequestId: randomUUID(), invoiceData: { id: emitted.body.id }, receiptType: "FB" };
-    const results = await Promise.all([request("/api/payments", body), request("/api/payments", body)]);
-    expect(results.map(r => r.status).sort(), JSON.stringify(results)).toEqual([200, 201]);
+    const requests = [body, { ...body, paymentRequestId: randomUUID() }];
+    const results = await Promise.all(requests.map(input => request("/api/payments", input)));
+    expect(results.map(r => r.status).sort(), JSON.stringify(results)).toEqual([201, 409]);
+    const winner = requests[results.findIndex(result => result.status === 201)];
+    expect((await request("/api/payments", winner)).status).toBe(200);
     expect((await request("/api/payments", { ...body, paymentRequestId: randomUUID() })).status).toBe(409);
     expect((await request("/api/payments", { ...body, paymentRequestId: randomUUID(), invoiceData: { id: f.oldInvoice } })).status).toBe(409);
     expect((await pool.query("SELECT * FROM cash_movements WHERE source_id=$1 AND movement_type='income'", [f.id])).rows).toHaveLength(1);
