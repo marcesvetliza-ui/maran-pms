@@ -50,7 +50,7 @@ import {
   isReservationCreditNoteAdjustment,
   getReservationRateAuditEvent,
 } from "@shared/reservationFolio";
-import { sendCheckoutEmail, sendConfirmationEmail } from "../email-service";
+import { sendConfirmationEmail } from "../email-service";
 import { assertPaymentHasNoUnresolvedCreditHold } from "../billing/reservationCreditReconciliation";
 import PDFDocument from "pdfkit";
 import { formatArgentinaDate, formatArgentinaDateTime } from "../utils/argentinaDateTime";
@@ -1514,7 +1514,6 @@ export function registerReservationsRoutes(app: Express) {
       const result = await checkoutReservationToAccount(req.params.id, req.body || {}, (req as any).user || {});
       if (!result.alreadyClosed) {
         storage.createCheckoutCleaningTask(result.roomId).catch(error => console.error("[checkout-cc] limpieza:", error));
-        sendCheckoutEmail(req.params.id, `${req.protocol}://${req.get("host")}`).catch(error => console.error("[checkout-cc] email:", error));
       }
       res.json(result);
     } catch (error: any) {
@@ -1748,9 +1747,7 @@ export function registerReservationsRoutes(app: Express) {
           ...(isGroupLinked ? { details: { unresolvedBalance: Math.max(0, balance), groupDeparture: groupDeparture && balance > 0.01, reason: groupDepartureReason || null } } : {}),
         }
       );
-      // Fire post-checkout email asynchronously (don't block response)
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      sendCheckoutEmail(req.params.id, baseUrl).catch(e => console.error("[email] checkout trigger error:", e));
+      // The durable checkout trigger schedules the survey after the actual departure.
       res.json({ success: true });
     } catch (error: any) {
       console.error("[check-out] error:", error?.message || error, error?.stack || "");

@@ -16,6 +16,7 @@ import { runMigrations, verifyFinancialSchema } from "../server/migrate";
 import { db } from "../server/db";
 import { sql } from "drizzle-orm";
 import { ensureRoomPreventiveSchema } from "../server/maintenance/roomPreventiveSchema";
+import { ensureReviewsSchema } from "../server/reviews/schema";
 import { ensureSupplierExpenseSchema } from "../server/accounting/supplierExpenseSchema";
 
 const REQUIRED_ACCOUNT_CODES = [
@@ -37,6 +38,7 @@ async function main() {
   await runMigrations();
   await ensureRoomPreventiveSchema();
   await ensureSupplierExpenseSchema();
+  await ensureReviewsSchema();
 
   console.log("[ci-migrate] Verificando esquema financiero contra el catálogo real...");
   const status = await verifyFinancialSchema();

@@ -1,7 +1,6 @@
 import { db } from "./db";
 import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, type WebCheckin } from "@shared/schema";
 import { eq } from "drizzle-orm";
-import crypto from "crypto";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { createIpv4SmtpTransport } from "./lib/smtpTransport";
 import { getOrCreateWebCheckin, publicHotelBaseUrl, WebCheckinAccessError } from "./lib/webCheckinAccess";
@@ -32,8 +31,8 @@ const HOTEL_BASE_URL =
 const BORDO = "#8B1535";
 const BORDO_DARK = "#6B1028";
 
-function buildHtmlEmail(bodyText: string, subject: string, images?: { bannerUrl?: string; footerImageUrl?: string }): string {
-  const logoUrl = `${HOTEL_BASE_URL}/hotel-logo.jpeg`;
+function buildHtmlEmail(bodyText: string, subject: string, images?: { bannerUrl?: string; footerImageUrl?: string },baseUrl=HOTEL_BASE_URL): string {
+  const logoUrl = `${baseUrl}/hotel-logo.jpeg`;
 
   // Convert plain text paragraphs to HTML, converting URLs to links
   const bodyHtml = bodyText
@@ -419,51 +418,6 @@ export async function sendConfirmationEmail(reservationId: string): Promise<void
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public: Send post-checkout + survey email
-// ─────────────────────────────────────────────────────────────────────────────
-export async function sendCheckoutEmail(reservationId: string, baseUrl: string): Promise<void> {
-  try {
-    const cfg = await getConfig();
-    if (!cfg || !cfg.globalEnabled || !cfg.checkoutEnabled) {
-      if (cfg) await logEmail({ reservationId, type: "checkout", status: "skipped", errorMessage: "Post-checkout desactivado" });
-      return;
-    }
-    const data = await getReservationData(reservationId);
-    if (!data) return;
-    const { reservation, guest, room } = data;
-    const email = guest?.email;
-    if (!email) {
-      await logEmail({ reservationId, type: "checkout", status: "skipped", errorMessage: "Huésped sin email" });
-      return;
-    }
-    // Generate survey token
-    const token = crypto.randomUUID();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-    await db.insert(surveyTokens).values({ reservationId, token, expiresAt });
-
-    const surveyUrl = `${baseUrl}/encuesta/${token}`;
-    const vars = {
-      nombre_huesped: `${guest.firstName} ${guest.lastName}`,
-      numero_habitacion: room?.roomNumber ?? "-",
-      fecha_checkin: fmtDate(reservation.checkInDate),
-      fecha_checkout: fmtDate(reservation.checkOutDate),
-      link_encuesta: surveyUrl,
-      link_google_maps: cfg.googleMapsUrl ?? "https://maps.google.com",
-    };
-    await sendEmail({
-      reservationId,
-      type: "checkout",
-      to: email,
-      subject: interpolate(cfg.checkoutSubject, vars),
-      body: interpolate(cfg.checkoutBody, vars),
-    });
-  } catch (e) {
-    console.error("[email] sendCheckoutEmail error:", e);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Public: Reminder scheduler — call daily (from night-audit or own scheduler)
 // Sends reminder to guests with check-in in exactly 2 days
 // Includes web check-in link automatically
@@ -567,6 +521,10 @@ export async function sendBirthdayEmail(opts: {
   body: string;
   idempotencyKey: string;
 }): Promise<BirthdayEmailResult> {
+  return sendConfiguredMessage(opts);
+}
+
+async function sendConfiguredMessage(opts:{to:string;subject:string;body:string;idempotencyKey:string;html?:string}):Promise<BirthdayEmailResult>{
   const cfg = await getConfig();
   if (!cfg?.globalEnabled)
     return { status: "failed", error: "Correo no configurado o desactivado." };
@@ -582,7 +540,7 @@ export async function sendBirthdayEmail(opts: {
           "'": "&#39;",
         })[char]!,
     );
-  const html = `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escape(opts.body)}</div>`;
+  const html = opts.html ?? `<div style="font-family:Arial,sans-serif;white-space:pre-wrap">${escape(opts.body)}</div>`;
   const from = `${cfg.fromName} <${cfg.fromEmail}>`;
   if (cfg.provider === "smtp") {
     if (!cfg.smtpUser || !cfg.smtpPass)
@@ -664,4 +622,25 @@ export async function sendBirthdayEmail(opts: {
         "Conexión interrumpida: no se puede confirmar el envío. No se reintentará automáticamente.",
     };
   }
+}
+
+/** The scheduler supplies its durable, single-use token and provider key. */
+export async function sendSurveyInvitationEmail(reservationId:string,token:string,recipient:string,idempotencyKey:string):Promise<BirthdayEmailResult>{
+  const cfg=await getConfig(),data=await getReservationData(reservationId);
+  if(!cfg?.globalEnabled||!cfg.checkoutEnabled)return {status:'failed',error:'El correo posestadía está pausado.'};
+  if(!data||data.reservation.status!=='checked_out')return {status:'failed',error:'La estadía no está cerrada.'};
+  if(data.guest?.email?.trim()!==recipient)return {status:'failed',error:'El email del huésped cambió. Revisá antes de reenviar.'};
+  const [survey]=await db.select().from(surveyTokens).where(eq(surveyTokens.token,token));
+  if(!survey||survey.completed)return {status:'failed',error:'La encuesta ya fue respondida o no está disponible.'};
+  const url=`${publicHotelBaseUrl()}/encuesta/${token}`;
+  const vars={nombre_huesped:`${data.guest.firstName} ${data.guest.lastName}`,numero_habitacion:data.room?.roomNumber||'-',
+    fecha_checkin:fmtDate(data.reservation.checkInDate),fecha_checkout:fmtDate(data.reservation.checkOutDate),
+    codigo_reserva:data.reservation.reservationCode||reservationId,link_encuesta:url,link_google_maps:cfg.googleMapsUrl||''};
+  let body=interpolate(cfg.checkoutBody,vars);
+  if(!body.includes(url))body+=`\n\nContanos tu experiencia: ${url}`;
+  const subject=interpolate(cfg.checkoutSubject,vars);
+  const escape=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+  return sendConfiguredMessage({to:recipient,subject,body,idempotencyKey,html:buildHtmlEmail(escape(body),escape(subject),{
+    bannerUrl:cfg.emailBannerBase64?`${publicHotelBaseUrl()}/api/public/email-images/banner`:undefined,
+    footerImageUrl:cfg.emailFooterBase64?`${publicHotelBaseUrl()}/api/public/email-images/footer`:undefined},publicHotelBaseUrl())});
 }

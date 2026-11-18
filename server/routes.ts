@@ -90,6 +90,7 @@ import { registerPresupuestosRoutes } from "./routes/presupuestos";
 import { registerMaintenanceRoutes } from "./routes/maintenance";
 import { registerFolioRoutes } from "./routes/folios";
 import { registerPublicBookingRoutes } from "./routes/publicBooking";
+import { registerReviewRoutes } from "./reviews/routes";
 import { registerEmailRoutes } from "./routes/emails";
 import { registerCountriesRoutes } from "./routes/countries";
 import { buildManualCashMovement } from "./cash-manual-movement";
@@ -3662,6 +3663,7 @@ export async function registerRoutes(
   registerFolioRoutes(app);
   registerPublicBookingRoutes(app);
   registerEmailRoutes(app);
+  registerReviewRoutes(app);
   registerCountriesRoutes(app);
   registerPosConfigsRoutes(app);
   registerCostCentersRoutes(app);

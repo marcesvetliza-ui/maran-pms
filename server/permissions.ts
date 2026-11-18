@@ -196,6 +196,8 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   ...Object.fromEntries(Object.entries(CHANNEX_ROLE_DEFAULTS).map(([key, roles]) => [`api:ota:${key}`, [...roles]])),
   "api:manuals:restricted": ["admin"],
   "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
+  "api:reviews:manage": ["admin", "manager", "ama_de_llaves", "reception", "responsable_area", "jefe_recepcion", "comercial"],
+  "api:reviews:configure": ["admin", "manager", "jefe_recepcion", "comercial"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
   // conexiones y mapeos (crear/editar/borrar/sincronizar catálogo).
   "api:channex:config": ["admin", "manager", "resp_administracion", "jefe_recepcion"],
@@ -455,6 +457,8 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "api:reports:export-excel": { label: "Exportar informe a Excel", section: "API — Reportes" },
 
   "api:hospitality:campaigns": {label:"Fechas especiales: contactos, mensajes y envíos",section:"API — Hospitalidad"},
+  "api:reviews:manage": {label:"Reseñas: cargar opiniones, dar seguimiento y reenviar encuestas",section:"API — Reseñas"},
+  "api:reviews:configure": {label:"Reseñas: configurar áreas, preguntas y horario de encuestas",section:"API — Reseñas"},
   "api:revenue:read": { label: "Ver tablero, Pace, demanda, competencia y sugerencias", section: "Revenue Management" },
   "api:revenue:events-write": { label: "Agregar, modificar y eliminar eventos de demanda", section: "Revenue Management" },
   "api:revenue:competitor-write": { label: "Agregar, modificar y eliminar tarifas de competencia", section: "Revenue Management" },

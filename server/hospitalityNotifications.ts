@@ -8,7 +8,8 @@ const managed=sql`type='hospitality_alert' AND related_entity_type IN ('hospital
 export function hospitalityNotificationVisibility(areas:string[]|null=null) {
  const audience=areas===null?sql`true`:areas.length?sql`target_area IN (${sql.join(areas.map(a=>sql`${a}`),sql`,`)})`:sql`false`;
  return sql`NOT (type='hospitality_alert' AND title LIKE '⚠️ Alerta de hospitalidad - Hab.%')
- AND (NOT (${managed}) OR (status NOT IN ('completado','rechazado') AND ${audience}))`;
+ AND (NOT (${managed}) OR (status NOT IN ('completado','rechazado') AND ${audience}))
+ AND (type<>'review_followup' OR (status NOT IN ('completado','rechazado') AND ${audience}))`;
 }
 export async function lockHospitalityNotifications(){await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext('hospitality-bell-notifications'))`);}
 export async function closeHospitalityBellItem(kind:string,id:string,actor:string){await db.execute(sql`UPDATE system_notifications SET status='completado',is_read=true,read_at=COALESCE(read_at,now()),resolved_at=now(),resolved_by=${actor} WHERE type='hospitality_alert' AND related_entity_type=${kind} AND related_entity_id=${id}`);}

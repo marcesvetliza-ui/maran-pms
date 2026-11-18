@@ -1,11 +1,12 @@
 import type { Express } from "express";
-import { db } from "../db";
+import { db,withDatabaseTransaction } from "../db";
 import {
   emailConfig, emailLogs, surveyTokens, surveyResponses,
   reservations, guests, rooms, roomTypes,
 } from "@shared/schema";
-import { eq, desc, and, gte } from "drizzle-orm";
-import { requireAuth } from "../auth";
+import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { hasPermission } from "../permissions";
+import { requireAuth, requirePermission } from "../auth";
 import { runReminderScheduler } from "../email-service";
 import { createIpv4SmtpTransport } from "../lib/smtpTransport";
 
@@ -82,11 +83,19 @@ export function registerEmailRoutes(app: Express) {
         globalEnabled, provider, fromEmail, fromName, googleMapsUrl,
         confirmationEnabled, confirmationSubject, confirmationBody,
         reminderEnabled, reminderSubject, reminderBody,
-        checkoutEnabled, checkoutSubject, checkoutBody,
+        checkoutEnabled, checkoutSubject, checkoutBody,checkoutDelayDays,checkoutSendTime,
         apiKey, smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure,
       } = req.body;
 
+      if(checkoutDelayDays!==undefined||checkoutSendTime!==undefined){
+        if(!hasPermission(req.user?.role || '', 'api:reviews:configure'))return res.status(403).json({error:'Sin permiso para configurar encuestas.'});
+        if(checkoutDelayDays!==undefined&&(!Number.isInteger(checkoutDelayDays)||checkoutDelayDays<0||checkoutDelayDays>2))return res.status(400).json({error:'Elegí 0, 1 o 2 días después de la salida.'});
+        if(checkoutSendTime!==undefined&&(typeof checkoutSendTime!=='string'||!/^([01]\d|2[0-3]):[0-5]\d$/.test(checkoutSendTime)))return res.status(400).json({error:'Ingresá una hora válida.'});
+      }
       const updateData: Record<string, any> = {};
+      if(checkoutDelayDays!==undefined)updateData.checkoutDelayDays=checkoutDelayDays;
+      if(checkoutSendTime!==undefined)updateData.checkoutSendTime=checkoutSendTime;
+
       if (globalEnabled !== undefined) updateData.globalEnabled = globalEnabled;
       if (provider !== undefined) updateData.provider = provider;
       if (fromEmail !== undefined) updateData.fromEmail = fromEmail;
@@ -110,7 +119,10 @@ export function registerEmailRoutes(app: Express) {
       if (apiKey && typeof apiKey === "string" && apiKey.trim().length > 0) updateData.apiKey = apiKey.trim();
       if (smtpPass && typeof smtpPass === "string" && smtpPass.trim().length > 0) updateData.smtpPass = smtpPass.trim();
 
+      await withDatabaseTransaction(async()=>{
       await db.update(emailConfig).set(updateData).where(eq(emailConfig.id, 1));
+      if(checkoutDelayDays!==undefined||checkoutSendTime!==undefined)await db.execute(sql`UPDATE survey_dispatches SET scheduled_for=survey_scheduled_time(checked_out_at),updated_at=now() WHERE status IN ('queued','no_email')`);
+      });
       const [updated] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
       const { apiKey: _k, smtpPass: _p, emailBannerBase64: _b, emailFooterBase64: _f, ...safe } = updated;
       res.json({ ...safe, apiKeySet: !!_k, smtpPassSet: !!_p, bannerImageSet: !!_b, footerImageSet: !!_f });
@@ -268,73 +280,9 @@ export function registerEmailRoutes(app: Express) {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Survey public routes (no auth)
-  // ──────────────────────────────────────────────────────────────────────────
-
-  // GET /api/survey/:token — validate token and return reservation summary
-  app.get("/api/survey/:token", async (req, res) => {
-    try {
-      const [tokenRow] = await db.select().from(surveyTokens).where(eq(surveyTokens.token, req.params.token));
-      if (!tokenRow) return res.status(404).json({ error: "Encuesta no encontrada" });
-      if (tokenRow.completed) return res.status(410).json({ error: "Encuesta ya completada", completed: true });
-      if (tokenRow.expiresAt && new Date() > tokenRow.expiresAt)
-        return res.status(410).json({ error: "Encuesta vencida" });
-
-      // Get reservation + guest info
-      const [reservation] = await db.select().from(reservations).where(eq(reservations.id, tokenRow.reservationId));
-      const guest = reservation?.guestId
-        ? (await db.select().from(guests).where(eq(guests.id, reservation.guestId)))[0]
-        : null;
-      const room = reservation?.roomId
-        ? (await db.select().from(rooms).where(eq(rooms.id, reservation.roomId)))[0]
-        : null;
-
-      res.json({
-        tokenId: tokenRow.id,
-        guestName: guest ? `${guest.firstName} ${guest.lastName}` : "Huésped",
-        checkIn: reservation?.checkInDate,
-        checkOut: reservation?.checkOutDate,
-        roomNumber: room?.roomNumber,
-      });
-    } catch (e) {
-      res.status(500).json({ error: "Error al cargar encuesta" });
-    }
-  });
-
-  // POST /api/survey/:token — submit survey response
-  app.post("/api/survey/:token", async (req, res) => {
-    try {
-      const [tokenRow] = await db.select().from(surveyTokens).where(eq(surveyTokens.token, req.params.token));
-      if (!tokenRow) return res.status(404).json({ error: "Encuesta no encontrada" });
-      if (tokenRow.completed) return res.status(410).json({ error: "Encuesta ya completada" });
-      if (tokenRow.expiresAt && new Date() > tokenRow.expiresAt)
-        return res.status(410).json({ error: "Encuesta vencida" });
-
-      const { ratingOverall, ratingRoom, ratingCleanliness, ratingService, ratingFood, comment, guestName } = req.body;
-      if (!ratingOverall || !ratingRoom || !ratingCleanliness || !ratingService)
-        return res.status(400).json({ error: "Faltan calificaciones obligatorias" });
-
-      await db.insert(surveyResponses).values({
-        surveyTokenId: tokenRow.id,
-        ratingOverall: Number(ratingOverall),
-        ratingRoom: Number(ratingRoom),
-        ratingCleanliness: Number(ratingCleanliness),
-        ratingService: Number(ratingService),
-        ratingFood: ratingFood ? Number(ratingFood) : null,
-        comment: comment || null,
-        guestName: guestName || null,
-      });
-      await db.update(surveyTokens).set({ completed: true }).where(eq(surveyTokens.id, tokenRow.id));
-      res.json({ ok: true });
-    } catch (e) {
-      res.status(500).json({ error: "Error al guardar respuesta" });
-    }
-  });
-
-  // ──────────────────────────────────────────────────────────────────────────
   // GET /api/email/survey-responses — admin view of all responses
   // ──────────────────────────────────────────────────────────────────────────
-  app.get("/api/email/survey-responses", requireAuth, async (req, res) => {
+  app.get("/api/email/survey-responses", requireAuth, requirePermission("sidebar:/reviews"), async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const responses = await db

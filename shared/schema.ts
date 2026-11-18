@@ -1032,6 +1032,15 @@ export const guestReviews = pgTable("guest_reviews", {
   analyzedAt: timestamp("analyzed_at"),
   isPublished: text("is_published").default("false"),
   staffResponse: text("staff_response"),
+  surveyResponseId: varchar("survey_response_id"),
+  guestDisplayName: text("guest_display_name"),
+  areaRatings: jsonb("area_ratings").$type<Record<string,number>>().notNull().default({}),
+  areaQuestions: jsonb("area_questions").$type<Record<string,string>>().notNull().default({}),
+  nps: integer("nps"),
+  contactRequested: boolean("contact_requested").notNull().default(false),
+  followupStatus: text("followup_status").notNull().default("new"),
+  assignedTo: text("assigned_to"),
+  actionAreas: text("action_areas").array().notNull().default([]),
   respondedAt: timestamp("responded_at"),
   respondedBy: text("responded_by"),
 });
@@ -2348,7 +2357,7 @@ export type PackageWithDetails = Package & {
 };
 
 // System Notifications (base for chatbot + web check-in)
-export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert" | "gift_voucher_expiring";
+export type NotificationType = "web_checkin" | "chatbot_request" | "chatbot_housekeeping" | "chatbot_maintenance" | "chatbot_restaurant" | "chatbot_spa" | "hospitality_alert" | "gift_voucher_expiring" | "review_followup";
 export type NotificationArea = "reception" | "housekeeping" | "maintenance" | "restaurant" | "spa" | "all";
 export type NotificationPriority = "low" | "normal" | "high" | "urgent";
 export type NotificationStatus = "pendiente" | "en_proceso" | "completado" | "rechazado";
@@ -3438,8 +3447,10 @@ export const emailConfig = pgTable("email_config", {
   reminderBody: text("reminder_body").notNull().default("Hola {nombre_huesped},\n\nTe recordamos que en 2 días comenzás tu estadía en Maran Suites & Towers.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\nHabitación: {numero_habitacion}\n\n¡Te esperamos!\nMaran Suites & Towers"),
   // Post-checkout + survey email
   checkoutEnabled: boolean("checkout_enabled").notNull().default(true),
+  checkoutDelayDays: integer("checkout_delay_days").notNull().default(1),
+  checkoutSendTime: text("checkout_send_time").notNull().default("10:00"),
   checkoutSubject: text("checkout_subject").notNull().default("Gracias por tu estadía — Contanos tu experiencia"),
-  checkoutBody: text("checkout_body").notNull().default("Hola {nombre_huesped},\n\nGracias por elegir Maran Suites & Towers. Esperamos que hayas disfrutado tu estadía.\n\nNos encantaría conocer tu experiencia. Completá nuestra encuesta rápida (menos de 2 minutos):\n\n{link_encuesta}\n\nSi tu estadía fue excelente, también podés dejarnos una reseña en Google Maps:\n{link_google_maps}\n\n¡Hasta la próxima!\nMaran Suites & Towers"),
+  checkoutBody: text("checkout_body").notNull().default("Hola {nombre_huesped},\n\nGracias por elegir Maran Suites & Towers. Esperamos que hayas disfrutado tu estadía.\n\nNos encantaría conocer tu experiencia. Completá nuestra encuesta rápida (menos de 2 minutos):\n\n{link_encuesta}\n\nTambién podés compartir tu experiencia en Google Maps:\n{link_google_maps}\n\n¡Hasta la próxima!\nMaran Suites & Towers"),
   // Email design images (stored as base64 data URLs, served via /api/public/email-images/:type)
   emailBannerBase64: text("email_banner_base64"),
   emailFooterBase64: text("email_footer_base64"),
@@ -3478,13 +3489,17 @@ export const surveyResponses = pgTable("survey_responses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   surveyTokenId: varchar("survey_token_id").notNull().references(() => surveyTokens.id),
   ratingOverall: integer("rating_overall").notNull(),    // 1-5
-  ratingRoom: integer("rating_room").notNull(),
-  ratingCleanliness: integer("rating_cleanliness").notNull(),
-  ratingService: integer("rating_service").notNull(),
+  ratingRoom: integer("rating_room"),
+  ratingCleanliness: integer("rating_cleanliness"),
+  ratingService: integer("rating_service"),
   ratingFood: integer("rating_food"),                    // optional
   comment: text("comment"),
   guestName: text("guest_name"),
   submittedAt: timestamp("submitted_at").defaultNow(),
+  areaRatings: jsonb("area_ratings").$type<Record<string,number>>().notNull().default({}),
+  areaQuestions: jsonb("area_questions").$type<Record<string,string>>().notNull().default({}),
+  nps: integer("nps"),
+  contactRequested: boolean("contact_requested").notNull().default(false),
 });
 
 export type SurveyResponse = typeof surveyResponses.$inferSelect;

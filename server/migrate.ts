@@ -4837,6 +4837,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   }
 
   await seedResourcePermissionsOnce({
+    "api:reviews:manage": ["admin", "manager", "ama_de_llaves", "reception", "responsable_area", "jefe_recepcion", "comercial"],
+    "api:reviews:configure": ["admin", "manager", "jefe_recepcion", "comercial"],
     "api:account-movements:reallocate": ["admin", "manager", "resp_administracion", "reception", "jefe_recepcion"],
   });
 
