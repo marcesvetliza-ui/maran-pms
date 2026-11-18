@@ -18,6 +18,23 @@ Esta entrega construye el panel central como una aplicación separada dentro del
 
 Los módulos de restaurant, spa, eventos y grupos quedan registrados como capacidades por establecimiento. Esta entrega no afirma que sus circuitos operativos estén conectados al panel central.
 
+## Aceptación manual del panel publicado
+
+El 17 de noviembre de 2026, Marcelo confirmó desde su navegador el ingreso a `https://app.xeniapms.com`, el alta activa de Hotel Aurora y Apart Brisa y estas pruebas:
+
+| Prueba | Resultado comunicado por Marcelo |
+| --- | --- |
+| Una reserva ficticia por establecimiento, ambas en la unidad 101 | Cada reserva aparece únicamente en su establecimiento. |
+| Recarga de la página | Las reservas permanecen guardadas y separadas. |
+| Responsable | Puede alternar entre ambos establecimientos y crear reservas de prueba. |
+| Recepción Aurora | Opera únicamente en Aurora. |
+| Consulta Brisa | Consulta únicamente Brisa; no puede crear ni anular reservas. |
+| Administración de Xenia | Los tres perfiles de prueba no tienen acceso a esta sección. |
+
+Esta es evidencia de una prueba manual realizada por el propietario, registrada en [el acta de aceptación](evidencia/multihotel-aceptacion-2026-11-17.json). Se complementa con las 24 pruebas PostgreSQL/HTTP y el recorrido automatizado de Chromium aprobados para el código funcional `02fe8c35`. La comprobación externa de `/healthz`, el SHA exacto servido por Railway y un ensayo remoto de restauración no fueron verificados desde este entorno.
+
+La siguiente entrega se prepara en [SEGUNDA_ENTREGA_PMS_AISLADO.md](SEGUNDA_ENTREGA_PMS_AISLADO.md): una instalación completa de prueba para Aurora y su enlace de identidad con el panel. Las reservas actuales siguen siendo el ejercicio mínimo de aislamiento.
+
 ## Demostración local
 
 Requisitos: Node 22 o superior, dependencias del repositorio (`npm ci`) y binarios locales de PostgreSQL (`initdb`, `pg_ctl` y `createdb`). Se detecta la carpeta con `pg_config`; también puede indicarse con `XENIA_PG_BIN`.
@@ -68,7 +85,7 @@ npm run xenia:start
 
 `Dockerfile.xenia-control` prepara una imagen independiente con el panel y su comando de inicialización compilado. Para una imagen ya construida, la preparación explícita se ejecuta con `npm run xenia:setup:production`. El servicio usa `XENIA_CONTROL_PORT` o el `PORT` asignado por el proveedor y expone `/healthz` para comprobar la conexión central.
 
-El panel requiere un servicio propio y nuevas bases en el proyecto de pruebas de Xenia. No basta con cambiar el comando de arranque del servicio hotelero existente. `app.xeniapms.com` es el destino previsto y todavía debe conectarse al servicio que se prepare.
+El panel utiliza un servicio propio y nuevas bases en el proyecto de pruebas de Xenia. La instalación publicada en `app.xeniapms.com` fue probada por el propietario; el procedimiento siguiente permite reproducirla en otra instalación independiente.
 
 ## Publicación de prueba desde GitHub en Railway
 
@@ -112,7 +129,7 @@ Si un registro muestra un servidor literal como `${{servicio.RAILWAY_PRIVATE_DOM
 
 Comprobar el nombre existente en **Variables** de cada base antes de referenciarlo. En esta instalación el campo es `DATABASE_URL`: su plantilla utiliza `PGUSER`, `POSTGRES_PASSWORD`, `RAILWAY_PRIVATE_DOMAIN` y `PGDATABASE` de la propia base. El diálogo **Connect → Private Network** ofrecía `DATABASE_PRIVATE_URL`, pero ese nombre no aparecía entre las variables del servicio. No utilizar una referencia sólo porque la sugiera el diálogo si el campo de origen no existe.
 
-El 17 de noviembre de 2026, el propietario confirmó que el despliegue pasó al usar las tres referencias a `DATABASE_URL` indicadas en la tabla. El JSON se pega completo en el valor de `XENIA_PROPERTY_DATABASES`, conservando las referencias; Railway debe entregar al proceso las URLs resueltas. Después de vincular el subdominio, el propietario confirmó el ingreso remoto como `marcelo.admin` y decidió conservar su contraseña actual. No se aplicó un restablecimiento. Siguen pendientes la comprobación externa de `/healthz` y las pruebas remotas de establecimientos y permisos antes de dar por completa la publicación de prueba.
+El 17 de noviembre de 2026, el propietario confirmó que el despliegue pasó al usar las tres referencias a `DATABASE_URL` indicadas en la tabla. El JSON se pega completo en el valor de `XENIA_PROPERTY_DATABASES`, conservando las referencias; Railway debe entregar al proceso las URLs resueltas. Después de vincular el subdominio, el propietario confirmó el ingreso remoto como `marcelo.admin`, conservó su contraseña y completó las pruebas manuales de establecimientos y perfiles registradas en el acta de aceptación.
 
 En otra instalación, verificar el campo y el servidor privado de su plantilla en lugar de asumir estos nombres. Para `XENIA_PROPERTY_DATABASES`, el valor recibido debe ser un objeto JSON cuyos valores sean las URLs completas y distintas de los establecimientos. Reemplazar sólo el servidor no alcanza si el usuario o la contraseña también conservan marcadores sin resolver. Las conexiones privadas completas se manipulan únicamente dentro del proveedor o del gestor de secretos, nunca por chat ni en Git.
 
@@ -131,9 +148,9 @@ Las lecturas anónimas no crean cookies de sesión. El ingreso exige origen exac
 
 ## Siguiente integración
 
-1. Revisar esta primera entrega en el entorno de pruebas de Xenia y conectar `app.xeniapms.com` a su servicio propio.
-2. Consolidar los desarrollos del PMS de Xenia con los arreglos recientes de Maran por módulo. Las ramas siguen divergiendo; no se propone una fusión masiva.
-3. Diseñar el enlace de identidad con las instalaciones completas del PMS y sus usuarios locales. No se comparte una cookie de hotel entre dominios ni se envían credenciales de base al navegador.
+1. Conservar el acta de aceptación de esta primera entrega y completar el inventario de revisión servida, salud y recuperación del servicio.
+2. Preparar la primera instalación completa de prueba para Aurora siguiendo la segunda entrega. Antes de incorporar cambios de Xenia, completar la matriz funcional y conservar los arreglos recientes de Maran.
+3. Implementar el enlace de identidad con las instalaciones completas del PMS y sus usuarios locales. Cada instalación tendrá su sesión propia y validará usuario, establecimiento y permisos.
 4. Extender la validación a archivos, cachés, procesos, tareas e integraciones por establecimiento.
 5. Resolver continuidad y revocación cuando el panel central no esté disponible antes de incorporar hoteles operativos. Esta primera aplicación central falla cerrada y no implementa todavía el mecanismo de continuidad del PMS.
 6. Validar la configuración fiscal por CUIT, ambiente, comprobante y punto de venta. Una serie fiscal compartida necesita coordinación de emisión.

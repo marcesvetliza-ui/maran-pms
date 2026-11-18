@@ -1,0 +1,34 @@
+{
+  "date_local": "2026-11-17",
+  "timezone": "America/Argentina/Cordoba",
+  "evidence_type": "owner_reported_manual_tests",
+  "reported_by": "Marcelo",
+  "panel_origin": "https://app.xeniapms.com",
+  "railway_project_name": "observant-possibility",
+  "service_name": "Xenia-Control",
+  "pull_request": "https://github.com/marcesvetliza-ui/maran-pms/pull/119",
+  "functional_code_reference": "02fe8c35c60de43f811f59a77dab42b3621ccd8a",
+  "deployed_commit_verified_by_agent": null,
+  "checks": [
+    { "name": "Administrator login", "result": "owner_confirmed" },
+    { "name": "Aurora and Brisa provisioned and active", "result": "owner_confirmed" },
+    { "name": "Fictitious reservations remain separated between establishments", "result": "owner_confirmed" },
+    { "name": "Reservations persist after page reload", "result": "owner_confirmed" },
+    { "name": "Manager operates both establishments", "result": "owner_confirmed" },
+    { "name": "Reception operates Aurora only", "result": "owner_confirmed" },
+    { "name": "Viewer reads Brisa only and cannot create or cancel", "result": "owner_confirmed" },
+    { "name": "Test staff accounts cannot access platform administration", "result": "owner_confirmed" }
+  ],
+  "automated_checks": {
+    "postgres_http_tests": 24,
+    "browser_tests": "passed",
+    "docker_build": "passed",
+    "workflow_url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44112394027"
+  },
+  "outstanding_verification": [
+    "External live /healthz check",
+    "Exact Railway deployment commit",
+    "Remote backup and restore exercise"
+  ],
+  "scope": "Independent control panel and fictitious reservations; full PMS integration remains pending"
+}
