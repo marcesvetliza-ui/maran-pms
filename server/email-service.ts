@@ -1,9 +1,12 @@
 import { db } from "./db";
-import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, webCheckins } from "@shared/schema";
+import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, type WebCheckin } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import { createIpv4SmtpTransport } from "./lib/smtpTransport";
+import { getOrCreateWebCheckin, publicHotelBaseUrl, WebCheckinAccessError } from "./lib/webCheckinAccess";
+import { withWebCheckinInvitation } from "./lib/webCheckinEmail";
+import { addArgentinaOperationalDays } from "./utils/argentinaDateTime";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Template interpolation
@@ -291,20 +294,6 @@ async function getReservationData(reservationId: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Get or create web check-in token for a reservation
-// ─────────────────────────────────────────────────────────────────────────────
-async function getOrCreateWebCheckinToken(reservationId: string): Promise<string> {
-  const [existing] = await db.select().from(webCheckins).where(eq(webCheckins.reservationId, reservationId));
-  if (existing) return existing.token;
-
-  const token = crypto.randomUUID();
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 3); // valid for 3 days (arrives in 2 days)
-  await db.insert(webCheckins).values({ reservationId, token, status: "pending", expiresAt });
-  return token;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Public: Send a transactional email with a file attachment (no reservation ID required)
 // ─────────────────────────────────────────────────────────────────────────────
 export async function sendEmailWithPdfAttachment(opts: {
@@ -392,12 +381,25 @@ export async function sendConfirmationEmail(reservationId: string): Promise<void
     const data = await getReservationData(reservationId);
     if (!data) return;
     const { reservation, guest, room } = data;
+    if (!["confirmed", "web_checkin"].includes(reservation.status)) {
+      await logEmail({ reservationId, type: "confirmation", status: "skipped", errorMessage: "La reserva ya no está pendiente de ingreso" });
+      return;
+    }
     const email = guest?.email;
     if (!email) {
       await logEmail({ reservationId, type: "confirmation", status: "skipped", recipientEmail: undefined, errorMessage: "Huésped sin email" });
       return;
     }
+    let checkin: WebCheckin | undefined;
+    try {
+      checkin = await getOrCreateWebCheckin(reservationId);
+    } catch (error) {
+      // Historical entries still receive their confirmation, without an expired invitation.
+      if (!(error instanceof WebCheckinAccessError)) throw error;
+    }
+    const link = !checkin || checkin.status === "completed" ? "" : `${publicHotelBaseUrl()}/web-checkin/${checkin.token}`;
     const vars = {
+      link_webcheckin: link,
       nombre_huesped: `${guest.firstName} ${guest.lastName}`,
       numero_habitacion: room?.roomNumber ?? "-",
       fecha_checkin: fmtDate(reservation.checkInDate),
@@ -409,7 +411,7 @@ export async function sendConfirmationEmail(reservationId: string): Promise<void
       type: "confirmation",
       to: email,
       subject: interpolate(cfg.confirmationSubject, vars),
-      body: interpolate(cfg.confirmationBody, vars),
+      body: interpolate(withWebCheckinInvitation(cfg.confirmationBody, link, checkin?.status === "completed"), vars),
     });
   } catch (e) {
     console.error("[email] sendConfirmationEmail error:", e);
@@ -466,19 +468,14 @@ export async function sendCheckoutEmail(reservationId: string, baseUrl: string):
 // Sends reminder to guests with check-in in exactly 2 days
 // Includes web check-in link automatically
 // ─────────────────────────────────────────────────────────────────────────────
-export async function runReminderScheduler(baseUrl: string): Promise<{ sent: number; skipped: number; failed: number }> {
+export async function runReminderScheduler(baseUrl?: string): Promise<{ sent: number; skipped: number; failed: number }> {
   const stats = { sent: 0, skipped: 0, failed: 0 };
   try {
     const cfg = await getConfig();
     if (!cfg || !cfg.globalEnabled || !cfg.reminderEnabled) return stats;
 
     // Calculate target date (today + 2 days, Argentina time)
-    const now = new Date();
-    const argOffset = -3 * 60;
-    const argNow = new Date(now.getTime() + (argOffset - now.getTimezoneOffset()) * 60000);
-    const target = new Date(argNow);
-    target.setDate(target.getDate() + 2);
-    const targetStr = target.toISOString().split("T")[0];
+    const targetStr = addArgentinaOperationalDays(new Date(), 2);
 
     // Find reservations with check-in on target date (confirmed)
     const { sql: sqlFn } = await import("drizzle-orm");
@@ -497,41 +494,45 @@ export async function runReminderScheduler(baseUrl: string): Promise<{ sent: num
 
     for (const row of pendingRes.rows as any[]) {
       const reservationId = row.id;
-      const [guest] = row.guest_id ? await db.select().from(guests).where(eq(guests.id, row.guest_id)) : [null];
-      const [room] = row.room_id ? await db.select().from(rooms).where(eq(rooms.id, row.room_id)) : [null];
-      const email = guest?.email;
-      if (!email) {
-        await logEmail({ reservationId, type: "reminder", status: "skipped", errorMessage: "Huésped sin email" });
-        stats.skipped++;
-        continue;
-      }
-
-      // Generate or retrieve web check-in token
-      let webCheckinLink = "";
       try {
-        const token = await getOrCreateWebCheckinToken(reservationId);
-        webCheckinLink = `${baseUrl}/web-checkin/${token}`;
-      } catch (e) {
-        console.error("[email] Error generating web check-in token:", e);
+        const [guest] = row.guest_id ? await db.select().from(guests).where(eq(guests.id, row.guest_id)) : [null];
+        const [room] = row.room_id ? await db.select().from(rooms).where(eq(rooms.id, row.room_id)) : [null];
+        const email = guest?.email;
+        if (!email) {
+          await logEmail({ reservationId, type: "reminder", status: "skipped", errorMessage: "Huésped sin email" });
+          stats.skipped++;
+          continue;
+        }
+
+        const checkin = await getOrCreateWebCheckin(reservationId);
+        if (checkin.status === "completed") {
+          stats.skipped++;
+          continue;
+        }
+        const webCheckinLink = `${publicHotelBaseUrl(baseUrl)}/web-checkin/${checkin.token}`;
+
+        const vars: Record<string, string> = {
+          nombre_huesped: `${guest.firstName} ${guest.lastName}`,
+          numero_habitacion: room?.roomNumber ?? "-",
+          fecha_checkin: fmtDate(row.check_in_date),
+          fecha_checkout: fmtDate(row.check_out_date),
+          codigo_reserva: row.reservation_code ?? reservationId,
+          link_webcheckin: webCheckinLink,
+        };
+
+        await sendEmail({
+          reservationId,
+          type: "reminder",
+          to: email,
+          subject: interpolate(cfg.reminderSubject, vars),
+          body: interpolate(withWebCheckinInvitation(cfg.reminderBody, webCheckinLink), vars),
+        });
+        stats.sent++;
+      } catch (error) {
+        stats.failed++;
+        console.error("[email] Error preparing reminder:", error);
+        await logEmail({ reservationId, type: "reminder", status: "failed", errorMessage: "No se pudo preparar el acceso de pre check-in" });
       }
-
-      const vars: Record<string, string> = {
-        nombre_huesped: `${guest.firstName} ${guest.lastName}`,
-        numero_habitacion: room?.roomNumber ?? "-",
-        fecha_checkin: fmtDate(row.check_in_date),
-        fecha_checkout: fmtDate(row.check_out_date),
-        codigo_reserva: row.reservation_code ?? reservationId,
-        link_webcheckin: webCheckinLink,
-      };
-
-      await sendEmail({
-        reservationId,
-        type: "reminder",
-        to: email,
-        subject: interpolate(cfg.reminderSubject, vars),
-        body: interpolate(cfg.reminderBody, vars),
-      });
-      stats.sent++;
     }
   } catch (e) {
     console.error("[email] runReminderScheduler error:", e);

@@ -1625,6 +1625,16 @@ export async function runMigrations() {
   // Incremental schema additions — each wrapped in an 8s timeout so a hung
   // DDL lock in Railway/PgBouncer never prevents the app from starting.
   const T = 8_000;
+  // The pre check-in form notifies reception after saving the guest data.
+  // Keep fresh databases consistent with the existing notification schema.
+  await withTimeout("system_notifications.workflow", T, () => db.execute(sql.raw([
+    addColumnWithoutRerunNotice("system_notifications", "status", "text NOT NULL DEFAULT 'pendiente'"),
+    addColumnWithoutRerunNotice("system_notifications", "staff_note", "text"),
+    addColumnWithoutRerunNotice("system_notifications", "resolved_at", "timestamp"),
+    addColumnWithoutRerunNotice("system_notifications", "resolved_by", "text"),
+    addColumnWithoutRerunNotice("system_notifications", "session_id", "text"),
+    addColumnWithoutRerunNotice("system_notifications", "guest_name", "text"),
+  ].join(";\n"))));
   await withTimeout("reservations.nightly_pricing", T, () => db.execute(sql.raw([
     addColumnWithoutRerunNotice("reservations", "pricing_scheme", "text NOT NULL DEFAULT 'legacy'"),
     addColumnWithoutRerunNotice("reservations", "pricing_revision", "integer NOT NULL DEFAULT 0"),

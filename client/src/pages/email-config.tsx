@@ -42,7 +42,7 @@ function Stars({ value }: { value: number }) {
 const VARS_COMMON = [
   "{nombre_huesped}", "{numero_habitacion}", "{fecha_checkin}", "{fecha_checkout}", "{codigo_reserva}",
 ];
-const VARS_REMINDER = [...VARS_COMMON, "{link_webcheckin}"];
+const VARS_PREARRIVAL = [...VARS_COMMON, "{link_webcheckin}"];
 const VARS_CHECKOUT = [...VARS_COMMON, "{link_encuesta}", "{link_google_maps}"];
 
 function VarChips({ vars }: { vars: string[] }) {
@@ -201,17 +201,17 @@ export default function EmailConfigPage() {
               enabledField: "confirmationEnabled",
               subjectField: "confirmationSubject",
               bodyField: "confirmationBody",
-              vars: VARS_COMMON,
+              vars: VARS_PREARRIVAL,
             },
             {
               key: "reminder",
               label: "Recordatorio 2 días antes",
               icon: Clock,
-              desc: "Se envía automáticamente cada mañana a las 09:00 para check-ins del día siguiente pasado mañana",
+              desc: "Se envía a las 09:00 para reservas con llegada dentro de 2 días y pre check-in pendiente",
               enabledField: "reminderEnabled",
               subjectField: "reminderSubject",
               bodyField: "reminderBody",
-              vars: VARS_REMINDER,
+              vars: VARS_PREARRIVAL,
             },
             {
               key: "checkout",
@@ -1153,6 +1153,12 @@ function TemplateCard({
           />
           <p className="text-xs text-muted-foreground">Variables disponibles:</p>
           <VarChips vars={vars} />
+          {vars.includes("{link_webcheckin}") && (
+            <p className="text-xs text-muted-foreground">
+              El enlace personal de pre check-in se incluye automáticamente si está pendiente y es válido hasta el final del día de llegada.
+              Usá {"{link_webcheckin}"} para elegir dónde aparece. El recordatorio reutiliza el mismo acceso si aún no se completó.
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
