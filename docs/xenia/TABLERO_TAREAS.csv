@@ -2,9 +2,9 @@
 A01,P0,Crear rama aislada y fijar referencias de código.,Técnico,Marcelo,Verificada,Hecha; base `494a59cd`.,,2026-11-16,,
 A02,P0,Comparar historial y tamaño de diferencias.,Técnico,Marcelo,Verificada,Hecha; inventario JSON.,,2026-11-16,,
 A03,P0,"Revisar conexión, alcance del esquema, marca y automatizaciones.",Técnico,Marcelo,Verificada,Hecha a nivel inicial; falta auditoría integral.,,2026-11-16,,
-A04,P0,Completar inventario real de Railway y dependencias de Maran/Xenia.,Infraestructura,Marcelo,Pendiente,Pendiente; acceso Xenia.,,,,
-A05,P0,"Confirmar salud externa, revisión servida y configuración por entorno.",Infraestructura,Marcelo,En curso,En curso; contraste externo pendiente.,,,,
-A06,P0,Completar matriz funcional de diferencias por módulo.,Técnico y áreas,Marcelo,Pendiente,Pendiente; A01 a A04.,,,,
+A04,P0,Completar inventario real de Railway y dependencias de Maran/Xenia.,Infraestructura,Marcelo,En curso,Panel y tres bases nuevas identificados por el propietario; inventario completo del PMS pendiente.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+A05,P0,"Confirmar salud externa, revisión servida y configuración por entorno.",Infraestructura,Marcelo,En curso,Ingreso remoto y pruebas manuales del panel confirmados; salud externa y SHA servido pendientes.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+A06,P0,Completar matriz funcional de diferencias por módulo.,Técnico y áreas,Marcelo,En curso,"Revisión inicial de identidad, sesiones, conexión y arranque; matriz funcional completa pendiente.",,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
 A07,P0,Registrar a Marcelo como responsable actual y definir delegación progresiva.,Marcelo,Marcelo,Verificada,Hecha; roles confirmados en la versión 1.1.,,2026-11-16,"PLAN_MAESTRO_XENIA_MARAN.md, sección 3, versión 1.1",
 A08,P0,"Confirmar fecha, alcance y criterios de apertura.",Marcelo y hotel,Marcelo,Pendiente,Pendiente; sección 11.,,,,
 A09,P0,"Inventariar respaldos, adjuntos y recuperación de claves.",Infraestructura,Marcelo,Pendiente,Pendiente; A04.,,,,
@@ -19,7 +19,7 @@ M07,P0,"Validar sesiones, reconexión y ausencia de duplicados.",Recepción y t�
 M08,P0,"Diagnosticar colas, trabajadores y mapeos de Channex sin enviar.",Técnico y comercial,Marcelo,Pendiente,Pendiente; A04.,,,,
 M09,P0,Capacitar por rol y ensayar contingencia.,Hotel y soporte,Marcelo,Pendiente,Pendiente; resultados M01 a M08.,,,,
 M10,P0,Revisar versión de apertura y decidir inicio oficial.,Marcelo y responsables,Marcelo,Pendiente,Pendiente; aceptación y recuperación.,,,,
-P01,P1,Elegir base común con matriz de diferencias revisada.,Técnico y Marcelo,Marcelo,Pendiente,Pendiente; A06.,,,,
+P01,P1,Elegir base común con matriz de diferencias revisada.,Técnico y Marcelo,Marcelo,En curso,Candidato basado en main 2301ffb6; revisar diferencias funcionales antes de integrar mejoras de Xenia.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
 P02,P1,Integrar mejoras por módulo con verificaciones.,Técnico,Marcelo,Pendiente,Pendiente; P01.,,,,
 P03,P1,Extraer identidad y parámetros por instalación.,Técnico,Marcelo,Pendiente,Pendiente; P01.,,,,
 P04,P1,"Definir versiones, artefactos, migraciones y compatibilidad.",Técnico e infraestructura,Marcelo,Pendiente,Pendiente.,,,,
@@ -29,24 +29,24 @@ P07,P1,Documentar circuito de hotfix y retorno al producto.,Técnico,Marcelo,Pen
 W01,P1,"Registrar nombres, titular y administración de los dominios.",Marcelo,Marcelo,En curso,"En curso; cuatro nombres confirmados, titular y recuperación por verificar.",,,DOMINIOS_Y_HOME_XENIA_2026-11-16.md,
 W02,P1,Registrar la compra de los dominios y el proveedor.,Marcelo e infraestructura,Marcelo,Verificada,Hecha; compra de cuatro dominios en Donweb confirmada por Marcelo.,,2026-11-16,DOMINIOS_Y_HOME_XENIA_2026-11-16.md,
 W03,P1,"Configurar recuperación, 2FA y renovación.",Infraestructura,Marcelo,Pendiente,Pendiente; W02.,,,,
-W04,P1,Crear zona DNS y verificar delegación.,Infraestructura,Marcelo,Pendiente,Pendiente; W02 y W03.,,,,
-W05,P1,Aprobar mapa de URLs y propietarios de servicios.,Marcelo y técnico,Marcelo,Pendiente,Pendiente; sección 7.,,,,
-W06,P1,Preparar sitio comercial y vista previa.,Diseño y desarrollo,Marcelo,Verificada,Hecha; home privada navegable con logos originales y revisión responsive.,,2026-11-16,DOMINIOS_Y_HOME_XENIA_2026-11-16.md,
+W04,P1,Crear zona DNS y verificar delegación.,Infraestructura,Marcelo,En curso,"Zona principal utilizada para web, correo y panel; inventario de los cuatro dominios pendiente.",,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+W05,P1,Aprobar mapa de URLs y propietarios de servicios.,Marcelo y técnico,Marcelo,En curso,Web principal y panel definidos; direcciones del PMS de pruebas propuestas.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+W06,P1,Preparar sitio comercial y vista previa.,Diseño y desarrollo,Marcelo,Verificada,"Home comercial aprobada, con logos originales y revisión responsive.",,2026-11-16,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
 W07,P1,Preparar demo estable sin datos reales.,Técnico,Marcelo,Pendiente,Pendiente; A04 y aislamiento.,,,,
-W08,P1,Configurar destinos DNS y certificados reales.,Infraestructura,Marcelo,Pendiente,Pendiente; W04 a W07.,,,,
-W09,P1,"Configurar buzones, remitentes y autenticación de correo.",Infraestructura,Marcelo,Pendiente,Pendiente; W04.,,,,
-W10,P1,"Probar formularios, móvil, privacidad, HTTPS y accesos.",Marcelo y técnico,Marcelo,Pendiente,Pendiente; W06 a W09.,,,,
-W11,P1,Publicar web aprobada y registrar evidencia.,Marcelo e infraestructura,Marcelo,Pendiente,Pendiente; W10.,,,,
-W12,P2,"Crear portal común, ayuda y estado según necesidad.",Técnico,Marcelo,Pendiente,Pendiente; multihotel y alcance comercial.,,,,
-H01,P1,"Diseñar cliente, hotel, entidad fiscal y membresías.",Técnico y Administración,Marcelo,Pendiente,Pendiente; sección 4.,,,,
-H02,P1,Resolver identidad y continuidad ante caída central.,Técnico,Marcelo,Pendiente,Pendiente; H01.,,,,
-H03,P1,Automatizar alta limpia de un hotel ficticio.,Infraestructura y técnico,Marcelo,Pendiente,Pendiente; P04 y H01.,,,,
-H04,P1,"Implementar selector, permisos y contexto del servidor.",Técnico,Marcelo,Pendiente,Pendiente; H02.,,,,
+W08,P1,Configurar destinos DNS y certificados reales.,Infraestructura,Marcelo,En curso,Web principal y acceso al panel confirmados; .com.ar pendiente y verificación integral por completar.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+W09,P1,"Configurar buzones, remitentes y autenticación de correo.",Infraestructura,Marcelo,En curso,Contacto recibe y responde según Marcelo; autenticación y remitentes del producto por revisar.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+W10,P1,"Probar formularios, móvil, privacidad, HTTPS y accesos.",Marcelo y técnico,Marcelo,En curso,Home responsive y perfiles del panel probados; aceptación comercial integral pendiente.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+W11,P1,Publicar web aprobada y registrar evidencia.,Marcelo e infraestructura,Marcelo,Verificada,Web comercial principal pública; publicación autorizada por Marcelo.,,2026-11-17,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+W12,P2,"Crear portal común, ayuda y estado según necesidad.",Técnico,Marcelo,En curso,Panel central publicado; ayuda y estado pendientes.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+H01,P1,"Diseñar cliente, hotel, entidad fiscal y membresías.",Técnico y Administración,Marcelo,En curso,"Cliente, establecimientos y membresías probados en el panel; entidad fiscal pendiente.",,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+H02,P1,Resolver identidad y continuidad ante caída central.,Técnico,Marcelo,En curso,Identidad del panel verificada; enlace con el PMS y continuidad pendientes.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+H03,P1,Automatizar alta limpia de un hotel ficticio.,Infraestructura y técnico,Marcelo,En curso,Altas del panel verificadas en Aurora y Brisa; instalación completa del PMS pendiente.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
+H04,P1,"Implementar selector, permisos y contexto del servidor.",Técnico,Marcelo,En curso,"Selector, permisos y contexto verificados en el panel ficticio; extender al PMS completo.",,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
 H05,P1,"Separar archivos, colas, cachés, tareas e integraciones.",Técnico,Marcelo,Pendiente,Pendiente; H03.,,,,
-H06,P1,Probar aislamiento con dos hoteles y sesiones cruzadas.,Técnico,Marcelo,Pendiente,Pendiente; H04 y H05.,,,,
+H06,P1,Probar aislamiento con dos hoteles y sesiones cruzadas.,Técnico,Marcelo,En curso,"Panel con pruebas automatizadas y manuales aprobadas; repetir con PMS, archivos y trabajos.",,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
 H07,P1,"Ensayar alta, exportación y baja documentadas.",Técnico y Administración,Marcelo,Pendiente,Pendiente; H06.,,,,
 H08,P2,Medir costos y preparar piloto comercial adicional.,Marcelo y equipo,Marcelo,Pendiente,Pendiente; H06 y H07.,,,,
-I01,P1,Auditar estado real del asistente en Xenia.,Técnico,Marcelo,Pendiente,"Pendiente; código revisado, retomar publicación y configuración después de la home.",,,AUDITORIA_PILOTO_IA_2026-11-16.md,
+I01,P1,Auditar estado real del asistente en Xenia.,Técnico,Marcelo,Pendiente,Código revisado; retomar después del enlace de identidad multihotel.,,,"ESTADO_EJECUCION.md; PLAN_MAESTRO_XENIA_MARAN.md, sección 2.4",Actualización del 17 de noviembre de 2026. Las verificaciones del panel no cierran la integración del PMS completo.
 I02,P1,"Validar presupuesto US$1, concurrencia e incertidumbre.",Técnico,Marcelo,Pendiente,Pendiente; I01.,,,,
 I03,P1,"Validar aprobaciones, bandeja y correo de Marcelo.",Técnico y Marcelo,Marcelo,Pendiente,Pendiente; I01.,,,,
 I04,P1,Evaluar calidad con casos reales anonimizados.,Marcelo y colaboradores,Marcelo,Pendiente,Pendiente; I02 e I03.,,,,

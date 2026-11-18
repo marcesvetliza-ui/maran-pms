@@ -1,6 +1,24 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Fecha: 16 de noviembre de 2026. Frentes activos: **relevamiento y preparación de Maran; marca y home de Xenia**.
+Actualización: 17 de noviembre de 2026. Frentes activos: **continuidad de Maran; enlace del panel multihotel con una instalación completa del PMS de pruebas**. Los apartados iniciales conservan la evidencia histórica del 16 de noviembre.
+
+## Hito vigente: panel multihotel probado
+
+Marcelo confirmó el ingreso remoto a `app.xeniapms.com`, dos establecimientos activos y las pruebas de reservas y perfiles. Aurora y Brisa conservan reservas distintas después de recargar. Responsable opera ambos; recepción sólo Aurora; consulta sólo Brisa sin escritura. Los tres perfiles de prueba no acceden a la administración central.
+
+El panel usa un servicio independiente y tres bases nuevas en `observant-possibility`. La [PR 119](https://github.com/marcesvetliza-ui/maran-pms/pull/119) conserva el código de esta entrega, sus 24 pruebas PostgreSQL/HTTP y las verificaciones de navegador y Docker. Sigue en borrador, sin integrarse en Maran. El [acta](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/evidencia/multihotel-aceptacion-2026-11-17.json) identifica lo probado por el propietario y lo pendiente.
+
+La web comercial ya está pública en `xeniapms.com`; Marcelo confirmó las redirecciones de `.store` y `.online` y la recepción y respuesta de `contacto@xeniapms.com`. El registro de `.com.ar` seguía pendiente en el último estado comunicado. La comprobación externa de salud, la revisión exacta servida y la recuperación remota no están cerradas.
+
+## Próximo paquete vigente
+
+1. Completar la matriz funcional y fijar el código candidato conservando los arreglos recientes de Maran.
+2. Preparar un arranque reproducible del PMS de Aurora con una base operativa nueva y datos ficticios, revisando los datos iniciales y los trabajadores automáticos.
+3. Implementar el enlace entre principal central y usuario local con permisos revisados y una sesión propia del PMS.
+4. Probar Aurora completa, después Brisa, y ensayar separación de archivos, cachés, trabajos y versiones.
+5. Validar recuperación y continuidad antes de proponer incorporar un hotel operativo. El asistente continúa después de esta base.
+
+La revisión inicial del siguiente paquete está en [Segunda entrega: PMS aislado](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/SEGUNDA_ENTREGA_PMS_AISLADO.md). Es preparación técnica; todavía no configura esos comportamientos ni crea servicios adicionales.
 
 ## Completado en esta etapa
 
@@ -19,7 +37,7 @@ Hay presencia de `RAILWAY_TOKEN`; no hay presencia de `RAILWAY_XENIA_TOKEN` en e
 
 Las direcciones observadas en workflows no prueban por sí solas la rama realmente vinculada, la revisión servida ni la separación de bases y servicios. Esas verificaciones pertenecen a A04 y A05.
 
-## Próximo paquete
+## Paquete previsto en el corte inicial del 16 de noviembre
 
 1. Revisar con Marcelo la home comercial privada y completar el contacto real y el destino de acceso al PMS.
 2. Preparar la conexión de `xeniapms.com` y las redirecciones de sus tres dominios alternativos desde Donweb, con valores reales del alojamiento.
@@ -53,9 +71,9 @@ Marcelo aceptó la propuesta de diseño. Se dieron de alta los nombres `xeniapms
 
 Se preparó el anexo operativo con los valores exactos y el recorrido de gestión de Donweb contrastado con su documentación. Falta la carga en la zona DNS de la cuenta de Marcelo, la validación externa y el certificado. El correo sigue siendo provisional. No se cambió el acceso privado de la home, no se configuraron redirecciones en Donweb y no se contrataron servicios de correo.
 
-## Alcance de los cambios realizados
+## Alcance de los cambios de planificación
 
-La rama de planificación cambia archivos de `docs/xenia/`: documentación, evidencias y una herramienta de lectura. La home se preparó en un proyecto estático separado y se conserva en otra rama de GitHub bajo `web/xenia/`. La publicación de la home es privada e independiente. No se modificó código operativo de Maran, datos, numeradores, comprobantes, cobros, configuración de producción, DNS ni publicación automática del PMS. Ninguna de estas ramas se fusiona con `main` como parte de esta entrega.
+La rama de planificación cambia archivos de `docs/xenia/`: documentación, evidencias y una herramienta de lectura. La home y el panel tienen ramas separadas. La home pasó a publicación pública con autorización de Marcelo y éste cargó los registros DNS y configuró el servicio del panel desde sus cuentas. Durante estas entregas no se modificaron código operativo, datos, numeradores, cobros ni configuración de producción de Maran. Las ramas de planificación y multihotel no se fusionan con `main` como parte de esta actualización.
 
 ## Cómo actualizar la evidencia
 

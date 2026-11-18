@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "16 de noviembre de 2026 · Versión 1.2"
+date: "17 de noviembre de 2026 · Versión 1.3"
 lang: es-AR
 ---
 
-**Estado:** plan de trabajo y primera etapa iniciada. Las decisiones de producto acordadas están incorporadas; los proveedores, importes, fechas y dominios todavía no elegidos quedan expresamente pendientes.
+**Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. El PMS completo todavía requiere integración con ese panel.
 
-**Prioridad actual:** consolidar Xenia como marca y preparar su home comercial; después continuar con el producto común y el asistente. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** preparar una instalación completa de prueba para Aurora y su enlace con el panel central; después incorporar Brisa y continuar la integración por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Regla de ejecución:** Maran PMS está en uso. Cada avance debe conservar la operación del hotel y las correcciones recientes. Este documento no autoriza por sí solo una migración, una compra ni una publicación en producción.
 
@@ -78,6 +78,17 @@ La base candidata inicial es el código estable actualizado de Maran, incorporan
 - Hay automatizaciones distintas para `main`, una rama de staging y la rama de Xenia. Su existencia no acredita que todos los entornos estén correctamente aislados o funcionando.
 
 Estas observaciones definen tareas. No se ejecuta una migración de esquema dentro del relevamiento.
+
+## 2.4 Avance confirmado el 17 de noviembre
+
+- Web comercial de hospitalidad publicada en `https://xeniapms.com`. Marcelo confirmó que `.store` y `.online` redirigen al dominio principal. La activación de `.com.ar` quedó pendiente en el último estado comunicado por Donweb.
+- Buzón `contacto@xeniapms.com`: Marcelo confirmó recepción y respuesta desde Webmail.
+- Panel central publicado en `https://app.xeniapms.com`, servicio `Xenia-Control` del proyecto de pruebas `observant-possibility`, con una base central y dos bases ficticias independientes.
+- Hotel Aurora y Apart Brisa activos; reservas ficticias guardadas, separadas y conservadas después de recargar la página, según la prueba manual de Marcelo.
+- Perfiles de responsable, recepción de Aurora y consulta de Brisa probados por Marcelo con el alcance esperado y sin acceso a la administración central.
+- La entrega del panel parte de `main` en `2301ffb6` y tiene 24 pruebas PostgreSQL/HTTP, navegador y construcción Docker aprobados para su revisión funcional `02fe8c35`. La [PR 119](https://github.com/marcesvetliza-ui/maran-pms/pull/119) sigue en borrador y no está integrada en Maran.
+
+El acta distingue confirmación manual del propietario, verificaciones automatizadas y comprobaciones todavía pendientes: [aceptación multihotel](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/evidencia/multihotel-aceptacion-2026-11-17.json). La comprobación externa de salud, el SHA exacto servido por Railway y la restauración remota siguen pendientes. El siguiente paquete está definido en [Segunda entrega: PMS aislado](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/SEGUNDA_ENTREGA_PMS_AISLADO.md).
 
 # 3. Organización, responsables y forma de seguimiento
 
@@ -466,7 +477,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | A01 · P0 | Crear rama aislada y fijar referencias de código. | Técnico | Hecha; base `494a59cd`. |
 | A02 · P0 | Comparar historial y tamaño de diferencias. | Técnico | Hecha; inventario JSON. |
 | A03 · P0 | Revisar conexión, alcance del esquema, marca y automatizaciones. | Técnico | Hecha a nivel inicial; falta auditoría integral. |
-| A04 · P0 | Completar inventario real de Railway y dependencias de Maran/Xenia. | Infraestructura | Pendiente; acceso Xenia. |
+| A04 · P0 | Completar inventario real de Railway y dependencias de Maran/Xenia. | Infraestructura | En curso; panel y tres bases nuevas identificados por la sesión del propietario; inventario del PMS pendiente. |
 | A05 · P0 | Confirmar salud externa, revisión servida y configuración por entorno. | Infraestructura | En curso; contraste externo pendiente. |
 | A06 · P0 | Completar matriz funcional de diferencias por módulo. | Técnico y áreas | Pendiente; A01 a A04. |
 | A07 · P0 | Registrar a Marcelo como responsable actual y definir delegación progresiva. | Marcelo | Hecha; roles confirmados en la versión 1.1. |
@@ -493,7 +504,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 | ID | Tarea y evidencia de cierre | Responsable propuesto | Estado / dependencia |
 |---|---|---|---|
-| P01 · P1 | Elegir base común con matriz de diferencias revisada. | Técnico y Marcelo | Pendiente; A06. |
+| P01 · P1 | Elegir base común con matriz de diferencias revisada. | Técnico y Marcelo | En curso; revisión inicial de identidad, sesiones, conexión y arranque; matriz funcional completa pendiente. |
 | P02 · P1 | Integrar mejoras por módulo con verificaciones. | Técnico | Pendiente; P01. |
 | P03 · P1 | Extraer identidad y parámetros por instalación. | Técnico | Pendiente; P01. |
 | P04 · P1 | Definir versiones, artefactos, migraciones y compatibilidad. | Técnico e infraestructura | Pendiente. |
@@ -508,29 +519,29 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | W01 · P1 | Registrar nombres, titular y administración de los dominios. | Marcelo | En curso; cuatro nombres confirmados, titular y recuperación por verificar. |
 | W02 · P1 | Registrar la compra de los dominios y el proveedor. | Marcelo e infraestructura | Hecha; compra de cuatro dominios en Donweb confirmada por Marcelo. |
 | W03 · P1 | Configurar recuperación, 2FA y renovación. | Infraestructura | Pendiente; W02. |
-| W04 · P1 | Crear zona DNS y verificar delegación. | Infraestructura | Pendiente; W02 y W03. |
-| W05 · P1 | Aprobar mapa de URLs y propietarios de servicios. | Marcelo y técnico | Pendiente; sección 7. |
-| W06 · P1 | Preparar sitio comercial y vista previa. | Diseño y desarrollo | Hecha; home privada navegable con logos originales y revisión responsive. |
+| W04 · P1 | Crear zona DNS y verificar delegación. | Infraestructura | En curso; zona principal utilizada para web, correo y panel; inventario de los cuatro dominios pendiente. |
+| W05 · P1 | Aprobar mapa de URLs y propietarios de servicios. | Marcelo y técnico | En curso; web principal y panel definidos; direcciones del PMS de pruebas propuestas. |
+| W06 · P1 | Preparar sitio comercial y vista previa. | Diseño y desarrollo | Hecha; home comercial aprobada, con logos originales y revisión responsive. |
 | W07 · P1 | Preparar demo estable sin datos reales. | Técnico | Pendiente; A04 y aislamiento. |
-| W08 · P1 | Configurar destinos DNS y certificados reales. | Infraestructura | Pendiente; W04 a W07. |
-| W09 · P1 | Configurar buzones, remitentes y autenticación de correo. | Infraestructura | Pendiente; W04. |
-| W10 · P1 | Probar formularios, móvil, privacidad, HTTPS y accesos. | Marcelo y técnico | Pendiente; W06 a W09. |
-| W11 · P1 | Publicar web aprobada y registrar evidencia. | Marcelo e infraestructura | Pendiente; W10. |
-| W12 · P2 | Crear portal común, ayuda y estado según necesidad. | Técnico | Pendiente; multihotel y alcance comercial. |
+| W08 · P1 | Configurar destinos DNS y certificados reales. | Infraestructura | En curso; web principal y acceso al panel confirmados; `.com.ar` pendiente y verificación integral por completar. |
+| W09 · P1 | Configurar buzones, remitentes y autenticación de correo. | Infraestructura | En curso; contacto recibe y responde; autenticación y remitentes del producto por revisar. |
+| W10 · P1 | Probar formularios, móvil, privacidad, HTTPS y accesos. | Marcelo y técnico | En curso; home responsive y perfiles del panel probados; aceptación comercial integral pendiente. |
+| W11 · P1 | Publicar web aprobada y registrar evidencia. | Marcelo e infraestructura | Verificada para la web comercial principal; publicación pública autorizada por Marcelo. |
+| W12 · P2 | Crear portal común, ayuda y estado según necesidad. | Técnico | En curso; panel central publicado; ayuda y estado pendientes. |
 
 ## 14.5 Multihotel y asistente
 
 | ID | Tarea y evidencia de cierre | Responsable propuesto | Estado / dependencia |
 |---|---|---|---|
-| H01 · P1 | Diseñar cliente, hotel, entidad fiscal y membresías. | Técnico y Administración | Pendiente; sección 4. |
-| H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | Pendiente; H01. |
-| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | Pendiente; P04 y H01. |
-| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | Pendiente; H02. |
+| H01 · P1 | Diseñar cliente, hotel, entidad fiscal y membresías. | Técnico y Administración | En curso; cliente, establecimientos y membresías probados en el panel; entidad fiscal pendiente. |
+| H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | En curso; identidad del panel verificada; enlace con el PMS y continuidad pendientes. |
+| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; altas del panel verificadas en Aurora y Brisa; instalación completa del PMS pendiente. |
+| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; verificados en el panel ficticio; extender al PMS completo. |
 | H05 · P1 | Separar archivos, colas, cachés, tareas e integraciones. | Técnico | Pendiente; H03. |
-| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | Pendiente; H04 y H05. |
+| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; panel con pruebas automatizadas y manuales aprobadas; repetir con PMS, archivos y trabajos. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
-| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar publicación y configuración después de la home. |
+| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar después del enlace de identidad multihotel. |
 | I02 · P1 | Validar presupuesto US$1, concurrencia e incertidumbre. | Técnico | Pendiente; I01. |
 | I03 · P1 | Validar aprobaciones, bandeja y correo de Marcelo. | Técnico y Marcelo | Pendiente; I01. |
 | I04 · P1 | Evaluar calidad con casos reales anonimizados. | Marcelo y colaboradores | Pendiente; I02 e I03. |
@@ -555,13 +566,13 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 ## 15.2 Primer paquete de ejecución
 
-**Ya realizado:** relevamiento inicial, roles actuales y revisión del código del piloto. En esta versión se incorporan los cuatro dominios comprados en Donweb, la prioridad de marca y home y una primera web navegable que usa los logos originales de Xenia.
+**Ya realizado:** relevamiento inicial, revisión del piloto, compra de cuatro dominios, home comercial pública, buzón de contacto probado y primera entrega del panel multihotel con aceptación manual. Las evidencias y sus límites están resumidos en la sección 2.4.
 
-**Siguiente trabajo:** revisar diseño, contenido y navegación de la home con Marcelo. Completar el contacto real y el destino del acceso al PMS; después preparar la conexión de `xeniapms.com` y las redirecciones de los otros tres dominios. El trabajo del producto común y del asistente continúa después de esta base de marca y web, conservando los arreglos de Maran.
+**Siguiente trabajo:** preparar el arranque reproducible de un PMS ficticio para Aurora, conservar las verificaciones recientes de sesión de la base estable y definir el enlace entre identidad central y usuario local. Después se ensaya Brisa y se completa la integración por módulos. Los esquemas de las actuales reservas de demostración y del PMS operativo requieren una transición explícita.
 
-**Primera entrega para revisar:** [home privada de Xenia](https://xenia-pms-home.chalky-yak-9675.chatgpt.site). Se verificaron navegación, controles y ausencia de desbordes en anchos de 360, 390, 768, 1024 y 1440 píxeles. Los ejemplos son ficticios. El formulario prepara un borrador local; `contacto@xeniapms.com` es un dato de maqueta pendiente de activar.
+**Direcciones actuales:** web comercial en [xeniapms.com](https://xeniapms.com) y panel central en [app.xeniapms.com](https://app.xeniapms.com). El buzón `contacto@xeniapms.com` está activo según la prueba de Marcelo. La dirección privada inicial se conserva como referencia histórica en los anexos de preparación.
 
-**Primer hito comercial:** home aprobada y pública bajo `xeniapms.com`, correo activo, redirecciones y acceso al PMS verificados. La demo comercial tendrá su propio circuito y datos aislados. Maran conserva las direcciones que usa hoy Recepción.
+**Próximo hito del producto:** desde el selector central, abrir una instalación completa del PMS de Aurora con datos ficticios, identidad local y permisos revisados. Las direcciones propuestas de QA se crean cuando el código y su configuración estén preparados. La incorporación de Maran requiere sus propios ensayos de continuidad, recuperación y aceptación operativa.
 
 # 16. Fuentes, alcance y mantenimiento del plan
 

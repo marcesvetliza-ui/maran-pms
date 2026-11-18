@@ -4,11 +4,11 @@ Documento principal: [PLAN_MAESTRO_XENIA_MARAN.md](PLAN_MAESTRO_XENIA_MARAN.md).
 
 Seguimiento: [ESTADO_EJECUCION.md](ESTADO_EJECUCION.md), tablero CSV y matriz de diferencias.
 
-La base documentada es una fotografía del 16 de noviembre de 2026. El objetivo es avanzar hacia Xenia como producto común sin interrumpir Maran, que ya está en uso.
+El inventario inicial conserva el corte del 16 de noviembre de 2026. El plan está actualizado al 17 de noviembre: web pública, correo probado y panel multihotel con aceptación manual del propietario. El objetivo es conectar ahora una instalación completa del PMS de pruebas, conservando la operación de Maran.
 
 ## Contenido
 
-- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.2.
+- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.3.
 - `ESTADO_EJECUCION.md`: trabajos realizados, límites del relevamiento y próximo paquete.
 - `TABLERO_TAREAS.csv`: 56 tareas del plan, con Marcelo como responsable actual y campos para fechas y evidencia.
 - `MATRIZ_DIFERENCIAS.md`: comparación inicial de rutas por área; falta validación funcional por módulo.
