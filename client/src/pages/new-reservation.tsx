@@ -31,6 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/lib/queryClient";
 import { GuestSelector, CompanySelector, AgencySelector } from "@/components/entity-selector";
+import { isXeniaPmsQa } from "@/components/xenia-pms-context";
 import type { Guest, Company, Agency, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, InsertAgency } from "@shared/schema";
 import { useBedCatalog } from "@/hooks/use-bed-catalog";
 
@@ -78,6 +79,7 @@ export default function NewReservationPage() {
 
   const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowRecurring: boolean }[]>({
     queryKey: ["/api/charge-types"],
+    enabled: !isXeniaPmsQa,
   });
   const nrChargePresets = [
     ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowRecurring: ct.allowRecurring ?? false })),
@@ -736,7 +738,7 @@ export default function NewReservationPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card hidden={isXeniaPmsQa}>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <ShoppingCart className="h-4 w-4" />

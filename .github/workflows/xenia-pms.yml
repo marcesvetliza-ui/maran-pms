@@ -1,0 +1,59 @@
+name: PMS aislado de Xenia
+on:
+  pull_request:
+    branches: [main, feat/xenia-multihotel-foundation-20261117]
+    paths:
+      - "server/xenia-control/**"
+      - "server/xenia-pms/**"
+      - "server/auth.ts"
+      - "server/index.ts"
+      - "client/src/**"
+      - "shared/**"
+      - "script/*xenia*"
+      - "Dockerfile.xenia-*"
+      - "railway.xenia-*.json"
+      - "package*.json"
+      - "vite.config.ts"
+      - ".github/workflows/xenia-pms.yml"
+permissions:
+  contents: read
+jobs:
+  pms-qa:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Preparar herramientas de pruebas
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql openssl
+          npx playwright install --with-deps chromium
+      - name: Verificar tipos y compilar ambos servicios
+        run: |
+          npm run check
+          npm run xenia:pms:build
+          npm run xenia:build
+          node --check server/xenia-control/public/app.js
+      - name: Probar identidad, reservas y aislamiento en clústeres descartables
+        env:
+          XENIA_SCREENSHOT_DIR: artifacts/xenia-pms
+        run: |
+          npm run xenia:test
+          npm run xenia:pms:test
+          npm run xenia:test:browser
+      - name: Compilar las imágenes independientes
+        run: |
+          docker build -f Dockerfile.xenia-control -t xenia-control:review .
+          docker build -f Dockerfile.xenia-pms -t xenia-pms:review .
+      - name: Conservar evidencia de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xenia-pms-aceptacion
+          path: artifacts/xenia-pms
+          if-no-files-found: ignore

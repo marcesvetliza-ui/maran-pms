@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="es-AR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#083e48" />
+    <title>Xenia · Mis establecimientos</title>
+    <link rel="icon" href="/branding/xenia-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="/" aria-label="Xenia, inicio"
+        ><img
+          src="/branding/xenia-horizontal.png"
+          alt="Xenia PMS"
+          width="156"
+          height="62" /></a
+      ><span class="demo-badge" id="demo-badge" hidden
+        >Demostración · datos ficticios</span
+      >
+      <div id="identity" hidden>
+        <span id="user-name"></span
+        ><button id="logout" class="quiet">Cerrar sesión</button>
+      </div>
+    </header>
+    <main>
+      <section id="login-view" class="login-layout" hidden>
+        <div class="login-copy">
+          <span class="eyebrow">XENIA MULTIHOTEL</span>
+          <h1>Tus establecimientos.<br /><em>Un mismo acceso.</em></h1>
+          <p>
+            Elegí dónde trabajar y encontrá la información que corresponde a tu
+            equipo.
+          </p>
+          <div class="login-detail">
+            <span>01</span>
+            <div>
+              <strong>Una visión compartida</strong>
+              <p>
+                Cada establecimiento con sus usuarios, módulos y espacio de
+                trabajo.
+              </p>
+            </div>
+          </div>
+          <div class="login-detail">
+            <span>02</span>
+            <div>
+              <strong>El contexto, siempre visible</strong>
+              <p>Sabé en qué hotel estás operando antes de continuar.</p>
+            </div>
+          </div>
+        </div>
+        <div class="card login-card">
+          <span class="eyebrow">BIENVENIDO A XENIA</span>
+          <h2>Ingresá a tu cuenta</h2>
+          <form id="login-form">
+            <div class="field">
+              <label for="username">Usuario</label
+              ><input
+                id="username"
+                name="username"
+                autocomplete="username"
+                required
+                maxlength="100"
+              />
+            </div>
+            <div class="field">
+              <label for="password">Contraseña</label
+              ><input
+                id="password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                required
+                maxlength="72"
+              />
+            </div>
+            <button class="primary" type="submit">Ingresar</button>
+          </form>
+          <div id="demo-login" class="demo-login" hidden>
+            <p>Explorá la demostración como:</p>
+            <button type="button" data-persona="owner">
+              Administración general
+              <span>Acceso a ambos establecimientos ↗</span></button
+            ><button type="button" data-persona="manager">
+              Responsable del grupo
+              <span>Trabaja en sus dos establecimientos ↗</span></button
+            ><button type="button" data-persona="reception">
+              Recepción Aurora
+              <span>Opera únicamente Hotel Aurora ↗</span></button
+            ><button type="button" data-persona="viewer">
+              Consulta Brisa
+              <span>Ve Apart Brisa, con acceso de consulta ↗</span>
+            </button>
+          </div>
+        </div>
+      </section>
+      <section id="workspace" hidden>
+        <div class="workspace-heading">
+          <div>
+            <span class="eyebrow">TU ESPACIO DE TRABAJO</span>
+            <h1 id="welcome-title">Mis establecimientos</h1>
+          </div>
+          <div class="field property-picker">
+            <label for="property-selector">Establecimiento activo</label
+            ><select id="property-selector"></select>
+          </div>
+        </div>
+        <nav class="section-tabs" aria-label="Secciones del panel">
+          <button id="operations-tab" aria-current="page">Mi operación</button
+          ><button id="admin-tab" hidden>Administración</button>
+        </nav>
+        <div id="operations-view">
+          <div class="context-banner">
+            <span class="context-dot"></span>
+            <div>
+              <span class="eyebrow">ESTÁS TRABAJANDO EN</span>
+              <h2 id="property-name"></h2>
+            </div>
+            <span id="property-role" class="pill"></span>
+          </div>
+          <div id="modules" class="module-tags"></div>
+          <section id="pms-workspace" class="card" hidden>
+            <span class="eyebrow">PMS DE PRUEBAS · ALOJAMIENTO</span>
+            <h2 id="pms-title"></h2>
+            <p>
+              Planning, habitaciones, huéspedes y reservas en una instalación
+              independiente. Usá datos ficticios.
+            </p>
+            <a id="open-pms" class="primary" href="#">Abrir PMS</a>
+            <p class="muted">
+              Estas reservas se guardan en el PMS. La demostración del panel
+              conserva sus propias reservas.
+            </p>
+          </section>
+          <div id="empty-state" class="card empty" hidden>
+            <h2>Todavía no hay un establecimiento disponible.</h2>
+            <p>La administración puede preparar el alta o revisar tu acceso.</p>
+          </div>
+          <div id="property-pending" class="card empty" hidden>
+            <h2>Este establecimiento está en preparación.</h2>
+            <p>Podés reintentar su preparación conservando el alta anterior.</p>
+            <button id="retry-activation" class="primary">
+              Reintentar preparación
+            </button>
+          </div>
+          <div id="lodging-disabled" class="card empty" hidden>
+            <h2>Este establecimiento tiene otros módulos.</h2>
+            <p>Alojamiento no está habilitado en esta instalación.</p>
+          </div>
+          <div id="lodging-workspace" class="operations-layout" hidden>
+            <section class="card">
+              <div class="card-title">
+                <div>
+                  <span class="eyebrow">ALOJAMIENTO</span>
+                  <h2>Reservas de demostración</h2>
+                </div>
+                <span id="reservation-count" class="pill"></span>
+              </div>
+              <p class="muted">
+                Datos ficticios para probar la separación entre
+                establecimientos.
+              </p>
+              <div id="reservation-list" aria-live="polite"></div>
+            </section>
+            <section class="card">
+              <span class="eyebrow">EN EL ESTABLECIMIENTO ACTIVO</span>
+              <h2>Nueva reserva de prueba</h2>
+              <p id="read-only-notice" class="muted" hidden>
+                Tu acceso permite consultar las reservas de este
+                establecimiento.
+              </p>
+              <form id="reservation-form">
+                <div class="field">
+                  <label for="guest-name">Nombre del huésped</label
+                  ><input
+                    id="guest-name"
+                    name="guestName"
+                    required
+                    minlength="2"
+                    maxlength="100"
+                    placeholder="Usá un nombre ficticio"
+                  />
+                </div>
+                <div class="field">
+                  <label for="room">Habitación o unidad</label
+                  ><input id="room" name="room" required maxlength="40" />
+                </div>
+                <div class="field-pair">
+                  <div class="field">
+                    <label for="check-in">Ingreso</label
+                    ><input id="check-in" name="checkIn" type="date" required />
+                  </div>
+                  <div class="field">
+                    <label for="check-out">Salida</label
+                    ><input
+                      id="check-out"
+                      name="checkOut"
+                      type="date"
+                      required
+                    />
+                  </div>
+                </div>
+                <button class="primary" type="submit">
+                  Guardar reserva de prueba
+                </button>
+              </form>
+            </section>
+          </div>
+        </div>
+        <section id="administration-view" hidden>
+          <section id="pms-configuration" class="card" hidden>
+            <span class="eyebrow">CONEXIÓN DEL PMS DE PRUEBAS</span>
+            <h2 id="pms-configuration-title"></h2>
+            <form id="pms-form">
+              <div class="field">
+                <label for="pms-origin">Dirección del PMS</label>
+                <input
+                  id="pms-origin"
+                  name="origin"
+                  type="url"
+                  required
+                  placeholder="https://aurora.qa.xeniapms.com"
+                />
+                <small
+                  >La dirección debe ser exclusiva de este establecimiento, sin
+                  rutas.</small
+                >
+              </div>
+              <button class="primary" type="submit">
+                Generar ficha de conexión
+              </button>
+            </form>
+            <div id="pms-credentials" hidden>
+              <p>
+                Guardá esta ficha en un lugar privado. El secreto se muestra una
+                sola vez. Generar otra ficha invalida el secreto y los accesos
+                anteriores.
+              </p>
+              <textarea
+                id="pms-connection-sheet"
+                readonly
+                rows="8"
+                aria-label="Ficha privada de conexión del PMS"
+              ></textarea>
+              <button id="pms-hide-credentials" type="button" class="quiet">
+                Ocultar ficha
+              </button>
+            </div>
+          </section>
+          <div class="admin-grid">
+            <section class="card">
+              <span class="eyebrow">CLIENTES Y CADENAS</span>
+              <h2>Nuevo cliente</h2>
+              <form id="organization-form">
+                <div class="field">
+                  <label for="organization-name"
+                    >Nombre del cliente o cadena</label
+                  ><input
+                    id="organization-name"
+                    name="name"
+                    required
+                    minlength="2"
+                    maxlength="100"
+                  />
+                </div>
+                <button class="primary">Crear cliente</button>
+              </form>
+              <div id="organization-list" class="compact-list"></div>
+            </section>
+            <section class="card">
+              <span class="eyebrow">ESTABLECIMIENTOS</span>
+              <h2>Dar de alta</h2>
+              <form id="property-form">
+                <div class="field">
+                  <label for="property-client">Cliente o cadena</label
+                  ><select
+                    id="property-client"
+                    name="organizationId"
+                    required
+                  ></select>
+                </div>
+                <div class="field">
+                  <label for="new-property-name"
+                    >Nombre del establecimiento</label
+                  ><input
+                    id="new-property-name"
+                    name="name"
+                    required
+                    minlength="2"
+                    maxlength="100"
+                  />
+                </div>
+                <div class="field">
+                  <label for="property-slug">Identificador</label
+                  ><input
+                    id="property-slug"
+                    name="slug"
+                    required
+                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                    maxlength="60"
+                    placeholder="por-ejemplo-hotel-centro"
+                  /><small>Usá letras minúsculas, números y guiones.</small>
+                </div>
+                <fieldset>
+                  <legend>Módulos habilitados</legend>
+                  <div class="checkbox-grid">
+                    <label
+                      ><input
+                        type="checkbox"
+                        name="module"
+                        value="lodging"
+                        checked
+                      />Alojamiento</label
+                    ><label
+                      ><input
+                        type="checkbox"
+                        name="module"
+                        value="restaurant"
+                      />Restaurant</label
+                    ><label
+                      ><input
+                        type="checkbox"
+                        name="module"
+                        value="spa"
+                      />Spa</label
+                    ><label
+                      ><input
+                        type="checkbox"
+                        name="module"
+                        value="events"
+                      />Eventos</label
+                    ><label
+                      ><input
+                        type="checkbox"
+                        name="module"
+                        value="groups"
+                      />Grupos</label
+                    >
+                  </div>
+                </fieldset>
+                <button class="primary">Crear establecimiento</button>
+              </form>
+            </section>
+            <section class="card">
+              <span class="eyebrow">USUARIOS Y PERMISOS</span>
+              <h2>Crear una cuenta</h2>
+              <form id="user-form">
+                <div class="field">
+                  <label for="new-user-name">Nombre y apellido</label
+                  ><input
+                    id="new-user-name"
+                    name="name"
+                    required
+                    minlength="2"
+                    maxlength="100"
+                  />
+                </div>
+                <div class="field">
+                  <label for="new-username">Usuario</label
+                  ><input
+                    id="new-username"
+                    name="username"
+                    autocomplete="off"
+                    required
+                    pattern="[a-z0-9][a-z0-9._-]{2,59}"
+                    maxlength="60"
+                  />
+                </div>
+                <div class="field">
+                  <label for="new-password">Contraseña inicial</label
+                  ><input
+                    id="new-password"
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    required
+                    minlength="12"
+                    maxlength="72"
+                  /><small>Al menos 12 caracteres.</small>
+                </div>
+                <div class="field">
+                  <label for="new-user-role"
+                    >Permiso en los establecimientos elegidos</label
+                  ><select id="new-user-role" name="role">
+                    <option value="reception">Recepción</option>
+                    <option value="manager">Responsable</option>
+                    <option value="viewer">Sólo consulta</option>
+                  </select>
+                </div>
+                <fieldset>
+                  <legend>Establecimientos autorizados</legend>
+                  <div id="user-property-options" class="checkbox-grid"></div>
+                </fieldset>
+                <button class="primary">Crear usuario</button>
+              </form>
+            </section>
+          </div>
+          <section class="card memberships-card">
+            <div class="card-title">
+              <div>
+                <span class="eyebrow">ACCESO AL ESTABLECIMIENTO ACTIVO</span>
+                <h2 id="memberships-title">Usuarios autorizados</h2>
+              </div>
+            </div>
+            <form id="assignment-form" class="assignment-form">
+              <div class="field">
+                <label for="assignment-user">Usuario existente</label
+                ><select
+                  id="assignment-user"
+                  name="principalId"
+                  required
+                ></select>
+              </div>
+              <div class="field">
+                <label for="assignment-role">Permiso</label
+                ><select id="assignment-role" name="role">
+                  <option value="reception">Recepción</option>
+                  <option value="manager">Responsable</option>
+                  <option value="viewer">Sólo consulta</option>
+                </select>
+              </div>
+              <button class="primary">Asignar acceso</button>
+            </form>
+            <div id="membership-list" class="compact-list"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <footer>Xenia · Gestión para la hospitalidad</footer>
+  </body>
+</html>
