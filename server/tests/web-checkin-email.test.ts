@@ -17,6 +17,7 @@ describe("Web check-in email invitation", () => {
   });
   it("does not ask for already submitted data", () => {
     expect(withWebCheckinInvitation("Hola", "")).toBe("Hola");
+    expect(withWebCheckinInvitation("Hola", "", true)).toBe("Hola\n\nEl pre check-in ya fue completado.");
     expect(withWebCheckinInvitation("Acceso: {link_webcheckin}", "", true)).toContain("ya fue completado");
     expect(withWebCheckinInvitation("Acceso: {link_webcheckin}", "", true)).not.toContain("{link_webcheckin}");
   });

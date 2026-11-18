@@ -207,7 +207,7 @@ export default function EmailConfigPage() {
               key: "reminder",
               label: "Recordatorio 2 días antes",
               icon: Clock,
-              desc: "Se envía a las 09:00 para reservas con llegada dentro de 2 días y pre check-in pendiente",
+              desc: "Se envía a las 09:00 para reservas con llegada dentro de 2 días. Incluye el enlace si el pre check-in sigue pendiente",
               enabledField: "reminderEnabled",
               subjectField: "reminderSubject",
               bodyField: "reminderBody",

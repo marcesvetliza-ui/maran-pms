@@ -116,17 +116,22 @@ describe.skipIf(!enabled)("Confirmation and reminder web check-in · disposable 
     expect(refreshed.token).toBe(record.token);
     expect(refreshed.expiresAt?.toISOString()).toBe("2027-05-16T03:00:00.000Z");
   });
-  it("preserves completed data, even with legacy duplicate records, and never asks again in a reminder", async () => {
+  it("preserves completed data and still sends the arrival reminder without requesting the form again", async () => {
     const id = await fixture("2026-11-20");
     const original = await getOrCreate(id);
     await db.update(webCheckins).set({ status: "completed", signatureImage: "synthetic-signature", confirmedPhone: "123" }).where(eq(webCheckins.id, original.id));
     await db.insert(webCheckins).values({ reservationId: id, token: randomUUID(), status: "pending" });
     expect((await getOrCreate(id)).token).toBe(original.token);
     await configure({ confirmationBody: "Hola {nombre_huesped}\n{link_webcheckin}" });
-    await confirm(id); await remind();
+    await confirm(id);
+    await pool.query("UPDATE reservations SET status='web_checkin' WHERE id=$1", [id]);
+    await remind();
     const message = smtp.sendMail.mock.calls[0][0];
     expect(message.text).toContain("ya fue completado"); expect(message.text).not.toContain("/web-checkin/");
-    expect(smtp.sendMail).toHaveBeenCalledTimes(1);
+    expect(smtp.sendMail).toHaveBeenCalledTimes(2);
+    const reminder = smtp.sendMail.mock.calls[1][0];
+    expect(reminder.text).toContain("ya fue completado"); expect(reminder.text).not.toContain("/web-checkin/");
+    await remind(); expect(smtp.sendMail).toHaveBeenCalledTimes(2);
     const [record] = await db.select().from(webCheckins).where(eq(webCheckins.id, original.id));
     expect(record.signatureImage).toBe("synthetic-signature"); expect(record.confirmedPhone).toBe("123");
     await expect(getPublic(original.token)).rejects.toThrow("ya fue completado");

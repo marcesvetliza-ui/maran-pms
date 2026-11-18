@@ -477,13 +477,13 @@ export async function runReminderScheduler(baseUrl?: string): Promise<{ sent: nu
     // Calculate target date (today + 2 days, Argentina time)
     const targetStr = addArgentinaOperationalDays(new Date(), 2);
 
-    // Find reservations with check-in on target date (confirmed)
+    // Keep the arrival reminder for both confirmed and pre-checked-in guests.
     const { sql: sqlFn } = await import("drizzle-orm");
     const pendingRes = await db.execute(sqlFn`
       SELECT r.id, r.guest_id, r.room_id, r.check_in_date, r.check_out_date, r.reservation_code
       FROM reservations r
       WHERE r.check_in_date = ${targetStr}::date
-        AND r.status IN ('confirmed')
+        AND r.status IN ('confirmed', 'web_checkin')
         AND NOT EXISTS (
           SELECT 1 FROM email_logs el
           WHERE el.reservation_id = r.id
@@ -505,11 +505,8 @@ export async function runReminderScheduler(baseUrl?: string): Promise<{ sent: nu
         }
 
         const checkin = await getOrCreateWebCheckin(reservationId);
-        if (checkin.status === "completed") {
-          stats.skipped++;
-          continue;
-        }
-        const webCheckinLink = `${publicHotelBaseUrl(baseUrl)}/web-checkin/${checkin.token}`;
+        const completed = checkin.status === "completed";
+        const webCheckinLink = completed ? "" : `${publicHotelBaseUrl(baseUrl)}/web-checkin/${checkin.token}`;
 
         const vars: Record<string, string> = {
           nombre_huesped: `${guest.firstName} ${guest.lastName}`,
@@ -525,7 +522,7 @@ export async function runReminderScheduler(baseUrl?: string): Promise<{ sent: nu
           type: "reminder",
           to: email,
           subject: interpolate(cfg.reminderSubject, vars),
-          body: interpolate(withWebCheckinInvitation(cfg.reminderBody, webCheckinLink), vars),
+          body: interpolate(withWebCheckinInvitation(cfg.reminderBody, webCheckinLink, completed), vars),
         });
         stats.sent++;
       } catch (error) {
