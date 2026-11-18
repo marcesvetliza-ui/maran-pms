@@ -45,7 +45,7 @@ La instalación limpia crea tres habitaciones —101, 102 y 103—, una categor�
 1. Seleccioná **Hotel Aurora** en “Establecimiento activo”.
 2. Abrí la pestaña **Administración**.
 3. Buscá **Conexión del PMS de pruebas / PMS de Hotel Aurora**.
-4. En “Dirección del PMS”, escribí exactamente `https://aurora.qa.xeniapms.com`, sin rutas.
+4. Elegí **Aurora** en “Plantilla de pruebas”. En “Dirección del PMS”, escribí exactamente `https://aurora.qa.xeniapms.com`, sin rutas.
 5. Pulsá **Generar ficha de conexión** una sola vez.
 6. Guardá el contenido de la ficha en un gestor de contraseñas o documento privado. Incluye un secreto de sesión de 64 caracteres y el secreto de conexión entre servidores. No los envíes por chat ni en capturas.
 
@@ -142,7 +142,11 @@ La sesión del PMS dura como máximo una hora. Si vence, volvé a ingresar desde
 
 ## 8. Repetir con Brisa después de aceptar Aurora
 
-El mismo paquete ya admite Brisa. Repetí los pasos seleccionando **Apart Brisa** en el panel y usando:
+El mismo paquete ya admite Brisa. Seleccioná el establecimiento **Hotel brisa** (o el nombre con que ya lo creaste), abrí **Administración → Conexión del PMS de pruebas**, elegí **Brisa** en “Plantilla de pruebas” y completá su dirección. No hace falta renombrar ni recrear el establecimiento; se conserva su identidad, su base y sus accesos. Si falta Alojamiento o el establecimiento no está activo, la tarjeta muestra el requisito pendiente.
+
+La corrección de esta opción está en `fix/xenia-brisa-pms-connection-20261118`. Para recibirla, cambiá únicamente la rama de **Xenia-Control** a esa rama en **Settings → Source**, conservá sus variables y los ajustes manuales del paso 2 y usá **Deploy latest commit**. Cuando esté Online, recargá el panel. Aurora puede conservar la rama y la ficha que ya tiene; esta actualización no requiere generar otra ficha de Aurora.
+
+Repetí la preparación de un servicio y una base nuevos para Brisa usando:
 
 | Elemento | Valor |
 | --- | --- |

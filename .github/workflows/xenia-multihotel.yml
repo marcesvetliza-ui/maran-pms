@@ -1,7 +1,7 @@
 name: Fundamentos multihotel de Xenia
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/xenia-pms-integration-20261118]
     paths:
       - "server/xenia-control/**"
       - "script/*xenia-control*"
