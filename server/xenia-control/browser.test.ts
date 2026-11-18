@@ -26,6 +26,9 @@ test(
     try {
       await setupControl(config);
       control = await createControlApp(config);
+      await control.store.central.query(
+        "UPDATE xenia_control.properties SET name='Hotel brisa',slug='hotel-brisa' WHERE slug='brisa-demo'",
+      );
       server = control.app.listen(0, "127.0.0.1");
       await new Promise<void>((resolve) => server!.once("listening", resolve));
       config.origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -63,7 +66,7 @@ test(
         .getAttribute("value"))!;
       const brisa = (await page
         .locator("#property-selector option")
-        .filter({ hasText: "Apart Brisa" })
+        .filter({ hasText: "Hotel brisa" })
         .getAttribute("value"))!;
       await page.locator("#property-selector").selectOption(aurora);
       await expect(page.locator("#reservation-list")).toContainText(
@@ -89,7 +92,7 @@ test(
       await other.goto(config.origin);
       await other.locator("#property-selector").selectOption(aurora);
       await expect(other.locator("#property-name")).toHaveText("Hotel Aurora");
-      await expect(page.locator("#property-name")).toHaveText("Apart Brisa");
+      await expect(page.locator("#property-name")).toHaveText("Hotel brisa");
       const held: import("@playwright/test").Route[] = [];
       await page.route(
         "**/api/properties/" + aurora + "/reservations",
@@ -121,6 +124,50 @@ test(
       );
       await page.unroute("**/api/properties/" + aurora + "/reservations");
       await page.locator("#admin-tab").click();
+      await expect(page.locator("#pms-configuration-title")).toHaveText(
+        "PMS de Hotel brisa",
+      );
+      await expect(page.locator("#pms-form")).toBeVisible();
+      await expect(page.locator("#pms-template")).toHaveValue("brisa");
+      await page.locator("#pms-origin").fill("https://brisa.qa.xeniapms.com");
+      await page.locator("#pms-form button").click();
+      await expect(page.locator("#pms-credentials")).toBeVisible();
+      const sheet = await page.locator("#pms-connection-sheet").inputValue();
+      assert.ok(sheet.includes("XENIA_PMS_TEMPLATE=brisa\n"));
+      assert.ok(sheet.includes("XENIA_PMS_PROPERTY_ID=" + brisa + "\n"));
+      await page.locator("#property-selector").selectOption(aurora);
+      await expect(page.locator("#pms-connection-sheet")).toHaveValue("");
+      await page.locator("#property-selector").selectOption(brisa);
+      await page.locator("#admin-tab").click();
+      await expect(page.locator("#pms-origin")).toHaveValue(
+        "https://brisa.qa.xeniapms.com",
+      );
+      await capture("hotel-brisa-conexion");
+      // Missing prerequisites explain the unavailable action without hiding its card.
+      await control.store.central.query(
+        "UPDATE xenia_control.properties SET modules=ARRAY['restaurant'] WHERE id=$1",
+        [brisa],
+      );
+      await page.reload();
+      await page.locator("#admin-tab").click();
+      await expect(page.locator("#pms-unavailable")).toContainText(
+        "Alojamiento",
+      );
+      await expect(page.locator("#pms-form")).toBeHidden();
+      await control.store.central.query(
+        "UPDATE xenia_control.properties SET modules=ARRAY['lodging'],status='provisioning' WHERE id=$1",
+        [brisa],
+      );
+      await page.reload();
+      await page.locator("#admin-tab").click();
+      await expect(page.locator("#pms-unavailable")).toContainText("activo");
+      await expect(page.locator("#pms-form")).toBeHidden();
+      await control.store.central.query(
+        "UPDATE xenia_control.properties SET status='active' WHERE id=$1",
+        [brisa],
+      );
+      await page.reload();
+      await page.locator("#admin-tab").click();
       await page.locator("#property-client").selectOption({ index: 1 });
       await page
         .getByLabel("Nombre del establecimiento", { exact: true })
@@ -148,6 +195,7 @@ test(
       await page.locator("[data-persona=reception]").click();
       await expect(page.locator("#property-name")).toHaveText("Hotel Aurora");
       await expect(page.locator("#property-selector option")).toHaveCount(1);
+      await expect(page.locator("#pms-configuration")).toBeHidden();
       await capture("recepcion-aurora");
       await expect(other.locator("#property-name")).toHaveText("Hotel Aurora");
       await expect(other.locator("#organization-list")).toBeEmpty();
@@ -162,7 +210,7 @@ test(
       );
       await page.locator("#logout").click();
       await page.locator("[data-persona=viewer]").click();
-      await expect(page.locator("#property-name")).toHaveText("Apart Brisa");
+      await expect(page.locator("#property-name")).toHaveText("Hotel brisa");
       await expect(page.locator("#reservation-form")).not.toBeVisible();
       await expect(
         page.getByRole("button", { name: "Anular prueba", exact: true }),

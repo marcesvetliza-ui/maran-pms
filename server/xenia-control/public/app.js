@@ -235,16 +235,32 @@ async function selectProperty(property) {
     $("#pms-title").textContent = property.name;
     $("#open-pms").href = new URL("/xenia/start", pms.origin).href;
   }
-  $("#pms-configuration").hidden =
-    !state.user?.platformAdmin ||
-    !property ||
-    !["aurora-demo", "brisa-demo"].includes(property.slug) ||
-    property.status !== "active" ||
-    !property.modules.includes("lodging");
+  $("#pms-configuration").hidden = !state.user?.platformAdmin || !property;
   $("#pms-configuration-title").textContent = property
     ? "PMS de " + property.name
     : "";
   $("#pms-origin").value = pms?.origin || "";
+  const pmsUnavailable = !property
+    ? ""
+    : property.status !== "active"
+      ? "El establecimiento debe estar activo para conectar su PMS de pruebas."
+      : !property.modules.includes("lodging")
+        ? "Habilitá el módulo Alojamiento para conectar su PMS de pruebas."
+        : "";
+  $("#pms-form").hidden = !property || !!pmsUnavailable;
+  $("#pms-unavailable").hidden = !pmsUnavailable;
+  $("#pms-unavailable").textContent = pmsUnavailable;
+  const template =
+    pms?.origin?.match(/^https:\/\/(aurora|brisa)\.qa\.xeniapms\.com$/)?.[1] ||
+    (property?.name.toLowerCase().includes("brisa")
+      ? "brisa"
+      : property?.name.toLowerCase().includes("aurora")
+        ? "aurora"
+        : "");
+  $("#pms-template").value = template;
+  $("#pms-origin").placeholder = template
+    ? `https://${template}.qa.xeniapms.com`
+    : "https://brisa.qa.xeniapms.com";
   dirty = false;
   $("#reservation-form").reset();
   $("#reservation-list").replaceChildren();
@@ -675,6 +691,12 @@ function clearPmsCredentials() {
   $("#pms-credentials").hidden = true;
 }
 $("#pms-hide-credentials").addEventListener("click", clearPmsCredentials);
+$("#pms-template").addEventListener("change", (event) => {
+  const template = event.currentTarget.value;
+  $("#pms-origin").placeholder = template
+    ? `https://${template}.qa.xeniapms.com`
+    : "https://brisa.qa.xeniapms.com";
+});
 $("#pms-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const property = state.selected;
@@ -694,7 +716,7 @@ $("#pms-form").addEventListener("submit", (event) => {
   void submit(event.currentTarget, async (data) => {
     const result = await api(`/admin/properties/${property.id}/pms`, {
       method: "POST",
-      body: { origin: data.get("origin") },
+      body: { origin: data.get("origin"), template: data.get("template") },
     });
     await refreshProperties(property.id);
     if (state.selected?.id !== property.id || !state.user?.platformAdmin)
@@ -708,8 +730,7 @@ $("#pms-form").addEventListener("submit", (event) => {
         Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
           byte.toString(16).padStart(2, "0"),
         ).join(""),
-      "XENIA_PMS_TEMPLATE=" +
-        (property.slug === "aurora-demo" ? "aurora" : "brisa"),
+      "XENIA_PMS_TEMPLATE=" + result.template,
       "XENIA_CONTROL_ORIGIN=" + window.location.origin,
       "XENIA_PMS_ORIGIN=" + result.origin,
       "XENIA_PMS_PROPERTY_ID=" + result.propertyId,

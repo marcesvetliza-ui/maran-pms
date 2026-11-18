@@ -377,6 +377,111 @@ test("another hotel's viewer and another installation cannot exchange or inspect
   );
 });
 
+test("an existing Hotel brisa connects by explicit template and preserves Aurora access and both properties", async () => {
+  const original = await store.authorize(owner, brisa);
+  const memberships = (
+    await store.central.query(
+      "SELECT * FROM xenia_control.memberships ORDER BY principal_id,property_id",
+    )
+  ).rows;
+  const reservations = await store.reservations(owner, brisa);
+  const verifier = randomBytes(32).toString("base64url");
+  const grant = await broker.grant(
+    owner,
+    installation.clientId,
+    pkceChallenge(verifier),
+  );
+  const access = await broker.exchange(
+    installation.clientId,
+    grant.code,
+    verifier,
+  );
+  const auroraBefore = (
+    await store.central.query(
+      "SELECT * FROM xenia_control.pms_installations WHERE property_id=$1",
+      [aurora],
+    )
+  ).rows;
+  try {
+    await store.central.query(
+      "UPDATE xenia_control.properties SET name='Hotel brisa',slug='hotel-brisa' WHERE id=$1",
+      [brisa],
+    );
+    await assert.rejects(
+      () => broker.configure(owner, brisa, "https://brisa.qa.xeniapms.com"),
+      /Elegí la plantilla/,
+    );
+    const result = await broker.configure(
+      owner,
+      brisa,
+      "https://brisa.qa.xeniapms.com",
+      "brisa",
+    );
+    assert.equal(result.template, "brisa");
+    assert.equal(result.propertyId, brisa);
+    assert.equal(result.propertyName, "Hotel brisa");
+    assert.equal(
+      (await broker.introspect(installation.clientId, access.leaseToken))
+        .identity.propertyId,
+      aurora,
+    );
+    assert.deepEqual(
+      (
+        await store.central.query(
+          "SELECT * FROM xenia_control.pms_installations WHERE property_id=$1",
+          [aurora],
+        )
+      ).rows,
+      auroraBefore,
+    );
+    assert.deepEqual(
+      (
+        await store.central.query(
+          "SELECT * FROM xenia_control.memberships ORDER BY principal_id,property_id",
+        )
+      ).rows,
+      memberships,
+    );
+    assert.deepEqual(await store.reservations(owner, brisa), reservations);
+    const property = await store.authorize(owner, brisa);
+    assert.equal(property.slug, "hotel-brisa");
+    assert.equal(property.databaseKey, original.databaseKey);
+  } finally {
+    await store.central.query(
+      "UPDATE xenia_control.properties SET name=$2,slug=$3 WHERE id=$1",
+      [brisa, original.name, original.slug],
+    );
+  }
+});
+
+test("production test templates require their reserved QA origin before changing an installation", async () => {
+  const production = store.config.production;
+  store.config.production = true;
+  try {
+    for (const origin of [
+      "https://aurora.qa.xeniapms.com",
+      "https://hotel.example.com",
+    ])
+      await assert.rejects(
+        () => broker.configure(owner, brisa, origin, "brisa"),
+        /https:\/\/brisa\.qa\.xeniapms\.com/,
+      );
+    assert.equal(
+      (
+        await broker.configure(
+          owner,
+          brisa,
+          "https://brisa.qa.xeniapms.com",
+          "brisa",
+        )
+      ).template,
+      "brisa",
+    );
+  } finally {
+    store.config.production = production;
+  }
+});
+
 test("expired codes are refused and rotating an installation secret revokes old leases", async () => {
   const verifier = randomBytes(32).toString("base64url");
   const grant = await broker.grant(

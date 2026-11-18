@@ -456,7 +456,10 @@ export async function createControlApp(config: ControlConfig) {
     authorize,
     route(async (req, res) => {
       const input = z
-        .object({ origin: z.string().max(250) })
+        .object({
+          origin: z.string().max(250),
+          template: z.enum(["aurora", "brisa"]).optional(),
+        })
         .strict()
         .parse(req.body);
       res
@@ -466,6 +469,7 @@ export async function createControlApp(config: ControlConfig) {
             actor(res),
             uuid.parse(req.params.propertyId),
             input.origin,
+            input.template,
           ),
         );
     }),
