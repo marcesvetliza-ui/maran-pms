@@ -85,6 +85,48 @@ const configure = [...read, requirePermission("api:reviews:configure")];
 
 export function registerReviewRoutes(app: Express) {
   app.get(
+    "/api/reviews/schedule",
+    ...read,
+    wrap(async (_req, res) => {
+      const [config] = (
+        await db.execute(
+          sql`SELECT checkout_delay_days AS "checkoutDelayDays",checkout_send_time AS "checkoutSendTime",global_enabled AS "globalEnabled",checkout_enabled AS "checkoutEnabled" FROM email_config WHERE id=1`,
+        )
+      ).rows;
+      res.json(config || null);
+    }),
+  );
+  app.patch(
+    "/api/reviews/schedule",
+    ...configure,
+    wrap(async (req, res) => {
+      const schedule = z
+        .object({
+          checkoutDelayDays: z.number().int().min(0).max(2),
+          checkoutSendTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        })
+        .parse(req.body);
+      await withDatabaseTransaction(async () => {
+        const changed = (
+          await db.execute(
+            sql`UPDATE email_config SET checkout_delay_days=${schedule.checkoutDelayDays},checkout_send_time=${schedule.checkoutSendTime},updated_at=now() WHERE id=1 RETURNING id`,
+          )
+        ).rows;
+        if (!changed.length)
+          throw new ReviewError(
+            "Primero configurá el correo del hotel en Respuestas automáticas.",
+            409,
+          );
+        await db.execute(
+          sql`UPDATE survey_dispatches SET scheduled_for=survey_scheduled_time(checked_out_at),updated_at=now() WHERE status IN ('queued','no_email')`,
+        );
+        await db.execute(sql`INSERT INTO audit_logs(action,module,user_name,description,entity_type,entity_id,details,timestamp)
+        VALUES('update','reviews',${actor(req)},'Horario de encuestas actualizado','email_config','1',${JSON.stringify(schedule)},now())`);
+      });
+      res.json({ ok: true });
+    }),
+  );
+  app.get(
     "/api/survey/:token",
     wrap(async (req, res) => res.json(await publicSurvey(req.params.token))),
   );

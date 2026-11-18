@@ -686,6 +686,35 @@ suite(
       ).rows;
       expect(row.matches).toBe(true);
     });
+    it("configura el horario desde Reseñas sin exponer credenciales del correo", async () => {
+      const visible = await (
+        await api("/api/reviews/schedule", "GET", undefined, "reception")
+      ).json();
+      expect(visible).toMatchObject({
+        checkoutDelayDays: 1,
+        checkoutSendTime: "10:00",
+      });
+      expect(visible).not.toHaveProperty("apiKey");
+      expect(visible).not.toHaveProperty("smtpPass");
+      expect(
+        (
+          await api(
+            "/api/reviews/schedule",
+            "PATCH",
+            { checkoutDelayDays: 0, checkoutSendTime: "12:00" },
+            "reception",
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await api("/api/reviews/schedule", "PATCH", {
+            checkoutDelayDays: 0,
+            checkoutSendTime: "12:00",
+          })
+        ).status,
+      ).toBe(200);
+    });
     it("conserva el texto de las preguntas y pide actualizar si cambiaron con la encuesta abierta", async () => {
       const r = await stay();
       await due(r.id);

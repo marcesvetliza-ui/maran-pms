@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { SurveyScheduleSettings } from "./survey-schedule-settings";
 import { useSearch } from "wouter";
 import {
   Star,
@@ -150,6 +151,25 @@ export function ReviewsCenter() {
     queryKey: ["/api/reviews", "analytics", urlParams],
     queryFn: () => get("/api/reviews/analytics?" + urlParams),
     refetchInterval: 30_000,
+  });
+  const schedule = useQuery<any>({
+    queryKey: ["/api/reviews", "schedule"],
+    queryFn: () => get("/api/reviews/schedule"),
+    enabled: tab === "areas",
+  });
+  const saveSchedule = useMutation({
+    mutationFn: (data: any) =>
+      apiRequest("PATCH", "/api/reviews/schedule", data),
+    onSuccess: () => {
+      void invalidate();
+      toast({ title: "Horario de encuestas guardado" });
+    },
+    onError: (e: any) =>
+      toast({
+        title: "No se pudo guardar el horario",
+        description: e.message,
+        variant: "destructive",
+      }),
   });
   const invitations = useQuery<any[]>({
     queryKey: ["/api/reviews", "invitations"],
@@ -648,6 +668,10 @@ export function ReviewsCenter() {
           ))}
         </TabsContent>
         <TabsContent value="areas" className="space-y-3">
+          <SurveyScheduleSettings
+            cfg={schedule.data}
+            onSave={(data) => saveSchedule.mutate(data)}
+          />
           <p className="text-sm text-muted-foreground">
             Las áreas evaluadas y las que deben intervenir se eligen por
             separado. Desactivar una pregunta conserva sus respuestas
