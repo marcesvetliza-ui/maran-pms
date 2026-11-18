@@ -1,6 +1,7 @@
 import {HospitalitySpecialDates} from "@/components/hospitality-special-dates";
 import { formatDisplayDate } from "@shared/date-display";
-import { useState } from "react";
+import { useState,useEffect } from "react";
+import {useSearch} from "wouter";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -339,6 +340,8 @@ function DashboardTab() {
 
 // ========== ALERTS LIST COMPONENT ==========
 function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
+  const focusedId=new URLSearchParams(useSearch()).get('alertId');
+  useEffect(()=>{if(focusedId)document.getElementById('hospitality-alert-'+focusedId)?.scrollIntoView?.({block:'center'});},[focusedId,alerts]);
   const { toast } = useToast();
   const { user } = useAuth();
   const currentUsername = (user as any)?.username || (user as any)?.firstName || "Recepción";
@@ -350,6 +353,8 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/alerts"] });
+      queryClient.invalidateQueries({queryKey:["/api/notifications"]});
+      queryClient.invalidateQueries({queryKey:["/api/notifications/unread-count"]});
       toast({ title: "Alerta marcada en proceso" });
     },
   });
@@ -361,6 +366,8 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/alerts"] });
+      queryClient.invalidateQueries({queryKey:["/api/notifications"]});
+      queryClient.invalidateQueries({queryKey:["/api/notifications/unread-count"]});
       toast({ title: "Alerta completada" });
     },
   });
@@ -380,9 +387,10 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
         return (
         <div
           key={alert.id}
+          id={'hospitality-alert-'+alert.id}
           className={`flex items-start justify-between gap-3 p-3 border rounded-lg ${
             (alert as any).status === "completed" ? "opacity-60 bg-muted/30" : ""
-          } ${isAdvance ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10" : ""}`}
+          } ${alert.id===focusedId?"ring-2 ring-primary":""} ${isAdvance ? "border-amber-300 dark:border-amber-700 bg-amber-50/30 dark:bg-amber-900/10" : ""}`}
           data-testid={`alert-${alert.id}`}
         >
           <div className="flex items-start gap-2 flex-1 min-w-0">
@@ -397,7 +405,7 @@ function AlertsList({ alerts }: { alerts: HospitalityAlert[] }) {
                 {isAdvance && (
                   <Badge className="text-xs px-1.5 py-0 h-5 bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 border-0">
                     <CalendarClock className="h-3 w-3 mr-1" />
-                    Llegada mañana
+                    Ingreso {formatDisplayDate(enriched.checkInDate)}
                   </Badge>
                 )}
                 {guestName && (
@@ -818,6 +826,7 @@ function PreferencesTab() {
 
 // ========== STAY NOTES TAB ==========
 function StayNotesTab() {
+  const focusedId=new URLSearchParams(useSearch()).get('noteId');
   const { toast } = useToast();
   const [filterArea, setFilterArea] = useState("all");
   const [showResolved, setShowResolved] = useState(false);
@@ -849,6 +858,7 @@ function StayNotesTab() {
   const [noteDescription, setNoteDescription] = useState("");
   const [notePriority, setNotePriority] = useState("normal");
 
+  useEffect(()=>{if(focusedId)document.getElementById('hospitality-note-'+focusedId)?.scrollIntoView?.({block:'center'});},[focusedId,notes]);
   const checkedInReservations = allReservations.filter((r) => r.status === "checked_in");
 
   const resolveMutation = useMutation({
@@ -857,6 +867,8 @@ function StayNotesTab() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/hospitality/stay-notes/active"] });
+      queryClient.invalidateQueries({queryKey:["/api/notifications"]});
+      queryClient.invalidateQueries({queryKey:["/api/notifications/unread-count"]});
       toast({ title: "Nota resuelta" });
     },
   });
@@ -926,7 +938,7 @@ function StayNotesTab() {
       ) : (
         <div className="space-y-3">
           {filteredNotes.map((note) => (
-            <Card key={note.id} className={note.isResolved ? "opacity-60" : ""} data-testid={`note-${note.id}`}>
+            <Card key={note.id} id={'hospitality-note-'+note.id} className={`${note.isResolved ? "opacity-60" : ""} ${note.id===focusedId?"ring-2 ring-primary":""}`} data-testid={`note-${note.id}`}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-3">
@@ -1252,6 +1264,9 @@ function HistoryTab() {
 // ========== MAIN PAGE ==========
 export default function HospitalityPage() {
   const {hasPermission}=useAuth();
+  const search=useSearch();
+  const [tab,setTab]=useState(()=>new URLSearchParams(search).get('tab')==='stay-notes'?'stay-notes':'dashboard');
+  useEffect(()=>setTab(new URLSearchParams(search).get('tab')==='stay-notes'?'stay-notes':'dashboard'),[search]);
   const canCampaign=hasPermission("api:hospitality:campaigns");
   return (
     <div className="hospitality-page p-4 sm:p-6 space-y-6">
@@ -1263,7 +1278,7 @@ export default function HospitalityPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="dashboard">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex h-auto flex-wrap justify-start gap-1" data-testid="hospitality-tabs">
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="preferences" data-testid="tab-preferences">Preferencias</TabsTrigger>

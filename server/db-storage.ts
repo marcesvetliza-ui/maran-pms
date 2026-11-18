@@ -1,3 +1,4 @@
+import {hospitalityNotificationVisibility,applyHospitalityNotificationStatus,requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from './hospitalityNotifications';
 import { normalizeToSpanishPaymentMethod } from "./payment-method";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, parseGroupCreditAdvanceConfirmation, supportsGroupCreditAdvance, groupCreditAdvanceSummary } from "@shared/groupCreditAdvance";
 import {getGroupPaymentRequest} from './groupPaymentRequest';
@@ -7196,11 +7197,11 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
-  async getNotifications(area?: NotificationArea, limit?: number): Promise<SystemNotification[]> {
+  async getNotifications(area?: NotificationArea, limit?: number, hospitalityAreas:string[]|null=null): Promise<SystemNotification[]> {
     // Hide historical audit summaries before LIMIT so they cannot crowd out alerts.
     const visible = sql`NOT (${systemNotifications.type} = 'hospitality_alert' AND ${systemNotifications.title} LIKE 'Night Audit %')`;
     const query = db.select().from(systemNotifications).where(and(
-      visible,
+      visible,hospitalityNotificationVisibility(hospitalityAreas),
       area ? or(eq(systemNotifications.targetArea, area), eq(systemNotifications.targetArea, "all")) : undefined,
     )).orderBy(asc(systemNotifications.isRead), desc(systemNotifications.createdAt));
     return limit ? query.limit(limit) : query;
@@ -7211,13 +7212,19 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async markNotificationRead(id: string): Promise<SystemNotification | undefined> {
-    const [updated] = await db.update(systemNotifications).set({ isRead: true, readAt: new Date() }).where(eq(systemNotifications.id, id)).returning();
+  async markNotificationRead(id: string, hospitalityAreas:string[]|null=null): Promise<SystemNotification | undefined> {
+    const [updated] = await db.update(systemNotifications).set({ isRead: true, readAt: new Date() }).where(and(eq(systemNotifications.id, id),hospitalityNotificationVisibility(hospitalityAreas))).returning();
     return updated;
   }
 
-  async updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string): Promise<SystemNotification | undefined> {
+  async updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string, hospitalityAreas:string[]|null=null): Promise<SystemNotification | undefined> {
+    return withDatabaseTransaction(async()=>{
     const isResolved = status === "completado" || status === "rechazado";
+    if(id.startsWith('hosp-'))await lockHospitalityNotifications();
+    const [before]=await db.select().from(systemNotifications).where(and(eq(systemNotifications.id,id),hospitalityNotificationVisibility(hospitalityAreas))).for('update');
+    if(!before)return undefined;
+    if(!['pendiente','en_proceso','completado','rechazado'].includes(status))throw Error('Estado de notificación inválido');
+    await applyHospitalityNotificationStatus(before,status,resolvedBy||'Sistema');
     const [updated] = await db.update(systemNotifications).set({
       status: status as any,
       isRead: true,
@@ -7226,9 +7233,12 @@ export class DatabaseStorage implements IStorage {
       ...(isResolved ? { resolvedAt: new Date(), resolvedBy: resolvedBy ?? null } : {}),
     }).where(eq(systemNotifications.id, id)).returning();
     return updated;
+    });
   }
 
-  async markAllNotificationsRead(area?: NotificationArea): Promise<number> {
+  async markAllNotificationsRead(area?: NotificationArea, hospitalityAreas:string[]|null=null): Promise<number> {
+    return withDatabaseTransaction(async()=>{
+    await lockHospitalityNotifications();
     let condition;
     if (area) {
       condition = and(
@@ -7238,11 +7248,12 @@ export class DatabaseStorage implements IStorage {
     } else {
       condition = eq(systemNotifications.isRead, false);
     }
-    const result = await db.update(systemNotifications).set({ isRead: true, readAt: new Date() }).where(condition!);
+    const result = await db.update(systemNotifications).set({ isRead: true, readAt: new Date() }).where(and(condition!,hospitalityNotificationVisibility(hospitalityAreas)));
     return result.rowCount ?? 0;
+    });
   }
 
-  async getUnreadNotificationCount(area?: NotificationArea): Promise<number> {
+  async getUnreadNotificationCount(area?: NotificationArea, hospitalityAreas:string[]|null=null): Promise<number> {
     let condition;
     if (area) {
       condition = and(
@@ -7252,7 +7263,7 @@ export class DatabaseStorage implements IStorage {
     } else {
       condition = eq(systemNotifications.isRead, false);
     }
-    const result = await db.select({ cnt: count() }).from(systemNotifications).where(and(condition, sql`NOT (${systemNotifications.type} = 'hospitality_alert' AND ${systemNotifications.title} LIKE 'Night Audit %')`));
+    const result = await db.select({ cnt: count() }).from(systemNotifications).where(and(condition,hospitalityNotificationVisibility(hospitalityAreas), sql`NOT (${systemNotifications.type} = 'hospitality_alert' AND ${systemNotifications.title} LIKE 'Night Audit %')`));
     return Number(result[0]?.cnt ?? 0);
   }
 
@@ -7298,11 +7309,13 @@ export class DatabaseStorage implements IStorage {
 
   async createGuestPreference(pref: InsertGuestPreference): Promise<GuestPreference> {
     const [created] = await db.insert(guestPreferences).values(pref as any).returning();
+    requestHospitalityNotificationRefresh();
     return created;
   }
 
   async updateGuestPreference(id: string, pref: Partial<InsertGuestPreference>): Promise<GuestPreference | undefined> {
     const [updated] = await db.update(guestPreferences).set({ ...pref as any, updatedAt: new Date() }).where(eq(guestPreferences.id, id)).returning();
+    requestHospitalityNotificationRefresh();
     return updated;
   }
 
@@ -7310,11 +7323,13 @@ export class DatabaseStorage implements IStorage {
     const [existing] = await db.select().from(guestPreferences).where(eq(guestPreferences.id, id));
     if (!existing) return undefined;
     const [updated] = await db.update(guestPreferences).set({ isActive: !existing.isActive, updatedAt: new Date() }).where(eq(guestPreferences.id, id)).returning();
+    requestHospitalityNotificationRefresh();
     return updated;
   }
 
   async deleteGuestPreference(id: string): Promise<boolean> {
     const result = await db.delete(guestPreferences).where(eq(guestPreferences.id, id));
+    requestHospitalityNotificationRefresh();
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -7328,21 +7343,29 @@ export class DatabaseStorage implements IStorage {
 
   async createStayNote(note: InsertStayNote): Promise<StayNote> {
     const [created] = await db.insert(stayNotes).values(note as any).returning();
+    requestHospitalityNotificationRefresh();
     return created;
   }
 
   async updateStayNote(id: string, note: Partial<InsertStayNote>): Promise<StayNote | undefined> {
     const [updated] = await db.update(stayNotes).set(note as any).where(eq(stayNotes.id, id)).returning();
+    requestHospitalityNotificationRefresh();
     return updated;
   }
 
   async resolveStayNote(id: string, resolvedBy: string): Promise<StayNote | undefined> {
+    return withDatabaseTransaction(async()=>{
+    await lockHospitalityNotifications();
     const [updated] = await db.update(stayNotes).set({ isResolved: true, resolvedAt: new Date(), resolvedBy }).where(eq(stayNotes.id, id)).returning();
+    if(updated)await closeHospitalityBellItem('hospitality_stay_note',id,resolvedBy);
+    requestHospitalityNotificationRefresh();
     return updated;
+    });
   }
 
   async deleteStayNote(id: string): Promise<boolean> {
     const result = await db.delete(stayNotes).where(eq(stayNotes.id, id));
+    requestHospitalityNotificationRefresh();
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -7361,6 +7384,7 @@ export class DatabaseStorage implements IStorage {
 
   async createHospitalityAlert(alert: InsertHospitalityAlert): Promise<HospitalityAlert> {
     const [created] = await db.insert(hospitalityAlerts).values(alert as any).returning();
+    requestHospitalityNotificationRefresh();
     return created;
   }
 
@@ -7371,6 +7395,7 @@ export class DatabaseStorage implements IStorage {
       acknowledgedBy,
       status: "in_progress",
     }).where(eq(hospitalityAlerts.id, id)).returning();
+    requestHospitalityNotificationRefresh();
     return updated;
   }
 
