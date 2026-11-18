@@ -9,6 +9,12 @@ if (!process.argv.includes("--schema-only")) {
     env: { ...process.env, VITE_XENIA_PMS_QA: "true", VITE_SENTRY_DSN: "" },
   });
   await rm("dist/public/maran-suite-system.zip", { force: true });
+  await rm("dist/server/assets", { recursive: true, force: true });
+  await mkdir("dist/server/assets", { recursive: true });
+  await copyFile(
+    "server/xenia-control/public/branding/xenia-horizontal.png",
+    "dist/server/assets/hotel-logo.png",
+  );
   await copyFile(
     "server/xenia-control/public/branding/xenia-icon.png",
     "dist/public/favicon.png",

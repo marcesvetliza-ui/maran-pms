@@ -2,7 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  existsSync,
+} from "node:fs";
 import {
   createServer as httpServer,
   request as httpRequest,
@@ -51,6 +57,8 @@ test(
       children: ChildProcess[] = [];
     const diagnostics: string[] = [];
     try {
+      assert.deepEqual(readdirSync("dist/server/assets"), ["hotel-logo.png"]);
+      assert.equal(existsSync("dist/public/maran-suite-system.zip"), false);
       const key = fixture.base + "/qa-key.pem",
         cert = fixture.base + "/qa-cert.pem";
       execFileSync(
@@ -224,6 +232,12 @@ test(
         });
       }
       const request = context.request;
+      assert.equal(
+        (
+          await request.get(installations[0].origin + "/descargar-colobig-pdf")
+        ).status(),
+        404,
+      );
       assert.equal(
         (
           await request.get(

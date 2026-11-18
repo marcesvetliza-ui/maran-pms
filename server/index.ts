@@ -131,7 +131,7 @@ app.use("/api", createApiLimiter());
 
 // Diagnóstico temporal de assets — requiere sesión autenticada (antes eran
 // públicas, ver server/debug-assets-routes.ts).
-registerDebugAssetRoutes(app);
+if (!xeniaPms) registerDebugAssetRoutes(app);
 
 app.use((req, res, next) => {
   const start = Date.now();

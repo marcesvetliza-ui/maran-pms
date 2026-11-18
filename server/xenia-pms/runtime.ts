@@ -246,6 +246,11 @@ export function registerXeniaPmsRuntime(
       startPath: "/xenia/start",
     }),
   );
+  app.get("/descargar-colobig-pdf", (_req, res) =>
+    res
+      .status(404)
+      .json({ message: "Recurso no disponible en esta instalación." }),
+  );
   app.get("/xenia/start", (req, res) => {
     void (async () => {
       const previous = readFlow(req, flowCookie);
