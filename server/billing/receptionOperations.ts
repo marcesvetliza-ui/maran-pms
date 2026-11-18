@@ -1,5 +1,6 @@
 import { canCloseCancelledReceptionOperation } from "./cancelledReceptionOperation";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
+import { prepareExcessReservationCollection } from "./excessReservationCollection";
 import type { Express } from "express";
 import { sql } from "drizzle-orm";
 import { db, pool } from "../db";
@@ -29,7 +30,9 @@ export function acknowledgedPayments(expected: any[], rows: any[], reservationId
     Number.isFinite(Number(payment.amount)) && Math.round(Number(row.amount) * 100) === Math.round(Number(payment.amount) * 100) &&
     row.method === payment.method && String(row.date) === payment.date &&
     String(row.reference ?? "") === String(payment.reference ?? "") && String(row.notes ?? "") === String(payment.notes ?? "") &&
-    Number(invoiceReference(row.invoice_ref)?.id) === invoiceId)).map(payment => payment.paymentRequestId);
+    // An advance may have subsequently been applied to another document.
+    // Its original payment key and immutable monetary fields still prove receipt.
+    (payment.unlinkedAdvance === true || Number(invoiceReference(row.invoice_ref)?.id) === invoiceId))).map(payment => payment.paymentRequestId);
 }
 export async function receptionOperationStatus(operation: BillingOperation) {
   const invoice = (await db.execute(operation.invoice_id
@@ -53,7 +56,9 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const creditsDone = !(operation.request_snapshot?.creditReapplications?.length || operation.request_snapshot?.ordinaryAdvanceApplications?.length) || intent?.status === "completed";
   const issued = ["emitida", "parcial"].includes(String(invoice?.estado));
   const canCloseCancelled = await canCloseCancelledReceptionOperation(db, operation, invoice);
-  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone;
+  const departure = recovery?.checkoutDebtAccount && recovery.checkoutRequested
+    ? (await db.execute(sql`SELECT status FROM reservations WHERE id=${operation.owner_id}`)).rows[0] as any : null;
+  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone && (!departure || departure.status === 'checked_out');
   return {
     operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled, canRetryNumberConflict,
     acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, code: operation.error_code,
@@ -62,11 +67,16 @@ export async function receptionOperationStatus(operation: BillingOperation) {
     invoice: issued ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
     attempt: recovery?.version === 2 ? { invoiceRequest: operation.request_snapshot,
       invoice: issued && ccDone && creditsDone ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
-      payments: expected, checkoutRequested: recovery.checkoutRequested === true, acknowledgedPaymentIds: acknowledged } : null,
+      payments: expected, checkoutRequested: recovery.checkoutRequested === true, checkoutDebtAccount: recovery.checkoutDebtAccount, acknowledgedPaymentIds: acknowledged } : null,
   };
 }
 
 export function registerReceptionOperationRoutes(app: Express) {
+  app.post('/api/billing/reservations/:reservationId/prepare-excess-collection', requireAuth, requirePermission('sidebar:/reservations'), async (req,res) => {
+    if (req.body?.acknowledge !== true) return res.status(400).json({error:'Confirmá el aviso del cobro excedente.'});
+    try { return res.json(await prepareExcessReservationCollection(req.params.reservationId, req.body.attempt, req.user?.id)); }
+    catch (error:any) { return res.status(error.statusCode || 500).json({error:error.message || 'No se pudo preparar el cobro. Conservamos el intento.'}); }
+  });
   app.get("/api/billing/reservations/:reservationId/pending-operation", requireAuth, requirePermission("sidebar:/reservations"), async (req, res) => {
     try {
       // Read-only discovery never queues on a financial lock or holds a pool

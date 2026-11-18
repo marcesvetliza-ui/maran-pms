@@ -262,6 +262,8 @@ describe("PrefacturaDialog — Punto de venta en homologación", () => {
     const status = { operationId: operation, stage: "authorized", safeToCorrect: false, invoice, acknowledgedPaymentIds: [first], attempt: { invoiceRequest: original, invoice, payments, checkoutRequested: true, acknowledgedPaymentIds: [first] } };
     const base = buildFetchMock();
     fetchMock = vi.fn(async (url, options) => {
+      // The first acknowledged payment has already reduced the live balance.
+      if (String(url).endsWith("/folio")) return Response.json({...FOLIO,balance:35000,totalPayments:35000,payments:[{...payments[0],id:"already-paid",invoiceRef:JSON.stringify({id:701})}]});
       if (String(url).endsWith("/pending-operation")) return Response.json({ pending: status });
       if (String(url).endsWith("/reception-status")) return Response.json(status);
       return base(url, options);
