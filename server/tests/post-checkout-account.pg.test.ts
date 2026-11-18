@@ -24,11 +24,11 @@ async function fixture() {
   await pool.query("INSERT INTO rooms(id,room_number,room_type_id,status) VALUES($1::text,$1::text,$2,'occupied')", [f.room, f.type]);
   await pool.query("INSERT INTO guests(id,first_name,last_name,document_number) VALUES($1,'Anterior','Huésped','12345678'),($2,'Actual','Otro huésped','87654321')", [f.guest, f.otherGuest]);
   await pool.query(`INSERT INTO reservations(id,reservation_code,guest_id,room_id,room_type_id,check_in_date,check_out_date,nights,total_room_amount,status,checked_out_at,created_at)
-    VALUES($1::text,$1::text,$3,$4,$5,CURRENT_DATE-2,CURRENT_DATE-1,1,100,'checked_out',NOW(),NOW()),
-      ($2::text,$2::text,$6,$4,$5,CURRENT_DATE,CURRENT_DATE+1,1,100,'checked_in',NULL,NOW())`, [f.id, f.other, f.guest, f.room, f.type, f.otherGuest]);
+    VALUES($1::text,$1::text,$3,$4,$5,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-2,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-1,1,100,'checked_out',NOW(),NOW()),
+      ($2::text,$2::text,$6,$4,$5,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date+1,1,100,'checked_in',NULL,NOW())`, [f.id, f.other, f.guest, f.room, f.type, f.otherGuest]);
   const old = (await pool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,source_charge_ids,source_charge_amounts,items)
-    VALUES('FB',998,floor(random()*100000000)::int,CURRENT_DATE,'Historical guest','Consumidor Final',100,100,'emitida',$1,'["accommodation"]','{"accommodation":100}','[]') RETURNING id`, [f.id])).rows[0];
-  await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date,status,invoice_ref) VALUES($1,$2,100,'efectivo',CURRENT_DATE-1,'active',$3)", [`${id}-paid`, f.id, JSON.stringify({ id: old.id })]);
+    VALUES('FB',998,floor(random()*100000000)::int,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,'Historical guest','Consumidor Final',100,100,'emitida',$1,'["accommodation"]','{"accommodation":100}','[]') RETURNING id`, [f.id])).rows[0];
+  await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date,status,invoice_ref) VALUES($1,$2,100,'efectivo',(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-1,'active',$3)", [`${id}-paid`, f.id, JSON.stringify({ id: old.id })]);
   await pool.query("INSERT INTO cash_shifts(id,area,shift_number,opened_at,status) VALUES($1,'reception',floor(random()*1000000)::int,NOW(),'open')", [f.shift]);
   return { ...f, oldInvoice: old.id };
 }
