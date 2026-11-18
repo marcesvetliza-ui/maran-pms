@@ -7220,7 +7220,7 @@ export class DatabaseStorage implements IStorage {
   async updateNotificationStatus(id: string, status: string, staffNote?: string, resolvedBy?: string, hospitalityAreas:string[]|null=null): Promise<SystemNotification | undefined> {
     return withDatabaseTransaction(async()=>{
     const isResolved = status === "completado" || status === "rechazado";
-    await lockHospitalityNotifications();
+    if(id.startsWith('hosp-'))await lockHospitalityNotifications();
     const [before]=await db.select().from(systemNotifications).where(and(eq(systemNotifications.id,id),hospitalityNotificationVisibility(hospitalityAreas))).for('update');
     if(!before)return undefined;
     if(!['pendiente','en_proceso','completado','rechazado'].includes(status))throw Error('Estado de notificación inválido');
@@ -7237,6 +7237,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async markAllNotificationsRead(area?: NotificationArea, hospitalityAreas:string[]|null=null): Promise<number> {
+    return withDatabaseTransaction(async()=>{
+    await lockHospitalityNotifications();
     let condition;
     if (area) {
       condition = and(
@@ -7248,6 +7250,7 @@ export class DatabaseStorage implements IStorage {
     }
     const result = await db.update(systemNotifications).set({ isRead: true, readAt: new Date() }).where(and(condition!,hospitalityNotificationVisibility(hospitalityAreas)));
     return result.rowCount ?? 0;
+    });
   }
 
   async getUnreadNotificationCount(area?: NotificationArea, hospitalityAreas:string[]|null=null): Promise<number> {

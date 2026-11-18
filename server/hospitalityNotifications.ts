@@ -78,13 +78,24 @@ export async function syncHospitalityNotifications(now=new Date()) {
   return {activeNotifications:activeIds.length,createdAlerts};
  });
 }
-let schedulerActive=false;
+let schedulerActive=false,deliveryRunning=false,deliveryRequested=false;
 let refreshTimer:ReturnType<typeof setTimeout>|undefined;
+async function deliverHospitalityNotifications(){
+ if(!schedulerActive)return;
+ if(deliveryRunning){deliveryRequested=true;return;}
+ deliveryRunning=true;
+ try{do{deliveryRequested=false;await syncHospitalityNotifications();}while(schedulerActive&&deliveryRequested);}
+ catch{console.error('[hospitality] No se pudieron actualizar los avisos; se reintentará.');}
+ finally{deliveryRunning=false;}
+}
 export function requestHospitalityNotificationRefresh(){
- if(!schedulerActive||refreshTimer)return;refreshTimer=setTimeout(()=>{refreshTimer=undefined;void syncHospitalityNotifications().catch(()=>console.error('[hospitality] No se pudieron actualizar los avisos; se reintentará.'));},250);refreshTimer.unref();
+ if(!schedulerActive)return;
+ if(deliveryRunning){deliveryRequested=true;return;}
+ if(refreshTimer)return;
+ refreshTimer=setTimeout(()=>{refreshTimer=undefined;void deliverHospitalityNotifications();},250);refreshTimer.unref();
 }
 export function setupHospitalityNotificationScheduler(){
- schedulerActive=true;
- let running=false;const tick=async()=>{if(running)return;running=true;try{await syncHospitalityNotifications();}catch{console.error('[hospitality] No se pudieron actualizar los avisos; se reintentará.');}finally{running=false;}};
- void tick();const timer=setInterval(()=>void tick(),60_000);timer.unref();return()=>{schedulerActive=false;clearInterval(timer);if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=undefined;};
+ schedulerActive=true;void deliverHospitalityNotifications();
+ const timer=setInterval(()=>void deliverHospitalityNotifications(),60_000);timer.unref();
+ return()=>{schedulerActive=false;deliveryRequested=false;clearInterval(timer);if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=undefined;};
 }
