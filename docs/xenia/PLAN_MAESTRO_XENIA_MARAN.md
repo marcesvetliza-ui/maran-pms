@@ -542,11 +542,11 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | ID | Tarea y evidencia de cierre | Responsable propuesto | Estado / dependencia |
 |---|---|---|---|
 | H01 · P1 | Diseñar cliente, hotel, entidad fiscal y membresías. | Técnico y Administración | En curso; cliente, establecimientos y membresías probados en el panel; entidad fiscal pendiente. |
-| H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | En curso; identidad del panel verificada; enlace con el PMS y continuidad pendientes. |
-| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; altas del panel verificadas en Aurora y Brisa; instalación completa del PMS pendiente. |
+| H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | En curso; identidad central-PMS y revocación probadas en QA; continuidad ante caída central pendiente. |
+| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; alta limpia del PMS probada en QA local para Aurora y Brisa; publicación y aceptación pendientes. |
 | H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; verificados en panel y PMS de QA local; aceptación remota pendiente. |
 | H05 · P1 | Separar archivos, colas, cachés, tareas e integraciones. | Técnico | Pendiente; H03. |
-| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; panel con pruebas automatizadas y manuales aprobadas; repetir con PMS, archivos y trabajos. |
+| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; panel y dos PMS probados localmente; aceptación remota y otros circuitos pendientes. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
 | I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar después del enlace de identidad multihotel. |

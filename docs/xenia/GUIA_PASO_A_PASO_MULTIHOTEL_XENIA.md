@@ -1,6 +1,6 @@
 # Guía paso a paso del multihotel de Xenia
 
-Actualización: 17 de noviembre de 2026. Preparada para Marcelo. Versión 1.0.
+Actualización: 18 de noviembre de 2026. Preparada para Marcelo. Versión 1.0.
 
 Esta guía explica quién hace cada tarea, dónde se hace y cómo comprobar el resultado. La web comercial y el panel central ya funcionan. El siguiente trabajo es desarrollar y probar el enlace con una instalación completa del PMS para Aurora; después se repite con Brisa. Maran mantiene su instalación operativa durante este recorrido.
 
