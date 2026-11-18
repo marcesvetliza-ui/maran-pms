@@ -1,6 +1,6 @@
 # Paso 2: abrir el PMS de Aurora desde Xenia
 
-Fecha: 18 de noviembre de 2026. Responsable: Marcelo. Alcance: instalaciones ficticias de Alojamiento. Esta guía corresponde al paquete `feat/xenia-pms-integration-20261118`; su publicación en Railway todavía debe realizarse.
+Fecha: 18 de noviembre de 2026. Versión 2: configuración manual de Railway. Responsable: Marcelo. Alcance: instalaciones ficticias de Alojamiento. Esta guía corresponde al paquete `feat/xenia-pms-integration-20261118`; su publicación en Railway todavía debe realizarse.
 
 El resultado será: **panel Xenia → Hotel Aurora → Abrir PMS → planning**, con la cuenta y los permisos que ya tenés. Maran mantiene su servicio, dominio, configuración y base actuales.
 
@@ -23,14 +23,16 @@ La instalación limpia crea tres habitaciones —101, 102 y 103—, una categor�
 2. Entrá en la tarjeta **Xenia-Control**. Las siguientes instrucciones son de esa tarjeta.
 3. Guardá la referencia del último despliegue que funciona. En `xenia-control-db → Backups`, generá una copia si está disponible en tu plan. Conservá el servicio y su volumen.
 4. En **Settings → Source**, mantené el repositorio `marcesvetliza-ui/maran-pms`, directorio raíz `/`, y elegí la rama `feat/xenia-pms-integration-20261118`.
-5. En **Config-as-code / Railway Config File**, indicá `/railway.xenia-control.json`. Si Railway conserva ajustes manuales, comprobá estos valores:
+5. Usá los ajustes manuales. La interfaz de Railway informa que **Config as Code** está obsoleto, que sus archivos existentes funcionan hasta el **1 de diciembre de 2026** y que los servicios que nunca lo usaron no pueden activarlo. Quitá `/railway.xenia-control.json` de **Settings → Config-as-code → Railway Config File**, dejá ese campo sin una ruta personalizada y completá los campos siguientes antes de aplicar el despliegue:
 
-   | Ajuste | Valor |
+   | Dónde se carga | Valor |
    | --- | --- |
-   | Dockerfile | `Dockerfile.xenia-control` |
-   | Pre-deploy command | `npm run xenia:setup:production` |
-   | Start command | `node dist/xenia-control/index.js` |
-   | Healthcheck path | `/healthz` |
+   | Variables → `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.xenia-control` |
+   | Settings → Deploy → Pre-deploy Command | `npm run xenia:setup:production` |
+   | Settings → Deploy → Custom Start Command | `node dist/xenia-control/index.js` |
+   | Settings → Deploy → Healthcheck Path | `/healthz` |
+
+   La variable del Dockerfile ya puede existir: si tiene ese valor, conservala. Los otros tres valores van en campos separados de **Deploy**, disponible en el menú derecho de Settings. Conservá el dominio y puerto actuales de Xenia-Control, `app.xeniapms.com` y `4186`. No es necesario activar Infrastructure as Code para esta publicación manual.
 
 6. Conservá las variables actuales de Xenia-Control, sus tres conexiones y las credenciales del administrador. No copies las variables del futuro PMS en esta tarjeta. La preparación agrega las tablas necesarias sin restablecer tu contraseña ni reemplazar las cuentas.
 7. Revisá **Details** de los cambios pendientes. Aplicá los de **Xenia-Control**. Si hay cambios de otros servicios, separalos antes de usar el botón general.
@@ -88,18 +90,18 @@ No hace falta copiar una URL con contraseña a mano. Tampoco habilitar una conex
    - La referencia esperada es `${{xenia-aurora-pms-db.DATABASE_URL}}`.
 
 4. En **Settings → Source → Connect Repo**, elegí `marcesvetliza-ui/maran-pms`, rama `feat/xenia-pms-integration-20261118` y directorio raíz `/`. Completá la configuración antes de aplicar el despliegue.
-5. En **Config-as-code / Railway Config File**, indicá `/railway.xenia-pms.json`.
+5. Usá la configuración manual de **Settings → Deploy** indicada en la tabla del punto 8. Dejá **Railway Config File** sin una ruta personalizada; no cargues `/railway.xenia-pms.json`. El aviso de Railway impide activar Config as Code en servicios que no lo usaban.
 6. Revisá que la tarjeta tenga la ficha de Aurora y la referencia de su base nueva. No importes variables compartidas del PMS existente.
 7. No agregues claves ARCA/AFIP, Channex, correo, IA ni otros servicios reales a esta tarjeta.
 8. Antes de publicar, comprobá que los ajustes efectivos sean:
 
-   | Ajuste | Valor |
+   | Dónde se carga | Valor |
    | --- | --- |
-   | Dockerfile | `Dockerfile.xenia-pms` |
-   | Pre-deploy command | `npm run xenia:pms:setup:production` |
-   | Start command | `node dist/index.cjs` |
-   | Healthcheck path | `/healthz` |
-   | Puerto | `5000`, igual que `PORT` en la ficha |
+   | Variables → `RAILWAY_DOCKERFILE_PATH` | `Dockerfile.xenia-pms` |
+   | Settings → Deploy → Pre-deploy Command | `npm run xenia:pms:setup:production` |
+   | Settings → Deploy → Custom Start Command | `node dist/index.cjs` |
+   | Settings → Deploy → Healthcheck Path | `/healthz` |
+   | Networking → puerto del dominio | `5000`, igual que `PORT` en la ficha |
 
 9. Revisá los cambios pendientes de esa tarjeta y publicá el **nuevo PMS de Aurora**.
 10. En los registros, la preparación debe indicar que se creó el PMS con datos ficticios o que ya estaba preparado y se conservaron sus datos. Después debe aparecer `Online`.
