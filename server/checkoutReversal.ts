@@ -1,5 +1,5 @@
-import { eq, sql } from "drizzle-orm";
-import { rooms, reservationChangelog } from "@shared/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { auditLogs, rooms, reservationChangelog } from "@shared/schema";
 import { isOperationalInventoryRoom } from "@shared/room-availability";
 import { db, withDatabaseTransaction } from "./db";
 import { storage, getArgentinaToday } from "./db-storage";
@@ -17,9 +17,12 @@ export async function checkoutReversalEligibility(id: string) {
   // Some legacy/group departure paths did not stamp checked_out_at. Only a
   // recorded status transition proves when they departed; scheduled dates do not.
   if (!checkedOutAt) {
-    const logs = (await db.execute(sql`SELECT timestamp, details FROM audit_logs
-      WHERE entity_type='reservation' AND entity_id=${id} AND module='reservations' AND action='update'
-      ORDER BY timestamp DESC LIMIT 100`)).rows as any[];
+    // Typed timestamp decoding follows the UTC convention used by the audit
+    // writer, independently of PostgreSQL's and Node's local time zones.
+    const logs = await db.select({ timestamp: auditLogs.timestamp, details: auditLogs.details }).from(auditLogs)
+      .where(and(eq(auditLogs.entityType, "reservation"), eq(auditLogs.entityId, id),
+        eq(auditLogs.module, "reservations"), eq(auditLogs.action, "update")))
+      .orderBy(desc(auditLogs.timestamp)).limit(100);
     const transition = logs.find(log => {
       try { const value = JSON.parse(log.details || "null"); return value?.before?.status !== "checked_out" && value?.before?.status && value?.after?.status === "checked_out"; }
       catch { return false; }

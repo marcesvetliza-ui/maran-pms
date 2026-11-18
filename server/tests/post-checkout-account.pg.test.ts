@@ -24,7 +24,7 @@ async function fixture() {
   await pool.query("INSERT INTO rooms(id,room_number,room_type_id,status) VALUES($1::text,$1::text,$2,'occupied')", [f.room, f.type]);
   await pool.query("INSERT INTO guests(id,first_name,last_name,document_number) VALUES($1,'Anterior','Huésped','12345678'),($2,'Actual','Otro huésped','87654321')", [f.guest, f.otherGuest]);
   await pool.query(`INSERT INTO reservations(id,reservation_code,guest_id,room_id,room_type_id,check_in_date,check_out_date,nights,total_room_amount,status,checked_out_at,created_at)
-    VALUES($1::text,$1::text,$3,$4,$5,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-2,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-1,1,100,'checked_out',NOW(),NOW()),
+    VALUES($1::text,$1::text,$3,$4,$5,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-2,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date-1,1,100,'checked_out',(NOW() AT TIME ZONE 'UTC'),NOW()),
       ($2::text,$2::text,$6,$4,$5,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date+1,1,100,'checked_in',NULL,NOW())`, [f.id, f.other, f.guest, f.room, f.type, f.otherGuest]);
   const old = (await pool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,source_charge_ids,source_charge_amounts,items)
     VALUES('FB',998,floor(random()*100000000)::int,(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,'Historical guest','Consumidor Final',100,100,'emitida',$1,'["accommodation"]','{"accommodation":100}','[]') RETURNING id`, [f.id])).rows[0];
@@ -125,7 +125,7 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
     expect((await request(`/api/reservations/${f.id}/undo-checkout`, {})).status).toBe(200);
     expect((await pool.query("SELECT status,checked_out_at FROM reservations WHERE id=$1", [f.id])).rows).toEqual([{ status: "checked_in", checked_out_at: null }]);
     expect((await pool.query("SELECT status FROM rooms WHERE id=$1", [f.room])).rows[0].status).toBe("occupied");
-    await pool.query("UPDATE reservations SET status='checked_out',checked_out_at=NOW()-INTERVAL '2 days' WHERE id=$1", [f.id]);
+    await pool.query("UPDATE reservations SET status='checked_out',checked_out_at=(NOW() AT TIME ZONE 'UTC')-INTERVAL '2 days' WHERE id=$1", [f.id]);
     expect((await request(`/api/reservations/${f.id}/checkout-reversal`)).body.allowed).toBe(false);
     expect((await request(`/api/reservations/${f.id}/undo-checkout`, {})).status).toBe(409);
   });
@@ -133,7 +133,7 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
     const f = await fixture();
     await pool.query("UPDATE reservations SET checked_out_at=NULL WHERE id=$1", [f.id]);
     expect((await request(`/api/reservations/${f.id}/checkout-reversal`)).body.allowed).toBe(false);
-    await pool.query("INSERT INTO audit_logs(action,module,entity_type,entity_id,description,details,timestamp) VALUES('update','reservations','reservation',$1,'Legacy checkout',$2,NOW())", [f.id, JSON.stringify({ before: { status: "checked_in" }, after: { status: "checked_out" } })]);
+    await pool.query("INSERT INTO audit_logs(action,module,entity_type,entity_id,description,details,timestamp) VALUES('update','reservations','reservation',$1,'Legacy checkout',$2,(NOW() AT TIME ZONE 'UTC'))", [f.id, JSON.stringify({ before: { status: "checked_in" }, after: { status: "checked_out" } })]);
     expect((await request(`/api/reservations/${f.id}/checkout-reversal`)).body.allowed).toBe(true);
     await pool.query("UPDATE reservations SET status='confirmed' WHERE id=$1", [f.other]);
     await pool.query("UPDATE rooms SET status='clean' WHERE id=$1", [f.room]);
