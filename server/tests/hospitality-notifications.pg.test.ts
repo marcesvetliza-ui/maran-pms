@@ -17,7 +17,7 @@ describe.skipIf(!enabled)('Hospitality bell · real PostgreSQL, no messaging pro
  },30000);
  afterAll(async()=>{
   if(!pool)return;await pool.query("DELETE FROM system_notifications WHERE related_entity_id IN(SELECT id FROM hospitality_alerts WHERE reservation_id LIKE $1) OR related_entity_id IN(SELECT id FROM stay_notes WHERE reservation_id LIKE $1) OR guest_name='Synthetic Bell'",[prefix+'%']);
-  await pool.query('DELETE FROM hospitality_alerts WHERE reservation_id LIKE $1',[prefix+'%']);await pool.query('DELETE FROM stay_notes WHERE reservation_id LIKE $1',[prefix+'%']);await pool.query('DELETE FROM guest_preferences WHERE guest_id=$1',[id('guest')]);await pool.query('DELETE FROM reservations WHERE id LIKE $1',[prefix+'%']);await pool.query('DELETE FROM guests WHERE id=$1',[id('guest')]);await pool.query('DELETE FROM rooms WHERE id=$1',[id('room')]);await pool.query('DELETE FROM room_types WHERE id=$1',[id('type')]);await pool.end();
+  await pool.query('DELETE FROM hospitality_alerts WHERE reservation_id LIKE $1',[prefix+'%']);await pool.query('DELETE FROM stay_notes WHERE reservation_id LIKE $1',[prefix+'%']);await pool.query('DELETE FROM guest_preferences WHERE guest_id=$1',[id('guest')]);await pool.query('DELETE FROM reservations WHERE id LIKE $1',[prefix+'%']);await pool.query('DELETE FROM guests WHERE id=ANY($1::text[])',[[id('guest'),id('replacement')]]);await pool.query('DELETE FROM rooms WHERE id=$1',[id('room')]);await pool.query('DELETE FROM room_types WHERE id=$1',[id('type')]);await pool.end();
  });
  it('creates one preparation task and bell item before arrival, including a normal-priority request',async()=>{
   await pref('Cuna');await Promise.all([sync(now),sync(now)]);
@@ -73,6 +73,15 @@ describe.skipIf(!enabled)('Hospitality bell · real PostgreSQL, no messaging pro
   try{await expect(sync(now)).rejects.toThrow();}finally{await pool.query(`DROP TRIGGER ${fn} ON system_notifications; DROP FUNCTION ${fn}()`);}
   expect((await pool.query('SELECT id FROM hospitality_alerts WHERE preference_id=$1',[id('Retry')])).rows).toHaveLength(0);
   await sync(now);await sync(now);expect((await pool.query('SELECT id FROM hospitality_alerts WHERE preference_id=$1',[id('Retry')])).rows).toHaveLength(1);
+ });
+
+ it('retires a previous guest request when the reservation guest changes, even if that guest has another upcoming stay',async()=>{
+  await pool.query("INSERT INTO guests(id,first_name,last_name)VALUES($1,'New','Synthetic')",[id('replacement')]);
+  await pool.query('UPDATE reservations SET guest_id=$2 WHERE id=$1',[id('stay'),id('replacement')]);
+  await pool.query("UPDATE reservations SET check_in_date='2034-01-16' WHERE id=$1",[id('far')]);
+  await sync(now);
+  expect((await pool.query("SELECT n.id FROM system_notifications n JOIN hospitality_alerts a ON a.id=n.related_entity_id WHERE a.reservation_id=$1 AND n.related_entity_type='hospitality_alert' AND n.status NOT IN ('completado','rechazado')",[id('stay')])).rows).toHaveLength(0);
+  expect((await pool.query("SELECT n.id FROM system_notifications n JOIN hospitality_alerts a ON a.id=n.related_entity_id WHERE a.reservation_id=$1 AND n.status='pendiente'",[id('far')])).rows.length).toBeGreaterThan(0);
  });
 
 });

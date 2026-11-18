@@ -65,7 +65,7 @@ export async function syncHospitalityNotifications(now=new Date()) {
   }
   for(const a of canonical.values()){
    const r=stays.find(r=>r.id===a.reservation_id),p=prefs.find(p=>p.id===a.preference_id);
-   if(!r||a.status==='completed'||a.preference_id&&(!p||!hospitalityRequestAreas(p.category,p.visible_to||[]).includes(a.target_area)))continue;
+   if(!r||a.guest_id!==r.guest_id||a.status==='completed'||a.preference_id&&(!p||!hospitalityRequestAreas(p.category,p.visible_to||[]).includes(a.target_area)))continue;
    // Legacy check-in created an additional reception copy for some categories.
    if(p&&a.target_area==='reception'&&!hospitalityRequestAreas(p.category,p.visible_to||[]).includes('reception'))continue;
    await put(r,'hospitality_alert',a,a.target_area,p?`${p.title}${p.description?': '+p.description:''}`:a.alert_message,a.status==='in_progress'?'en_proceso':'pendiente');
