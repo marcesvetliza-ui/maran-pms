@@ -126,3 +126,28 @@ describe("Prefactura persisted payment intent", () => {
   });
 
 });
+
+describe('Cobro mayor al comprobante',()=>{
+ it('conserva el anticipo sin vínculo fiscal y reintenta con las mismas claves tras perder una respuesta',async()=>{
+  sessionStorage.clear();const submission=createPrefacturaSubmission(sessionStorage);
+  const original=submission.prepare('506',{reservaId:'506',creditOperationId:crypto.randomUUID()},[{reservationId:'506',amount:'471600.00',method:'efectivo'}]);
+  const replacement={...original,invoiceRequest:{...original.invoiceRequest!,creditOperationId:crypto.randomUUID(),excessCollection:{originalOperationId:original.invoiceRequest!.creditOperationId}},payments:[
+   {reservationId:'506',amount:'235800.00',method:'efectivo',paymentRequestId:crypto.randomUUID()},
+   {reservationId:'506',amount:'235800.00',method:'efectivo',paymentRequestId:crypto.randomUUID(),unlinkedAdvance:true,receiptType:'none'}]};
+  submission.replaceUnissued('506',original.invoiceRequest!.creditOperationId,replacement);
+  const saved=new Map<string,any>();let lost=true,issued=0;
+  const post=async(url:string,payload:any)=>{if(url.endsWith('/invoices')){issued++;return{id:506,reservaId:'506',montoTotal:'235800.00'};}
+   if(saved.has(payload.paymentRequestId))expect(payload).toEqual(saved.get(payload.paymentRequestId));saved.set(payload.paymentRequestId,structuredClone(payload));
+   if(payload.receiptType==='none'&&lost){lost=false;throw Error('lost response');}return{id:payload.paymentRequestId};};
+  await expect(submission.run('506',post)).rejects.toThrow('lost response');
+  await createPrefacturaSubmission(sessionStorage).run('506',post);
+  expect(issued).toBe(1);expect(saved.size).toBe(2);
+  const payments=[...saved.values()];expect(payments.reduce((sum,p)=>sum+Number(p.amount),0)).toBe(471600);
+  expect(payments[0].invoiceData.id).toBe(506);expect(payments[1].invoiceData).toBeUndefined();expect(payments[1].unlinkedAdvance).toBeUndefined();
+ });
+ it('no reemplaza un intento que ya recibió su comprobante',()=>{
+  sessionStorage.clear();const submission=createPrefacturaSubmission(sessionStorage);const attempt=submission.prepare('506',{reservaId:'506',creditOperationId:crypto.randomUUID()},[]);
+  submission.acceptInvoice('506',{id:506,reservaId:'506'});
+  expect(()=>submission.replaceUnissued('506',attempt.invoiceRequest!.creditOperationId,attempt)).toThrow('La operación cambió');
+ });
+});

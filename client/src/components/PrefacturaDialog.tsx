@@ -1,4 +1,5 @@
 import { compareReservationsByRoom } from "@/lib/reservation-list-order";
+import { prefacturaCollectionDifference } from '@shared/prefacturaCollection';
 import { isPostCheckoutCharge } from "@shared/postCheckout";
 import {GroupRoomAccount} from './group-room-account';
 import { chargeUnits, expandChargeUnitCoverage, unitParent } from '@shared/chargeUnits';
@@ -13,7 +14,7 @@ import { ReservationChargeEdit } from "@/components/reservation-charge-edit";
 import { isDebitAnnulmentCredit } from "@shared/debitNoteActions";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
-import { createPrefacturaSubmission } from "@/lib/prefactura-submission";
+import { createPrefacturaSubmission, type PrefacturaAttempt } from "@/lib/prefactura-submission";
 import { readPrefacturaSelection, savePrefacturaSelection, retainedPrefacturaSelection, pendingPrefacturaSourceIds, originalPrefacturaLines } from "@/lib/prefactura-selection";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError, parseApiErrorPayload } from "@/lib/queryClient";
@@ -636,6 +637,7 @@ export function PrefacturaDialog({
 
   // Partial payment warning
   const [showPartialWarning, setShowPartialWarning] = useState(false);
+  const [showCollectionWarning, setShowCollectionWarning] = useState(false);
   const [showAccountCheckoutWarning, setShowAccountCheckoutWarning] = useState(false);
 
   // True when a folio re-fetch (after NC/ND/reversal) changed the balance while the
@@ -838,6 +840,7 @@ export function PrefacturaDialog({
       setTransferCharge(null);
       setShowBulkTransfer(false);
       setShowPartialWarning(false);
+      setShowCollectionWarning(false);
       setRevertCharge(null);
       setRevertDialogOpen(false);
       setNcDialogOpen(false);
@@ -1345,7 +1348,8 @@ export function PrefacturaDialog({
   const checkoutBalance = Number(folio?.financialSummary?.operationalFolioBalance ?? folio?.balance);
   const checkoutBalanceCents = Math.round(checkoutBalance * 100);
   const accountCheckoutAttempt = hasPendingAccountCheckout ? accountSubmission.current!.pending(reservationId)?.accountCheckout : undefined;
-  const canCheckoutWithoutCollection = mode === "checkout" && !!folio && Number.isSafeInteger(checkoutBalanceCents) && checkoutBalanceCents <= 0 && !accountCheckoutAttempt;
+  const pendingDepartureRecovery = hasPendingSubmission && !!submission.current!.pending(reservationId)?.checkoutDebtAccount;
+  const canCheckoutWithoutCollection = mode === "checkout" && !!folio && Number.isSafeInteger(checkoutBalanceCents) && checkoutBalanceCents <= 0 && !accountCheckoutAttempt && !pendingDepartureRecovery;
   const canTransferCheckout = mode === 'checkout' && !!folio && !folio.groupId && Number.isSafeInteger(checkoutBalanceCents) && checkoutBalanceCents > 0;
   const accountCheckoutOnly = mode === "checkout" && doCheckout && !!folio && !folio.groupId &&
     saleCondition === "cuenta_corriente" && checkoutBalanceCents > 0 && allBillableItems.length === 0 &&
@@ -1454,6 +1458,39 @@ export function PrefacturaDialog({
   const pendingAttempt = hasPendingSubmission ? submission.current!.pending(reservationId) : null;
   const pointError = isFiscalTipo && !pendingAttempt?.invoice && !receptionStatus?.invoice ? billingPointError(billingConfig, posConfigs, pendingAttempt?.invoiceRequest?.puntoVentaOverride ?? puntoVenta) : null;
   const retainedPoint = pendingAttempt?.invoiceRequest?.puntoVentaOverride;
+  const collectionDifference = pendingAttempt?.invoiceRequest
+    ? prefacturaCollectionDifference(pendingAttempt.invoiceRequest)
+    : {documented:invoiceAmount,collected:selectedAlreadyPaid + totalPayments,excess:Math.max(0,totalPayments-selectedBalance)};
+  const requestedCheckout = mode === 'checkout' && (pendingAttempt ? pendingAttempt.checkoutRequested : doCheckout);
+  const knownPaymentIds = new Set([...(pendingAttempt?.acknowledgedPaymentIds || []), ...(folio?.payments || []).map(payment=>payment.paymentRequestId)]);
+  const pendingNewCollection = pendingAttempt ? pendingAttempt.payments.reduce((sum,payment)=>sum+(knownPaymentIds.has(payment.paymentRequestId)?0:Number(payment.amount || 0)),0) : saleCondition === 'cuenta_corriente' ? 0 : totalPayments;
+  const adjustmentNotYetIssued = !pendingAttempt?.invoice && !receptionStatus?.invoice;
+  const intendedType = pendingAttempt?.invoiceRequest?.tipoComprobante || tipo;
+  const expectedTourismRefund = adjustmentNotYetIssued && intendedType === 'FT'
+    ? Object.values(pendingAttempt?.invoiceRequest?.sourceChargeAmounts || invoiceSourceAmounts).reduce<number>((sum,amount)=>sum+Math.round(Number(amount)*21)/100,0) : 0;
+  let expectedCheckoutDiscount = adjustmentNotYetIssued ? checkoutDiscount?.amount || 0 : 0;
+  if (adjustmentNotYetIssued && pendingAttempt?.invoiceRequest?.checkoutDiscount) {
+    const discount = pendingAttempt.invoiceRequest.checkoutDiscount;
+    try { expectedCheckoutDiscount = calculateCheckoutDiscount(discount.originalSourceAmounts,discount).amount; } catch { expectedCheckoutDiscount = 0; }
+  }
+  const projectedCheckoutDebt = Math.max(0, Math.round((operationalBalance - pendingNewCollection - expectedTourismRefund - expectedCheckoutDiscount - (!pendingAttempt && saleCondition === 'cuenta_corriente' ? selectedBalance : 0))*100)/100);
+
+  async function performConfirmedDeparture(attempt?: PrefacturaAttempt | null, assertActive:()=>void = ()=>{}) {
+    assertActive();
+    const debt = attempt?.checkoutDebtAccount;
+    if (!debt) return apiRequest('POST', `/api/reservations/${reservationId}/check-out`, {});
+    const current = await (await apiRequest('GET', `/api/reservations/${reservationId}`)).json();
+    assertActive();
+    if (current.status === 'checked_out') return new Response(JSON.stringify({success:true,alreadyClosed:true}),{status:200});
+    const fresh = await refetchFolio();
+    assertActive();
+    if (fresh.error || !fresh.data) throw new Error('No se pudo verificar el saldo antes del cierre. El cobro original se conserva.');
+    const balance = Number(fresh.data.financialSummary?.operationalFolioBalance ?? fresh.data.balance);
+    if (!Number.isFinite(balance) || balance > debt.maximumBalance + 0.01) throw new Error('El saldo cambió. Revisá el importe pendiente antes de trasladarlo a cuenta corriente.');
+    return balance > 0.01
+      ? apiRequest('POST', `/api/reservations/${reservationId}/check-out-to-account`, {operationId:debt.operationId,entityType:debt.entityType,entityId:debt.entityId,expectedBalance:balance.toFixed(2)})
+      : apiRequest('POST', `/api/reservations/${reservationId}/check-out`, {requireSettled:true});
+  }
 
 
   // A linked company/agency is a billing option, never a forced recipient:
@@ -1533,7 +1570,7 @@ export function PrefacturaDialog({
         setSubmitError("Ingresá un monto en cada forma de pago.");
         return;
       }
-      if (saldoRestante > 0.01) {
+      if (saldoRestante > 0.01 && !(mode === 'checkout' && doCheckout)) {
         setShowPartialWarning(true);
         return;
       }
@@ -1545,7 +1582,7 @@ export function PrefacturaDialog({
     doSubmit();
   }
 
-  async function doSubmit() {
+  async function doSubmit(acknowledgeCollection = false) {
     const scope = viewScope.current.version;
     const isCurrentView = () => viewScope.current.version === scope && viewScope.current.open;
     const assertCurrentView = () => {
@@ -1555,6 +1592,9 @@ export function PrefacturaDialog({
     if (submission.current!.isBusy()) return;
     if (accountCheckoutAttempt || accountCheckoutOnly) { await doAccountCheckout(); return; }
     const retrying = !!submission.current!.pending(reservationId);
+    if (!acknowledgeCollection && (collectionDifference.excess > 0.02 || (!pendingAttempt?.checkoutDebtAccount && requestedCheckout && projectedCheckoutDebt > 0.01 && !folio?.groupId))) {
+      setShowCollectionWarning(true); return;
+    }
     try {
       savePrefacturaSelection(window.sessionStorage, reservationId,
         pendingPrefacturaSourceIds(submission.current!.pending(reservationId)) ?? selectedIds);
@@ -1622,6 +1662,9 @@ export function PrefacturaDialog({
     setSubmitError(null);
 
     try {
+      if (retrying && acknowledgeCollection && requestedCheckout && projectedCheckoutDebt > 0.01 && !folio?.groupId && checkoutAccount && !submission.current!.pending(reservationId)?.checkoutDebtAccount) {
+        submission.current!.confirmCheckoutDebt(reservationId, {...checkoutAccount,operationId:newSettlementOperationId(),maximumBalance:projectedCheckoutDebt});
+      }
       const receiptType = RECEIPT_TYPE_MAP[tipo] || "cierre_habitacion";
 
       // A browser may disappear after ARCA/local issuance and before checkout.
@@ -1684,7 +1727,7 @@ export function PrefacturaDialog({
           if (mode === "checkout" && doCheckout) {
             let checkoutSucceeded = false;
             try {
-              await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+              await performConfirmedDeparture(submission.current!.pending(reservationId),assertCurrentView);
               assertCurrentView();
               checkoutSucceeded = true;
               setCheckoutDone(true);
@@ -1873,12 +1916,23 @@ export function PrefacturaDialog({
           });
         }
       }
-      submission.current!.prepare(reservationId, invoiceRequest, paymentPayloads, mode === "checkout" && doCheckout);
+      const debtAccount = !folio?.groupId && mode === 'checkout' && doCheckout && projectedCheckoutDebt > 0.01 && checkoutAccount
+        ? {...checkoutAccount,operationId:newSettlementOperationId(),maximumBalance:projectedCheckoutDebt} : undefined;
+      submission.current!.prepare(reservationId, invoiceRequest, paymentPayloads, mode === "checkout" && doCheckout, debtAccount);
       setHasPendingSubmission(true);
       if (retrying && localOperationId) {
         const status = await (await apiRequest("GET", `/api/billing/reservations/${reservationId}/operations/${localOperationId}/reception-status`)).json();
         if (Array.isArray(status.acknowledgedPaymentIds)) submission.current!.acknowledge(reservationId, status.acknowledgedPaymentIds);
         if (status.attempt?.invoice) submission.current!.acceptInvoice(reservationId, status.attempt.invoice);
+      }
+      const unissued = submission.current!.pending(reservationId)!;
+      if (unissued.invoiceRequest && prefacturaCollectionDifference(unissued.invoiceRequest).excess > 0.02) {
+        if (!acknowledgeCollection) throw new Error('Confirmá el aviso antes de continuar con el cobro excedente.');
+        const replacement = await (await apiRequest('POST', `/api/billing/reservations/${reservationId}/prepare-excess-collection`, {acknowledge:true,attempt:unissued})).json();
+        assertCurrentView();
+        submission.current!.replaceUnissued(reservationId, unissued.invoiceRequest.creditOperationId, replacement);
+        setCreditOperationId(replacement.invoiceRequest.creditOperationId);
+        window.sessionStorage.setItem(settlementOperationKey(reservationId), replacement.invoiceRequest.creditOperationId);
       }
       const submittedAttempt = submission.current!.pending(reservationId)!;
       const submittedSourceIds = pendingPrefacturaSourceIds(submittedAttempt) ?? [...selectedIds];
@@ -1900,7 +1954,7 @@ export function PrefacturaDialog({
       let checkoutSucceeded = false;
       if (completed.checkoutRequested) {
         try {
-          const coRes = await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, {});
+          const coRes = await performConfirmedDeparture(submittedAttempt,assertCurrentView);
           assertCurrentView();
           if (!coRes.ok) {
             const coBody = await coRes.json().catch(() => ({}));
@@ -1920,6 +1974,7 @@ export function PrefacturaDialog({
           // Advance to step 3 with a warning so staff know to fix checkout manually.
           // checkoutSucceeded remains false, so onCheckoutComplete will NOT fire.
           setCheckoutFailed(true);
+          if (submittedAttempt.checkoutDebtAccount) setSubmitError(parseApiError(coErr));
           console.error("[PrefacturaDialog] checkout failed after payment/invoice:", coErr);
         }
       }
@@ -1939,6 +1994,9 @@ export function PrefacturaDialog({
       assertCurrentView();
       if (refreshed.error || refreshedInvoices.error) {
         throw new Error("El cobro se guardó, pero no se pudo actualizar el folio. Reintentá completar la misma operación.");
+      }
+      if (completed.checkoutRequested && !checkoutSucceeded && submittedAttempt.checkoutDebtAccount) {
+        setEmittedInvoice(invoiceData); setStep(2); return;
       }
       submission.current!.complete(reservationId);
       setHasPendingSubmission(false);
@@ -2762,7 +2820,7 @@ export function PrefacturaDialog({
                   {receptionStatus.paymentConflictMessage || receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
                 </p>}
                 {hasPendingSubmission && (receptionStatus?.safeToCorrect || receptionStatus?.canVerifyRejection || receptionStatus?.canCloseCancelled) && <Button type="button" variant="outline" onClick={() => correctReceptionAttempt.mutate()} disabled={isSubmitting || correctReceptionAttempt.isPending} data-testid="button-correct-reception-attempt">{correctReceptionAttempt.isPending ? "Verificando…" : receptionStatus.canCloseCancelled ? "Cerrar intento de factura anulada" : receptionStatus.canVerifyRejection ? "Verificar rechazo y corregir datos" : "Corregir datos del intento"}</Button>}
-                {(hasPendingSubmission || hasPendingAccountCheckout) && (!serverAttempt || accountCheckoutAttempt) && (receptionStatus?.stage !== "cancelled" || accountCheckoutAttempt) && <Button onClick={() => {if(accountCheckoutAttempt)void doAccountCheckout();else void doSubmit();}} disabled={isSubmitting || (!accountCheckoutAttempt && (correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!receptionStatus?.paymentConflicts?.length)) || (!accountCheckoutAttempt && (!!pointError || (receptionStatus?.stage === "blocked" && !receptionStatus?.canRetryNumberConflict) || receptionStatus?.canVerifyRejection === true || receptionStatus?.stage === "corrected"))} data-testid="button-retry-prefactura">
+                {(hasPendingSubmission || hasPendingAccountCheckout) && (!serverAttempt || accountCheckoutAttempt) && (receptionStatus?.stage !== "cancelled" || accountCheckoutAttempt) && <Button onClick={() => {if(accountCheckoutAttempt)void doAccountCheckout();else void doSubmit();}} disabled={isSubmitting || folioLoading || !folio || (!accountCheckoutAttempt && (correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!receptionStatus?.paymentConflicts?.length)) || (!accountCheckoutAttempt && (!!pointError || (receptionStatus?.stage === "blocked" && !receptionStatus?.canRetryNumberConflict) || receptionStatus?.canVerifyRejection === true || (receptionStatus?.stage === "corrected" && receptionStatus?.code !== "EXCESS_COLLECTION_SEPARATED")))} data-testid="button-retry-prefactura">
                   {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
                 </Button>}
                 {canCorrectExemptRejection && <Button type="button" variant="outline" className="mt-2 sm:ml-2" disabled={isSubmitting || folioLoading || correctExemptRejection.isPending} onClick={() => correctExemptRejection.mutate()} data-testid="button-correct-exempt-rejection">
@@ -3051,6 +3109,14 @@ export function PrefacturaDialog({
       </Dialog>
 
       {/* Partial payment warning dialog */}
+      <Dialog open={showCollectionWarning} onOpenChange={setShowCollectionWarning}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Revisar cobro y comprobante</DialogTitle><DialogDescription>Confirmá los importes para continuar con la operación.</DialogDescription></DialogHeader>
+          {collectionDifference.excess > 0.02 && <p className="text-sm">Se está cobrando o aplicando <strong>${fmtMoney(collectionDifference.collected)}</strong>, mientras que el comprobante incluye <strong>${fmtMoney(collectionDifference.documented)}</strong>. La diferencia de <strong>${fmtMoney(collectionDifference.excess)}</strong> quedará como anticipo disponible de esta reserva para otros cargos. No se agregarán conceptos al comprobante.</p>}
+          {requestedCheckout && projectedCheckoutDebt > 0.01 && <p className="text-sm">Al cerrar, el saldo de <strong>${fmtMoney(projectedCheckoutDebt)}</strong> pasará a la cuenta corriente de <strong>{checkoutAccount?.entityName || 'la entidad seleccionada'}</strong>. Quedará pendiente de cobro; este traslado no es un ingreso de dinero.</p>}
+          <DialogFooter><Button variant="outline" onClick={()=>setShowCollectionWarning(false)}>Volver a revisar</Button><Button data-testid="confirm-collection-difference" onClick={()=>{setShowCollectionWarning(false);void doSubmit(true);}}>Confirmar y continuar</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={showPartialWarning} onOpenChange={o => { if (!o) setShowPartialWarning(false); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>

@@ -6,6 +6,7 @@ export type PrefacturaAttempt = {
   payments: Payload[];
   checkoutRequested: boolean;
   acknowledgedPaymentIds?: string[];
+  checkoutDebtAccount?: { operationId: string; entityType: string; entityId: string; entityName: string; maximumBalance: number };
   accountCheckout?: { operationId: string; entityType: string; entityId: string; expectedBalance: string; entityName: string };
 };
 
@@ -39,7 +40,7 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
       const attempt = raw ? JSON.parse(raw) : null;
       return attempt;
     },
-    prepare(reservationId: string | number, invoiceRequest: Payload | null, payments: Payload[], checkoutRequested = false) {
+    prepare(reservationId: string | number, invoiceRequest: Payload | null, payments: Payload[], checkoutRequested = false, checkoutDebtAccount?: PrefacturaAttempt['checkoutDebtAccount']) {
       const previous = this.pending(reservationId);
       if (previous) { assertReservation(reservationId, previous); return previous; }
       const attempt: PrefacturaAttempt = {
@@ -48,10 +49,11 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
         invoice: null,
         payments: payments.map(payment => ({ ...payment, paymentRequestId: crypto.randomUUID() })),
         checkoutRequested,
+        ...(checkoutDebtAccount ? { checkoutDebtAccount } : {}),
       };
       assertReservation(reservationId, attempt);
       if (attempt.invoiceRequest?.creditOperationId) {
-        attempt.invoiceRequest = { ...attempt.invoiceRequest, prefacturaRecovery: { version: 2, payments: attempt.payments, checkoutRequested } };
+        attempt.invoiceRequest = { ...attempt.invoiceRequest, prefacturaRecovery: { version: 2, payments: attempt.payments, checkoutRequested, ...(checkoutDebtAccount ? {checkoutDebtAccount} : {}) } };
       }
       // Serialize now, not after awaiting issuance; storage errors stop the write.
       storage.setItem(key(reservationId), JSON.stringify(attempt));
@@ -79,6 +81,22 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
       if (!attempt || !Array.isArray(ids)) return;
       const ownIds = new Set(attempt.payments.map(payment => payment.paymentRequestId));
       attempt.acknowledgedPaymentIds = ids.filter(id => ownIds.has(id));
+      storage.setItem(key(reservationId), JSON.stringify(attempt));
+    },
+    replaceUnissued(reservationId: string | number, originalOperationId: string, replacement: PrefacturaAttempt) {
+      const current = this.pending(reservationId);
+      if (!current || current.invoice || current.acknowledgedPaymentIds?.length || current.invoiceRequest?.creditOperationId !== originalOperationId ||
+          replacement.invoice || replacement.invoiceRequest?.excessCollection?.originalOperationId !== originalOperationId) throw new Error('La operación cambió. Conservamos su recuperación.');
+      assertReservation(reservationId, replacement);
+      storage.setItem(key(reservationId), JSON.stringify(replacement));
+    },
+    confirmCheckoutDebt(reservationId: string | number, account: NonNullable<PrefacturaAttempt['checkoutDebtAccount']>) {
+      const attempt = this.pending(reservationId);
+      if (!attempt?.checkoutRequested || attempt.accountCheckout) throw new Error('La operación no solicita el cierre de esta estadía.');
+      assertReservation(reservationId, attempt);
+      if (attempt.checkoutDebtAccount) return;
+      // Departure authorization is separate from the frozen fiscal request.
+      attempt.checkoutDebtAccount = account;
       storage.setItem(key(reservationId), JSON.stringify(attempt));
     },
     acceptInvoice(reservationId: string | number, invoice: Payload) {
@@ -113,14 +131,15 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
           cae: invoice.cae,
           total: invoice.montoTotal ?? invoice.monto_total,
         };
-        attempt.payments = attempt.payments.map(payment => ({ ...payment, invoiceData }));
+        attempt.payments = attempt.payments.map(payment => payment.unlinkedAdvance ? payment : ({ ...payment, invoiceData }));
         storage.setItem(key(reservationId), JSON.stringify(attempt));
       }
       // Replay every row with its original key and payload. An acknowledged row
       // and a committed row with a lost response both return the same payment.
       for (const payment of attempt.payments) {
         assertActive();
-        if (!attempt.acknowledgedPaymentIds?.includes(payment.paymentRequestId)) await post("/api/payments", payment);
+        const {unlinkedAdvance, ...payload} = payment;
+        if (!attempt.acknowledgedPaymentIds?.includes(payment.paymentRequestId)) await post("/api/payments", payload);
       }
       assertActive();
       return { invoice: attempt.invoice, paymentCount: attempt.payments.length, checkoutRequested: attempt.checkoutRequested };

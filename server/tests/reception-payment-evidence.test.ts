@@ -5,6 +5,10 @@ import { acknowledgedPayments, receptionOperationStatus } from "../billing/recep
 const payment = { paymentRequestId: "request-1", reservationId: "r1", amount: "100.00", method: "efectivo", date: "2026-11-03", reference: null, notes: null };
 const saved = { payment_request_id: "request-1", reservation_id: "r1", amount: "100", method: "efectivo", date: "2026-11-03", reference: null, notes: null, status: "active", invoice_ref: JSON.stringify({ id: 77 }) };
 describe("Pagos recuperados con evidencia exacta", () => {
+  it.each([null, JSON.stringify({id:88})])('reconoce un anticipo original aunque luego se haya aplicado a otro comprobante: %s',invoice_ref=>{
+    expect(acknowledgedPayments([{...payment,unlinkedAdvance:true}],[{...saved,invoice_ref}], 'r1',77)).toEqual(['request-1']);
+    expect(acknowledgedPayments([{...payment,unlinkedAdvance:true}],[{...saved,amount:'99',invoice_ref}], 'r1',77)).toEqual([]);
+  });
   it("reconoce el pago guardado y permite omitir el reenvío desde otra sesión", () => {
     expect(acknowledgedPayments([payment], [saved], "r1", 77)).toEqual(["request-1"]);
   });
