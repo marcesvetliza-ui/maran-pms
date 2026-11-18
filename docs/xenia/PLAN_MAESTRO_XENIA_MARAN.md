@@ -10,6 +10,8 @@ lang: es-AR
 
 **Prioridad actual:** preparar una instalación completa de prueba para Aurora y su enlace con el panel central; después incorporar Brisa y continuar la integración por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
 
+**Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
+
 **Regla de ejecución:** Maran PMS está en uso. Cada avance debe conservar la operación del hotel y las correcciones recientes. Este documento no autoriza por sí solo una migración, una compra ni una publicación en producción.
 
 **Objetivo de referencia:** preparar la puesta en marcha oficial de Maran alrededor del **1 de diciembre de 2026**, si se mantiene el horizonte de quince días mencionado el 16 de noviembre. La fecha se confirma con Marcelo y con los criterios de aceptación, no solamente con el calendario.

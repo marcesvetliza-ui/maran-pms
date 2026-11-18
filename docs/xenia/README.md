@@ -4,6 +4,8 @@ Documento principal: [PLAN_MAESTRO_XENIA_MARAN.md](PLAN_MAESTRO_XENIA_MARAN.md).
 
 Seguimiento: [ESTADO_EJECUCION.md](ESTADO_EJECUCION.md), tablero CSV y matriz de diferencias.
 
+Procedimiento para Marcelo: [GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con responsables, recorridos de Railway y Donweb, comprobaciones y condiciones para cada etapa.
+
 El inventario inicial conserva el corte del 16 de noviembre de 2026. El plan está actualizado al 17 de noviembre: web pública, correo probado y panel multihotel con aceptación manual del propietario. El objetivo es conectar ahora una instalación completa del PMS de pruebas, conservando la operación de Maran.
 
 ## Contenido
