@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiRequest, apiRequestWithGroupInventoryWarning } from '@/lib/queryClient';
 import type { InboundAssignmentOptions, InboundAssignmentRoom } from '@shared/channexAssignment';
+import { assignmentErrorMessage } from '@/lib/channex-assignment-error';
 import { formatDisplayDate } from '@shared/date-display';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -34,9 +35,7 @@ export function ChannexManualAssignment({connectionId, revisionId, onAssigned}: 
       await client.invalidateQueries({predicate:query=>['channex-bookings','channex-booking-detail','channex-history','channex-inbound','/api/reservations','/api/planning','/api/rooms'].some(key=>query.queryKey[0]===key)});
       onAssigned();
     } catch(e) {
-      const raw=e instanceof Error?e.message:'';
-      try {const data=JSON.parse(raw.slice(raw.indexOf('{')));setError(data.error||'No se pudo asignar la reserva.');}
-      catch {setError('No se pudo asignar la reserva. Actualizá las opciones antes de volver a confirmar.');}
+      setError(assignmentErrorMessage(e,'No se pudo asignar la reserva. Actualizá las opciones antes de volver a confirmar.'));
       setCategoryConfirmed(false);setScopeConfirmed(false);
     } finally {setPending(false);}
   }
@@ -44,7 +43,7 @@ export function ChannexManualAssignment({connectionId, revisionId, onAssigned}: 
   if(!started)return <Button onClick={()=>setStarted(true)}>Asignar al PMS</Button>;
   return <section aria-label="Asignación al PMS" className="rounded-lg border p-4 space-y-4">
     <h3 className="font-semibold">Asignar al PMS</h3>
-    {q.isLoading?<p>Cargando habitaciones disponibles…</p>:q.error?<p role="alert">No se pudieron consultar las opciones. La reserva puede haber cambiado o estar ya asignada.</p>:q.data&&<>
+    {q.isLoading?<p>Cargando habitaciones disponibles…</p>:q.error?<p role="alert">{assignmentErrorMessage(q.error,'No se pudieron consultar las habitaciones disponibles. Volvé a intentar.')}</p>:q.data&&<>
       <p>{formatDisplayDate(q.data.arrival)} → {formatDisplayDate(q.data.departure)} · Original: <strong>{money(q.data.currency,q.data.amount)}</strong></p>
       <p className="text-muted-foreground">Se conserva el importe del canal al elegir otra categoría. {q.data.currency==='USD'&&`Cotización: ARS ${Number(q.data.exchangeRate).toLocaleString('es-AR',{maximumFractionDigits:6})} por USD. Total en PMS: ${money('ARS',q.data.settlementTotal)}.`}</p>
       {q.data.rooms.map((remote,index)=>{
@@ -54,6 +53,8 @@ export function ChannexManualAssignment({connectionId, revisionId, onAssigned}: 
         return <fieldset key={remote.key} className="rounded border p-3 space-y-3 min-w-0" disabled={pending}>
           <legend className="px-1 font-medium">Habitación {index+1} · {remote.occupancy} huésped(es)</legend>
           <p>Categoría del canal: <strong>{remote.category}</strong>{remote.mappedCategory&&` · Correspondencia en PMS: ${remote.mappedCategory}`}</p>
+          {remote.ratePlanMissing && <p className="text-amber-700 dark:text-amber-400">El canal no identificó el plan tarifario. La asignación es excepcional y conserva el importe recibido.</p>}
+          {remote.sourceNetAmount && remote.sourceVatAmount && <p>Tarifa base: {money(q.data!.currency,remote.sourceNetAmount)} + IVA informado: {money(q.data!.currency,remote.sourceVatAmount)}. Total del canal: {money(q.data!.currency,remote.sourceTotal)}.</p>}
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block space-y-1">Categoría en PMS<select aria-label={`Categoría en PMS ${index+1}`} className="block w-full min-w-0 rounded border bg-background p-2" value={category||categories[remote.key]||''} onChange={e=>{
               setAssignments({...assignments,[remote.key]:''});setCategories({...categories,[remote.key]:e.target.value});setCategoryConfirmed(false);setScopeConfirmed(false);

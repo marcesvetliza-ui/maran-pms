@@ -70,7 +70,15 @@ export function registerChannexInboundRoutes(app: Express, pool: Pool) {
   });
   const assignmentError = (res: any, error: any) => {
     if (error?.response && error?.statusCode) return res.status(error.statusCode).json(error.response);
-    if (error instanceof BookingReviewError) return res.status(409).json({ error: 'La reserva necesita revisión antes de asignarse.', code: error.code });
+    if (error instanceof BookingReviewError) {
+      const messages: Record<string, string> = {
+        INVALID_BOOKING: 'La reserva recibida tiene datos incompletos o con un formato no compatible. Revisá los datos de origen en Channex.',
+        ROOM_TAX_TOTAL_REQUIRES_REVIEW: 'El total de la habitación no coincide con las tarifas y el IVA informado por el canal. Revisá el desglose antes de asignar.',
+        TOTAL_REQUIRES_REVIEW: 'El total de la reserva no coincide con la suma de sus habitaciones. Revisá los importes recibidos del canal.',
+        SETTLEMENT_RATE_REQUIRED: 'Guardá una cotización válida de pesos por dólar en Configuración y mapeos → Cotización antes de asignar.',
+      };
+      return res.status(409).json({ error: messages[error.code] || 'La reserva necesita revisión antes de asignarse.', code: error.code });
+    }
     if (error?.code?.startsWith('ASSIGNMENT_') || ['NOT_FOUND','CATEGORY_CHANGE_CONFIRMATION_REQUIRED','MANUAL_SCOPE_CONFIRMATION_REQUIRED'].includes(error?.code))
       return res.status(error.statusCode || 409).json({ error: error.message, code: error.code });
     return res.status(409).json({ error: 'No se pudo asignar la reserva. Actualizá las habitaciones disponibles y revisá la configuración.' });

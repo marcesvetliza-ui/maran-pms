@@ -1,4 +1,5 @@
 export const reasons: Record<string, string> = {
+ ROOM_TAX_TOTAL_REQUIRES_REVIEW:'El total de la habitación no coincide con sus tarifas y el IVA informado por el canal.',
   UNLINKED_EXTERNAL_RESERVATION: "Ya existe una reserva con esta referencia externa; revisá su vínculo",
   MASKED_GUEST_DATA: "Channex ocultó los datos de contacto antes de que pudieran guardarse; requiere revisión",
   INVALID_REVISION: "La revisión no tiene el formato esperado", INVALID_BOOKING: "Faltan datos de la reserva",

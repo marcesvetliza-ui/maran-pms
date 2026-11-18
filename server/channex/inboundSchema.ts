@@ -43,12 +43,14 @@ CREATE TABLE IF NOT EXISTS channex_inbound_dispatch(id int PRIMARY KEY CHECK(id=
 CREATE TABLE IF NOT EXISTS channex_inbound_settlements (
  connection_id varchar NOT NULL, revision_id text NOT NULL, remote_room_id text NOT NULL,
  reservation_id varchar NOT NULL REFERENCES reservations(id), source_currency text NOT NULL CHECK(source_currency IN ('ARS','USD')),
- source_total numeric(10,2) NOT NULL, source_nights jsonb NOT NULL, source_rate_plan_id text NOT NULL,
+ source_total numeric(10,2) NOT NULL, source_nights jsonb NOT NULL, source_rate_plan_id text,
  exchange_rate numeric(12,6) NOT NULL CHECK(exchange_rate>0), settlement_currency text NOT NULL DEFAULT 'ARS' CHECK(settlement_currency='ARS'),
  settlement_total numeric(10,2) NOT NULL, settlement_nights jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(connection_id,revision_id,remote_room_id),
  FOREIGN KEY(connection_id,revision_id) REFERENCES channex_inbound_revisions(connection_id,revision_id)
 );
+-- Historical channel bookings may not identify a rate plan; preserve that absence.
+ALTER TABLE channex_inbound_settlements ALTER COLUMN source_rate_plan_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS channex_settlement_reservation ON channex_inbound_settlements(reservation_id,created_at DESC);
 INSERT INTO channex_inbound_dispatch(id) VALUES(1) ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION channex_guard_inbound_history() RETURNS trigger LANGUAGE plpgsql AS $body$
