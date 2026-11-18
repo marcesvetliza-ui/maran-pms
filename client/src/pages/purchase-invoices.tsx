@@ -7,7 +7,7 @@ import { iibbRateFromAmount } from '@shared/iibbRate';
 import {matchesPurchaseReport,validatePurchaseReportFilters} from "@shared/purchase-invoice-report";
 import { isPurchaseRemito, purchaseDocumentLabel } from "@shared/purchase-remito";
 import { useAuth } from "@/App";
-import { canCorrectPurchaseInvoiceMetadata, canEditPurchaseInvoice } from "@shared/purchase-invoice-edit";
+import { canCorrectPurchaseInvoiceMetadata, canEditPurchaseInvoice, PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-edit";
 import { matchesIssuer } from "@/lib/issuer-search";
 import { isActiveWarehouse } from "@/lib/inventory-warehouse";
 import { formatDisplayDate } from "@shared/date-display";
@@ -533,6 +533,7 @@ export function InvoiceDialog({
   };
 
   const isEditing = !!editingInvoice;
+  const isSettledInvoiceEdit = isEditing && ["pagado", "parcial"].includes(editingInvoice?.estado || "");
   const isEditingRemito = isEditing && isPurchaseRemito(editingInvoice?.tipoComprobante);
   const [remitoSnapshot, setRemitoSnapshot] = useState<any>(null);
   const [remitoDraft, setRemitoDraft] = useState<RemitoDraft | null>(null);
@@ -1086,7 +1087,14 @@ export function InvoiceDialog({
       onOpenChange={(v) => { if (!v) resetDialog(); }}
       title={sourceRemito ? `Cargar factura del remito ${sourceRemito.numeroComprobanteExt || sourceRemito.numeroComprobante}` : isEditing ? `Editar Comprobante — ${editingInvoice?.numeroComprobanteExt || editingInvoice?.numeroComprobante}` : "Registrar Comprobante"}
       headerExtra={
-        unifiedLayout ? undefined : (
+        <>
+        {isSettledInvoiceEdit && (
+          <p className="mt-2 text-sm text-muted-foreground" data-testid="settled-invoice-edit-notice">
+            Los pagos y las órdenes de pago se conservan. Al guardar se recalcula el saldo pendiente con el nuevo total.
+            Para corregir fecha o número, usá «Corregir datos» en el listado.
+          </p>
+        )}
+        {unifiedLayout ? undefined : (
         <div className="flex gap-1 mt-2">
           {steps.map((s, i) => (
             <div key={i} className="flex items-center">
@@ -1100,7 +1108,8 @@ export function InvoiceDialog({
             </div>
           ))}
         </div>
-        )
+        )}
+        </>
       }
     >
         <div className="py-2 space-y-4">
@@ -1234,7 +1243,7 @@ export function InvoiceDialog({
                         onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
                         onFocus={() => { setSupplierDropdownOpen(true); }}
                         onClick={() => { if (!supplierDropdownOpen) { setSupplierDropdownOpen(true); } }}
-                        disabled={!!sourceRemito || isEditingRemito && !!remitoSnapshot?.ordenesPago?.length} data-testid="select-supplier"
+                        disabled={isSettledInvoiceEdit || !!sourceRemito || isEditingRemito && !!remitoSnapshot?.ordenesPago?.length} data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
@@ -1275,19 +1284,19 @@ export function InvoiceDialog({
                 </div>
                 <div>
                   <Label>Punto de Venta</Label>
-                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
+                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" disabled={isSettledInvoiceEdit} data-testid="input-punto-venta" />
                 </div>
                 <div>
                   <Label>Número</Label>
-                  <Input value={form.numeroComprobante} onChange={(e) => f("numeroComprobante", e.target.value)} placeholder="00000001" data-testid="input-numero-comprobante" />
+                  <Input value={form.numeroComprobante} onChange={(e) => f("numeroComprobante", e.target.value)} placeholder="00000001" disabled={isSettledInvoiceEdit} data-testid="input-numero-comprobante" />
                 </div>
                 <div>
                   <Label>Fecha de Emisión</Label>
-                  <Input type="date" value={form.fechaEmision} onChange={(e) => { f("fechaEmision", e.target.value); f("periodo", calcPeriodo(e.target.value)); }} data-testid="input-fecha-emision" />
+                  <Input type="date" value={form.fechaEmision} onChange={(e) => { f("fechaEmision", e.target.value); f("periodo", calcPeriodo(e.target.value)); }} disabled={isSettledInvoiceEdit} data-testid="input-fecha-emision" />
                 </div>
                 <div>
                   <Label>Período</Label>
-                  <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" data-testid="input-periodo" />
+                  <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" disabled={isSettledInvoiceEdit} data-testid="input-periodo" />
                 </div>
                 <div className="col-span-2">
                   <Label>{isRetencion ? "Cuenta Contable de Activo" : "Cuenta Contable de Gasto"}</Label>
@@ -1743,7 +1752,7 @@ export function InvoiceDialog({
                         onChange={(e) => { setSupplierSearch(e.target.value); setSupplierDropdownOpen(true); }}
                         onFocus={() => { setSupplierDropdownOpen(true); }}
                         onClick={() => { if (!supplierDropdownOpen) { setSupplierDropdownOpen(true); } }}
-                        disabled={!!sourceRemito || isEditingRemito && !!remitoSnapshot?.ordenesPago?.length} data-testid="select-supplier"
+                        disabled={isSettledInvoiceEdit || !!sourceRemito || isEditingRemito && !!remitoSnapshot?.ordenesPago?.length} data-testid="select-supplier"
                         autoComplete="off"
                       />
                       {supplierDropdownOpen && (
@@ -1784,19 +1793,19 @@ export function InvoiceDialog({
                 </div>
                 <div>
                   <Label>Punto de Venta</Label>
-                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" data-testid="input-punto-venta" />
+                  <Input type="number" value={form.puntoVenta} onChange={(e) => { const v = e.target.value; if (v === "" || (parseInt(v) >= 1 && parseInt(v) <= 99999)) f("puntoVenta", v); }} placeholder="00001" min="1" max="99999" disabled={isSettledInvoiceEdit} data-testid="input-punto-venta" />
                 </div>
                 <div>
                   <Label>Número</Label>
-                  <Input value={form.numeroComprobante} onChange={(e) => f("numeroComprobante", e.target.value)} placeholder="00000001" data-testid="input-numero-comprobante" />
+                  <Input value={form.numeroComprobante} onChange={(e) => f("numeroComprobante", e.target.value)} placeholder="00000001" disabled={isSettledInvoiceEdit} data-testid="input-numero-comprobante" />
                 </div>
                 <div>
                   <Label>Fecha de Emisión</Label>
-                  <Input type="date" value={form.fechaEmision} onChange={(e) => { f("fechaEmision", e.target.value); f("periodo", calcPeriodo(e.target.value)); }} data-testid="input-fecha-emision" />
+                  <Input type="date" value={form.fechaEmision} onChange={(e) => { f("fechaEmision", e.target.value); f("periodo", calcPeriodo(e.target.value)); }} disabled={isSettledInvoiceEdit} data-testid="input-fecha-emision" />
                 </div>
                 <div>
                   <Label>Período</Label>
-                  <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" data-testid="input-periodo" />
+                  <Input value={form.periodo} onChange={(e) => f("periodo", e.target.value)} placeholder="MM/AAAA" disabled={isSettledInvoiceEdit} data-testid="input-periodo" />
                 </div>
               </div>
               {isRetencion && (
@@ -3009,7 +3018,9 @@ export function OrdenesDePagoTab() {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function PurchaseInvoices() {
-  const { user } = useAuth();
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission?.("api:purchase-invoices:write") ?? false;
+  const canEditAll = hasPermission?.(PURCHASE_INVOICE_EDIT_ALL_PERMISSION) ?? false;
   const [tab, setTab] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("tab") || "comprobantes";
@@ -3294,8 +3305,8 @@ export default function PurchaseInvoices() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              {canCorrectPurchaseInvoiceMetadata(inv.tipoComprobante,inv.estado) && <Button variant="ghost" size="icon" title="Corregir datos" data-testid={`btn-correct-invoice-${inv.id}`} onClick={()=>setMetadataInvoice(inv)}><Pencil className="h-4 w-4 text-muted-foreground"/></Button>}
-                              {(canEditPurchaseInvoice(user?.role, inv.estado) || isPurchaseRemito(inv.tipoComprobante) && inv.estado !== "anulado") && (
+                              {canWrite && canCorrectPurchaseInvoiceMetadata(inv.tipoComprobante,inv.estado) && <Button variant="ghost" size="icon" title="Corregir datos" data-testid={`btn-correct-invoice-${inv.id}`} onClick={()=>setMetadataInvoice(inv)}><Pencil className="h-4 w-4 text-muted-foreground"/></Button>}
+                              {(canWrite && (isPurchaseRemito(inv.tipoComprobante) ? inv.estado !== "anulado" : canEditPurchaseInvoice(inv.estado, canEditAll))) && (
                                 <>
                                   <Button
                                     variant="ghost" size="icon"

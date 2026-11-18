@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit as balance } from "./purchase-invoice-edit";
 
 describe("purchase invoice historical correction", () => {
-  it("grants only the administration lead the state exception", () => {
-    for (const state of ["pendiente", "registrado", "anulado"]) expect(canEditPurchaseInvoice("resp_administracion", state)).toBe(true);
-    for (const state of ["pagado", "parcial"]) expect(canEditPurchaseInvoice("resp_administracion", state)).toBe(false);
-    for (const role of [undefined, "admin", "manager", "resp_deposito", "reception"]) {
-      expect(canEditPurchaseInvoice(role, "pendiente")).toBe(true);
-      for (const state of ["parcial", "pagado", "registrado", "anulado"]) expect(canEditPurchaseInvoice(role, state)).toBe(false);
+  it("requires an explicit permission for every non-pending state", () => {
+    expect(canEditPurchaseInvoice("pendiente")).toBe(true);
+    for (const state of ["parcial", "pagado", "registrado", "anulado"]) {
+      expect(canEditPurchaseInvoice(state)).toBe(false);
+      expect(canEditPurchaseInvoice(state, true)).toBe(true);
     }
+    expect(canEditPurchaseInvoice("unknown", true)).toBe(false);
   });
   it("preserves settled amounts when correcting a partial invoice", () => {
     const original = { estado: "parcial", monto_total: "100.00", saldo_pendiente: "40.00" };

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-edit";
 
 /**
  * Etapa 1 del ABM de usuarios: role_permissions reemplaza los arrays de
@@ -45,6 +46,18 @@ afterEach(() => {
   dbState.rows = [];
   // Cada test deja el caché en un estado conocido para el siguiente.
   setRolePermissionsCacheForTests([]);
+});
+
+describe("purchase invoice exceptional edit permission", () => {
+  it("seeds only the administration lead, with no implicit administrator access", () => {
+    expect(API_RESOURCE_PERMISSIONS[PURCHASE_INVOICE_EDIT_ALL_PERMISSION]).toEqual(["resp_administracion"]);
+    expect(RESOURCE_KEY_LABELS[PURCHASE_INVOICE_EDIT_ALL_PERMISSION].label).toContain("incluidos pagados");
+    setRolePermissionsCacheForTests([{ role: "resp_administracion", resourceKey: PURCHASE_INVOICE_EDIT_ALL_PERMISSION }]);
+    expect(hasPermission("resp_administracion", PURCHASE_INVOICE_EDIT_ALL_PERMISSION)).toBe(true);
+    expect(hasPermission("admin", PURCHASE_INVOICE_EDIT_ALL_PERMISSION)).toBe(false);
+    setRolePermissionsCacheForTests([]);
+    expect(hasPermission("resp_administracion", PURCHASE_INVOICE_EDIT_ALL_PERMISSION)).toBe(false);
+  });
 });
 
 describe("hasPermission / permissionsForRole", () => {

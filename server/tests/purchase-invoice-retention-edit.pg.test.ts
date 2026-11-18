@@ -264,6 +264,7 @@ runIfDatabaseIsConfigured("PostgreSQL real: edición de retenciones en comproban
       // Synthetic settled fixture: no operational payment is created.
       await testPool!.query("UPDATE purchase_invoices SET estado='pagado', saldo_pendiente=0 WHERE id=$1", [id]);
       const beforeItems = await testPool!.query("SELECT * FROM payment_order_items WHERE invoice_id=$1", [id]);
+      (await import('../permissions')).setRolePermissionsCacheForTests([]);
       for(const role of ['manager','resp_administracion','admin']){
         expect((await requestInvoice('PATCH',`/api/purchase-invoices/${id}`,{cuentaContableId:accountId,montoNeto:'120'},role)).status).toBe(403);
       }
