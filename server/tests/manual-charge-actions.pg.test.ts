@@ -501,6 +501,45 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
       .toMatchObject({ eligible: false, reason: expect.stringContaining("origen manual único") });
   });
 
+  async function commercialGroupFixture() {
+    const f=await createFixture({amount:'7500.00'}),groupId=randomUUID();
+    await testPool.query("INSERT INTO groups(id,status) VALUES($1,'inhouse')",[groupId]);
+    await testPool.query('INSERT INTO group_reservation_links(id,reservation_id,group_id) VALUES($1,$2,$3)',[randomUUID(),f.reservationId,groupId]);
+    return {...f,groupId};
+  }
+  it("lets Commercial edit a group's manual charge with ledger and audit updates, without void access",async()=>{
+    const f=await commercialGroupFixture(),headers={'x-test-role':'comercial'},path=`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`;
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`,undefined,headers);
+    expect(actions.status).toBe(200);expect(actions.body.charges[0]).toMatchObject({eligible:true,canEdit:true});
+    const changed=await request('PATCH',path,{...bodyFor({amount:'7500.00'}),description:'Cochera comercial',amount:'8000.00'},headers);
+    expect(changed.status,JSON.stringify(changed.body)).toBe(200);expect(changed.body).toMatchObject({description:'Cochera comercial',amount:'8000.00'});
+    expect((await testPool.query('SELECT amount::text,description FROM folio_movements WHERE id=$1',[f.movementId])).rows[0]).toEqual({amount:'8000.00',description:'Cochera comercial'});
+    expect((await testPool.query('SELECT balance::text FROM folios WHERE id=$1',[f.folioId])).rows[0].balance).toBe('8000.00');
+    expect((await testPool.query("SELECT id FROM audit_logs WHERE entity_type='reservation_manual_extra' AND entity_id=$1",[f.chargeId])).rows).toHaveLength(1);
+    expect((await request('POST',path+'/anular',{...bodyFor({description:'Cochera comercial',amount:'8000.00'})},headers)).status).toBe(403);
+    expect((await request('PATCH',`/api/charges/${f.chargeId}/anular`,{motivoAnulacion:'No autorizado'},headers)).status).toBe(403);
+  });
+  it.each(['manual','restaurant','orphan-link'])('keeps Commercial editing restricted to real groups (%s)',async mode=>{
+    const f=mode==='restaurant'?await restaurantFixture():await createFixture(),headers={'x-test-role':'comercial'};
+    if(mode==='orphan-link')await testPool.query('INSERT INTO group_reservation_links(id,reservation_id) VALUES($1,$2)',[randomUUID(),f.reservationId]);
+    const before=(await testPool.query('SELECT description,amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0];
+    expect((await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`,undefined,headers)).status).toBe(403);
+    const changed=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(before),description:'No debería guardar',amount:'100.00'},headers);
+    expect(changed.status).toBe(403);expect((await testPool.query('SELECT description,amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0]).toEqual(before);
+  });
+  it('retains the existing Restaurant group review rule for Commercial',async()=>{
+    const f=await groupRestaurantFixture(),headers={'x-test-role':'comercial'},before=await restaurantSnapshot();
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`,undefined,headers);expect(actions.status).toBe(200);expect(actions.body.charges[0].canEdit).toBe(false);
+    const changed=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Restaurant grupo corregido',amount:'250.00'},headers);expect(changed.status,JSON.stringify(changed.body)).toBe(409);expect(await restaurantSnapshot()).toEqual(before);
+  });
+  it.each(['closed-room','closed-folio','invoiced'])('retains existing Commercial group protections (%s)',async mode=>{
+    const f=await commercialGroupFixture(),headers={'x-test-role':'comercial'};
+    if(mode==='closed-room')await testPool.query("UPDATE reservations SET status='checked_out' WHERE id=$1",[f.reservationId]);
+    if(mode==='closed-folio')await testPool.query("UPDATE folios SET status='closed' WHERE id=$1",[f.folioId]);
+    if(mode==='invoiced')await testPool.query("INSERT INTO sales_invoices(estado,reserva_id,source_charge_ids,monto_total,monto_acreditado) VALUES('emitida',$1,$2,7500,0)",[f.reservationId,JSON.stringify([f.chargeId])]);
+    const changed=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor({amount:'7500.00'}),description:'No debería guardar',amount:'8000.00'},headers);expect(changed.status).toBe(mode==='invoiced'?409:403);expect((await testPool.query('SELECT amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0].amount).toBe('7500.00');
+  });
+
   it("allows Jefe de Recepción to inspect and edit charges without extending void permissions", async () => {
     const fixture = await createFixture();
     const role = { "x-test-role": "jefe_recepcion" };
