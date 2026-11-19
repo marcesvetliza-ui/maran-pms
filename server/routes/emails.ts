@@ -1,3 +1,4 @@
+import { confirmationBodyTemplate, withoutAssignedRoom } from "@shared/confirmationEmail";
 import type { Express } from "express";
 import { db,withDatabaseTransaction } from "../db";
 import {
@@ -65,7 +66,7 @@ export function registerEmailRoutes(app: Express) {
       // Never expose API key, SMTP password, or raw base64 images — send booleans only
       if (cfg) {
         const { apiKey, smtpPass, emailBannerBase64, emailFooterBase64, ...safe } = cfg;
-        res.json({ ...safe, apiKeySet: !!apiKey, smtpPassSet: !!smtpPass, bannerImageSet: !!emailBannerBase64, footerImageSet: !!emailFooterBase64 });
+        res.json({ ...safe, confirmationBody: confirmationBodyTemplate(safe.confirmationBody), confirmationSubject: withoutAssignedRoom(safe.confirmationSubject), apiKeySet: !!apiKey, smtpPassSet: !!smtpPass, bannerImageSet: !!emailBannerBase64, footerImageSet: !!emailFooterBase64 });
       } else {
         res.json(null);
       }
@@ -92,6 +93,7 @@ export function registerEmailRoutes(app: Express) {
         if(checkoutDelayDays!==undefined&&(!Number.isInteger(checkoutDelayDays)||checkoutDelayDays<0||checkoutDelayDays>2))return res.status(400).json({error:'Elegí 0, 1 o 2 días después de la salida.'});
         if(checkoutSendTime!==undefined&&(typeof checkoutSendTime!=='string'||!/^([01]\d|2[0-3]):[0-5]\d$/.test(checkoutSendTime)))return res.status(400).json({error:'Ingresá una hora válida.'});
       }
+      if ((confirmationBody !== undefined && typeof confirmationBody !== "string") || (confirmationSubject !== undefined && typeof confirmationSubject !== "string")) return res.status(400).json({ error: "La plantilla de confirmación debe ser texto." });
       const updateData: Record<string, any> = {};
       if(checkoutDelayDays!==undefined)updateData.checkoutDelayDays=checkoutDelayDays;
       if(checkoutSendTime!==undefined)updateData.checkoutSendTime=checkoutSendTime;
@@ -102,8 +104,8 @@ export function registerEmailRoutes(app: Express) {
       if (fromName !== undefined) updateData.fromName = fromName;
       if (googleMapsUrl !== undefined) updateData.googleMapsUrl = googleMapsUrl;
       if (confirmationEnabled !== undefined) updateData.confirmationEnabled = confirmationEnabled;
-      if (confirmationSubject !== undefined) updateData.confirmationSubject = confirmationSubject;
-      if (confirmationBody !== undefined) updateData.confirmationBody = confirmationBody;
+      if (confirmationSubject !== undefined) updateData.confirmationSubject = withoutAssignedRoom(confirmationSubject);
+      if (confirmationBody !== undefined) updateData.confirmationBody = confirmationBodyTemplate(confirmationBody);
       if (reminderEnabled !== undefined) updateData.reminderEnabled = reminderEnabled;
       if (reminderSubject !== undefined) updateData.reminderSubject = reminderSubject;
       if (reminderBody !== undefined) updateData.reminderBody = reminderBody;
@@ -125,7 +127,7 @@ export function registerEmailRoutes(app: Express) {
       });
       const [updated] = await db.select().from(emailConfig).where(eq(emailConfig.id, 1));
       const { apiKey: _k, smtpPass: _p, emailBannerBase64: _b, emailFooterBase64: _f, ...safe } = updated;
-      res.json({ ...safe, apiKeySet: !!_k, smtpPassSet: !!_p, bannerImageSet: !!_b, footerImageSet: !!_f });
+      res.json({ ...safe, confirmationBody: confirmationBodyTemplate(safe.confirmationBody), confirmationSubject: withoutAssignedRoom(safe.confirmationSubject), apiKeySet: !!_k, smtpPassSet: !!_p, bannerImageSet: !!_b, footerImageSet: !!_f });
     } catch (e) {
       res.status(500).json({ error: "Error al guardar configuración" });
     }

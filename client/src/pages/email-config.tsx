@@ -44,6 +44,7 @@ const VARS_COMMON = [
   "{nombre_huesped}", "{numero_habitacion}", "{fecha_checkin}", "{fecha_checkout}", "{codigo_reserva}",
 ];
 const VARS_PREARRIVAL = [...VARS_COMMON, "{link_webcheckin}"];
+const VARS_CONFIRMATION = [...VARS_COMMON.filter(v => v !== "{numero_habitacion}"), "{tipo_habitacion}", "{link_webcheckin}"];
 const VARS_CHECKOUT = [...VARS_COMMON, "{link_encuesta}", "{link_google_maps}"];
 
 function VarChips({ vars }: { vars: string[] }) {
@@ -195,11 +196,11 @@ export default function EmailConfigPage() {
               key: "confirmation",
               label: "Email de confirmación",
               icon: CheckCircle2,
-              desc: "Se envía automáticamente cuando se confirma una reserva",
+              desc: "Se envía al confirmar la reserva con la confirmación PDF adjunta y el enlace al pre check-in. No incluye el número de habitación.",
               enabledField: "confirmationEnabled",
               subjectField: "confirmationSubject",
               bodyField: "confirmationBody",
-              vars: VARS_PREARRIVAL,
+              vars: VARS_CONFIRMATION,
             },
             {
               key: "reminder",

@@ -1,3 +1,5 @@
+import { generateReservationConfirmationPdf } from "./reservationConfirmationPdf";
+import { confirmationBodyTemplate, withoutAssignedRoom } from "@shared/confirmationEmail";
 import { db } from "./db";
 import { emailConfig, emailLogs, surveyTokens, reservations, guests, rooms, type WebCheckin } from "@shared/schema";
 import { eq } from "drizzle-orm";
@@ -138,7 +140,10 @@ async function getConfig() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Send via Resend REST API (supports HTML)
 // ─────────────────────────────────────────────────────────────────────────────
+type EmailAttachment = { filename: string; content: Buffer; contentType?: string };
+
 async function sendViaResend(opts: {
+  attachments?: EmailAttachment[];
   apiKey: string;
   from: string;
   to: string;
@@ -159,6 +164,7 @@ async function sendViaResend(opts: {
         subject: opts.subject,
         text: opts.text,
         html: opts.html,
+        ...(opts.attachments?.length ? { attachments: opts.attachments.map(a => ({ filename: a.filename, content: a.content.toString("base64") })) } : {}),
       }),
     });
     if (!res.ok) {
@@ -175,6 +181,7 @@ async function sendViaResend(opts: {
 // Send via SMTP (Gmail / cualquier servidor) — supports HTML
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendViaSmtp(opts: {
+  attachments?: EmailAttachment[];
   host: string;
   port: number;
   secure: boolean;
@@ -200,6 +207,7 @@ async function sendViaSmtp(opts: {
       subject: opts.subject,
       text: opts.text,
       html: opts.html,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     });
     return { ok: true };
   } catch (e: any) {
@@ -230,6 +238,7 @@ async function logEmail(opts: {
 // Core send function — routes to Resend or SMTP, always sends HTML + text
 // ─────────────────────────────────────────────────────────────────────────────
 async function sendEmail(opts: {
+  attachments?: EmailAttachment[];
   reservationId: string;
   type: "confirmation" | "reminder" | "checkout";
   to: string;
@@ -265,13 +274,14 @@ async function sendEmail(opts: {
       subject: opts.subject,
       text: opts.body,
       html,
+      attachments: opts.attachments,
     });
   } else {
     if (!cfg.apiKey) {
       await logEmail({ ...opts, status: "skipped", recipientEmail: opts.to, errorMessage: "Resend: API key no configurada" });
       return;
     }
-    result = await sendViaResend({ apiKey: cfg.apiKey, from, to: opts.to, subject: opts.subject, text: opts.body, html });
+    result = await sendViaResend({ apiKey: cfg.apiKey, from, to: opts.to, subject: opts.subject, text: opts.body, html, attachments: opts.attachments });
   }
 
   if (result.ok) {
@@ -379,7 +389,7 @@ export async function sendConfirmationEmail(reservationId: string): Promise<void
     }
     const data = await getReservationData(reservationId);
     if (!data) return;
-    const { reservation, guest, room } = data;
+    const { reservation, guest } = data;
     if (!["confirmed", "web_checkin"].includes(reservation.status)) {
       await logEmail({ reservationId, type: "confirmation", status: "skipped", errorMessage: "La reserva ya no está pendiente de ingreso" });
       return;
@@ -397,10 +407,12 @@ export async function sendConfirmationEmail(reservationId: string): Promise<void
       if (!(error instanceof WebCheckinAccessError)) throw error;
     }
     const link = !checkin || checkin.status === "completed" ? "" : `${publicHotelBaseUrl()}/web-checkin/${checkin.token}`;
+    const pdf = await generateReservationConfirmationPdf(reservationId, { reservation, guest });
+    if (!pdf) throw new Error("No se pudo generar la confirmación adjunta: reserva no encontrada");
     const vars = {
       link_webcheckin: link,
       nombre_huesped: `${guest.firstName} ${guest.lastName}`,
-      numero_habitacion: room?.roomNumber ?? "-",
+      tipo_habitacion: pdf.roomTypeName,
       fecha_checkin: fmtDate(reservation.checkInDate),
       fecha_checkout: fmtDate(reservation.checkOutDate),
       codigo_reserva: reservation.reservationCode ?? reservation.id,
@@ -408,12 +420,14 @@ export async function sendConfirmationEmail(reservationId: string): Promise<void
     await sendEmail({
       reservationId,
       type: "confirmation",
+      attachments: [{ filename: pdf.filename, content: pdf.content, contentType: "application/pdf" }],
       to: email,
-      subject: interpolate(cfg.confirmationSubject, vars),
-      body: interpolate(withWebCheckinInvitation(cfg.confirmationBody, link, checkin?.status === "completed"), vars),
+      subject: interpolate(withoutAssignedRoom(cfg.confirmationSubject), vars),
+      body: interpolate(withWebCheckinInvitation(confirmationBodyTemplate(cfg.confirmationBody), link, checkin?.status === "completed"), vars),
     });
   } catch (e) {
     console.error("[email] sendConfirmationEmail error:", e);
+    await logEmail({ reservationId, type: "confirmation", status: "failed", errorMessage: e instanceof Error ? e.message : "Error al preparar la confirmación adjunta" }).catch(() => undefined);
   }
 }
 

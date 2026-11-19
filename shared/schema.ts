@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIRMATION_BODY } from "./confirmationEmail";
 import type {InventoryAreaKey} from "./inventoryAreas";
 import type { GuestStayProfile, StaySelection } from "./guestStayProfile";
 import type { LostFoundShippingDetails } from "./lostFoundDelivery";
@@ -3440,7 +3441,7 @@ export const emailConfig = pgTable("email_config", {
   // Confirmation email
   confirmationEnabled: boolean("confirmation_enabled").notNull().default(true),
   confirmationSubject: text("confirmation_subject").notNull().default("Confirmación de tu reserva — Maran Suites & Towers"),
-  confirmationBody: text("confirmation_body").notNull().default("Hola {nombre_huesped},\n\nTu reserva ha sido confirmada. Te esperamos el {fecha_checkin} en la habitación {numero_habitacion}.\n\nCheck-in: {fecha_checkin}\nCheck-out: {fecha_checkout}\nHabitaciones: {numero_habitacion}\n\n¡Nos vemos pronto!\nMaran Suites & Towers"),
+  confirmationBody: text("confirmation_body").notNull().default(DEFAULT_CONFIRMATION_BODY),
   // 2-day reminder email
   reminderEnabled: boolean("reminder_enabled").notNull().default(true),
   reminderSubject: text("reminder_subject").notNull().default("Tu estadía se acerca — Maran Suites & Towers"),
