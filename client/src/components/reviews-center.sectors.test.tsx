@@ -199,3 +199,56 @@ it("edita encuestas por sector y permite agregar una pregunta abierta exclusiva"
     ).toBe(true),
   );
 });
+
+it("retira una pregunta solo del sector elegido tras confirmar y permite cancelar", async () => {
+  const area = {
+    key: "cleanliness",
+    name: "Limpieza compartida",
+    question: "¿Cómo encontraste la limpieza?",
+    sectors: ["hotel", "spa"],
+    questionType: "rating",
+    active: true,
+    inSurvey: true,
+    sortOrder: 1,
+    notificationArea: "housekeeping",
+  };
+  state.request.mockImplementation(async (_method, url) =>
+    Response.json(
+      url.includes("/areas")
+        ? [area]
+        : url.includes("/options")
+          ? { rooms: [], roomTypes: [], channels: [] }
+          : url.includes("/analytics")
+            ? {}
+            : { items: [], total: 0, pageSize: 50 },
+    ),
+  );
+  show();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("tab", { name: "Áreas y preguntas" }));
+  await user.click(await screen.findByRole("button", { name: "Editar" }));
+  await user.click(screen.getByRole("button", { name: "Eliminar de Hotel" }));
+  expect(screen.getByRole("alertdialog")).toHaveTextContent(
+    "Las respuestas ya recibidas se conservan",
+  );
+  expect(screen.getByRole("alertdialog")).toHaveTextContent(
+    "Seguirá disponible en: SPA",
+  );
+  await user.click(screen.getByRole("button", { name: "Cancelar" }));
+  expect(state.request.mock.calls.some(([method]) => method === "DELETE")).toBe(
+    false,
+  );
+  await user.click(screen.getByRole("button", { name: "Eliminar de Hotel" }));
+  await user.click(
+    screen.getByRole("button", { name: "Confirmar eliminación" }),
+  );
+  await waitFor(() =>
+    expect(state.request).toHaveBeenCalledWith(
+      "DELETE",
+      "/api/reviews/areas/cleanliness/surveys/hotel",
+    ),
+  );
+  expect(state.request.mock.calls.some(([method]) => method === "POST")).toBe(
+    false,
+  );
+});

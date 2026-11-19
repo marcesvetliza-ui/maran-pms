@@ -355,6 +355,181 @@ suite("Sector surveys, personal sharing and enforced sector access", () => {
       await pool!.query("DELETE FROM review_areas WHERE key=$1", [key]);
     }
   });
+
+  it("removes a shared question from one survey with configuration permission and preserves history", async () => {
+    const key = "test_remove_" + randomUUID().replaceAll("-", "");
+    const area = {
+      key,
+      name: "Pregunta compartida",
+      question: "¿Cómo evaluás el servicio?",
+      questionType: "rating",
+      active: true,
+      inSurvey: true,
+      sectors: ["hotel", "spa"],
+      sortOrder: 10,
+      notificationArea: "reception",
+    };
+    try {
+      expect(
+        (await call("/api/reviews/areas", "POST", area, "admin")).status,
+      ).toBe(200);
+      const f = await form("hotel");
+      const stale = await form("hotel");
+      expect(
+        (
+          await call(
+            "/api/survey/general/hotel",
+            "POST",
+            answer(f, {
+              areaRatings: { [key]: 2 },
+              areaQuestions: { [key]: area.question },
+            }),
+          )
+        ).status,
+      ).toBe(200);
+      const review = (
+        await pool!.query(
+          "SELECT id,area_ratings,area_questions,followup_status FROM guest_reviews WHERE generic_response_id IN(SELECT id FROM survey_public_responses WHERE submission_key=$1::uuid)",
+          [keys[0]],
+        )
+      ).rows[0];
+      const reservationId = await stay();
+      const invitation = await call(
+        `/api/reservations/${reservationId}/survey-link`,
+        "POST",
+        {},
+        "reception",
+      );
+      const token = invitation.body.url.split("/").pop();
+      expect(
+        (await call(`/api/survey/${token}`)).body.areas.some(
+          (a: any) => a.key === key,
+        ),
+      ).toBe(true);
+      const endpoint = `/api/reviews/areas/${key}/surveys/hotel`;
+      expect((await call(endpoint, "DELETE")).status).toBe(401);
+      expect((await call(endpoint, "DELETE", undefined, "spa")).status).toBe(
+        403,
+      );
+      expect(
+        (await call(endpoint, "DELETE", undefined, "admin")).body,
+      ).toMatchObject({ ok: true, alreadyRemoved: false });
+      expect((await form("hotel")).areas.some((a: any) => a.key === key)).toBe(
+        false,
+      );
+      expect((await form("spa")).areas.some((a: any) => a.key === key)).toBe(
+        true,
+      );
+      expect(
+        (await call(`/api/survey/${token}`)).body.areas.some(
+          (a: any) => a.key === key,
+        ),
+      ).toBe(false);
+
+      expect(
+        (await call(endpoint, "DELETE", undefined, "admin")).body
+          .alreadyRemoved,
+      ).toBe(true);
+      expect(
+        (
+          await pool!.query(
+            "SELECT count(*)::int AS n FROM audit_logs WHERE entity_id=$1 AND details::jsonb->>'operation'='remove_from_survey'",
+            [key],
+          )
+        ).rows[0].n,
+      ).toBe(1);
+      expect(
+        (
+          await call(
+            "/api/survey/general/hotel",
+            "POST",
+            answer(stale, { areaRatings: { [key]: 4 } }),
+          )
+        ).status,
+      ).toBe(400);
+      const after = (
+        await pool!.query(
+          "SELECT id,area_ratings,area_questions,followup_status FROM guest_reviews WHERE id=$1",
+          [review.id],
+        )
+      ).rows[0];
+      expect(after).toEqual(review);
+      expect(
+        (
+          await call(
+            `/api/reviews/areas/${key}/surveys/spa`,
+            "DELETE",
+            undefined,
+            "admin",
+          )
+        ).body.alreadyRemoved,
+      ).toBe(false);
+      const stored = (
+        await pool!.query(
+          "SELECT name,question,question_type,active,in_survey,sectors FROM review_areas WHERE key=$1",
+          [key],
+        )
+      ).rows[0];
+      expect(stored).toMatchObject({
+        name: area.name,
+        question: area.question,
+        question_type: "rating",
+        active: true,
+        in_survey: false,
+        sectors: ["spa"],
+      });
+      await ensureReviewsSchema();
+      expect((await form("spa")).areas.some((a: any) => a.key === key)).toBe(
+        false,
+      );
+      expect(
+        (
+          await call(
+            "/api/reviews/areas",
+            "POST",
+            { ...area, sectors: ["spa"] },
+            "admin",
+          )
+        ).status,
+      ).toBe(200);
+      expect((await form("spa")).areas.some((a: any) => a.key === key)).toBe(
+        true,
+      );
+      expect(
+        (
+          await pool!.query(
+            "SELECT area_ratings,area_questions FROM survey_public_responses WHERE submission_key=$1::uuid",
+            [keys[0]],
+          )
+        ).rows[0],
+      ).toEqual({
+        area_ratings: { [key]: 2 },
+        area_questions: { [key]: area.question },
+      });
+      expect(
+        (
+          await call(
+            `/api/reviews/areas/${key}/surveys/invalid`,
+            "DELETE",
+            undefined,
+            "admin",
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await call(
+            "/api/reviews/areas/unknown_question/surveys/hotel",
+            "DELETE",
+            undefined,
+            "admin",
+          )
+        ).status,
+      ).toBe(404);
+    } finally {
+      await pool!.query("DELETE FROM review_areas WHERE key=$1", [key]);
+    }
+  });
   it("grants sector-scoped access without granting the legacy unrestricted review resources", async () => {
     const rows = (
       await pool!.query(
