@@ -45,6 +45,14 @@ export function withDatabaseTransaction<T>(action: () => Promise<T>): Promise<T>
   if (transactionContext.getStore()) return action();
   return rootDb.transaction((tx) => transactionContext.run(tx, action));
 }
+/** Consistent reporting snapshot, with database-enforced read-only access.
+ * Existing transactions (e.g. caller-owned fixtures) keep their own scope. */
+export function withReadOnlyDatabaseTransaction<T>(action: () => Promise<T>): Promise<T> {
+  if (transactionContext.getStore()) return action();
+  return rootDb.transaction(tx => transactionContext.run(tx, action), {
+    isolationLevel: "repeatable read", accessMode: "read only",
+  });
+}
 /** An isolated atomic operation, even when called within another transaction. */
 export function withDatabaseSavepoint<T>(action:()=>Promise<T>):Promise<T>{
   const executor=transactionContext.getStore()??rootDb;
