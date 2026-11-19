@@ -33,7 +33,14 @@ describe("credenciales cifradas de Channex", () => {
   it("falla si el ciphertext fue manipulado", () => {
     process.env.CHANNEX_CREDENTIALS_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString("base64");
     const encrypted = encryptChannexApiKey("secret");
-    const tampered = `${encrypted.slice(0, -2)}AA`;
+    const parts = encrypted.split(".");
+    const ciphertext = Buffer.from(parts[3], "base64");
+    // Replacing a random suffix with "AA" can leave it unchanged. Flip a
+    // decoded bit so this assertion always tests a real ciphertext alteration.
+    ciphertext[0] ^= 1;
+    parts[3] = ciphertext.toString("base64");
+    const tampered = parts.join(".");
+    expect(tampered).not.toBe(encrypted);
 
     expect(() => decryptChannexApiKey(tampered)).toThrow(/no se pudo descifrar/i);
   });
