@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "19 de noviembre de 2026 · Versión 1.5"
+date: "19 de noviembre de 2026 · Versión 1.6"
 lang: es-AR
 ---
 
 **Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. Marcelo confirmó el ingreso al PMS completo de Aurora; Brisa sigue pendiente de validación DNS. Las pruebas operativas remotas de estos PMS y su aceptación conjunta continúan abiertas.
 
-**Prioridad actual:** comprobar en Aurora la creación, edición y persistencia de una reserva ficticia; completar el dominio de Brisa y probar aislamiento, permisos y cierre de sesión entre ambos PMS. Después se ensayan actualización y recuperación independientes y se continúa por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** publicar la corrección de edición de alojamiento y comprobar en Aurora fechas, tarifas y observaciones de la reserva ya creada; completar el dominio de Brisa y probar aislamiento, permisos y cierre de sesión entre ambos PMS. Después se ensayan actualización y recuperación independientes y se continúa por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -103,6 +103,10 @@ La [ficha de publicación](https://github.com/marcesvetliza-ui/maran-pms/blob/fi
 Marcelo informó que ya pudo entrar al PMS de Aurora y que Brisa continúa validando el DNS. Esto acredita el ingreso según su prueba manual; todavía no acredita la persistencia de nuevas reservas, los permisos ni el aislamiento de los PMS publicados. La [evidencia de avance](evidencia/pms-publicacion-2026-11-19.json) conserva esa distinción y deja sin confirmar las revisiones exactas servidas por Railway.
 
 La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, permite generar la ficha para **Hotel brisa** mediante una plantilla explícita, conservando el establecimiento existente. Sus cuatro verificaciones de GitHub aprobaron las pruebas del panel y del PMS, el navegador y ambas imágenes. Es evidencia del código candidato; no identifica por sí sola el código instalado.
+
+## 2.7 Corrección de edición preparada el 19 de noviembre
+
+Marcelo confirmó la creación y el cambio de habitación de una reserva en Aurora y detectó el bloqueo de fechas y tarifas. La [PR 146](https://github.com/marcesvetliza-ui/maran-pms/pull/146), revisión `f5005dc7`, incorpora el permiso omitido de QA y permite las rutas de edición de alojamiento. La actualización conserva la identidad, el esquema, las reservas y las revocaciones posteriores del permiso. Las pruebas del navegador verificaron tarifas, extensión de fechas y observaciones después de recargar. La [evidencia](evidencia/pms-edicion-2026-11-19.json) mantiene pendiente la publicación y aceptación remota de esta corrección. Consumos, pagos y facturación continúan fuera de la etapa habilitada; la pantalla lo informa.
 
 # 3. Organización, responsables y forma de seguimiento
 
