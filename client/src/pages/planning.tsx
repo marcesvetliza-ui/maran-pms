@@ -51,8 +51,6 @@ import {
   getSourceColor, getSourceBg, getPlanningCellClasses, getGroupCellStyle, getSourceLabel,
   getPlanningStatusForDate, isPlanningRoomOccupied, ROOM_STATUS_OPTIONS, Legend,
 } from "@/lib/planning-utils";
-import { QuickReservationDialog } from "@/components/planning-quick-reservation";
-import type { QuickReservationData } from "@/components/planning-quick-reservation";
 import { ReservationDetailModal } from "@/components/planning-reservation-detail";
 import {
   PlanningMoveConfirmDialog,
@@ -191,8 +189,6 @@ export default function PlanningPage() {
     };
   });
 
-  const [quickReservationOpen, setQuickReservationOpen] = useState(false);
-  const [selectedCell, setSelectedCell] = useState<QuickReservationData | null>(null);
   const [reservationDetailOpen, setReservationDetailOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
 

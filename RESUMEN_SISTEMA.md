@@ -43,7 +43,7 @@ rooms.tsx          (628 líneas)  - Gestión de habitaciones
 packages.tsx       (571 líneas)  - Paquetes comerciales
 rate-plans.tsx     (520 líneas)  - Planes tarifarios
 ota-channels.tsx   (482 líneas)  - Canales OTA
-new-reservation.tsx(451 líneas)  - Formulario reserva rápida
+Reserva rápida retirada: la creación usa el formulario compartido de Reservas y Planning
 companies.tsx      (441 líneas)  - Base de datos de empresas
 check-out.tsx      (255 líneas)  - Proceso de check-out
 ```

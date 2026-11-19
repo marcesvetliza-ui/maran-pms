@@ -3,7 +3,7 @@ import { useVerifiedSession } from "@/hooks/use-verified-session";
 import { SessionConnectionNotice } from "@/components/session-connection-notice";
 import { canViewCash } from "@shared/cash-user-access";
 import { useState, useEffect, useRef, createContext, useContext, useCallback, lazy, Suspense } from "react";
-import { Switch, Route, useRoute, useLocation } from "wouter";
+import { Switch, Route, Redirect, useRoute, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -31,7 +31,6 @@ const CheckOutPage = lazy(() => import("@/pages/check-out"));
 const RatePlansPage = lazy(() => import("@/pages/rate-plans"));
 const OTAChannelsPage = lazy(() => import("@/pages/ota-channels"));
 const ChannexPage = lazy(() => import("@/pages/ota-manager"));
-const NewReservationPage = lazy(() => import("@/pages/new-reservation"));
 const GroupsPage = lazy(() => import("@/pages/groups"));
 const GroupDetailPage = lazy(() => import("@/pages/group-detail"));
 const ReviewsPage = lazy(() => import("@/pages/reviews"));
@@ -220,6 +219,15 @@ function CashAccessRoute({ component: Component }: { component: React.ComponentT
   return canViewCash(user?.username) ? <Component /> : <p className="p-6">Tu cuenta no tiene acceso a cajas.</p>;
 }
 
+// Compatibility for old bookmarks: the retired form is never loaded.
+function RetiredQuickReservationEntry() {
+  const { user, hasPermission, permissionsReady } = useAuth();
+  if (!permissionsReady) return <PageLoader />;
+  return <Redirect to={hasPermission("sidebar:/reservations")
+    ? "/reservations?new=1"
+    : getRoleHomePage(user?.role || "")} replace />;
+}
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
@@ -230,7 +238,7 @@ function Router() {
         <Route path="/rooms" component={RoomsPage} />
         <Route path="/admin/room-types/integrity">{() => <PermissionRoute component={RoomTypeIntegrityPage} resourceKey="sidebar:/admin/room-types/integrity" />}</Route>
         <Route path="/reservations" component={ReservationsPage} />
-        <Route path="/new-reservation" component={NewReservationPage} />
+        <Route path="/new-reservation" component={RetiredQuickReservationEntry} />
         <Route path="/guests" component={GuestsPage} />
         <Route path="/groups" component={GroupsPage} />
         <Route path="/groups/:id" component={GroupDetailPage} />

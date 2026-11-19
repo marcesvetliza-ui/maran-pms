@@ -9,6 +9,7 @@ import {
   RESOURCE_KEY_LABELS,
   grantPermission,
   revokePermission,
+  isRetiredResourceKey,
 } from "../permissions";
 
 const KNOWN_RESOURCE_KEYS = new Set(Object.keys(RESOURCE_KEY_LABELS));
@@ -38,7 +39,7 @@ export function registerAdminPermissionsRoutes(app: Express) {
         resourceKey,
         ...meta,
       }));
-      res.json({ roles: ALL_SYSTEM_ROLES, catalog, grants: rows });
+      res.json({ roles: ALL_SYSTEM_ROLES, catalog, grants: rows.filter(row => !isRetiredResourceKey(row.resourceKey)) });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

@@ -102,6 +102,16 @@ describe("admin role-permissions routes", () => {
     expect(body.grants).toEqual([{ role: "reception", resourceKey: "sidebar:/reservations" }]);
   });
 
+  it("hides historical quick-reservation grants and refuses reactivation without deleting stored history",async()=>{
+    dbState.rows=[{role:'admin',resourceKey:'sidebar:/new-reservation'},{role:'reception',resourceKey:'sidebar:/reservations'}];
+    const before=structuredClone(dbState.rows);app=await startApp();
+    const response=await fetch(`${app.baseUrl}/api/admin/role-permissions`);const data=await response.json();
+    expect(data.catalog.some((r:any)=>r.resourceKey==='sidebar:/new-reservation')).toBe(false);
+    expect(data.grants).toEqual([{role:'reception',resourceKey:'sidebar:/reservations'}]);
+    const grant=await fetch(`${app.baseUrl}/api/admin/role-permissions/grant`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({role:'admin',resourceKey:'sidebar:/new-reservation'})});
+    expect(grant.status).toBe(400);expect(dbState.rows).toEqual(before);expect(auditMock).not.toHaveBeenCalled();
+  });
+
   it("reúne los cinco permisos de Revenue en una sección administrable", async () => {
     app = await startApp();
     const response = await fetch(`${app.baseUrl}/api/admin/role-permissions`);

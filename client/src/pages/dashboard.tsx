@@ -1,3 +1,4 @@
+import { useAuth } from "@/App";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { getLocalToday, getArgentinaToday, toArgentinaDateStr } from "@/lib/utils";
@@ -218,6 +219,7 @@ type InHouseEntry = {
 };
 
 export default function Dashboard() {
+  const { hasPermission } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [inHouseOpen, setInHouseOpen] = useLocalState(false);
@@ -615,14 +617,14 @@ export default function Dashboard() {
       <div>
         <h2 className="text-xl font-semibold mb-4">Acciones Rápidas</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <QuickActionCard
+          {hasPermission("sidebar:/reservations") && <QuickActionCard
             title="Nueva Reserva"
-            description="Crear una nueva reservación"
+            description="Crear desde el formulario de Reservas"
             icon={CalendarCheck}
-            href="/new-reservation"
+            href="/reservations?new=1"
             variant="primary"
             testId="action-new-reservation"
-          />
+          />}
           <QuickActionCard
             title="Check-in"
             description="Registrar llegada de huésped"
