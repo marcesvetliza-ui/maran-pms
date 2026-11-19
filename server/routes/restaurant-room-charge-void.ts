@@ -1,6 +1,6 @@
 import { roomChargeActionSupport as support } from "./manual-charge-actions";
 
-type Actor = { id: string; name: string; ipAddress: string };
+type Actor = { id: string; name: string; ipAddress: string; role?: string };
 
 /**
  * Cancels only a Restaurant charge's imputation to a room.
@@ -174,6 +174,7 @@ export async function editRestaurantRoomCharge(reservationId:string, chargeId:st
     try {
       const reservation=await support.getReservation(client,reservationId);
       if(!reservation)throw support.actionError(404,'Reserva no encontrada.');
+      support.assertChargeEditScope(reservation, actor.role);
       if(support.reservationIsClosed(reservation))throw support.actionError(403,'No se pueden editar cargos de una reserva o folio cerrado.');
       const folios=await client.query("SELECT id,status,closed_at FROM folios WHERE entity_type='reservation' AND entity_id=$1 FOR UPDATE",[reservationId]);
       if(folios.rows.length>1 || folios.rows.some(f=>f.status!=='open'||f.closed_at))throw support.actionError(409,'El folio requiere revisión antes de editar cargos.');

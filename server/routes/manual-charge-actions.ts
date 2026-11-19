@@ -7,7 +7,7 @@ import { requireAuth, requireRole } from "../auth";
 import { RESERVATION_CHARGE_VOID_ROLES } from "@shared/reservationChargePermissions";
 
 const MANUAL_CHARGE_ROLES = ["admin", "manager", "reception"] as const;
-const MANUAL_CHARGE_EDIT_ROLES = [...MANUAL_CHARGE_ROLES, "jefe_recepcion"] as const;
+const MANUAL_CHARGE_EDIT_ROLES = [...MANUAL_CHARGE_ROLES, "jefe_recepcion", "comercial"] as const;
 const MOTIVE_LIMIT = 500;
 const DESCRIPTION_LIMIT = 500;
 const MONEY_LIMIT_CENTS = 9_999_999_999n;
@@ -126,14 +126,20 @@ async function getReservation(client: PoolClient, reservationId: string) {
   await client.query('SELECT g.id FROM groups g JOIN group_reservation_links gl ON gl.group_id=g.id WHERE gl.reservation_id=$1 ORDER BY g.id FOR UPDATE OF g',[reservationId]);
 
   const result = await client.query(
-    `SELECT r.id, r.status, f.status AS folio_status, f.closed_at AS folio_closed_at
+    `SELECT r.id, r.status, f.status AS folio_status, f.closed_at AS folio_closed_at,
+            EXISTS(SELECT 1 FROM group_reservation_links gl JOIN groups g ON g.id=gl.group_id WHERE gl.reservation_id=r.id) AS group_linked
        FROM reservations r
        LEFT JOIN folios f ON f.entity_type = 'reservation' AND f.entity_id = r.id
       WHERE r.id = $1
       FOR UPDATE OF r`,
     [reservationId],
   );
-  return result.rows[0] as { id: string; status: string; folio_status: string | null; folio_closed_at: Date | null } | undefined;
+  return result.rows[0] as { id: string; status: string; folio_status: string | null; folio_closed_at: Date | null; group_linked: boolean } | undefined;
+}
+
+function assertChargeEditScope(reservation: {group_linked: boolean}, role?: string) {
+  if (role === "comercial" && !reservation.group_linked)
+    throw actionError(403, "Comercial puede editar cargos de reservas vinculadas a un grupo.");
 }
 
 function reservationIsClosed(reservation: { status: string; folio_status?: string | null; folio_closed_at?: Date | null }) {
@@ -313,9 +319,10 @@ async function writeAudit(
   );
 }
 
-async function loadActions(client: PoolClient, reservationId: string) {
+async function loadActions(client: PoolClient, reservationId: string, role?: string) {
   const reservation = await getReservation(client, reservationId);
   if (!reservation) throw actionError(404, "Reserva no encontrada.");
+  assertChargeEditScope(reservation, role);
   const result = await client.query(
     `SELECT id, reservation_id, description, amount::text, date::text, category, status,
             created_by, is_recurring, unit_amount::text, anulado_por, motivo_anulacion, anulado_at
@@ -352,7 +359,7 @@ async function mutateManualCharge(
   chargeId: string,
   operation: "edit" | "void",
   body: any,
-  actor: { id: string; name: string; ipAddress: string },
+  actor: { id: string; name: string; ipAddress: string; role?: string },
 ) {
   assertAllowedBody(body, operation);
   const motivo = parseReason(body);
@@ -380,6 +387,7 @@ async function mutateManualCharge(
     try {
       const reservation = await getReservation(client, reservationId);
       if (!reservation) throw actionError(404, "Reserva no encontrada.");
+      if (operation === "edit") assertChargeEditScope(reservation, actor.role);
       if (reservationIsClosed(reservation)) {
         throw actionError(403, "No se pueden modificar extras de una reserva cerrada o cancelada.");
       }
@@ -553,6 +561,7 @@ function requestActor(req: any) {
     id: String(user?.id ?? ""),
     name: String(user?.username ?? user?.fullName ?? ""),
     ipAddress: String(req.ip ?? req.socket?.remoteAddress ?? ""),
+    role: user?.role,
   };
 }
 
@@ -578,7 +587,7 @@ export function registerManualChargeActionRoutes(app: Express) {
         const result = await withReservationInvoiceLock(req.params.reservationId, async (client) => {
           await client.query("BEGIN");
           try {
-            const actions = await loadActions(client, req.params.reservationId);
+            const actions = await loadActions(client, req.params.reservationId, req.user?.role);
             await client.query("COMMIT");
             return actions;
           } catch (error) {
@@ -649,6 +658,6 @@ export const roomChargeActionSupport = {
   actionError, parseReason, parseExpected, cents, money, publicCharge,
   validateEditBody: (body: unknown): void => { assertAllowedBody(body, "edit"); },
   validateVoidBody: (body: unknown): void => { assertAllowedBody(body, "void"); },
-  withReservationInvoiceLock, getReservation, reservationIsClosed, getCharge,
+  withReservationInvoiceLock, getReservation, reservationIsClosed, getCharge, assertChargeEditScope,
   invoiceSourceConflict, recalculateFolio, writeAudit,
 };
