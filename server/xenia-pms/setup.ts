@@ -9,6 +9,23 @@ import {
   XENIA_QA_WRITE_RESOURCES,
 } from "../../shared/xeniaPms";
 import { assertXeniaPmsBinding } from "./binding";
+import { ACCOMMODATION_PERMISSION } from "../../shared/accommodationPermission";
+
+// Upgrade bound QA installations once. Later local revocations stay revoked.
+async function seedAccommodationPermission(connection: pg.PoolClient) {
+  const marker = await connection.query(
+    "INSERT INTO resource_permission_seeds(resource_key) VALUES($1) ON CONFLICT DO NOTHING RETURNING resource_key",
+    [ACCOMMODATION_PERMISSION],
+  );
+  if (marker.rows.length)
+    await connection.query(
+      `INSERT INTO role_permissions(role,resource_key)
+       SELECT role,$1 FROM role_permissions
+       WHERE resource_key='sidebar:/reservations' AND role IN ('admin','manager','reception')
+       ON CONFLICT DO NOTHING`,
+      [ACCOMMODATION_PERMISSION],
+    );
+}
 
 export const schemaDigest = (schema: string) =>
   createHash("sha256").update(schema).digest("hex");
@@ -42,6 +59,7 @@ export async function setupXeniaPms(config: XeniaPmsConfig, schema: string) {
         throw new Error(
           "La versión del esquema cambió; prepará una migración explícita antes de actualizar esta base.",
         );
+      await seedAccommodationPermission(connection);
       await connection.query("COMMIT");
       return { alreadyInitialized: true };
     }
@@ -118,6 +136,7 @@ export async function setupXeniaPms(config: XeniaPmsConfig, schema: string) {
           "INSERT INTO role_permissions(role,resource_key) VALUES($1,$2) ON CONFLICT DO NOTHING",
           [role, resource],
         );
+    await seedAccommodationPermission(connection);
     await connection.query(
       "INSERT INTO bed_types(id,code,name,is_active,display_order) VALUES('xenia-qa-bed','matrimonial','Matrimonial de prueba',true,1)",
     );

@@ -152,6 +152,56 @@ test("a new operational database is prepared with fictional rooms and preserved 
   }
 });
 
+test("existing QA installations gain lodging editing once without resetting data or later revocations", async () => {
+  const pool = new pg.Pool({ connectionString: qa.databaseUrl });
+  const permission = "reservations:edit-accommodation";
+  try {
+    const before = (await pool.query("SELECT id,notes FROM rooms ORDER BY id"))
+      .rows;
+    await pool.query("DELETE FROM role_permissions WHERE resource_key=$1", [
+      permission,
+    ]);
+    await pool.query(
+      "DELETE FROM resource_permission_seeds WHERE resource_key=$1",
+      [permission],
+    );
+    assert.equal((await setupXeniaPms(qa, schema)).alreadyInitialized, true);
+    assert.deepEqual(
+      (
+        await pool.query(
+          "SELECT role FROM role_permissions WHERE resource_key=$1 ORDER BY role",
+          [permission],
+        )
+      ).rows.map((row) => row.role),
+      ["admin", "manager", "reception"],
+    );
+    assert.deepEqual(
+      (await pool.query("SELECT id,notes FROM rooms ORDER BY id")).rows,
+      before,
+    );
+    assert.equal(
+      (await pool.query("SELECT count(*) FROM reservations")).rows[0].count,
+      "1",
+    );
+    await pool.query(
+      "DELETE FROM role_permissions WHERE role='reception' AND resource_key=$1",
+      [permission],
+    );
+    await setupXeniaPms(qa, schema);
+    assert.equal(
+      (
+        await pool.query(
+          "SELECT count(*) FROM role_permissions WHERE role='reception' AND resource_key=$1",
+          [permission],
+        )
+      ).rows[0].count,
+      "0",
+    );
+  } finally {
+    await pool.end();
+  }
+});
+
 test("operational setup refuses central and demonstration databases without modifying them", async () => {
   const count = (
     await store.central.query("SELECT count(*) FROM xenia_control.principals")

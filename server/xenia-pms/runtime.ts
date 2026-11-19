@@ -172,6 +172,7 @@ async function localPrincipal(
 const readPaths = [
   "/api/auth/me",
   "/api/permissions/mine",
+  "/api/reservation-edit-permission",
   "/api/pos-configs",
   "/api/rooms",
   "/api/room-types",
@@ -198,6 +199,8 @@ const readPaths = [
 ];
 const writePath =
   /^(?:\/api\/guests(?:\/[^/]+)?|\/api\/reservations(?:\/[^/]+(?:\/(?:cancel|restore))?)?|\/api\/rooms(?:\/[^/]+)?|\/api\/room-types(?:\/[^/]+)?|\/api\/rate-plans(?:\/[^/]+)?)$/;
+const nightlyWritePath =
+  /^\/api\/reservations\/[^/]+\/nightly-pricing\/(?:preview|apply)$/;
 
 export function registerXeniaPmsRuntime(
   app: Express,
@@ -412,7 +415,10 @@ export function registerXeniaPmsRuntime(
           );
         if (
           !["POST", "PATCH", "DELETE"].includes(req.method) ||
-          !writePath.test(req.path)
+          !(
+            writePath.test(req.path) ||
+            (req.method === "POST" && nightlyWritePath.test(req.path))
+          )
         )
           throw new PmsAccessError(
             403,

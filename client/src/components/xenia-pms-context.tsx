@@ -39,8 +39,8 @@ export function XeniaPmsLogin() {
         </p>
         <p className="text-sm text-muted-foreground">
           Prueba de Alojamiento: planning, habitaciones, huéspedes y reservas
-          con datos ficticios. Cobros e integraciones pendientes de
-          habilitación.
+          con datos ficticios. Consumos, pagos, facturación e integraciones
+          pendientes de habilitación.
         </p>
         {installation.isError ? (
           <div role="alert" className="space-y-3">
@@ -71,6 +71,10 @@ export function XeniaPmsBanner() {
       <div>
         <strong>{data?.name ?? "Xenia"}</strong> · Alojamiento · Pruebas con
         datos ficticios
+        <p className="text-xs mt-1">
+          Consumos, pagos y facturación pendientes de habilitación en esta
+          prueba.
+        </p>
       </div>
       {data && (
         <a className="underline font-medium" href={data.controlOrigin}>
