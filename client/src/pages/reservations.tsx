@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import {SurveyInvitation} from "@/components/survey-invitation";
 import {ReservationCollectionReceipts} from '@/components/reservation-collection-receipts';
 import { GroupRoomAdvanceInvoice } from '@/components/group-room-advance-invoice';
@@ -2117,7 +2118,7 @@ export function ReservationFormDialog({
                               setPendingCompSearching(true);
                               try {
                                 const r = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
-                                setPendingCompHits(await r.json() || []);
+                                setPendingCompHits(((await r.json()) || []).filter(isSelectableGuest));
                               } catch { setPendingCompHits([]); } finally { setPendingCompSearching(false); }
                             }}
                           />
@@ -3501,7 +3502,7 @@ export function ReservationDetailDialog({
                             setCompanionSearching(true);
                             try {
                               const r = await fetch(`/api/guests/search?q=${encodeURIComponent(q)}`, { credentials: "include" });
-                              setCompanionHits(await r.json() || []);
+                              setCompanionHits(((await r.json()) || []).filter(isSelectableGuest));
                             } catch { setCompanionHits([]); } finally { setCompanionSearching(false); }
                           }}
                         />

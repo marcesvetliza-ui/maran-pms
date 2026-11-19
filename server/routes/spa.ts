@@ -2317,13 +2317,13 @@ export function registerSpaRoutes(app: Express) {
       const allGuests = await db.select().from(guests).where(visibleGuestCondition()).orderBy(desc(guests.fechaAlta));
       if (search) {
         const s = (search as string).toLowerCase();
-        return res.json(allGuests.filter((c: any) =>
+        return res.json(allGuests.filter((c: any) => c.active !== false && (
           (c.firstName || "").toLowerCase().includes(s) ||
           (c.lastName || "").toLowerCase().includes(s) ||
           (c.phone || "").includes(s) ||
           (c.email || "").toLowerCase().includes(s) ||
           (c.documentNumber || "").includes(s)
-        ));
+        )));
       }
       res.json(allGuests);
     } catch (error) {

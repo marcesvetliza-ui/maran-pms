@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import { GuestStayProfileEditor } from "@/components/guest-stay-profile";
 import { emptyStayProfile, guestStayProfileSchema } from "@shared/guestStayProfile";
 import { useState, useEffect, useRef } from "react";
@@ -134,6 +135,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
       return res.json();
     },
     enabled: debouncedQuery.length >= 2,
+    select: data => data.filter(isSelectableGuest),
   });
 
   const handleCreateGuest = () => {

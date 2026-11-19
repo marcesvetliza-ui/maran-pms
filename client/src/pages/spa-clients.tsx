@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Search, Pencil, Trash2, UserRound, Phone, Mail, FileText, Building2, User } from "lucide-react";
@@ -15,6 +16,7 @@ import { ProvinciaCiudadSelect } from "@/components/provincia-ciudad-select";
 import { VAT_CONDITION_LABELS } from "@/pages/guests";
 
 type SpaClient = {
+  active?: boolean;
   id: string;
   tipoPersona: string | null;
   firstName: string;
@@ -78,7 +80,7 @@ export default function SpaClientsPage() {
     queryKey: ["/api/spa/clients"],
   });
 
-  const filteredClients = clients.filter(c => {
+  const filteredClients = clients.filter(isSelectableGuest).filter(c => {
     const s = searchTerm.toLowerCase();
     return !s || c.firstName.toLowerCase().includes(s) ||
       (c.lastName || "").toLowerCase().includes(s) ||
@@ -208,7 +210,7 @@ export default function SpaClientsPage() {
             data-testid="input-search-spa-client"
           />
         </div>
-        <Badge variant="outline" data-testid="badge-client-count">{clients.length} clientes</Badge>
+        <Badge variant="outline" data-testid="badge-client-count">{clients.filter(isSelectableGuest).length} clientes</Badge>
       </div>
 
       {isLoading ? (

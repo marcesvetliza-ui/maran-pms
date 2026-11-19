@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import {billingPointOptions} from "@shared/billing-point-of-sale";
 import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
 import { canReviewCreditNoteAccount } from "@shared/credit-note-account-recovery";
@@ -1068,6 +1069,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     // El buscador ofrece huésped en las tres formas de este diálogo (label dice
     // "Buscar empresa, agencia o huésped"), no solo en Centro de Comprobantes.
     enabled: open && entitySearch.trim().length >= 2,
+    select: data => data.filter(isSelectableGuest),
   });
 
   // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
