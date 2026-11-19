@@ -1,3 +1,4 @@
+import { surveySectors } from "@shared/survey-sectors";
 import {
   Eye,
   ChevronRight,
@@ -74,6 +75,8 @@ export function ReviewInboxTable({
   onToday,
   showToday,
   dateRange,
+  compact = false,
+  restrictToAreas = false,
 }: {
   items: ReviewItem[];
   areas: ReviewArea[];
@@ -89,9 +92,19 @@ export function ReviewInboxTable({
   onToday: () => void;
   showToday: boolean;
   dateRange: boolean;
+  compact?: boolean;
+  restrictToAreas?: boolean;
 }) {
-  const keys = new Set(items.flatMap((r) => Object.keys(r.areaRatings)));
-  const columns = areas
+  const keys = new Set(
+    compact
+      ? []
+      : items
+          .flatMap((r) => Object.keys(r.areaRatings))
+          .filter(
+            (key) => !restrictToAreas || areas.some((a) => a.key === key),
+          ),
+  );
+  const columns = (compact ? [] : areas)
     .filter((a) => (a.active && a.inSurvey) || keys.has(a.key))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.key.localeCompare(b.key));
   for (const key of keys)
@@ -266,9 +279,13 @@ export function ReviewInboxTable({
                         )}
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground">
-                        {r.roomNumber
-                          ? `Hab. ${r.roomNumber}`
-                          : "Sin habitación"}
+                        {r.surveyKind === "generic"
+                          ? `Visita: ${formatDisplayDate(r.visitDate)}`
+                          : r.roomNumber
+                            ? `Hab. ${r.roomNumber}`
+                            : "Sin habitación"}
+                        {r.sector && ` · ${surveySectors[r.sector]}`}
+                        {r.surveyKind === "generic" && " · Genérica"}
                         {r.checkIn &&
                           ` · ${formatDisplayDate(r.checkIn)}–${formatDisplayDate(r.checkOut)}`}
                       </p>
@@ -345,7 +362,9 @@ export function ReviewInboxTable({
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/10 px-5 py-3">
             <p className="text-[11px] text-muted-foreground">
-              — Sin evaluar · Escala de 1 a 5 por área
+              {compact
+                ? "Elegí un sector para comparar puntajes por área."
+                : "— Sin evaluar · Escala de 1 a 5 por área"}
             </p>
             <div className="flex items-center gap-3">
               <span className="text-xs text-muted-foreground">

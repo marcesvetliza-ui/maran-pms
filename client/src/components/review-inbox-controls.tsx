@@ -75,7 +75,7 @@ export function ReviewInboxControls({
   const [expanded, setExpanded] = useState(false);
   const active = Object.entries(filters).filter(
     ([key, value]) =>
-      !["from", "to", "search"].includes(key) &&
+      !["from", "to", "search", "sector", "sectorMode"].includes(key) &&
       (key === "source"
         ? value !== "survey"
         : key === "dateField"
@@ -265,6 +265,15 @@ export function ReviewInboxControls({
               }}
             />
           </label>
+          <FilterSelect
+            label="Tipo de encuesta"
+            value={filters.surveyKind || ""}
+            onChange={(v) => onChange("surveyKind", v)}
+          >
+            <option value="">Todas</option>
+            <option value="personal">Vinculada a una estadía</option>
+            <option value="generic">Enlace genérico</option>
+          </FilterSelect>
           <FilterSelect
             label="Origen"
             value={filters.source}

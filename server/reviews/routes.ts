@@ -1,7 +1,19 @@
+import rateLimit from "express-rate-limit";
+import QRCode from "qrcode";
+import {
+  surveySectorSchema,
+  permittedReviewSectors,
+} from "@shared/survey-sectors";
+import {
+  publicSectorSurvey,
+  submitSectorSurvey,
+  sectorSharingLinks,
+} from "./sectorLinks";
 import type { Express, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "../db";
+import { hasPermission } from "../permissions";
 import { requireAuth, requirePermission } from "../auth";
 import {
   rating,
@@ -22,6 +34,7 @@ import {
 import {
   surveyDispatchForReservation,
   requestSurveyInvitation,
+  preparePersonalSurveyLink,
 } from "./dispatch";
 
 const followupSchema = z.object({
@@ -36,9 +49,11 @@ const areaSchema = z.object({
   question: z.string().trim().min(3).max(250),
   active: z.boolean(),
   inSurvey: z.boolean(),
+  sectors: z.array(surveySectorSchema).min(1).optional(),
   sortOrder: z.number().int().min(0).max(100),
   notificationArea: z.enum([
     "reception",
+    "events",
     "housekeeping",
     "maintenance",
     "restaurant",
@@ -49,6 +64,7 @@ const manualSchema = z
   .object({
     reservationId: z.string().min(1).max(80).nullable().optional(),
     guestName: z.string().trim().min(2).max(160).optional(),
+    sector: surveySectorSchema.default("hotel"),
     source: z.enum(["direct", "google", "booking", "other"]),
     rating,
     reviewDate: reviewDateKey,
@@ -79,11 +95,128 @@ const wrap =
     });
   };
 const actor = (req: Request) => req.user?.username || "operador";
-const read = [requireAuth, requirePermission("sidebar:/reviews")];
-const write = [...read, requirePermission("api:reviews:manage")];
+const scopesFor = (req: Request, manage = false) => {
+  const granted = (key: string) => hasPermission(req.user?.role || "", key);
+  const sectors = permittedReviewSectors(granted);
+  if (manage && !granted("api:reviews:manage")) return sectors;
+  return granted("sidebar:/reviews") ? undefined : sectors;
+};
+const scopeFor = (req: Request) => scopesFor(req);
+const reviewPermission =
+  (manage = false) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    const scopes = scopesFor(req, manage);
+    if (!scopes || scopes.length) return next();
+    return res
+      .status(403)
+      .json({ error: "Tu rol no tiene acceso a esta acción de Reseñas." });
+  };
+const read = [requireAuth, reviewPermission()];
+const write = [...read, reviewPermission(true)];
 const configure = [...read, requirePermission("api:reviews:configure")];
+const hotelOnly = (req: Request, manage = false) => {
+  const scope = scopesFor(req, manage);
+  if (scope && !scope.includes("hotel"))
+    throw new ReviewError("Esta acción corresponde a Recepción.", 403);
+};
+
+const genericReadLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error:
+      "Recibimos muchas respuestas desde esta conexión. Reintentá más tarde.",
+  },
+});
+const genericSubmitLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 240,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error:
+      "Recibimos muchas respuestas desde esta conexión. Reintentá más tarde.",
+  },
+});
 
 export function registerReviewRoutes(app: Express) {
+  app.get(
+    "/api/survey/general/:sector",
+    genericReadLimit,
+    wrap(async (req, res) =>
+      res.json(await publicSectorSurvey(req.params.sector)),
+    ),
+  );
+  app.post(
+    "/api/survey/general/:sector",
+    genericSubmitLimit,
+    wrap(async (req, res) =>
+      res.json(await submitSectorSurvey(req.params.sector, req.body)),
+    ),
+  );
+  app.get(
+    "/api/reviews/links",
+    ...read,
+    wrap(async (req, res) => res.json(await sectorSharingLinks(scopeFor(req)))),
+  );
+  app.patch(
+    "/api/reviews/links/:sector",
+    ...configure,
+    wrap(async (req, res) => {
+      const sector = surveySectorSchema.parse(req.params.sector),
+        body = z.object({ active: z.boolean() }).parse(req.body);
+      await withDatabaseTransaction(async () => {
+        await db.execute(
+          sql`UPDATE review_sector_links SET active=${body.active},updated_at=now() WHERE sector=${sector}`,
+        );
+        await db.execute(sql`INSERT INTO audit_logs(action,module,user_name,description,entity_type,entity_id,details,timestamp)
+        VALUES('update','reviews',${actor(req)},'Disponibilidad de enlace de encuesta','survey_sector',${sector},${JSON.stringify(body)},now())`);
+      });
+      res.json({ ok: true });
+    }),
+  );
+  app.get(
+    "/api/reviews/links/:sector/qr",
+    ...read,
+    wrap(async (req, res) => {
+      const sector = surveySectorSchema.parse(req.params.sector),
+        links = await sectorSharingLinks(scopeFor(req)),
+        link = links.find((l) => l.sector === sector);
+      if (!link)
+        throw new ReviewError("Enlace no disponible para tu sector.", 403);
+      const png = await QRCode.toBuffer(link.url, {
+        type: "png",
+        width: 700,
+        margin: 3,
+      });
+      res
+        .type("png")
+        .setHeader(
+          "Content-Disposition",
+          `attachment; filename="encuesta-${sector}.png"`,
+        );
+      res.send(png);
+    }),
+  );
+  app.post(
+    "/api/reservations/:id/survey-link",
+    ...write,
+    wrap(async (req, res) => {
+      hotelOnly(req, true);
+      const body = z
+        .object({ markSent: z.boolean().default(false) })
+        .parse(req.body || {});
+      res.json(
+        await preparePersonalSurveyLink(
+          req.params.id,
+          body.markSent,
+          actor(req),
+        ),
+      );
+    }),
+  );
   app.get(
     "/api/reviews/schedule",
     ...read,
@@ -150,6 +283,10 @@ export function registerReviewRoutes(app: Express) {
         await db.execute(sql`INSERT INTO review_areas(key,name,question,active,in_survey,sort_order,notification_area)
         VALUES(${a.key},${a.name},${a.question},${a.active},${a.inSurvey},${a.sortOrder},${a.notificationArea})
         ON CONFLICT(key) DO UPDATE SET name=EXCLUDED.name,question=EXCLUDED.question,active=EXCLUDED.active,in_survey=EXCLUDED.in_survey,sort_order=EXCLUDED.sort_order,notification_area=EXCLUDED.notification_area`);
+        if (a.sectors)
+          await db.execute(
+            sql`UPDATE review_areas SET sectors=ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(a.sectors)}::jsonb)) WHERE key=${a.key}`,
+          );
         await db.execute(sql`INSERT INTO audit_logs(action,module,user_name,description,entity_type,entity_id,details,timestamp)
         VALUES('update','reviews',${actor(req)},'Configuración de área de encuesta','review_area',${a.key},${JSON.stringify(a)},now())`);
       });
@@ -159,7 +296,7 @@ export function registerReviewRoutes(app: Express) {
   app.get(
     "/api/reviews/options",
     ...read,
-    wrap(async (_req, res) => {
+    wrap(async (req, res) => {
       const rooms = (
         await db.execute(
           sql`SELECT room_number AS number FROM rooms ORDER BY length(room_number),room_number`,
@@ -173,13 +310,19 @@ export function registerReviewRoutes(app: Express) {
           sql`SELECT DISTINCT source FROM reservations WHERE source IS NOT NULL ORDER BY source`,
         )
       ).rows;
-      res.json({ rooms, roomTypes, channels });
+      res.json({
+        rooms: scopeFor(req) ? [] : rooms,
+        roomTypes: scopeFor(req) ? [] : roomTypes,
+        channels: scopeFor(req) ? [] : channels,
+        scopes: scopeFor(req) || null,
+      });
     }),
   );
   app.get(
     "/api/reviews/stays",
     ...read,
     wrap(async (req, res) => {
+      hotelOnly(req);
       const search = z
         .string()
         .trim()
@@ -199,16 +342,25 @@ export function registerReviewRoutes(app: Express) {
     ...read,
     wrap(async (req, res) => {
       const filters = reviewFiltersSchema.parse(req.query),
-        rows = await reviewAnalyticsRows(filters);
-      const cohortDate = sql`(d.sent_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`;
+        rows = await reviewAnalyticsRows(filters, scopeFor(req));
+      const applicable =
+        (!scopeFor(req) || scopeFor(req)!.includes("hotel")) &&
+        (!filters.sector || filters.sector === "hotel") &&
+        filters.surveyKind !== "generic";
       const [mail] = (
-        await db.execute(sql`SELECT count(*)::int AS sent,count(*) FILTER(WHERE EXISTS(SELECT 1 FROM survey_responses s WHERE s.survey_token_id=d.survey_token_id))::int AS responded
-      FROM survey_dispatches d WHERE d.sent_at IS NOT NULL AND (${filters.from || null}::date IS NULL OR ${cohortDate}>=${filters.from || null}::date)
-        AND (${filters.to || null}::date IS NULL OR ${cohortDate}<=${filters.to || null}::date)`)
+        await db.execute(sql`WITH invitations AS (
+        SELECT reservation_id,min(at) AS sent_at FROM (
+          SELECT reservation_id,sent_at AS at FROM survey_dispatches WHERE sent_at IS NOT NULL
+          UNION ALL SELECT reservation_id,shared_at AS at FROM survey_manual_deliveries
+        ) deliveries GROUP BY reservation_id
+      ) SELECT count(*)::int AS sent,count(*) FILTER(WHERE EXISTS(SELECT 1 FROM survey_responses s JOIN survey_tokens t ON t.id=s.survey_token_id WHERE t.reservation_id=d.reservation_id))::int AS responded
+      FROM invitations d WHERE ${applicable} AND (${filters.from || null}::date IS NULL OR (d.sent_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date>=${filters.from || null}::date)
+      AND (${filters.to || null}::date IS NULL OR (d.sent_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date<=${filters.to || null}::date)`)
       ).rows as any[];
       res.json({
         ...summarizeReviews(rows),
         invitations: {
+          applicable,
           ...mail,
           responseRate: mail.sent
             ? Number(((mail.responded * 100) / mail.sent).toFixed(1))
@@ -220,10 +372,11 @@ export function registerReviewRoutes(app: Express) {
   app.get(
     "/api/reviews/invitations",
     ...read,
-    wrap(async (_req, res) => {
+    wrap(async (req, res) => {
+      hotelOnly(req);
       res.json(
         (
-          await db.execute(sql`SELECT d.id,d.reservation_id AS "reservationId",d.status,d.scheduled_for AS "scheduledFor",d.sent_at AS "sentAt",d.last_error AS "lastError",d.attempts,
+          await db.execute(sql`SELECT d.id,d.reservation_id AS "reservationId",d.status,d.scheduled_for AS "scheduledFor",d.sent_at AS "sentAt",d.last_error AS "lastError",d.attempts,(SELECT shared_at FROM survey_manual_deliveries m WHERE m.reservation_id=d.reservation_id) AS "sharedAt",
       concat_ws(' ',g.last_name,g.first_name) AS "guestName",rm.room_number AS "roomNumber",r.check_out_date::text AS "checkOut"
       FROM survey_dispatches d JOIN reservations r ON r.id=d.reservation_id LEFT JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id
       ORDER BY d.created_at DESC,d.id LIMIT 200`)
@@ -234,14 +387,16 @@ export function registerReviewRoutes(app: Express) {
   app.get(
     "/api/reservations/:id/survey-invitation",
     ...read,
-    wrap(async (req, res) =>
-      res.json(await surveyDispatchForReservation(req.params.id)),
-    ),
+    wrap(async (req, res) => {
+      hotelOnly(req);
+      res.json(await surveyDispatchForReservation(req.params.id));
+    }),
   );
   app.post(
     "/api/reservations/:id/survey-invitation",
     ...write,
     wrap(async (req, res) => {
+      hotelOnly(req, true);
       const body = z
         .object({ acknowledge: z.boolean().default(false) })
         .parse(req.body || {});
@@ -265,7 +420,14 @@ export function registerReviewRoutes(app: Express) {
         .max(100000)
         .default(1)
         .parse(req.query.page);
-      res.json(await listReviews(reviewFiltersSchema.parse(req.query), page));
+      res.json(
+        await listReviews(
+          reviewFiltersSchema.parse(req.query),
+          page,
+          undefined,
+          scopeFor(req),
+        ),
+      );
     }),
   );
   app.post(
@@ -273,6 +435,9 @@ export function registerReviewRoutes(app: Express) {
     ...write,
     wrap(async (req, res) => {
       const data = manualSchema.parse(req.body);
+      if (scopesFor(req, true) && !scopesFor(req, true)!.includes(data.sector))
+        throw new ReviewError("Elegí tu sector de origen.", 403);
+      if (scopesFor(req, true) && data.reservationId) hotelOnly(req, true);
       const areas = new Set(
         (await reviewAreas()).filter((a) => a.active).map((a) => a.key),
       );
@@ -289,15 +454,20 @@ export function registerReviewRoutes(app: Express) {
         throw new ReviewError("Seleccioná una estadía válida.");
       const [review] = await withDatabaseTransaction(async () => {
         const rows = (
-          await db.execute(sql`INSERT INTO guest_reviews(reservation_id,guest_id,guest_display_name,room_id,review_date,source,rating,title,content,area_ratings,followup_status,sentiment)
+          await db.execute(sql`INSERT INTO guest_reviews(reservation_id,guest_id,guest_display_name,room_id,review_date,source,rating,title,content,area_ratings,followup_status,sentiment,survey_sector)
         VALUES(${data.reservationId || null},${owner?.guest_id || "unlinked"},${data.guestName || null},${owner?.room_id || null},${data.reviewDate}::date,${data.source},${data.rating},${data.title || null},${data.content},${JSON.stringify(data.areaRatings)}::jsonb,
-          ${needsReviewFollowup(data.rating, data.areaRatings, false) ? "new" : "resolved"},${data.rating <= 2 ? "negative" : data.rating >= 4 ? "positive" : "neutral"}) RETURNING id`)
+          ${needsReviewFollowup(data.rating, data.areaRatings, false) ? "new" : "resolved"},${data.rating <= 2 ? "negative" : data.rating >= 4 ? "positive" : "neutral"},${data.sector}) RETURNING id`)
         ).rows as any[];
         await db.execute(
           sql`INSERT INTO review_events(review_id,actor,kind,details) VALUES(${rows[0].id},${actor(req)},'created',${JSON.stringify({ source: data.source })}::jsonb)`,
         );
         if (needsReviewFollowup(data.rating, data.areaRatings, false))
-          await notifyReviewFollowup(rows[0].id, data.areaRatings, false);
+          await notifyReviewFollowup(
+            rows[0].id,
+            data.areaRatings,
+            false,
+            data.sector,
+          );
         return rows;
       });
       res.status(201).json(review);
@@ -311,6 +481,7 @@ export function registerReviewRoutes(app: Express) {
         reviewFiltersSchema.parse({}),
         1,
         req.params.id,
+        scopeFor(req),
       );
       if (!items.length) throw new ReviewError("Reseña no encontrada", 404);
       const events = (
@@ -331,6 +502,21 @@ export function registerReviewRoutes(app: Express) {
       if (data.actionAreas.some((a) => !keys.has(a)))
         throw new ReviewError("Revisá las áreas responsables.");
       await withDatabaseTransaction(async () => {
+        // Lock before checking access; a concurrent reassignment cannot bypass scope.
+        await db.execute(
+          sql`SELECT id FROM guest_reviews WHERE id=${req.params.id} FOR UPDATE`,
+        );
+        if (
+          !(
+            await listReviews(
+              reviewFiltersSchema.parse({}),
+              1,
+              req.params.id,
+              scopesFor(req, true),
+            )
+          ).items.length
+        )
+          throw new ReviewError("Reseña no encontrada", 404);
         const [before] = (
           await db.execute(
             sql`SELECT followup_status,assigned_to,action_areas FROM guest_reviews WHERE id=${req.params.id} FOR UPDATE`,

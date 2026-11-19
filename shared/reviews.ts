@@ -1,3 +1,4 @@
+import { surveySectorSchema, type SurveySector } from "./survey-sectors";
 import { z } from "zod";
 
 export const reviewStates = {
@@ -41,6 +42,9 @@ export const reviewFiltersSchema = z.object({
   to: reviewDateKey.optional(),
   dateField: z.enum(["response", "stay"]).default("response"),
   source: z.enum(["survey", "direct", "google", "booking", "other"]).optional(),
+  sector: surveySectorSchema.optional(),
+  sectorMode: z.enum(["all", "origin", "assigned"]).default("all"),
+  surveyKind: z.enum(["personal", "generic"]).optional(),
   area: z.string().max(60).optional(),
   actionArea: z.string().max(60).optional(),
   rating: z.coerce.number().int().min(1).max(5).optional(),
@@ -52,6 +56,7 @@ export const reviewFiltersSchema = z.object({
 });
 export type ReviewFilters = z.infer<typeof reviewFiltersSchema>;
 export interface ReviewArea {
+  sectors?: SurveySector[];
   key: string;
   name: string;
   question: string;
@@ -61,6 +66,12 @@ export interface ReviewArea {
   notificationArea: string;
 }
 export interface ReviewItem {
+  sector?: SurveySector | null;
+  surveyKind?: "personal" | "generic" | null;
+  visitDate?: string | null;
+  eventName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
   id: string;
   reservationId: string | null;
   guestId: string;
@@ -127,6 +138,17 @@ export function summarizeReviews(reviews: ReviewItem[]) {
     months[month] = { average: mean(values), count: values.length };
   }
   return {
+    sectors: Object.fromEntries(
+      ["hotel", "spa", "events", "restaurant"].map((sector) => {
+        const own = reviews.filter((r) => r.sector === sector);
+        return [
+          sector,
+          { count: own.length, average: mean(own.map((r) => r.rating)) },
+        ];
+      }),
+    ),
+    personal: reviews.filter((r) => r.surveyKind === "personal").length,
+    generic: reviews.filter((r) => r.surveyKind === "generic").length,
     count: reviews.length,
     average: mean(reviews.map((r) => r.rating)),
     pending: reviews.filter((r) => r.followupStatus !== "resolved").length,

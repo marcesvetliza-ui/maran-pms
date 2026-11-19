@@ -1,3 +1,4 @@
+import { canReadReviews } from "@shared/survey-sectors";
 import {hospitalityNotificationLink} from '@shared/hospitalityNotifications';
 import {useChannexAccess} from '@/hooks/use-channex-access';
 import { canViewCash } from "@shared/cash-user-access";
@@ -244,7 +245,7 @@ function getAreaLabel(area: string): string {
 }
 
 function NotificationBell() {
-  const {hasPermission}=useAuth();
+  const {hasPermission,user}=useAuth();
   const [open, setOpen] = useState(false);
   const [, navigate] = useLocation();
 
@@ -332,7 +333,7 @@ function NotificationBell() {
                   }`}
                   onClick={() => {
                     if (!n.isRead) markReadMutation.mutate(n.id);
-                    if(n.type==='review_followup'&&hasPermission('sidebar:/reviews')){setOpen(false);navigate(`/reviews?review=${encodeURIComponent(n.relatedEntityId || '')}`);}
+                    if(n.type==='review_followup'&&canReadReviews(user?.role,hasPermission)){setOpen(false);navigate(`/reviews?review=${encodeURIComponent(n.relatedEntityId || '')}`);}
                     const hospitalityLink=hospitalityNotificationLink(n);
                     if(hospitalityLink){setOpen(false);navigate(hospitalityLink);}
                     if (n.type.startsWith("chatbot_")) {
@@ -419,7 +420,7 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user, hasPermission: roleHasPermission } = useAuth();
   const {data:otaAccess}=useChannexAccess({poll:true});
-  const hasPermission=(key:string)=>key==='sidebar:/ota-channels'?!!otaAccess?.entry:roleHasPermission(key);
+  const hasPermission=(key:string)=>key==='sidebar:/ota-channels'?!!otaAccess?.entry:key==='sidebar:/reviews'?canReadReviews(user?.role,roleHasPermission):roleHasPermission(key);
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     try {

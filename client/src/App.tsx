@@ -299,6 +299,7 @@ function Router() {
           {() => <PermissionRoute component={SpaFiscalReviewPage} resourceKey="sidebar:/admin/spa-fiscal-review" />}
         </Route>
         <Route path="/seguridad" component={SeguridadPage} />
+        <Route path="/encuesta/general/:sector" component={SurveyPage} />
         <Route path="/encuesta/:token" component={SurveyPage} />
         <Route path="/manuales" component={ManualLibraryPage} />
         <Route path="/mozo" component={MozoPage} />
@@ -596,6 +597,7 @@ function App() {
   const [isPreIngreso] = useRoute("/pre-ingreso");
   const [isReservar] = useRoute("/reservar");
   const [isSurvey] = useRoute("/encuesta/:token");
+  const [isSectorSurvey] = useRoute("/encuesta/general/:sector");
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -613,7 +615,7 @@ function App() {
             <Suspense fallback={<PageLoader />}>
               <ReservarPage />
             </Suspense>
-          ) : isSurvey ? (
+          ) : (isSurvey || isSectorSurvey) ? (
             <Suspense fallback={<PageLoader />}>
               <SurveyPage />
             </Suspense>
