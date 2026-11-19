@@ -22,13 +22,19 @@ La [ficha con el paso a paso de Railway y Donweb](https://github.com/marcesvetli
 
 La captura de Settings aportada por Marcelo informa la retirada de Config as Code el 1 de diciembre y la imposibilidad de activarlo en servicios que no lo usaban. La guía de publicación versión 2 utiliza ajustes manuales: `RAILWAY_DOCKERFILE_PATH` en Variables y los comandos de preparación, arranque y salud en Settings → Deploy. Se deja Railway Config File sin ruta personalizada. Esto corrige los puntos 2.5 y 5 de la guía; no cambia el código probado ni administra servicios desde esta conversación.
 
+## Edición de reservas: corrección preparada el 19 de noviembre
+
+Marcelo confirmó que pudo crear una reserva en Aurora y moverla de habitación. Informó que no pudo editar fechas, tarifas ni consumos. La revisión del código encontró dos omisiones de QA: faltaba el permiso de edición de alojamiento y el filtro bloqueaba su consulta y las rutas de revisión y confirmación de precios por noche. Los consumos continúan fuera del alcance habilitado de esta entrega.
+
+La [PR 146](https://github.com/marcesvetliza-ui/maran-pms/pull/146), revisión `f5005dc7`, corrige la edición en las instalaciones existentes y añade un aviso sobre los circuitos pendientes. Se probaron actualización sin borrar datos, conservación de revocaciones, edición desde el navegador de fechas, tarifas y observaciones, persistencia al recargar, consulta sin escritura e aislamiento. Las cuatro verificaciones de GitHub y ambas imágenes de despliegue aprobaron. La publicación en los servicios **xenia-aurora-pms** y **xenia-brisa-pms** y su aceptación con la reserva existente siguen pendientes. Se conserva la ficha de cada instalación; el comando de preparación incorpora el permiso una sola vez. El [acta de esta corrección](evidencia/pms-edicion-2026-11-19.json) distingue el código probado del servicio publicado.
+
 ## Próximos hitos
 
 Marcelo confirmó el ingreso al PMS de Aurora y comunicó que Brisa continúa validando su DNS. La [evidencia del 19 de noviembre](evidencia/pms-publicacion-2026-11-19.json) registra el ingreso como prueba manual del propietario; las consultas DNS/HTTPS desde este entorno no pudieron resolver los tres dominios y no permiten concluir que estén caídos. El SHA servido por cada servicio sigue sin registrar.
 
 La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, corrige la ficha para **Hotel brisa** sin depender de su identificador textual. Las cuatro verificaciones de GitHub aprobaron las pruebas y las imágenes. La [guía corregida](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) conserva los ajustes manuales de Railway y la selección de la plantilla Brisa.
 
-1. Crear y editar una reserva ficticia en el PMS completo de Aurora; recargar y comprobar que se conserva.
+1. Publicar la corrección de edición en los PMS de prueba y comprobar en Aurora fechas, tarifas y observaciones de la reserva existente después de recargar.
 2. Completar la validación DNS y HTTPS de Brisa; entrar a su PMS y crear una reserva distinta.
 3. Comparar ambos PMS en pestañas separadas, probar recepción y consulta y comprobar la revocación y el cierre central. Las pruebas previas del prototipo del panel no reemplazan estas pruebas en los PMS completos publicados.
 4. Registrar la revisión instalada y aceptar los resultados de cada servicio en Railway.
