@@ -398,8 +398,12 @@ export async function registerRoutes(
       return next();
     }
 
-    // Survey routes are public — guests access them from email links without login
-    if (req.path.startsWith("/api/survey/")) {
+    // Express strips the mounted /api prefix from req.path here. Only the
+    // guest survey GET/POST are public; review management stays authenticated.
+    if (
+      ["GET", "POST"].includes(req.method) &&
+      /^\/survey\/[^/]+\/?$/.test(req.path)
+    ) {
       return next();
     }
 
