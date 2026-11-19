@@ -13,6 +13,7 @@ import { activeSalesRecord } from "./salesArchive";
 import { getCashDayReport } from "./cash-day-report";
 import { enrichCashDocumentEvidence } from "./cash-document-evidence";
 import { assertPurchaseInvoiceNotDuplicate } from "./purchase-invoice-duplicates";
+import { purchaseDocumentAfterEdit } from "./purchase-invoice-document";
 import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit, PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-edit";
 import { requireCashView, cashShiftAccess } from "./cash-user-access";
 import { canViewCash, canOperateCash } from "@shared/cash-user-access";
@@ -3066,9 +3067,18 @@ export async function registerRoutes(
         if(!locked||!canEditPurchaseInvoice(locked.estado, locked.estado !== "pendiente" && !!req.user?.role && hasPermission(req.user.role, PURCHASE_INVOICE_EDIT_ALL_PERMISSION)))throw Object.assign(new Error('El comprobante cambió de estado; actualizá la pantalla antes de editarlo'),{statusCode:409});
         if(locked.descuento&&req.body.descuentoTipo===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el descuento del comprobante'),{statusCode:409});
         if(locked.envio&&req.body.envioImporte===undefined)throw Object.assign(new Error('Actualizá la pantalla para conservar el envío'),{statusCode:409});
+        const document = purchaseDocumentAfterEdit(locked, req.body);
+        if (document.identityChanged && locked.estado !== "anulado") {
+          await assertPurchaseInvoiceNotDuplicate(tx, {
+            excludeInvoiceId: id, supplierId: locked.supplier_id, proveedorCuit: locked.proveedor_cuit,
+            tipoComprobante: locked.tipo_comprobante, puntoVenta: document.point, numeroComprobante: document.number,
+          });
+        }
         const balance = purchaseInvoiceBalanceAfterEdit(locked, montoTotal, isSupplierPayableDocument(tipoComprobante));
         const result = await tx.execute(sql`
           UPDATE purchase_invoices SET
+            punto_venta = ${document.point}, numero_comprobante = ${document.number},
+            numero_comprobante_ext = ${document.external}, fecha_emision = ${document.date}, periodo = ${document.period},
             monto_neto = ${n("montoNeto")}, monto_iva21 = ${n("montoIva21")},
             monto_iva105 = ${n("montoIva105")}, monto_iva27 = ${n("montoIva27")},
             monto_iva5 = ${n("montoIva5")}, monto_iva25 = ${n("montoIva25")},
@@ -3189,12 +3199,16 @@ export async function registerRoutes(
           await tx.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
             VALUES(${req.user?.id || null},${req.user?.fullName || req.user?.username || "Sistema"},'update','purchase_invoices','purchase_invoice',${String(id)},
               'Edición de comprobante de compra con permiso especial',${JSON.stringify({ permission: PURCHASE_INVOICE_EDIT_ALL_PERMISSION, before: locked, after: { ...raw, asiento_id: entryId } })},NOW())`);
+        } else if (document.changed) {
+          await tx.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
+            VALUES(${req.user?.id || null},${req.user?.fullName || req.user?.username || "Sistema"},'update','purchase_invoices','purchase_invoice',${String(id)},
+              'Edición de fecha y numeración de comprobante de compra',${JSON.stringify({ before: locked, after: { ...raw, asiento_id: entryId } })},NOW())`);
         }
         return { ...raw, asiento_id: entryId };
       });
       res.json(updatedInvoice);
     } catch (e: any) {
-      res.status(e?.statusCode || 500).json({ error: e.message });
+      res.status(e?.statusCode || 500).json({ error: e.message, ...(e?.code === "PURCHASE_INVOICE_DUPLICATE" ? { existingId: e.existingId } : {}) });
     }
   });
 
