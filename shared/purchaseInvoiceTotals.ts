@@ -44,13 +44,17 @@ export type PurchaseInvoiceArticleAmount = {
   vatRate?: string | null;
 };
 
+export function isPurchaseCreditNote(type?: string | null): boolean {
+  return /^NC-[ABCM]$/.test(type || "");
+}
+
 /** A usa precio neto y discrimina IVA; B usa precio final y no suma IVA encima. */
 export function suggestPurchaseAmountsFromArticles(
   articles: PurchaseInvoiceArticleAmount[],
   tipoComprobante: string,
 ): { lines: Array<{ neto: string; alicuota: string }>; fields: Record<string, string>; articleTotal: number } {
   const totals = new Map<string, number>();
-  const grossPrice = tipoComprobante === "FACT-B" || tipoComprobante === "FACT-C" || tipoComprobante === "RECIBO-C";
+  const grossPrice = ["FACT-B", "FACT-C", "RECIBO-C", "NC-B", "NC-C"].includes(tipoComprobante);
   for (const article of articles) {
     const subtotal = roundCurrency(amount(article.quantity) * amount(article.unitPrice));
     const rate = grossPrice ? "0" : article.vatRate === "2.5" ? "25" : article.vatRate || "0";

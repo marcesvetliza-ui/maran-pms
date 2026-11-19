@@ -2827,6 +2827,10 @@ export async function registerRoutes(
         return res.status(400).json({ error: "El total del comprobante debe ser mayor a $0,00." });
       }
       const stockRows = parsePurchaseStockRows(body.stockItems);
+      if (/^NC-[ABCM]$/.test(body.tipoComprobante) && stockRows.some(row => row.unitCost > 0) &&
+          n("montoNeto") + n("montoExento") + n("montoNoGravado") <= 0) {
+        return res.status(400).json({ error: "La nota de crédito tiene artículos con importe, pero falta su neto. Actualizá la pantalla y revisá los importes de la devolución antes de guardar." });
+      }
 
       // Las facturas, notas y recibos se pagan desde la cuenta corriente del
       // proveedor. Ignorar "contado" enviado por clientes anteriores: cargar
@@ -2965,7 +2969,7 @@ export async function registerRoutes(
           `);
       }
       await enterPurchaseInvoiceStock(tx, invoice.id, supplierId, stockRows,
-        `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`,req.user?.id);
+        `Comprobante ${invoice.numeroComprobanteExt || invoice.numeroComprobante} — ${invoice.proveedorNombre}`,req.user?.id, body.tipoComprobante);
       if(stockRows.length)rawInvoice.inventoryWarnings=(await tx.execute(sql`
         SELECT id,name,unit_correction_note AS note FROM inventory_items
         WHERE id IN (${sql.join([...new Set(stockRows.map(row=>row.itemId))].map(id=>sql`${id}`),sql`,`)})
