@@ -1,3 +1,5 @@
+import { cancelledReceptionCollection, CANCELLED_COLLECTION_ROLES } from "./cancelledReceptionCollection";
+import { voidReservationPaymentWithLedger } from "../reservationPaymentVoid";
 import { canCloseCancelledReceptionOperation } from "./cancelledReceptionOperation";
 import { resolveFiscalRecipientDocument } from "./fiscalDocument";
 import { prepareExcessReservationCollection } from "./excessReservationCollection";
@@ -57,12 +59,14 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const creditsDone = !(operation.request_snapshot?.creditReapplications?.length || operation.request_snapshot?.ordinaryAdvanceApplications?.length) || intent?.status === "completed";
   const issued = ["emitida", "parcial"].includes(String(invoice?.estado));
   const canCloseCancelled = await canCloseCancelledReceptionOperation(db, operation, invoice);
+  const collectionCorrectionCompleted = operation.stage === 'corrected' && operation.error_code === 'BILLING_CANCELLED_COLLECTION_REVERSED';
+  const cancelledCollection = collectionCorrectionCompleted ? null : await cancelledReceptionCollection(db, operation, invoice);
   const departure = recovery?.checkoutDebtAccount && recovery.checkoutRequested
     ? (await db.execute(sql`SELECT status FROM reservations WHERE id=${operation.owner_id}`)).rows[0] as any : null;
   const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone && (!departure || departure.status === 'checked_out');
   return {
     operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled, canRetryNumberConflict,
-    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, code: operation.error_code,
+    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, cancelledCollection, collectionCorrectionCompleted, code: operation.error_code,
     paymentConflictMessage: paymentConflicts.length ? "El cobro de este intento ya existe, pero fue modificado o requiere conciliación. Administración debe revisar el pago vinculado; no se volverá a cobrar ni a cambiar su forma de pago. El check-out se gestiona por separado desde la reserva, trasladando el saldo actual a Cuenta Corriente si corresponde." : null,
     message: invoice?.estado === "anulada" ? `La factura ${invoice.tipo_comprobante} ${invoice.punto_venta}-${invoice.numero} de este intento está anulada. ${canCloseCancelled ? "Podés cerrar el intento anterior sin emitir ni cobrar y volver a revisar la cuenta vigente." : "Su anulación o sus cobros requieren conciliación antes de cerrar el intento."}` : operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}${conflict ? `, está ocupada por el comprobante interno #${conflict.id}` : ", necesita volver a verificarse"}. Al completar la operación se consultará ARCA y se recuperará el borrador anterior si hay evidencia suficiente, conservando los importes y pagos originales.` : archived ? "El borrador anterior fue archivado después de verificar que ARCA no lo autorizó. Revisá sus datos antes de preparar un nuevo intento." : null,
     invoice: issued ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,
@@ -73,6 +77,39 @@ export async function receptionOperationStatus(operation: BillingOperation) {
 }
 
 export function registerReceptionOperationRoutes(app: Express) {
+  app.post("/api/billing/reservations/:reservationId/operations/:operationId/cancel-collection", requireAuth, requirePermission("sidebar:/reservations"), async (req,res) => {
+    if (!CANCELLED_COLLECTION_ROLES.includes(String(req.user?.role))) return res.status(403).json({error:"La anulación del cobro requiere un supervisor de recepción."});
+    const reason = String(req.body?.reason || "").trim(), fingerprint = req.body?.fingerprint;
+    if (req.body?.acknowledge !== true || typeof fingerprint !== 'string' || reason.length < 10 || reason.length > 500)
+      return res.status(400).json({error:"Confirmá el importe y el motivo de la anulación del cobro."});
+    try {
+      const result = await withReservationFinancialLock(req.params.reservationId, () => db.transaction(async tx => {
+        const operation = (await tx.execute(sql`SELECT * FROM billing_operations WHERE operation_id=${req.params.operationId} AND owner_type='reservation' AND owner_id=${req.params.reservationId} FOR UPDATE`)).rows[0] as BillingOperation;
+        if (!operation) throw fail("No se encontró el intento original. Actualizá la prefactura.");
+        if (operation.stage === 'corrected') {
+          const prior = (await tx.execute(sql`SELECT details FROM audit_logs WHERE entity_type='billing_operation' AND entity_id=${operation.operation_id} AND description='Cobro anulado para refacturar una factura cancelada' ORDER BY timestamp DESC LIMIT 1`)).rows[0] as any;
+          let details = prior?.details; if (typeof details === 'string') details = JSON.parse(details);
+          if (operation.error_code !== 'BILLING_CANCELLED_COLLECTION_REVERSED' || details?.fingerprint !== fingerprint || details?.reason !== reason) throw fail("El intento ya fue corregido con otros datos. Actualizá la pantalla.");
+          return details.result;
+        }
+        const invoice = (await tx.execute(sql`SELECT * FROM sales_invoices WHERE id=${operation.invoice_id} AND reserva_id=${operation.owner_id} FOR UPDATE`)).rows[0] as any;
+        const plan = await cancelledReceptionCollection(tx,operation,invoice);
+        if (!plan || plan.fingerprint !== fingerprint) throw fail("Cambió la factura, su NC o el cobro. Actualizá antes de confirmar.");
+        const registry = (await tx.execute(sql`SELECT to_regclass('payment_funding.scopes') AS name`)).rows[0] as any;
+        if (registry?.name && (await tx.execute(sql`SELECT 1 FROM payment_funding.scopes WHERE kind='reservation' AND id=${operation.owner_id}`)).rows.length) throw fail("Esta reserva usa financiación completa. Corregí el cobro desde ese circuito.");
+        const operator = req.user?.id || req.user?.username || 'sistema';
+        for (const payment of plan.payments) await voidReservationPaymentWithLedger(tx,payment.id,operator,reason);
+        const result = {corrected:true,closedCancelled:true,collectionReversed:true,voidedPaymentIds:plan.payments.map(p=>p.id),amount:plan.total};
+        await tx.execute(sql`UPDATE billing_operations SET stage='corrected',error_code='BILLING_CANCELLED_COLLECTION_REVERSED',updated_at=now() WHERE operation_id=${operation.operation_id}`);
+        await tx.execute(sql`INSERT INTO audit_logs(user_id,action,module,entity_type,entity_id,description,details,timestamp)
+          VALUES(${req.user?.id || null},'update','billing','billing_operation',${operation.operation_id},'Cobro anulado para refacturar una factura cancelada',${JSON.stringify({fingerprint,reason,invoiceId:invoice.id,priorStage:operation.stage,payments:plan.payments,result})},now())`);
+        await tx.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion) VALUES(${operation.owner_id},${operator},'pago',${`Cobro de ${plan.invoiceLabel} anulado para refacturar · $${plan.total.toFixed(2)} · ${reason}. Operación: ${operation.operation_id}`})`);
+        return result;
+      }));
+      res.json(result);
+    } catch(error:any) { res.status(error?.statusCode || 409).json({error:error?.message || 'No se pudo anular el cobro. Actualizá la pantalla.'}); }
+  });
+
   app.get('/api/reservations/:reservationId/collection-receipts',requireAuth,requirePermission('sidebar:/reservations'),async(req,res)=>{
     res.setHeader('Cache-Control','private, no-store');
     try{const receipts=await reservationCollectionReceipts(req.params.reservationId);res.json(receipts.map(r=>({operationId:r.operationId,total:r.total,date:r.date,paymentIds:r.payments.map(p=>p.id)})));}

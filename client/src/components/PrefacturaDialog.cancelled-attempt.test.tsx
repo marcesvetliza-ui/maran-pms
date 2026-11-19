@@ -5,13 +5,13 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("@/hooks/use-toast",()=>({useToast:()=>({toast:vi.fn()})}));
 const { PrefacturaDialog } = await import("./PrefacturaDialog");
 afterEach(()=>{cleanup();vi.unstubAllGlobals();window.sessionStorage.clear();});
-it("closes the stale cancelled attempt without invoice, collection or checkout writes", async()=>{
+it.each([false,true])("closes a cancelled attempt and recovers an already committed collection correction (%s)", async(alreadyCorrected)=>{
  const reservationId='cancelled-cc-reservation', operationId='cancelled-operation-1234567890123';
  const attempt={invoiceRequest:{reservaId:reservationId,creditOperationId:operationId,tipoComprobante:'FA',puntoVentaOverride:5,cashFormaPago:'cuenta_corriente',cliente:{razonSocial:'Original company'}},invoice:null,payments:[],checkoutRequested:true};
  window.sessionStorage.setItem(`prefactura-pending:${reservationId}`,JSON.stringify(attempt));
  const fetcher=vi.fn(async(url:any,options?:RequestInit)=>{
   const path=String(url);
-  if(path.endsWith('/reception-status'))return Response.json({stage:'cancelled',canCloseCancelled:true,safeToCorrect:false,message:'La factura FA 5-100 está anulada.',attempt});
+  if(path.endsWith('/reception-status'))return Response.json({stage:'cancelled',collectionCorrectionCompleted:alreadyCorrected,canCloseCancelled:!alreadyCorrected,safeToCorrect:false,message:'La factura FA 5-100 está anulada.',attempt});
   if(path.endsWith('/correct-reception'))return Response.json({corrected:true,closedCancelled:true});
   if(path.endsWith('/pending-operation'))return Response.json({pending:null});
   if(path.includes('/folio'))return Response.json({reservationCode:'ROOM307',guestName:'Fixture',roomNumber:'307',nights:1,roomRate:'100',roomTotal:100,charges:[],payments:[],grandTotal:100,totalCharges:0,totalPayments:0,balance:100});
@@ -20,11 +20,13 @@ it("closes the stale cancelled attempt without invoice, collection or checkout w
  });
  vi.stubGlobal('fetch',fetcher); const close=vi.fn();
  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><PrefacturaDialog open onClose={close} reservationId={reservationId} reservation={{id:reservationId,guestId:'g',status:'checked_in',guest:{firstName:'Fixture',lastName:'Guest'},room:{roomNumber:'307'}} as any} mode="checkout"/></QueryClientProvider>);
+ if(!alreadyCorrected){
  const button=await screen.findByRole('button',{name:'Cerrar intento de factura anulada'});
  expect(screen.queryByRole('button',{name:'Completar operación pendiente'})).not.toBeInTheDocument();
  await userEvent.setup().click(button);
+ }
  await waitFor(()=>expect(close).toHaveBeenCalledOnce());
  expect(window.sessionStorage.getItem(`prefactura-pending:${reservationId}`)).toBeNull();
  const writes=fetcher.mock.calls.filter(([,options])=>options?.method==='POST');
- expect(writes).toHaveLength(1);expect(String(writes[0][0])).toContain('/correct-reception');
+ expect(writes).toHaveLength(alreadyCorrected?0:1);if(!alreadyCorrected)expect(String(writes[0][0])).toContain('/correct-reception');
 });
