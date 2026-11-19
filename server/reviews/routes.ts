@@ -47,6 +47,7 @@ const areaSchema = z.object({
   key: z.string().regex(/^[a-z][a-z0-9_]{1,59}$/),
   name: z.string().trim().min(2).max(80),
   question: z.string().trim().min(3).max(250),
+  questionType: z.enum(["rating", "text"]).optional(),
   active: z.boolean(),
   inSurvey: z.boolean(),
   sectors: z.array(surveySectorSchema).min(1).optional(),
@@ -283,6 +284,10 @@ export function registerReviewRoutes(app: Express) {
         await db.execute(sql`INSERT INTO review_areas(key,name,question,active,in_survey,sort_order,notification_area)
         VALUES(${a.key},${a.name},${a.question},${a.active},${a.inSurvey},${a.sortOrder},${a.notificationArea})
         ON CONFLICT(key) DO UPDATE SET name=EXCLUDED.name,question=EXCLUDED.question,active=EXCLUDED.active,in_survey=EXCLUDED.in_survey,sort_order=EXCLUDED.sort_order,notification_area=EXCLUDED.notification_area`);
+        if (a.questionType)
+          await db.execute(
+            sql`UPDATE review_areas SET question_type=${a.questionType} WHERE key=${a.key}`,
+          );
         if (a.sectors)
           await db.execute(
             sql`UPDATE review_areas SET sectors=ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(a.sectors)}::jsonb)) WHERE key=${a.key}`,
@@ -439,7 +444,9 @@ export function registerReviewRoutes(app: Express) {
         throw new ReviewError("Elegí tu sector de origen.", 403);
       if (scopesFor(req, true) && data.reservationId) hotelOnly(req, true);
       const areas = new Set(
-        (await reviewAreas()).filter((a) => a.active).map((a) => a.key),
+        (await reviewAreas())
+          .filter((a) => a.active && a.questionType !== "text")
+          .map((a) => a.key),
       );
       if (Object.keys(data.areaRatings).some((a) => !areas.has(a)))
         throw new ReviewError("Revisá las áreas seleccionadas.");

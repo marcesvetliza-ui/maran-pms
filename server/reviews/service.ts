@@ -28,7 +28,7 @@ export async function reviewAreas(
 ): Promise<ReviewArea[]> {
   return (
     await db.execute(
-      sql`SELECT key,name,question,active,in_survey AS "inSurvey",sort_order AS "sortOrder",notification_area AS "notificationArea",sectors FROM review_areas WHERE (${!activeOnly} OR (active AND in_survey)) AND (${sector || null}::text IS NULL OR ${sector || null}=ANY(sectors)) ORDER BY sort_order,key`,
+      sql`SELECT key,name,question,active,in_survey AS "inSurvey",sort_order AS "sortOrder",notification_area AS "notificationArea",sectors,question_type AS "questionType" FROM review_areas WHERE (${!activeOnly} OR (active AND in_survey)) AND (${sector || null}::text IS NULL OR ${sector || null}=ANY(sectors)) ORDER BY sort_order,key`,
     )
   ).rows as any;
 }
@@ -66,6 +66,8 @@ export async function createSurveyReview(
     ON CONFLICT(survey_response_id) WHERE survey_response_id IS NOT NULL DO NOTHING RETURNING id`)
   ).rows as any[];
   if (!r) return;
+  await db.execute(sql`UPDATE guest_reviews SET area_text_answers=${JSON.stringify(response.area_text_answers || {})}::jsonb,
+    not_applicable=ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(response.not_applicable || [])}::jsonb)) WHERE id=${r.id}`);
   await db.execute(
     sql`INSERT INTO review_events(review_id,actor,kind,details) VALUES(${r.id},'huésped','received',${JSON.stringify({ origin: "survey", attention })}::jsonb)`,
   );
@@ -169,16 +171,49 @@ export async function validateSurveyAnswers(
   };
   const questions = await reviewAreas(true, sector),
     active = new Set(questions.map((a) => a.key));
-  if (Object.keys(areaRatings).some((key) => !active.has(key)))
+  const textAnswers = Object.fromEntries(
+    Object.entries(data.areaTextAnswers).filter(([, value]) => value.trim()),
+  );
+  const notApplicable = [
+    ...new Set([
+      ...data.notApplicable,
+      ...Object.keys(areaRatings).filter((key) => areaRatings[key] === null),
+    ]),
+  ];
+  const answeredKeys = [
+    ...Object.keys(areaRatings),
+    ...Object.keys(textAnswers),
+    ...notApplicable,
+  ];
+  const changed = () =>
+    new ReviewError(
+      "Las preguntas cambiaron. Actualizá la encuesta antes de enviarla.",
+      409,
+    );
+  if (answeredKeys.some((key) => !active.has(key)))
     throw new ReviewError(
       "Las preguntas cambiaron. Actualizá la encuesta antes de enviarla.",
     );
+  if (
+    Object.keys(areaRatings).some(
+      (key) =>
+        areaRatings[key] !== null &&
+        questions.find((q) => q.key === key)?.questionType === "text",
+    ) ||
+    Object.keys(textAnswers).some(
+      (key) => questions.find((q) => q.key === key)?.questionType !== "text",
+    ) ||
+    notApplicable.some(
+      (key) => Object.hasOwn(textAnswers, key) || areaRatings[key] != null,
+    )
+  )
+    throw changed();
   const valid = Object.fromEntries(
     Object.entries(areaRatings).filter(([, value]) => value !== null),
   );
   if (
     data.areaQuestions &&
-    Object.keys(valid).some(
+    answeredKeys.some(
       (key) =>
         data.areaQuestions![key] !==
         questions.find((a) => a.key === key)?.question,
@@ -190,10 +225,10 @@ export async function validateSurveyAnswers(
     );
   const questionSnapshot = Object.fromEntries(
     questions
-      .filter((q) => Object.hasOwn(valid, q.key))
+      .filter((q) => answeredKeys.includes(q.key))
       .map((q) => [q.key, q.question]),
   );
-  return { valid, questionSnapshot };
+  return { valid, questionSnapshot, textAnswers, notApplicable };
 }
 
 export async function submitSurvey(token: string, input: unknown) {
@@ -237,16 +272,23 @@ export async function submitSurvey(token: string, input: unknown) {
         409,
       );
     const data = parsed.data;
-    const { valid, questionSnapshot } = await validateSurveyAnswers(
-      data,
-      "hotel",
-    );
+    const { valid, questionSnapshot, textAnswers, notApplicable } =
+      await validateSurveyAnswers(data, "hotel");
     const [response] = (
       await db.execute(sql`INSERT INTO survey_responses(id,survey_token_id,rating_overall,rating_room,rating_cleanliness,rating_service,rating_food,comment,guest_name,area_ratings,area_questions,nps,contact_requested,submitted_at)
       VALUES(${randomUUID()},${access.id},${data.ratingOverall},${valid.room ?? null},${valid.cleanliness ?? null},${valid.service ?? null},${valid.food ?? null},
         ${data.comment || null},${data.guestName || null},${JSON.stringify(valid)}::jsonb,${JSON.stringify(questionSnapshot)}::jsonb,${data.nps ?? null},${data.contactRequested},now() AT TIME ZONE 'UTC') RETURNING *,to_char((submitted_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS review_day`)
     ).rows as any[];
-    await createSurveyReview(response, reservation);
+    await db.execute(sql`UPDATE survey_responses SET area_text_answers=${JSON.stringify(textAnswers)}::jsonb,
+      not_applicable=ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(notApplicable)}::jsonb)) WHERE id=${response.id}`);
+    await createSurveyReview(
+      {
+        ...response,
+        area_text_answers: textAnswers,
+        not_applicable: notApplicable,
+      },
+      reservation,
+    );
     await db.execute(
       sql`UPDATE survey_tokens SET completed=true WHERE reservation_id=${reservation.id}`,
     );
@@ -284,7 +326,7 @@ function reviewWhere(f: ReviewFilters, scope?: SurveySector[]): SQL {
     filters.push(sql`r.generic_response_id IS NOT NULL`);
   if (f.search)
     filters.push(
-      sql`concat_ws(' ',g.last_name,g.first_name,r.guest_display_name,r.title,r.content,rs.reservation_code,p.event_name,p.contact_email,p.contact_phone) ILIKE ${"%" + f.search + "%"}`,
+      sql`concat_ws(' ',g.last_name,g.first_name,r.guest_display_name,r.title,r.content,r.area_text_answers::text,rs.reservation_code,p.event_name,p.contact_email,p.contact_phone) ILIKE ${"%" + f.search + "%"}`,
     );
   const date =
     f.dateField === "stay"
@@ -293,7 +335,10 @@ function reviewWhere(f: ReviewFilters, scope?: SurveySector[]): SQL {
   if (f.from) filters.push(sql`${date}>=${f.from}::date`);
   if (f.to) filters.push(sql`${date}<=${f.to}::date`);
   if (f.source) filters.push(sql`r.source=${f.source}`);
-  if (f.area) filters.push(sql`r.area_ratings ? ${f.area}`);
+  if (f.area)
+    filters.push(
+      sql`(r.area_ratings ? ${f.area} OR r.area_text_answers ? ${f.area} OR ${f.area}=ANY(r.not_applicable))`,
+    );
   if (f.actionArea)
     filters.push(sql`r.action_areas @> ARRAY[${f.actionArea}]::text[]`);
   if (f.rating) filters.push(sql`r.rating=${f.rating}`);
@@ -322,7 +367,7 @@ export async function listReviews(
     await db.execute(sql`SELECT r.id,r.reservation_id AS "reservationId",r.guest_id AS "guestId",r.room_id AS "roomId",
     COALESCE(NULLIF(concat_ws(' ',g.last_name,g.first_name),''),r.guest_display_name,CASE WHEN r.generic_response_id IS NOT NULL THEN 'Anónimo' ELSE 'Huésped' END) AS "guestName",rm.room_number AS "roomNumber",
     rs.check_in_date::text AS "checkIn",rs.check_out_date::text AS "checkOut",rt.name AS "roomType",rs.source AS channel,
-    r.review_date::text AS "reviewDate",r.source,r.rating,r.title,r.content,r.area_ratings AS "areaRatings",r.area_questions AS "areaQuestions",r.sentiment,r.nps,
+    r.review_date::text AS "reviewDate",r.source,r.rating,r.title,r.content,r.area_ratings AS "areaRatings",r.area_questions AS "areaQuestions",r.area_text_answers AS "areaTextAnswers",r.not_applicable AS "notApplicable",r.sentiment,r.nps,
     r.contact_requested AS "contactRequested",r.followup_status AS "followupStatus",r.assigned_to AS "assignedTo",r.action_areas AS "actionAreas",
     r.survey_response_id AS "surveyResponseId",r.staff_response AS "staffResponse",
     COALESCE(r.survey_sector,CASE WHEN r.source='survey' THEN 'hotel' END) AS sector,

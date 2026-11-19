@@ -189,6 +189,172 @@ suite("Sector surveys, personal sharing and enforced sector access", () => {
       expect(f.areas.every((a: any) => a.sectors.includes(sector))).toBe(true);
     },
   );
+
+  it("configures a sector-specific open question and persists text and explicit N/A without numeric scores", async () => {
+    const key = "test_text_" + randomUUID().replaceAll("-", "");
+    try {
+      expect(
+        (
+          await call(
+            "/api/reviews/areas",
+            "POST",
+            {
+              key,
+              name: "Sugerencias",
+              question: "¿Qué mejorarías?",
+              questionType: "text",
+              active: true,
+              inSurvey: true,
+              sortOrder: 20,
+              notificationArea: "spa",
+              sectors: ["spa"],
+            },
+            "admin",
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await call(
+            "/api/reviews",
+            "POST",
+            {
+              guestName: "Prueba",
+              sector: "spa",
+              source: "direct",
+              rating: 5,
+              reviewDate: "2026-11-19",
+              content: "Carga manual",
+              areaRatings: { [key]: 5 },
+            },
+            "admin",
+          )
+        ).status,
+      ).toBe(400);
+      const f = await form("spa");
+      expect(f.areas.find((a: any) => a.key === key)?.questionType).toBe(
+        "text",
+      );
+      expect((await form("hotel")).areas.some((a: any) => a.key === key)).toBe(
+        false,
+      );
+      const body = answer(f, {
+        areaTextAnswers: { [key]: "Más horarios" },
+        notApplicable: ["spa"],
+        areaQuestions: {
+          [key]: "¿Qué mejorarías?",
+          spa: f.areas.find((a: any) => a.key === "spa").question,
+        },
+      });
+      expect((await call("/api/survey/general/spa", "POST", body)).status).toBe(
+        200,
+      );
+      const review = (
+        await pool!.query(
+          "SELECT * FROM guest_reviews WHERE generic_response_id IN(SELECT id FROM survey_public_responses WHERE submission_key=$1::uuid)",
+          [keys[0]],
+        )
+      ).rows[0];
+      expect(review.area_ratings).toEqual({});
+      expect(review.area_text_answers).toEqual({ [key]: "Más horarios" });
+      expect(review.not_applicable).toEqual(["spa"]);
+      await ensureReviewsSchema();
+      const detail = await call(
+        "/api/reviews/" + review.id,
+        "GET",
+        undefined,
+        "admin",
+      );
+      expect(detail.body.review || detail.body).toMatchObject({
+        areaTextAnswers: { [key]: "Más horarios" },
+        notApplicable: ["spa"],
+      });
+      const duplicate = await call("/api/survey/general/spa", "POST", body);
+      expect(duplicate.body.alreadyCompleted).toBe(true);
+      const wrongType = await form("spa");
+      expect(
+        (
+          await call(
+            "/api/survey/general/spa",
+            "POST",
+            answer(wrongType, { areaRatings: { [key]: 5 } }),
+          )
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await call(
+            "/api/survey/general/spa",
+            "POST",
+            answer(wrongType, { areaTextAnswers: { room: "texto ajeno" } }),
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await call(
+            "/api/survey/general/spa",
+            "POST",
+            answer(wrongType, {
+              areaRatings: { spa: 5 },
+              notApplicable: ["spa"],
+            }),
+          )
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await call(
+            "/api/survey/general/spa",
+            "POST",
+            answer(wrongType, {
+              areaTextAnswers: { [key]: "Texto" },
+              areaQuestions: { [key]: "Texto viejo" },
+            }),
+          )
+        ).status,
+      ).toBe(409);
+    } finally {
+      await pool!.query("DELETE FROM review_areas WHERE key=$1", [key]);
+    }
+  });
+  it("stores open answers and N/A on personal stay surveys as well as their review", async () => {
+    const key = "test_open_" + randomUUID().replaceAll("-", "");
+    try {
+      await pool!.query(
+        "INSERT INTO review_areas(key,name,question,question_type,sectors) VALUES($1,'Sugerencias','¿Cómo mejorar?', 'text',ARRAY['hotel'])",
+        [key],
+      );
+      const id = await stay();
+      const shared = await call(
+        `/api/reservations/${id}/survey-link`,
+        "POST",
+        {},
+        "reception",
+      );
+      const token = shared.body.url.split("/").pop();
+      expect(
+        (
+          await call("/api/survey/" + token, "POST", {
+            ratingOverall: 4,
+            areaTextAnswers: { [key]: "Más almohadas" },
+            notApplicable: ["spa"],
+          })
+        ).status,
+      ).toBe(200);
+      const row = (
+        await pool!.query(
+          "SELECT s.area_text_answers,s.not_applicable,g.area_text_answers AS review_text FROM survey_responses s JOIN survey_tokens t ON t.id=s.survey_token_id JOIN guest_reviews g ON g.survey_response_id=s.id WHERE t.token=$1",
+          [token],
+        )
+      ).rows[0];
+      expect(row.area_text_answers).toEqual({ [key]: "Más almohadas" });
+      expect(row.review_text).toEqual(row.area_text_answers);
+      expect(row.not_applicable).toEqual(["spa"]);
+    } finally {
+      await pool!.query("DELETE FROM review_areas WHERE key=$1", [key]);
+    }
+  });
   it("grants sector-scoped access without granting the legacy unrestricted review resources", async () => {
     const rows = (
       await pool!.query(

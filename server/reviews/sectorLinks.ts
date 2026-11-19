@@ -140,10 +140,8 @@ export async function submitSectorSurvey(rawSector: string, input: unknown) {
   const submissionKey = checkChallenge(data.challenge, sector);
   return withDatabaseTransaction(async () => {
     await requireActiveSector(sector, true);
-    const { valid, questionSnapshot } = await validateSurveyAnswers(
-      data,
-      sector,
-    );
+    const { valid, questionSnapshot, textAnswers, notApplicable } =
+      await validateSurveyAnswers(data, sector);
     const [response] = (
       await db.execute(sql`INSERT INTO survey_public_responses(id,submission_key,sector,guest_name,visit_date,event_name,contact_email,contact_phone,
       rating_overall,area_ratings,area_questions,comment,nps,contact_requested)
@@ -152,7 +150,18 @@ export async function submitSectorSurvey(rawSector: string, input: unknown) {
       ON CONFLICT(submission_key) DO NOTHING RETURNING *,to_char((submitted_at AT TIME ZONE 'UTC') AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM-DD') AS review_day`)
     ).rows as any[];
     if (!response) return { ok: true, alreadyCompleted: true };
-    await createSurveyReview({ ...response, is_generic: true }, null, sector);
+    await db.execute(sql`UPDATE survey_public_responses SET area_text_answers=${JSON.stringify(textAnswers)}::jsonb,
+      not_applicable=ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(notApplicable)}::jsonb)) WHERE id=${response.id}`);
+    await createSurveyReview(
+      {
+        ...response,
+        area_text_answers: textAnswers,
+        not_applicable: notApplicable,
+        is_generic: true,
+      },
+      null,
+      sector,
+    );
     return { ok: true, alreadyCompleted: false };
   });
 }
