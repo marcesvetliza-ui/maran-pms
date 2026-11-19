@@ -665,9 +665,10 @@ export function InvoiceDialog({
     } : r));
   };
 
-  const canSuggestArticles = !isEditing && ["FACT-A", "FACT-B", "FACT-M", "FACT-C"].includes(form.tipoComprobante);
+  const isStockReturn = /^NC-[ABCM]$/.test(form.tipoComprobante);
+  const canSuggestArticles = !isEditing && ["FACT-A", "FACT-B", "FACT-M", "FACT-C", "NC-A", "NC-B", "NC-C", "NC-M"].includes(form.tipoComprobante);
   const completedArticles = invItems.filter(row => row.existingItemId && Number(row.quantity) > 0 && Number(row.costPrice) >= 0);
-  const vatSelectionComplete = ["FACT-B", "FACT-C"].includes(form.tipoComprobante) || completedArticles.every(row => row.vatRate);
+  const vatSelectionComplete = ["FACT-B", "FACT-C", "NC-B", "NC-C"].includes(form.tipoComprobante) || completedArticles.every(row => row.vatRate);
   const articleSuggestion = useMemo(() => suggestPurchaseAmountsFromArticles(
     completedArticles.map(row => ({ quantity: row.quantity, unitPrice: row.costPrice, vatRate: row.vatRate })),
     form.tipoComprobante,
@@ -901,7 +902,7 @@ export function InvoiceDialog({
 
   const createMut = useMutation({
     mutationFn: async (data: any) => {
-      if(invItems.some(row=>row.existingItemId && !row.warehouseId))throw new Error('Elegí un depósito de ingreso para cada artículo.');
+      if(invItems.some(row=>row.existingItemId && !row.warehouseId))throw new Error(isStockReturn ? 'Elegí el depósito de origen para cada artículo devuelto.' : 'Elegí un depósito de ingreso para cada artículo.');
       const res = await apiRequest("POST", "/api/purchase-invoices", {
         ...data,
         // Un renglón sin artículo elegido (p. ej. el que arranca precargado
@@ -930,7 +931,7 @@ export function InvoiceDialog({
       queryClient.invalidateQueries({ queryKey: ["/api/accounting-suppliers/cuenta-corriente"] });
       resetDialog();
       const desc = invItems.length > 0
-        ? `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
+        ? isStockReturn ? `Se descontaron ${invItems.length} artículo(s) del inventario por devolución al proveedor.` : `Se ingresaron ${invItems.length} artículo(s) al inventario con el comprobante.`
         : "El comprobante fue registrado correctamente.";
       const pendingRecipes = Array.isArray(result?.inventoryWarnings) && result.inventoryWarnings.length > 0;
       toast({ title: pendingRecipes ? "Comprobante registrado; recetas pendientes de revisión" : "Comprobante registrado",
@@ -1349,7 +1350,7 @@ export function InvoiceDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock.</span>
+                <span>{isStockReturn ? "Elegí los artículos devueltos al proveedor y su depósito de origen. Se descontarán del stock al registrar la nota de crédito." : "Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock."}</span>
               </div>
 
               {invItems.length > 0 && (
@@ -1389,7 +1390,7 @@ export function InvoiceDialog({
 
                       {(["caja","paquete"].includes(row.unit) && row.unit !== existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit) && <div className="space-y-1"><Label>Contenido por {row.unit} en {existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit || "unidad de stock"}</Label><Input type="number" min="0.001" step="0.001" aria-label={`Contenido de presentación ${i+1}`} value={row.stockUnitsPerInput || ""} onChange={e=>updateInvRow(i,"stockUnitsPerInput",e.target.value)} placeholder="Ej.: 24 o 120 sobres"/><p className="text-xs text-muted-foreground">Si lo indicás, se usa para esta compra y queda registrado en sus cantidades. Vacío: usa la equivalencia del artículo.</p>{Number(row.stockUnitsPerInput)>0 && <p className="text-xs">Ingreso: {Number(row.quantity)*Number(row.stockUnitsPerInput)} unidades de stock · costo por unidad: ${(Number(row.costPrice)/Number(row.stockUnitsPerInput)).toLocaleString("es-AR",{maximumFractionDigits:4})}</p>}</div>}
 
-                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
+                      {canSuggestArticles && !["FACT-C", "NC-C"].includes(form.tipoComprobante) && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
                         const configuredSuggestion = purchaseVatSuggestion(configuredRate);
                         const locked = !!configuredSuggestion && !vatOverrideRows.has(i);
@@ -2071,7 +2072,7 @@ export function InvoiceDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground border rounded-lg p-3 bg-muted/30">
                 <Package className="h-4 w-4 shrink-0" />
-                <span>Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock.</span>
+                <span>{isStockReturn ? "Elegí los artículos devueltos al proveedor y su depósito de origen. Se descontarán del stock al registrar la nota de crédito." : "Si recibiste mercadería, elegí artículos del Inventario para registrar su ingreso. Los servicios se cargan en Importes e impuestos, sin movimiento de stock."}</span>
               </div>
 
               {invItems.length > 0 && (
@@ -2111,7 +2112,7 @@ export function InvoiceDialog({
 
                       {(["caja","paquete"].includes(row.unit) && row.unit !== existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit) && <div className="space-y-1"><Label>Contenido por {row.unit} en {existingInvItems.find((it:any)=>String(it.id) === row.existingItemId)?.unit || "unidad de stock"}</Label><Input type="number" min="0.001" step="0.001" aria-label={`Contenido de presentación ${i+1}`} value={row.stockUnitsPerInput || ""} onChange={e=>updateInvRow(i,"stockUnitsPerInput",e.target.value)} placeholder="Ej.: 24 o 120 sobres"/><p className="text-xs text-muted-foreground">Si lo indicás, se usa para esta compra y queda registrado en sus cantidades. Vacío: usa la equivalencia del artículo.</p>{Number(row.stockUnitsPerInput)>0 && <p className="text-xs">Ingreso: {Number(row.quantity)*Number(row.stockUnitsPerInput)} unidades de stock · costo por unidad: ${(Number(row.costPrice)/Number(row.stockUnitsPerInput)).toLocaleString("es-AR",{maximumFractionDigits:4})}</p>}</div>}
 
-                      {canSuggestArticles && form.tipoComprobante !== "FACT-C" && (() => {
+                      {canSuggestArticles && !["FACT-C", "NC-C"].includes(form.tipoComprobante) && (() => {
                         const configuredRate = (existingInvItems as any[]).find((it: any) => String(it.id) === row.existingItemId)?.ivaRate;
                         const configuredSuggestion = purchaseVatSuggestion(configuredRate);
                         const locked = !!configuredSuggestion && !vatOverrideRows.has(i);

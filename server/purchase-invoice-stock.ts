@@ -4,6 +4,7 @@ import {convertInventoryQuantity} from "./inventoryUnits";
 import { sql } from "drizzle-orm";
 import { db } from "./db";
 import { refreshRecipeCostsForInventoryEntry } from "./recipeCostCascade";
+import { isPurchaseCreditNote } from "@shared/purchaseInvoiceTotals";
 
 type Executor = Omit<typeof db, "$client">;
 
@@ -39,7 +40,7 @@ export function parsePurchaseStockRows(value: unknown): PurchaseStockRow[] {
   });
 }
 
-/** All writes use the same executor as the invoice and its accounting entry. */
+/** Purchases enter stock; supplier credit notes return it. All writes share the invoice transaction. */
 export async function enterPurchaseInvoiceStock(
   tx: Executor,
   invoiceId: number,
@@ -47,7 +48,10 @@ export async function enterPurchaseInvoiceStock(
   rows: PurchaseStockRow[],
   reference: string,
   actor?:string,
+  documentType?:string,
 ): Promise<void> {
+  const isReturn = isPurchaseCreditNote(documentType);
+  const direction = isReturn ? -1 : 1;
   for (const id of [...new Set(rows.map(r=>r.itemId))].sort()) await tx.execute(sql`SELECT id FROM inventory_items WHERE id=${id} FOR UPDATE`);
   for (const id of [...new Set(rows.map(r=>r.warehouseId).filter((id):id is string=>!!id))].sort()) {
     const r=await tx.execute(sql`SELECT id FROM inventory_warehouses WHERE id=${id} AND is_active='true' FOR SHARE`);
@@ -66,6 +70,7 @@ export async function enterPurchaseInvoiceStock(
     if (row.stockUnitsPerInput !== undefined && row.unit === item.unit) throw Object.assign(new Error("La presentación ya es la unidad de stock; no se puede aplicar otro contenido"), {statusCode:400});
     const factor=row.stockUnitsPerInput ?? await unitFactor(tx,row.itemId,row.unit || item.unit,item.unit);
     const stockQuantity=convertInventoryQuantity(row.quantity,factor),stockCost=row.unitCost/factor;
+    const quantityUnits = stockUnits(stockQuantity);
     if(!Number.isFinite(stockCost)||stockCost>99999999)throw Object.assign(new Error("El costo convertido está fuera de rango"),{statusCode:400});
     await tx.execute(sql`
       INSERT INTO purchase_invoice_lines
@@ -85,31 +90,35 @@ export async function enterPurchaseInvoiceStock(
       }
       const stock = await tx.execute(sql`
         SELECT current_stock FROM warehouse_stock
-        WHERE warehouse_id = ${row.warehouseId} AND item_id = ${row.itemId}
+        WHERE warehouse_id = ${row.warehouseId} AND item_id = ${row.itemId} FOR UPDATE
       `);
       previousStock = Number((stock.rows[0] as any)?.current_stock ?? 0);
+      if (isReturn && Math.round(previousStock * 1000) < quantityUnits)
+        throw Object.assign(new Error(`Stock insuficiente de ${item.name} en el depósito para registrar la devolución. Disponible: ${previousStock}.`), {statusCode:409});
+      if (isReturn && Math.round(previousGlobal * 1000) < quantityUnits)
+        throw Object.assign(new Error(`Stock global insuficiente de ${item.name} para registrar la devolución.`), {statusCode:409});
       await tx.execute(sql`
         INSERT INTO warehouse_stock (warehouse_id, item_id, current_stock, updated_at)
-        VALUES (${row.warehouseId}, ${row.itemId}, ${stockQuantity}, now())
+        VALUES (${row.warehouseId}, ${row.itemId}, ${direction * stockQuantity}, now())
         ON CONFLICT (warehouse_id, item_id) DO UPDATE SET
           current_stock = warehouse_stock.current_stock + EXCLUDED.current_stock, updated_at = now()
       `);
     }
-    // Increase the global stock by the entry itself. Summing warehouse stocks here
+    // Apply only this movement to global stock. Summing warehouse stocks here
     // would discard stock previously entered without a warehouse.
     await tx.execute(sql`
-      UPDATE inventory_items SET current_stock = COALESCE(current_stock, 0) + ${stockQuantity}
+      UPDATE inventory_items SET current_stock = COALESCE(current_stock, 0) + ${direction * stockQuantity}
       WHERE id = ${row.itemId}
     `);
     await tx.execute(sql`
       INSERT INTO stock_movements
         (item_id, movement_type, quantity, previous_stock, new_stock, unit_cost,
          notes, source_type, source_id, created_at, warehouse_id,created_by)
-      VALUES (${row.itemId}, 'entrada', ${stockQuantity}, ${previousStock},
-        ${previousStock + stockQuantity}, ${stockCost || null}, ${reference},
+      VALUES (${row.itemId}, ${isReturn ? 'salida' : 'entrada'}, ${stockQuantity}, ${previousStock},
+        ${(Math.round(previousStock * 1000) + direction * quantityUnits) / 1000}, ${stockCost || null}, ${reference},
         'purchase_invoice', ${String(invoiceId)}, now(), ${row.warehouseId},${actor || null})
     `);
-    if (row.unitCost > 0 && stockCost !== Number(item.cost_price ?? 0)) {
+    if (!isReturn && row.unitCost > 0 && stockCost !== Number(item.cost_price ?? 0)) {
       await tx.execute(sql`
         INSERT INTO item_price_history (item_id, price, source, notes)
         VALUES (${row.itemId}, ${stockCost}, 'entrada', ${reference})
@@ -119,6 +128,7 @@ export async function enterPurchaseInvoiceStock(
     }
     // Preserve an existing preferred supplier. Associate the invoice supplier
     // without replacing other supplier relationships or their preference.
+    if (!isReturn) {
     const existingPreferred = await tx.execute(sql`
       SELECT accounting_supplier_id FROM inventory_item_suppliers
       WHERE item_id = ${row.itemId} AND is_preferred = true LIMIT 1
@@ -128,5 +138,6 @@ export async function enterPurchaseInvoiceStock(
       VALUES (${row.itemId}, ${supplierId}, ${existingPreferred.rows.length === 0})
       ON CONFLICT (item_id, accounting_supplier_id) DO NOTHING
     `);
+    }
   }
 }
