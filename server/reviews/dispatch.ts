@@ -1,3 +1,4 @@
+import { publicHotelBaseUrl } from "../lib/webCheckinAccess";
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "../db";
@@ -123,13 +124,14 @@ export async function surveyDispatchForReservation(
   lock = false,
 ) {
   const [row] = (
-    await db.execute(sql`SELECT d.id,d.status,d.scheduled_for AS "scheduledFor",d.sent_at AS "sentAt",d.last_error AS "lastError",d.attempts
+    await db.execute(sql`SELECT d.id,d.reservation_id AS "reservationId",d.status,(SELECT shared_at FROM survey_manual_deliveries m WHERE m.reservation_id=d.reservation_id) AS "sharedAt",d.scheduled_for AS "scheduledFor",d.sent_at AS "sentAt",d.last_error AS "lastError",d.attempts
     FROM reservations r JOIN survey_dispatches d ON (d.reservation_id=r.id OR d.stay_key=COALESCE(r.guest_id,r.id)||':'||r.check_in_date::text||':'||r.check_out_date::text)
     WHERE r.id=${reservationId} ORDER BY (d.reservation_id=r.id) DESC LIMIT 1 ${lock ? sql`FOR UPDATE OF d` : sql``}`)
   ).rows as any[];
   if (row) return row;
   const [legacy] = (
     await db.execute(sql`SELECT
+    (SELECT shared_at FROM survey_manual_deliveries WHERE reservation_id=${reservationId}) AS "sharedAt",
     (SELECT max(sent_at) FROM email_logs WHERE reservation_id=${reservationId} AND type='checkout' AND status='sent') AS "sentAt",
     EXISTS(SELECT 1 FROM survey_tokens WHERE reservation_id=${reservationId} AND completed=true) AS completed,
     EXISTS(SELECT 1 FROM survey_tokens WHERE reservation_id=${reservationId}) AS invited`)
@@ -145,6 +147,7 @@ export async function surveyDispatchForReservation(
         sentAt: legacy.sentAt,
         lastError: null,
         attempts: 1,
+        sharedAt: legacy.sharedAt,
       }
     : null;
 }
@@ -221,4 +224,76 @@ export function startSurveyScheduler() {
   timer.unref();
   void tick();
   return () => clearInterval(timer);
+}
+
+/** Prepare a personal invitation without queueing or sending an email.
+ * The dispatch lock shares the same token used by the email scheduler.
+ * Copying a link is not recorded as a successful WhatsApp delivery.
+ */
+export async function preparePersonalSurveyLink(
+  reservationId: string,
+  markSent: boolean,
+  actor: string,
+) {
+  return withDatabaseTransaction(async () => {
+    const [r] = (
+      await db.execute(
+        sql`SELECT * FROM reservations WHERE id=${reservationId} FOR UPDATE`,
+      )
+    ).rows as any[];
+    if (!r) throw new ReviewError("Reserva no encontrada", 404);
+    if (r.status !== "checked_out")
+      throw new ReviewError(
+        "La encuesta está disponible después de la salida.",
+        409,
+      );
+    const activeOther = (
+      await db.execute(
+        sql`SELECT 1 FROM reservations other WHERE other.id<>${r.id} AND other.guest_id=${r.guest_id} AND other.check_in_date=${r.check_in_date}::date AND other.check_out_date=${r.check_out_date}::date AND other.status IN ('checked_in','confirmed','web_checkin','reserved') LIMIT 1`,
+      )
+    ).rows.length;
+    if (activeOther)
+      throw new ReviewError(
+        "La estadía todavía tiene un alojamiento activo. La encuesta estará disponible al finalizar la salida.",
+        409,
+      );
+    const dispatch = await surveyDispatchForReservation(reservationId, true);
+    const ownerId = dispatch?.reservationId || reservationId;
+    let [token] = (
+      await db.execute(
+        sql`SELECT *,expires_at<(now() AT TIME ZONE 'UTC') AS expired FROM survey_tokens WHERE reservation_id=${ownerId} ORDER BY created_at DESC,id LIMIT 1`,
+      )
+    ).rows as any[];
+    if (
+      dispatch?.status === "completed" ||
+      token?.completed ||
+      (
+        await db.execute(
+          sql`SELECT 1 FROM survey_tokens WHERE reservation_id=${ownerId} AND completed=true LIMIT 1`,
+        )
+      ).rows.length
+    )
+      throw new ReviewError("El huésped ya respondió la encuesta.", 409);
+    if (!token) {
+      [token] = (
+        await db.execute(
+          sql`INSERT INTO survey_tokens(id,reservation_id,token,expires_at) VALUES(${randomUUID()},${ownerId},${randomUUID()},(now() AT TIME ZONE 'UTC')+interval '30 days') RETURNING *`,
+        )
+      ).rows as any[];
+    } else if (token.expired) {
+      await db.execute(
+        sql`UPDATE survey_tokens SET expires_at=(now() AT TIME ZONE 'UTC')+interval '30 days' WHERE id=${token.id}`,
+      );
+    }
+    if (markSent)
+      await db.execute(
+        sql`INSERT INTO survey_manual_deliveries(reservation_id,survey_token_id,actor) VALUES(${ownerId},${token.id},${actor}) ON CONFLICT(reservation_id) DO NOTHING`,
+      );
+    await db.execute(sql`INSERT INTO audit_logs(action,module,user_name,description,entity_type,entity_id,details,timestamp)
+      VALUES('update','reviews',${actor},${markSent ? "Encuesta registrada como compartida por WhatsApp" : "Enlace personal de encuesta preparado"},'reservation',${ownerId},${JSON.stringify({ requestedReservationId: reservationId, markSent })},now())`);
+    return {
+      url: `${publicHotelBaseUrl()}/encuesta/${token.token}`,
+      markedSent: markSent,
+    };
+  });
 }

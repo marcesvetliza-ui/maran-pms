@@ -403,7 +403,7 @@ export async function registerRoutes(
     // guest survey GET/POST are public; review management stays authenticated.
     if (
       ["GET", "POST"].includes(req.method) &&
-      /^\/survey\/[^/]+\/?$/.test(req.path)
+      (/^\/survey\/[^/]+\/?$/.test(req.path) || /^\/survey\/general\/(hotel|spa|events|restaurant)\/?$/.test(req.path))
     ) {
       return next();
     }

@@ -1,3 +1,4 @@
+import { ensureReviewSectorSchema } from "./sectorSchema";
 import { sql } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "../db";
 
@@ -81,5 +82,6 @@ export async function ensureReviewsSchema() {
         FOR EACH ROW EXECUTE FUNCTION queue_checkout_survey();
     `),
     );
+    await ensureReviewSectorSchema();
   });
 }

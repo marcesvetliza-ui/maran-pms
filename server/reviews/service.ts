@@ -1,3 +1,8 @@
+import {
+  surveySectors,
+  surveySectorTargets,
+  type SurveySector,
+} from "@shared/survey-sectors";
 import { randomUUID } from "node:crypto";
 import { sql, type SQL } from "drizzle-orm";
 import { db, withDatabaseTransaction } from "../db";
@@ -17,10 +22,13 @@ export class ReviewError extends Error {
     super(message);
   }
 }
-export async function reviewAreas(activeOnly = false): Promise<ReviewArea[]> {
+export async function reviewAreas(
+  activeOnly = false,
+  sector?: SurveySector,
+): Promise<ReviewArea[]> {
   return (
     await db.execute(
-      sql`SELECT key,name,question,active,in_survey AS "inSurvey",sort_order AS "sortOrder",notification_area AS "notificationArea" FROM review_areas WHERE (${!activeOnly} OR (active AND in_survey)) ORDER BY sort_order,key`,
+      sql`SELECT key,name,question,active,in_survey AS "inSurvey",sort_order AS "sortOrder",notification_area AS "notificationArea",sectors FROM review_areas WHERE (${!activeOnly} OR (active AND in_survey)) AND (${sector || null}::text IS NULL OR ${sector || null}=ANY(sectors)) ORDER BY sort_order,key`,
     )
   ).rows as any;
 }
@@ -36,7 +44,11 @@ const legacyAreas = (r: any) =>
     ),
   );
 
-async function createSurveyReview(response: any, reservation: any) {
+export async function createSurveyReview(
+  response: any,
+  reservation: any,
+  sector: SurveySector = "hotel",
+) {
   const areaRatings = { ...legacyAreas(response), ...response.area_ratings };
   const attention = needsReviewFollowup(
     response.rating_overall,
@@ -45,12 +57,12 @@ async function createSurveyReview(response: any, reservation: any) {
   );
   const [r] = (
     await db.execute(sql`INSERT INTO guest_reviews(id,reservation_id,guest_id,room_id,review_date,source,rating,title,content,
-    survey_response_id,area_ratings,area_questions,nps,contact_requested,followup_status,sentiment)
-    VALUES(${"survey-" + response.id},${reservation.id},${reservation.guest_id || "unknown"},${reservation.room_id},
+    survey_response_id,area_ratings,area_questions,nps,contact_requested,followup_status,sentiment,survey_sector,generic_response_id,guest_display_name,action_areas)
+    VALUES(${"survey-" + response.id},${reservation?.id || null},${reservation?.guest_id || "unlinked"},${reservation?.room_id || null},
       ${response.review_day}::date,
-      'survey',${response.rating_overall},'Encuesta posestadía',${response.comment || ""},${response.id},${JSON.stringify(areaRatings)}::jsonb,${JSON.stringify(response.area_questions || {})}::jsonb,
+      'survey',${response.rating_overall},${response.is_generic ? "Encuesta " + surveySectors[sector] : "Encuesta posestadía"},${response.comment || ""},${response.is_generic ? null : response.id},${JSON.stringify(areaRatings)}::jsonb,${JSON.stringify(response.area_questions || {})}::jsonb,
       ${response.nps ?? null},${response.contact_requested || false},${attention ? "new" : "resolved"},
-      ${response.rating_overall <= 2 ? "negative" : response.rating_overall >= 4 ? "positive" : "neutral"})
+      ${response.rating_overall <= 2 ? "negative" : response.rating_overall >= 4 ? "positive" : "neutral"},${sector},${response.is_generic ? response.id : null},${response.guest_name || null},ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(Object.keys(areaRatings).filter((k) => Number(areaRatings[k]) <= 2))}::jsonb)))
     ON CONFLICT(survey_response_id) WHERE survey_response_id IS NOT NULL DO NOTHING RETURNING id`)
   ).rows as any[];
   if (!r) return;
@@ -58,20 +70,26 @@ async function createSurveyReview(response: any, reservation: any) {
     sql`INSERT INTO review_events(review_id,actor,kind,details) VALUES(${r.id},'huésped','received',${JSON.stringify({ origin: "survey", attention })}::jsonb)`,
   );
   if (attention)
-    await notifyReviewFollowup(r.id, areaRatings, response.contact_requested);
+    await notifyReviewFollowup(
+      r.id,
+      areaRatings,
+      response.contact_requested,
+      sector,
+    );
 }
 
 export async function notifyReviewFollowup(
   reviewId: string,
   areaRatings: Record<string, number | null>,
   contactRequested: boolean,
+  sector: SurveySector = "hotel",
 ) {
   const areas = await reviewAreas();
   const lowAreas = areas.filter(
     (a) => Number(areaRatings[a.key]) > 0 && Number(areaRatings[a.key]) <= 2,
   );
   const targets = new Set([
-    "reception",
+    surveySectorTargets[sector],
     ...lowAreas.map((a) => a.notificationArea),
   ]);
   for (const target of targets) {
@@ -129,9 +147,53 @@ export async function publicSurvey(token: string) {
     checkIn: row.checkIn,
     checkOut: row.checkOut,
     roomNumber: row.roomNumber,
-    areas: await reviewAreas(true),
+    areas: await reviewAreas(true, "hotel"),
+    sector: "hotel",
+    kind: "personal",
     googleMapsUrl,
   };
+}
+
+export async function validateSurveyAnswers(
+  data: ReturnType<typeof surveyAnswerSchema.parse>,
+  sector: SurveySector,
+) {
+  const areaRatings = {
+    ...legacyAreas({
+      rating_room: data.ratingRoom,
+      rating_cleanliness: data.ratingCleanliness,
+      rating_service: data.ratingService,
+      rating_food: data.ratingFood,
+    }),
+    ...data.areaRatings,
+  };
+  const questions = await reviewAreas(true, sector),
+    active = new Set(questions.map((a) => a.key));
+  if (Object.keys(areaRatings).some((key) => !active.has(key)))
+    throw new ReviewError(
+      "Las preguntas cambiaron. Actualizá la encuesta antes de enviarla.",
+    );
+  const valid = Object.fromEntries(
+    Object.entries(areaRatings).filter(([, value]) => value !== null),
+  );
+  if (
+    data.areaQuestions &&
+    Object.keys(valid).some(
+      (key) =>
+        data.areaQuestions![key] !==
+        questions.find((a) => a.key === key)?.question,
+    )
+  )
+    throw new ReviewError(
+      "Las preguntas cambiaron. Actualizá la encuesta antes de enviarla.",
+      409,
+    );
+  const questionSnapshot = Object.fromEntries(
+    questions
+      .filter((q) => Object.hasOwn(valid, q.key))
+      .map((q) => [q.key, q.question]),
+  );
+  return { valid, questionSnapshot };
 }
 
 export async function submitSurvey(token: string, input: unknown) {
@@ -175,40 +237,9 @@ export async function submitSurvey(token: string, input: unknown) {
         409,
       );
     const data = parsed.data;
-    const areaRatings = {
-      ...legacyAreas({
-        rating_room: data.ratingRoom,
-        rating_cleanliness: data.ratingCleanliness,
-        rating_service: data.ratingService,
-        rating_food: data.ratingFood,
-      }),
-      ...data.areaRatings,
-    };
-    const questions = await reviewAreas(true),
-      active = new Set(questions.map((a) => a.key));
-    if (Object.keys(areaRatings).some((key) => !active.has(key)))
-      throw new ReviewError(
-        "Las preguntas cambiaron. Actualizá la encuesta antes de enviarla.",
-      );
-    const valid = Object.fromEntries(
-      Object.entries(areaRatings).filter(([, value]) => value !== null),
-    );
-    if (
-      data.areaQuestions &&
-      Object.keys(valid).some(
-        (key) =>
-          data.areaQuestions![key] !==
-          questions.find((a) => a.key === key)?.question,
-      )
-    )
-      throw new ReviewError(
-        "Las preguntas cambiaron. Actualizá la encuesta antes de enviarla.",
-        409,
-      );
-    const questionSnapshot = Object.fromEntries(
-      questions
-        .filter((q) => Object.hasOwn(valid, q.key))
-        .map((q) => [q.key, q.question]),
+    const { valid, questionSnapshot } = await validateSurveyAnswers(
+      data,
+      "hotel",
     );
     const [response] = (
       await db.execute(sql`INSERT INTO survey_responses(id,survey_token_id,rating_overall,rating_room,rating_cleanliness,rating_service,rating_food,comment,guest_name,area_ratings,area_questions,nps,contact_requested,submitted_at)
@@ -226,14 +257,39 @@ export async function submitSurvey(token: string, input: unknown) {
   });
 }
 
-function reviewWhere(f: ReviewFilters): SQL {
+export function reviewSectorCondition(sector: SurveySector): SQL {
+  return sql`(COALESCE(r.survey_sector,CASE WHEN r.source='survey' THEN 'hotel' END)=${sector}
+    OR EXISTS(SELECT 1 FROM review_areas a WHERE a.key=ANY(r.action_areas) AND a.notification_area=${surveySectorTargets[sector]}))`;
+}
+function reviewWhere(f: ReviewFilters, scope?: SurveySector[]): SQL {
   const filters: SQL[] = [sql`true`];
+  if (scope)
+    filters.push(
+      scope.length
+        ? sql`(${sql.join(scope.map(reviewSectorCondition), sql` OR `)})`
+        : sql`false`,
+    );
+  if (f.sector) {
+    const origin = sql`COALESCE(r.survey_sector,CASE WHEN r.source='survey' THEN 'hotel' END)=${f.sector}`;
+    if (f.sectorMode === "origin") filters.push(origin);
+    else if (f.sectorMode === "assigned")
+      filters.push(
+        sql`NOT COALESCE((${origin}),false) AND ${reviewSectorCondition(f.sector)}`,
+      );
+    else filters.push(reviewSectorCondition(f.sector));
+  }
+  if (f.surveyKind === "personal")
+    filters.push(sql`r.source='survey' AND r.generic_response_id IS NULL`);
+  if (f.surveyKind === "generic")
+    filters.push(sql`r.generic_response_id IS NOT NULL`);
   if (f.search)
     filters.push(
-      sql`concat_ws(' ',g.last_name,g.first_name,r.guest_display_name,r.title,r.content,rs.reservation_code) ILIKE ${"%" + f.search + "%"}`,
+      sql`concat_ws(' ',g.last_name,g.first_name,r.guest_display_name,r.title,r.content,rs.reservation_code,p.event_name,p.contact_email,p.contact_phone) ILIKE ${"%" + f.search + "%"}`,
     );
   const date =
-    f.dateField === "stay" ? sql`rs.check_out_date` : sql`r.review_date`;
+    f.dateField === "stay"
+      ? sql`COALESCE(p.visit_date,rs.check_out_date)`
+      : sql`r.review_date`;
   if (f.from) filters.push(sql`${date}>=${f.from}::date`);
   if (f.to) filters.push(sql`${date}<=${f.to}::date`);
   if (f.source) filters.push(sql`r.source=${f.source}`);
@@ -248,14 +304,15 @@ function reviewWhere(f: ReviewFilters): SQL {
   if (f.channel) filters.push(sql`rs.source=${f.channel}`);
   return sql.join(filters, sql` AND `);
 }
-const reviewJoins = sql`FROM guest_reviews r LEFT JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id
- LEFT JOIN reservations rs ON rs.id=r.reservation_id LEFT JOIN room_types rt ON rt.id=rm.room_type_id`;
+const reviewJoins = sql`FROM guest_reviews r LEFT JOIN guests g ON g.id=r.guest_id AND r.generic_response_id IS NULL LEFT JOIN rooms rm ON rm.id=r.room_id
+ LEFT JOIN survey_public_responses p ON p.id=r.generic_response_id LEFT JOIN reservations rs ON rs.id=r.reservation_id LEFT JOIN room_types rt ON rt.id=rm.room_type_id`;
 export async function listReviews(
   filters: ReviewFilters,
   page = 1,
   id?: string,
+  scope?: SurveySector[],
 ) {
-  const where = sql`${reviewWhere(filters)} AND (${id || null}::text IS NULL OR r.id=${id || null})`;
+  const where = sql`${reviewWhere(filters, scope)} AND (${id || null}::text IS NULL OR r.id=${id || null})`;
   const [count] = (
     await db.execute(
       sql`SELECT count(*)::int AS count ${reviewJoins} WHERE ${where}`,
@@ -263,21 +320,26 @@ export async function listReviews(
   ).rows as any[];
   const rows = (
     await db.execute(sql`SELECT r.id,r.reservation_id AS "reservationId",r.guest_id AS "guestId",r.room_id AS "roomId",
-    COALESCE(NULLIF(concat_ws(' ',g.last_name,g.first_name),''),r.guest_display_name,'Huésped') AS "guestName",rm.room_number AS "roomNumber",
+    COALESCE(NULLIF(concat_ws(' ',g.last_name,g.first_name),''),r.guest_display_name,CASE WHEN r.generic_response_id IS NOT NULL THEN 'Anónimo' ELSE 'Huésped' END) AS "guestName",rm.room_number AS "roomNumber",
     rs.check_in_date::text AS "checkIn",rs.check_out_date::text AS "checkOut",rt.name AS "roomType",rs.source AS channel,
     r.review_date::text AS "reviewDate",r.source,r.rating,r.title,r.content,r.area_ratings AS "areaRatings",r.area_questions AS "areaQuestions",r.sentiment,r.nps,
     r.contact_requested AS "contactRequested",r.followup_status AS "followupStatus",r.assigned_to AS "assignedTo",r.action_areas AS "actionAreas",
-    r.survey_response_id AS "surveyResponseId",r.staff_response AS "staffResponse"
+    r.survey_response_id AS "surveyResponseId",r.staff_response AS "staffResponse",
+    COALESCE(r.survey_sector,CASE WHEN r.source='survey' THEN 'hotel' END) AS sector,
+    CASE WHEN r.generic_response_id IS NOT NULL THEN 'generic' WHEN r.source='survey' THEN 'personal' END AS "surveyKind",
+    p.visit_date::text AS "visitDate",p.event_name AS "eventName",COALESCE(p.contact_email,g.email) AS "contactEmail",COALESCE(p.contact_phone,g.phone) AS "contactPhone"
     ${reviewJoins} WHERE ${where} ORDER BY r.review_date DESC,r.id DESC LIMIT 50 OFFSET ${(page - 1) * 50}`)
   ).rows as unknown as ReviewItem[];
   return { items: rows, total: count.count, page, pageSize: 50 };
 }
 export async function reviewAnalyticsRows(
   filters: ReviewFilters,
+  scope?: SurveySector[],
 ): Promise<ReviewItem[]> {
   return (
     await db.execute(sql`SELECT r.rating,r.review_date::text AS "reviewDate",r.area_ratings AS "areaRatings",r.nps,
-    r.followup_status AS "followupStatus",r.contact_requested AS "contactRequested"
-    ${reviewJoins} WHERE ${reviewWhere(filters)}`)
+    r.followup_status AS "followupStatus",r.contact_requested AS "contactRequested",COALESCE(r.survey_sector,CASE WHEN r.source='survey' THEN 'hotel' END) AS sector,
+    CASE WHEN r.generic_response_id IS NOT NULL THEN 'generic' WHEN r.source='survey' THEN 'personal' END AS "surveyKind"
+    ${reviewJoins} WHERE ${reviewWhere(filters, scope)}`)
   ).rows as any;
 }

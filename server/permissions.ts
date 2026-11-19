@@ -131,6 +131,7 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   "sidebar:/chatbot": ["admin", "reception", "responsable_area", "jefe_recepcion", "comercial"],
   "sidebar:/reviews": [
     "admin", "manager", "ama_de_llaves", "reception", "responsable_area", "jefe_recepcion", "comercial",
+    "resp_administracion",
   ],
 
   // ── MÓDULO 6: Administración ────────────────────────────────────────────
@@ -195,7 +196,10 @@ export const API_RESOURCE_PERMISSIONS: Record<string, SystemUserRole[]> = {
   ...Object.fromEntries(Object.entries(CHANNEX_ROLE_DEFAULTS).map(([key, roles]) => [`api:ota:${key}`, [...roles]])),
   "api:manuals:restricted": ["admin"],
   "api:hospitality:campaigns": ["admin", "manager", "jefe_recepcion", "comercial", "reception"],
-  "api:reviews:manage": ["admin", "manager", "ama_de_llaves", "reception", "responsable_area", "jefe_recepcion", "comercial"],
+  "api:reviews:manage": ["admin", "manager", "ama_de_llaves", "reception", "responsable_area", "jefe_recepcion", "comercial", "resp_administracion"],
+  "api:reviews:sector:spa": ["spa"],
+  "api:reviews:sector:events": ["events"],
+  "api:reviews:sector:restaurant": ["restaurant"],
   "api:reviews:configure": ["admin", "manager", "jefe_recepcion", "comercial"],
   // server/routes/channex.ts — antes CHANNEX_CONFIG_ROLES, 6 endpoints de
   // conexiones y mapeos (crear/editar/borrar/sincronizar catálogo).
@@ -456,6 +460,9 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
 
   "api:hospitality:campaigns": {label:"Fechas especiales: contactos, mensajes y envíos",section:"API — Hospitalidad"},
   "api:reviews:manage": {label:"Reseñas: cargar opiniones, dar seguimiento y reenviar encuestas",section:"API — Reseñas"},
+  "api:reviews:sector:spa": {label:"Reseñas: bandeja y seguimiento del SPA",section:"API — Reseñas"},
+  "api:reviews:sector:events": {label:"Reseñas: bandeja y seguimiento de Eventos",section:"API — Reseñas"},
+  "api:reviews:sector:restaurant": {label:"Reseñas: bandeja y seguimiento de Restaurant",section:"API — Reseñas"},
   "api:reviews:configure": {label:"Reseñas: configurar áreas, preguntas y horario de encuestas",section:"API — Reseñas"},
   "api:revenue:read": { label: "Ver tablero, Pace, demanda, competencia y sugerencias", section: "Revenue Management" },
   "api:revenue:events-write": { label: "Agregar, modificar y eliminar eventos de demanda", section: "Revenue Management" },

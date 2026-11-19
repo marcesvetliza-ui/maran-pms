@@ -1,3 +1,4 @@
+import { PersonalSurveySharing } from "./survey-sharing";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/App";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -68,6 +69,14 @@ export function SurveyInvitation({ reservationId }: { reservationId: string }) {
         </p>
       )}
       {data?.status === "completed" && <p>Encuesta finalizada.</p>}
+      {data?.sharedAt && (
+        <p className="text-muted-foreground">
+          Compartida por WhatsApp: {formatHotelDateTime(data.sharedAt)}
+        </p>
+      )}
+      {canManage && data?.status !== "completed" && (
+        <PersonalSurveySharing reservationId={reservationId} />
+      )}
       {data?.lastError && <p className="text-destructive">{data.lastError}</p>}
       {canManage &&
         !["sending", "completed", "queued"].includes(data?.status) && (

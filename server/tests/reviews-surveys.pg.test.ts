@@ -616,7 +616,8 @@ suite(
       );
       expect(
         (await api("/api/reviews", "GET", undefined, "restaurant")).status,
-      ).toBe(403);
+      ).toBe(200); // Sector access is now explicit and filtered; unrelated Hotel reviews remain hidden.
+      expect((await (await api("/api/reviews", "GET", undefined, "restaurant")).json()).items).toEqual([]);
       expect(
         (await api("/api/reviews/areas", "POST", {}, "reception")).status,
       ).toBe(403);

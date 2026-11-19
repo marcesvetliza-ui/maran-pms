@@ -16,12 +16,13 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 
 const authState = vi.hoisted(() => ({
   navigate:vi.fn(),
+  role:"reception",
   hasPermission: ((_resourceKey: string) => true) as (resourceKey: string) => boolean,
 }));
 
 vi.mock("@/App", () => ({
   useAuth: () => ({
-    user: { id: "u1", username: "tester", email: "t@t.com", fullName: "Tester", role: "reception", department: null },
+    user: { id: "u1", username: "tester", email: "t@t.com", fullName: "Tester", role: authState.role, department: null },
     hasPermission: authState.hasPermission,
   }),
 }));
@@ -42,6 +43,7 @@ function renderSidebar() {
 
 describe("AppSidebar — filtrado por resourceKey", () => {
   beforeEach(() => {
+    authState.role="reception";
     queryClient.clear();
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([]), { status: 200 })));
     // SidebarProvider usa useIsMobile(), que llama matchMedia — jsdom no lo trae.
@@ -125,6 +127,10 @@ describe("AppSidebar — filtrado por resourceKey", () => {
     // extra (devOnly) por fuera del modelo de permisos.
     expect(screen.queryByText("Código fuente")).not.toBeInTheDocument();
   });
+  it("shows Reviews through the sector-specific permission without granting the legacy global entry",()=>{
+    authState.role='spa';authState.hasPermission=key=>key==='api:reviews:sector:spa';renderSidebar();
+    expect(screen.getByText('Reseñas')).toBeInTheDocument();expect(screen.queryByText('Reservas')).not.toBeInTheDocument();
+  });
 });
 
 it.each(['hospitality_alert','hospitality_stay_note'])('opens the exact %s request from the bell and only marks it read',async kind=>{
@@ -134,6 +140,8 @@ it.each(['hospitality_alert','hospitality_stay_note'])('opens the exact %s reque
  renderSidebar();fireEvent.click(screen.getByTestId('button-notifications'));await screen.findByText(n.title);fireEvent.click(screen.getByTestId('notification-item-bell-1'));
  await waitFor(()=>expect(authState.navigate).toHaveBeenCalledWith(kind==='hospitality_alert'?'/hospitality?tab=dashboard&alertId=source-1':'/hospitality?tab=stay-notes&noteId=source-1'));
  expect(vi.mocked(fetch).mock.calls.filter(([,init])=>init?.method==='PATCH').map(([url])=>String(url))).toEqual(['/api/notifications/bell-1/read']);
+
+
 });
 
-afterEach(()=>{queryClient.clear();vi.unstubAllGlobals();});
+afterEach(()=>{authState.role="reception";queryClient.clear();vi.unstubAllGlobals();});

@@ -219,6 +219,7 @@ app.use((req, res, next) => {
     startupReady = true;
     try {
       const {ensureReviewsSchema}=await import('./reviews/schema');await ensureReviewsSchema();
+      await (await import('./permissions')).loadRolePermissionsCache();
       const {backfillSurveyReviews}=await import('./reviews/service');await backfillSurveyReviews();
       const {startSurveyScheduler}=await import('./reviews/dispatch');httpServer.once('close',startSurveyScheduler());
       log('Reseñas y encuestas posestadía preparadas; cola automática iniciada');

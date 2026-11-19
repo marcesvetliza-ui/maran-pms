@@ -1,3 +1,10 @@
+import { SurveySectorLinks, PersonalSurveySharing } from "./survey-sharing";
+import {
+  surveySectors,
+  permittedReviewSectors,
+  surveySectorTargets,
+  type SurveySector,
+} from "@shared/survey-sectors";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { SurveyScheduleSettings } from "./survey-schedule-settings";
@@ -61,6 +68,9 @@ const emptyFilters: Filters = {
   to: "",
   dateField: "response",
   source: "survey",
+  sector: "",
+  sectorMode: "all",
+  surveyKind: "",
   area: "",
   actionArea: "",
   rating: "",
@@ -117,10 +127,18 @@ const dispatchLabels: Record<string, string> = {
 };
 
 export function ReviewsCenter() {
-  const { hasPermission } = useAuth(),
+  const { hasPermission, user } = useAuth(),
     { toast } = useToast();
-  const canManage = hasPermission("api:reviews:manage"),
+  const permittedSectors = permittedReviewSectors(hasPermission);
+  const scopes = hasPermission("sidebar:/reviews")
+    ? undefined
+    : permittedSectors;
+  const canManage =
+      (hasPermission("api:reviews:manage") && (!scopes || scopes.length > 0)) ||
+      permittedSectors.length > 0,
     canConfigure = hasPermission("api:reviews:configure");
+  const canManageHotel =
+    hasPermission("sidebar:/reviews") && hasPermission("api:reviews:manage");
   const [tab, setTab] = useState("opinions"),
     [filters, setFilters] = useState<Filters>(() => {
       const day = moveReviewDay(reviewToday(), -1);
@@ -247,6 +265,14 @@ export function ReviewsCenter() {
   };
   const areaName = (key: string) =>
     areas.data?.find((a) => a.key === key)?.name || key;
+  const inboxSectors = new Set(
+    (reviews.data?.items || []).map((r) => r.sector || "hotel"),
+  );
+  const displaySector = (filters.sector ||
+    (scopes?.length === 1 ? scopes[0] : undefined) ||
+    (inboxSectors.size === 1 ? [...inboxSectors][0] : "hotel")) as SurveySector;
+  const compactInbox =
+    !filters.sector && (!scopes || scopes.length > 1) && inboxSectors.size > 1;
   const stats = analytics.data,
     monthData = Object.entries(stats?.months || {})
       .sort(([a], [b]) => a.localeCompare(b))
@@ -283,7 +309,8 @@ export function ReviewsCenter() {
             {[
               ["opinions", "Encuestas recibidas"],
               ["overview", "Resumen"],
-              ["invitations", "Envíos"],
+              ...(!scopes ? [["invitations", "Envíos"]] : []),
+              ["links", "Enlaces para compartir"],
               ["areas", "Áreas y preguntas"],
             ].map(([key, label]) => (
               <TabsTrigger
@@ -298,6 +325,44 @@ export function ReviewsCenter() {
         </div>
         {["overview", "opinions"].includes(tab) && (
           <div className="mt-5 mb-5 min-w-0">
+            <div
+              className="mb-4 flex flex-wrap items-center gap-2"
+              aria-label="Bandejas por sector"
+            >
+              <Button
+                size="sm"
+                variant={!filters.sector ? "default" : "outline"}
+                onClick={() => change("sector", "")}
+              >
+                {scopes ? "Mi bandeja" : "Todas"}
+              </Button>
+              {Object.entries(surveySectors)
+                .filter(
+                  ([key]) => !scopes || scopes.includes(key as SurveySector),
+                )
+                .map(([key, label]) => (
+                  <Button
+                    key={key}
+                    size="sm"
+                    variant={filters.sector === key ? "default" : "outline"}
+                    onClick={() => change("sector", key)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              {filters.sector && (
+                <select
+                  aria-label="Opiniones del sector"
+                  className="h-9 max-w-full rounded-lg border bg-background px-2 text-sm"
+                  value={filters.sectorMode}
+                  onChange={(e) => change("sectorMode", e.target.value)}
+                >
+                  <option value="all">Propias y derivadas</option>
+                  <option value="origin">Del sector</option>
+                  <option value="assigned">Derivadas de otros sectores</option>
+                </select>
+              )}
+            </div>
             <ReviewInboxControls
               filters={filters}
               from={period.from}
@@ -354,6 +419,49 @@ export function ReviewsCenter() {
               </Card>
             ))}
           </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">
+                Resultados por sector de origen
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left">
+                    <th>Sector</th>
+                    <th>Respuestas</th>
+                    <th>Calificación general</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(surveySectors)
+                    .filter(
+                      ([key]) =>
+                        !scopes ||
+                        scopes.includes(key as SurveySector) ||
+                        stats?.sectors?.[key]?.count > 0,
+                    )
+                    .map(([key, name]) => (
+                      <tr key={key} className="border-t">
+                        <td className="py-2">{name}</td>
+                        <td>{stats?.sectors?.[key]?.count ?? 0}</td>
+                        <td>
+                          {stats?.sectors?.[key]?.average == null
+                            ? "—"
+                            : `${stats.sectors[key].average} / 5`}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {stats?.personal ?? 0} encuestas vinculadas a una estadía ·{" "}
+                {stats?.generic ?? 0} respuestas por enlace genérico. Los casos
+                derivados conservan su sector de origen.
+              </p>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Puntajes por área</CardTitle>
@@ -432,13 +540,17 @@ export function ReviewsCenter() {
                 {stats?.invitations?.sent ?? 0} enviadas ·{" "}
                 {stats?.invitations?.responded ?? 0} respondidas ·{" "}
                 {stats?.invitations?.responseRate == null
-                  ? "Sin tasa todavía"
+                  ? stats?.invitations?.applicable === false
+                    ? "No aplica a esta bandeja"
+                    : "Sin tasa todavía"
                   : `${stats.invitations.responseRate}% de respuesta`}
               </p>
               <p className="text-xs text-muted-foreground mt-2">
-                Por fecha de envío, entre las fechas elegidas. No depende de los
-                filtros de área, puntaje ni estado. “Enviada” confirma que el
-                proveedor aceptó el correo, no su entrega.
+                Solo invitaciones personales de Hotel por fecha de envío (correo
+                o WhatsApp registrado), sin contar dos veces una misma estadía.
+                No depende de los filtros de área, puntaje ni estado. “Enviada”
+                confirma que el proveedor aceptó el correo, no su entrega.
+                Copiar un enlace genérico no aumenta las invitaciones.
               </p>
             </CardContent>
           </Card>
@@ -446,7 +558,11 @@ export function ReviewsCenter() {
         <TabsContent value="opinions" className="min-w-0 space-y-4">
           <ReviewInboxTable
             items={reviews.data?.items || []}
-            areas={areas.data || []}
+            areas={(areas.data || []).filter((a) =>
+              (a.sectors || ["hotel"]).includes(displaySector),
+            )}
+            compact={compactInbox}
+            restrictToAreas={!!filters.sector || scopes?.length === 1}
             total={reviews.data?.total || 0}
             page={page}
             loading={reviews.isLoading}
@@ -460,6 +576,9 @@ export function ReviewsCenter() {
             showToday={dayMode !== "today"}
             dateRange={period.from !== period.to}
           />
+        </TabsContent>
+        <TabsContent value="links">
+          <SurveySectorLinks canConfigure={canConfigure} />
         </TabsContent>
         <TabsContent value="invitations" className="space-y-3">
           <p className="text-sm text-muted-foreground">
@@ -489,7 +608,15 @@ export function ReviewsCenter() {
                     <p className="text-sm text-destructive">{j.lastError}</p>
                   )}
                 </div>
-                {canManage &&
+                {canManageHotel && j.status !== "completed" && (
+                  <PersonalSurveySharing reservationId={j.reservationId} />
+                )}
+                {j.sharedAt && (
+                  <p className="text-xs">
+                    Compartida por WhatsApp: {formatHotelDateTime(j.sharedAt)}
+                  </p>
+                )}
+                {canManageHotel &&
                   !["completed", "sending", "queued"].includes(j.status) && (
                     <Button
                       variant="outline"
@@ -544,6 +671,10 @@ export function ReviewsCenter() {
                       : a.inSurvey
                         ? "Visible en la encuesta"
                         : "Solo para seguimiento"}{" "}
+                    ·{" "}
+                    {(a.sectors || ["hotel"])
+                      .map((k) => surveySectors[k])
+                      .join(" · ")}{" "}
                     · Avisos: {a.notificationArea}
                   </p>
                 </div>
@@ -610,6 +741,7 @@ function ReviewDetail({
   onClose: () => void;
 }) {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
   const detail = useQuery<{ review: ReviewItem; events: any[] }>({
     queryKey: ["/api/reviews", "detail", id],
     queryFn: () => get("/api/reviews/" + id),
@@ -646,6 +778,22 @@ function ReviewDetail({
       }),
   });
   const r = detail.data?.review;
+  const globallyManaged =
+    hasPermission("sidebar:/reviews") && hasPermission("api:reviews:manage");
+  const writable = permittedReviewSectors(hasPermission);
+  const canEditCase =
+    canManage &&
+    (globallyManaged ||
+      (!!r &&
+        writable.some(
+          (s) =>
+            r.sector === s ||
+            areas.some(
+              (a) =>
+                r.actionAreas.includes(a.key) &&
+                a.notificationArea === surveySectorTargets[s],
+            ),
+        )));
   return (
     <Dialog
       open
@@ -671,9 +819,25 @@ function ReviewDetail({
                 · {formatDisplayDate(r.reviewDate)} · Hab. {r.roomNumber || "—"}
               </p>
               <p className="text-sm">
-                Estadía: {formatDisplayDate(r.checkIn)} al{" "}
-                {formatDisplayDate(r.checkOut)}
+                {r.sector ? surveySectors[r.sector] : "Sin sector"} ·{" "}
+                {r.surveyKind === "generic"
+                  ? "Enlace genérico"
+                  : r.surveyKind === "personal"
+                    ? "Vinculada a una estadía"
+                    : "Opinión registrada"}
               </p>
+              <p className="text-sm">
+                {r.surveyKind === "generic"
+                  ? `Visita: ${formatDisplayDate(r.visitDate)}`
+                  : `Estadía: ${formatDisplayDate(r.checkIn)} al ${formatDisplayDate(r.checkOut)}`}
+              </p>
+              {r.eventName && <p className="text-sm">Evento: {r.eventName}</p>}
+              {(r.contactEmail || r.contactPhone) && (
+                <p className="text-sm break-words">
+                  Contacto:{" "}
+                  {[r.contactEmail, r.contactPhone].filter(Boolean).join(" · ")}
+                </p>
+              )}
               <h3 className="font-medium">Respuesta original del huésped</h3>
               <blockquote className="rounded bg-muted p-3 whitespace-pre-wrap">
                 {r.content || "Sin comentario escrito."}
@@ -715,7 +879,7 @@ function ReviewDetail({
               </p>
               <SelectField
                 label="Estado del caso"
-                disabled={!canManage}
+                disabled={!canEditCase}
                 value={status}
                 onChange={setStatus}
               >
@@ -729,7 +893,7 @@ function ReviewDetail({
                 Responsable
                 <Input
                   aria-label="Responsable"
-                  disabled={!canManage}
+                  disabled={!canEditCase}
                   value={assigned}
                   onChange={(e) => setAssigned(e.target.value)}
                   placeholder="Nombre o equipo responsable"
@@ -747,7 +911,7 @@ function ReviewDetail({
                       className="text-sm flex items-center gap-1"
                     >
                       <Checkbox
-                        disabled={!canManage}
+                        disabled={!canEditCase}
                         checked={actionAreas.includes(a.key)}
                         onCheckedChange={(v) =>
                           setActionAreas((p) =>
@@ -762,7 +926,7 @@ function ReviewDetail({
                   ))}
                 </div>
               </fieldset>
-              {canManage && (
+              {canEditCase && (
                 <>
                   <label className="block text-sm space-y-1">
                     Nota interna
@@ -820,6 +984,13 @@ function ManualReview({
   onClose: () => void;
 }) {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const managed = permittedReviewSectors(hasPermission);
+  const scopes =
+    hasPermission("sidebar:/reviews") && hasPermission("api:reviews:manage")
+      ? undefined
+      : managed;
+  const [sector, setSector] = useState<SurveySector>(scopes?.[0] || "hotel");
   const [guestName, setGuestName] = useState("");
   const [search, setSearch] = useState(""),
     [delayed, setDelayed] = useState(""),
@@ -839,6 +1010,7 @@ function ManualReview({
   }, [search]);
   const stays = useQuery<any[]>({
     queryKey: ["/api/reviews", "stays", delayed],
+    enabled: !scopes,
     queryFn: () =>
       get("/api/reviews/stays?search=" + encodeURIComponent(delayed)),
   });
@@ -848,6 +1020,7 @@ function ManualReview({
         reservationId: reservationId || null,
         ...(guestName.trim() ? { guestName: guestName.trim() } : {}),
         source,
+        sector,
         rating: Number(rating),
         reviewDate: date,
         content,
@@ -880,33 +1053,38 @@ function ManualReview({
           Google y Booking se registran manualmente. Esto no publica ni descarga
           opiniones de esos sitios.
         </p>
-        <label className="text-sm">
-          Buscar huésped o reserva
-          <Input
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setReservationId("");
-            }}
-            placeholder="Apellido, habitación o reserva"
-          />
-        </label>
-        <SelectField
-          label="Estadía"
-          value={reservationId}
-          onChange={setReservationId}
-        >
-          <option value="">Sin estadía vinculada</option>
-          {stays.data?.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.guestName} · Hab. {r.roomNumber} ·{" "}
-              {formatDisplayDate(r.checkIn)} al {formatDisplayDate(r.checkOut)}
-            </option>
-          ))}
-        </SelectField>
+        {!scopes && (
+          <>
+            <label className="text-sm">
+              Buscar huésped o reserva
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setReservationId("");
+                }}
+                placeholder="Apellido, habitación o reserva"
+              />
+            </label>
+            <SelectField
+              label="Estadía"
+              value={reservationId}
+              onChange={setReservationId}
+            >
+              <option value="">Sin estadía vinculada</option>
+              {stays.data?.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.guestName} · Hab. {r.roomNumber} ·{" "}
+                  {formatDisplayDate(r.checkIn)} al{" "}
+                  {formatDisplayDate(r.checkOut)}
+                </option>
+              ))}
+            </SelectField>
+          </>
+        )}
         {!reservationId && (
           <label className="text-sm">
-            Nombre del huésped
+            {scopes ? "Nombre del cliente" : "Nombre del huésped"}
             <Input
               value={guestName}
               onChange={(e) => setGuestName(e.target.value)}
@@ -915,6 +1093,20 @@ function ManualReview({
             />
           </label>
         )}
+        <SelectField
+          label="Sector de origen"
+          value={sector}
+          onChange={(value) => setSector(value as SurveySector)}
+          disabled={scopes?.length === 1}
+        >
+          {Object.entries(surveySectors)
+            .filter(([key]) => !scopes || scopes.includes(key as SurveySector))
+            .map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+        </SelectField>
         <SelectField
           label="Origen de la opinión"
           value={source}
@@ -1012,7 +1204,10 @@ function AreaEditor({
   onClose: () => void;
 }) {
   const { toast } = useToast();
-  const [draft, setDraft] = useState(area);
+  const [draft, setDraft] = useState({
+    ...area,
+    sectors: area.sectors || (["hotel"] as SurveySector[]),
+  });
   const save = useMutation({
     mutationFn: () => apiRequest("POST", "/api/reviews/areas", draft),
     onSuccess: () => {
@@ -1091,12 +1286,37 @@ function AreaEditor({
             ["maintenance", "Mantenimiento"],
             ["restaurant", "Restaurante"],
             ["spa", "Spa"],
+            ["events", "Eventos"],
           ].map(([k, v]) => (
             <option key={k} value={k}>
               {v}
             </option>
           ))}
         </SelectField>
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">
+            Encuestas donde aparece
+          </legend>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(surveySectors).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={draft.sectors.includes(key as SurveySector)}
+                  onCheckedChange={(value) =>
+                    setDraft((p) => ({
+                      ...p,
+                      sectors:
+                        value === true
+                          ? [...p.sectors, key as SurveySector]
+                          : p.sectors.filter((k) => k !== key),
+                    }))
+                  }
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <label className="flex gap-2 text-sm">
           <Checkbox
             checked={draft.active}
@@ -1117,7 +1337,11 @@ function AreaEditor({
         </label>
         <Button
           disabled={
-            save.isPending || !draft.name || !draft.question || !draft.key
+            save.isPending ||
+            !draft.name ||
+            !draft.question ||
+            !draft.key ||
+            !draft.sectors.length
           }
           onClick={() => save.mutate()}
         >
