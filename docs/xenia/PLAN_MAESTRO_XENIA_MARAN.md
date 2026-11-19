@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "18 de noviembre de 2026 · Versión 1.4"
+date: "19 de noviembre de 2026 · Versión 1.5"
 lang: es-AR
 ---
 
-**Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. El enlace con dos PMS ficticios de Alojamiento ya está implementado y probado localmente en la PR 130; falta publicarlo y aceptarlo en Railway.
+**Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. Marcelo confirmó el ingreso al PMS completo de Aurora; Brisa sigue pendiente de validación DNS. Las pruebas operativas remotas de estos PMS y su aceptación conjunta continúan abiertas.
 
-**Prioridad actual:** publicar primero Xenia-Control con la PR 130 y sus controles aprobados y después el PMS de pruebas de Aurora; aceptar Aurora antes de incorporar Brisa y continuar por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** comprobar en Aurora la creación, edición y persistencia de una reserva ficticia; completar el dominio de Brisa y probar aislamiento, permisos y cierre de sesión entre ambos PMS. Después se ensayan actualización y recuperación independientes y se continúa por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -96,7 +96,13 @@ El acta distingue confirmación manual del propietario, verificaciones automatiz
 
 La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130) implementa PMS separados de Aurora y Brisa con datos ficticios y acceso desde Xenia, manteniendo Maran fuera de los cambios publicados. Las pruebas locales cubren la preparación limpia, el ingreso, el planning, la reserva desde el formulario, la edición y la revocación de permisos. Las cinco verificaciones de GitHub y ambas imágenes están aprobadas para `73f85093`; la [evidencia](evidencia/pms-qa-2026-11-18.json) conserva el alcance. La publicación remota y su aceptación siguen pendientes.
 
-La [ficha de publicación](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) entrega los pasos de Railway y Donweb. El modo QA bloquea operaciones si el panel central no puede verificar el acceso; la continuidad ante caídas, los otros circuitos operativos y la restauración remota siguen siendo condiciones pendientes para un hotel en uso.
+La [ficha de publicación](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) entrega los pasos de Railway y Donweb, incluida la corrección de la conexión de establecimientos existentes. El modo QA bloquea operaciones si el panel central no puede verificar el acceso; la continuidad ante caídas, los otros circuitos operativos y la restauración remota siguen siendo condiciones pendientes para un hotel en uso.
+
+## 2.6 Ingreso remoto a Aurora confirmado el 19 de noviembre
+
+Marcelo informó que ya pudo entrar al PMS de Aurora y que Brisa continúa validando el DNS. Esto acredita el ingreso según su prueba manual; todavía no acredita la persistencia de nuevas reservas, los permisos ni el aislamiento de los PMS publicados. La [evidencia de avance](evidencia/pms-publicacion-2026-11-19.json) conserva esa distinción y deja sin confirmar las revisiones exactas servidas por Railway.
+
+La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, permite generar la ficha para **Hotel brisa** mediante una plantilla explícita, conservando el establecimiento existente. Sus cuatro verificaciones de GitHub aprobaron las pruebas del panel y del PMS, el navegador y ambas imágenes. Es evidencia del código candidato; no identifica por sí sola el código instalado.
 
 # 3. Organización, responsables y forma de seguimiento
 
@@ -543,10 +549,10 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 |---|---|---|---|
 | H01 · P1 | Diseñar cliente, hotel, entidad fiscal y membresías. | Técnico y Administración | En curso; cliente, establecimientos y membresías probados en el panel; entidad fiscal pendiente. |
 | H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | En curso; identidad central-PMS y revocación probadas en QA; continuidad ante caída central pendiente. |
-| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; alta limpia del PMS probada en QA local para Aurora y Brisa; publicación y aceptación pendientes. |
-| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; verificados en panel y PMS de QA local; aceptación remota pendiente. |
+| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; ingreso remoto a Aurora confirmado por Marcelo; DNS de Brisa y aceptación operativa pendientes. |
+| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; ingreso remoto a Aurora confirmado; permisos y contexto de ambos PMS publicados pendientes de aceptación. |
 | H05 · P1 | Separar archivos, colas, cachés, tareas e integraciones. | Técnico | Pendiente; H03. |
-| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; panel y dos PMS probados localmente; aceptación remota y otros circuitos pendientes. |
+| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; pruebas locales aprobadas; comparación remota pendiente del dominio de Brisa y de la prueba con ambos PMS. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
 | I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar después del enlace de identidad multihotel. |
