@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { SurveyScheduleSettings } from "./survey-schedule-settings";
 import { useSearch } from "wouter";
+import { ReviewInboxControls } from "./review-inbox-controls";
+import { ReviewInboxTable, ReviewComment } from "./review-inbox-table";
+import {
+  reviewToday,
+  moveReviewDay,
+  reviewPeriod,
+  type ReviewDayMode,
+} from "@/lib/review-period";
 import {
   Star,
   MessageSquare,
@@ -52,7 +60,7 @@ const emptyFilters: Filters = {
   from: "",
   to: "",
   dateField: "response",
-  source: "",
+  source: "survey",
   area: "",
   actionArea: "",
   rating: "",
@@ -62,7 +70,8 @@ const emptyFilters: Filters = {
   roomType: "",
   channel: "",
 };
-const selectClass = "h-10 rounded-md border bg-background px-3 text-sm w-full";
+const selectClass =
+  "box-border h-9 min-w-0 max-w-full w-full rounded-lg border bg-background px-3 text-sm";
 function SelectField({
   label,
   value,
@@ -77,7 +86,7 @@ function SelectField({
   disabled?: boolean;
 }) {
   return (
-    <label className="space-y-1 text-sm">
+    <label className="flex min-w-0 flex-col gap-1.5 text-sm">
       <span>{label}</span>
       <select
         disabled={disabled}
@@ -112,9 +121,32 @@ export function ReviewsCenter() {
     { toast } = useToast();
   const canManage = hasPermission("api:reviews:manage"),
     canConfigure = hasPermission("api:reviews:configure");
-  const [tab, setTab] = useState("overview"),
-    [filters, setFilters] = useState<Filters>(emptyFilters),
+  const [tab, setTab] = useState("opinions"),
+    [filters, setFilters] = useState<Filters>(() => {
+      const day = moveReviewDay(reviewToday(), -1);
+      return { ...emptyFilters, from: day, to: day };
+    }),
     [page, setPage] = useState(1);
+  const [today, setToday] = useState(reviewToday);
+  const [dayMode, setDayMode] = useState<ReviewDayMode>("yesterday");
+  const [comment, setComment] = useState<ReviewItem | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => setToday(reviewToday()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (dayMode !== "custom") setPage(1);
+  }, [today, dayMode]);
+  const period = reviewPeriod(dayMode, today, filters.from, filters.to);
+  const chooseMode = (mode: ReviewDayMode) => {
+    setDayMode(mode);
+    setPage(1);
+  };
+  const chooseDates = (from: string, to: string) => {
+    setDayMode("custom");
+    setFilters((f) => ({ ...f, from, to }));
+    setPage(1);
+  };
   const [selected, setSelected] = useState<string | null>(() =>
     new URLSearchParams(window.location.search).get("review"),
   );
@@ -126,7 +158,7 @@ export function ReviewsCenter() {
   const [manual, setManual] = useState(false),
     [editingArea, setEditingArea] = useState<ReviewArea | null>(null);
   const params = new URLSearchParams(
-    Object.entries(filters).filter(([, v]) => v),
+    Object.entries({ ...filters, ...period }).filter(([, v]) => v),
   );
   params.set("page", String(page));
   const urlParams = params.toString();
@@ -221,182 +253,72 @@ export function ReviewsCenter() {
       .slice(-12)
       .map(([month, value]: any) => ({ month, ...value }));
   return (
-    <div className="p-4 md:p-6 space-y-5">
-      <header className="flex flex-wrap justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <MessageSquare />
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-5 px-4 py-5 md:px-6 lg:py-6">
+      <header className="flex min-w-0 flex-wrap items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
+            Experiencia del huésped
+          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">
             Reseñas y encuestas
           </h1>
-          <p className="text-muted-foreground">
-            La experiencia del huésped y su seguimiento en un solo lugar.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Las respuestas de cada día, de un vistazo.
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => setManual(true)}>
-            <Plus className="h-4 w-4 mr-2" />
+          <Button
+            variant="outline"
+            className="h-9 shrink-0 gap-2 rounded-lg bg-card"
+            onClick={() => setManual(true)}
+          >
+            <Plus className="h-4 w-4" />
             Cargar opinión
           </Button>
         )}
       </header>
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="flex flex-wrap h-auto justify-start">
-          <TabsTrigger value="overview">Resumen</TabsTrigger>
-          <TabsTrigger value="opinions">Opiniones y encuestas</TabsTrigger>
-          <TabsTrigger value="invitations">Envíos</TabsTrigger>
-          <TabsTrigger value="areas">Áreas y preguntas</TabsTrigger>
-        </TabsList>
+      <Tabs value={tab} onValueChange={setTab} className="min-w-0">
+        <div className="max-w-full overflow-x-auto">
+          <TabsList className="h-auto w-max min-w-full justify-start gap-5 rounded-none border-b bg-transparent p-0">
+            {[
+              ["opinions", "Encuestas recibidas"],
+              ["overview", "Resumen"],
+              ["invitations", "Envíos"],
+              ["areas", "Áreas y preguntas"],
+            ].map(([key, label]) => (
+              <TabsTrigger
+                key={key}
+                value={key}
+                className="min-h-11 rounded-none border-b-2 border-transparent bg-transparent px-1 text-sm text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+              >
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
         {["overview", "opinions"].includes(tab) && (
-          <Card className="mt-4">
-            <CardContent className="p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="space-y-1 text-sm">
-                Buscar
-                <Input
-                  aria-label="Buscar opiniones"
-                  placeholder="Huésped, comentario o reserva"
-                  value={filters.search}
-                  onChange={(e) => change("search", e.target.value)}
-                />
-              </label>
-              <SelectField
-                label="Fecha a filtrar"
-                value={filters.dateField}
-                onChange={(v) => change("dateField", v)}
-              >
-                <option value="response">Fecha de respuesta</option>
-                <option value="stay">Fecha de salida</option>
-              </SelectField>
-              <label className="space-y-1 text-sm">
-                Desde
-                <Input
-                  type="date"
-                  aria-label="Desde"
-                  value={filters.from}
-                  onChange={(e) => change("from", e.target.value)}
-                />
-              </label>
-              <label className="space-y-1 text-sm">
-                Hasta
-                <Input
-                  type="date"
-                  aria-label="Hasta"
-                  value={filters.to}
-                  onChange={(e) => change("to", e.target.value)}
-                />
-              </label>
-              <SelectField
-                label="Origen"
-                value={filters.source}
-                onChange={(v) => change("source", v)}
-              >
-                <option value="">Todos</option>
-                {Object.entries(reviewSources).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Área evaluada"
-                value={filters.area}
-                onChange={(v) => change("area", v)}
-              >
-                <option value="">Todas</option>
-                {areas.data?.map((a) => (
-                  <option key={a.key} value={a.key}>
-                    {a.name}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Calificación general"
-                value={filters.rating}
-                onChange={(v) => change("rating", v)}
-              >
-                <option value="">Todas</option>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <option key={n} value={n}>
-                    {stars(n)}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Seguimiento"
-                value={filters.status}
-                onChange={(v) => change("status", v)}
-              >
-                <option value="">Todos</option>
-                {Object.entries(reviewStates).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Área que interviene"
-                value={filters.actionArea}
-                onChange={(v) => change("actionArea", v)}
-              >
-                <option value="">Todas</option>
-                {areas.data?.map((a) => (
-                  <option key={a.key} value={a.key}>
-                    {a.name}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Valoración"
-                value={filters.sentiment}
-                onChange={(v) => change("sentiment", v)}
-              >
-                <option value="">Todas</option>
-                <option value="positive">Positiva</option>
-                <option value="neutral">Neutra</option>
-                <option value="negative">Negativa</option>
-              </SelectField>
-              <SelectField
-                label="Habitación"
-                value={filters.room}
-                onChange={(v) => change("room", v)}
-              >
-                <option value="">Todas</option>
-                {options.data?.rooms?.map((r: any) => (
-                  <option key={r.number}>{r.number}</option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Tipo de habitación"
-                value={filters.roomType}
-                onChange={(v) => change("roomType", v)}
-              >
-                <option value="">Todos</option>
-                {options.data?.roomTypes?.map((r: any) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField
-                label="Canal de la reserva"
-                value={filters.channel}
-                onChange={(v) => change("channel", v)}
-              >
-                <option value="">Todos</option>
-                {options.data?.channels?.map((r: any) => (
-                  <option key={r.source}>{r.source}</option>
-                ))}
-              </SelectField>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setFilters(emptyFilters);
-                  setPage(1);
-                }}
-              >
-                Limpiar filtros
-              </Button>
-            </CardContent>
-          </Card>
+          <div className="mt-5 mb-5 min-w-0">
+            <ReviewInboxControls
+              filters={filters}
+              from={period.from}
+              to={period.to}
+              today={today}
+              mode={dayMode}
+              onMode={chooseMode}
+              onDates={chooseDates}
+              onChange={change}
+              onClear={() => {
+                setFilters({
+                  ...emptyFilters,
+                  from: period.from,
+                  to: period.to,
+                });
+                setPage(1);
+              }}
+              areas={areas.data || []}
+              options={options.data}
+            />
+          </div>
         )}
         <TabsContent value="overview" className="space-y-4">
           {analytics.isError && (
@@ -521,108 +443,23 @@ export function ReviewsCenter() {
             </CardContent>
           </Card>
         </TabsContent>
-        <TabsContent value="opinions" className="space-y-3">
-          {reviews.isLoading && <p>Cargando opiniones…</p>}
-          {reviews.isError && (
-            <p role="alert">
-              No se pudieron cargar las opiniones.{" "}
-              <Button onClick={() => reviews.refetch()}>Reintentar</Button>
-            </p>
-          )}
-          {!reviews.isLoading &&
-            !reviews.isError &&
-            !reviews.data?.items.length && (
-              <Card>
-                <CardContent className="p-8 text-center text-muted-foreground">
-                  No hay opiniones para estos filtros.
-                </CardContent>
-              </Card>
-            )}
-          {reviews.data?.items.map((r) => (
-            <Card key={r.id}>
-              <CardContent className="p-4 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <strong>{r.guestName}</strong>
-                    <Badge variant="outline">
-                      {reviewSources[r.source as keyof typeof reviewSources] ||
-                        r.source}
-                    </Badge>
-                    <Badge
-                      variant={
-                        needsReviewFollowup(
-                          r.rating,
-                          r.areaRatings,
-                          r.contactRequested,
-                        ) && r.followupStatus !== "resolved"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                    >
-                      {reviewStates[r.followupStatus]}
-                    </Badge>
-                  </div>
-                  <span className="text-amber-600 font-medium">
-                    {stars(r.rating)}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {formatDisplayDate(r.reviewDate)}
-                  {r.roomNumber && ` · Hab. ${r.roomNumber}`}
-                  {r.checkIn &&
-                    ` · Estadía ${formatDisplayDate(r.checkIn)} al ${formatDisplayDate(r.checkOut)}`}
-                </p>
-                {r.content ? (
-                  <p className="line-clamp-3 whitespace-pre-wrap">
-                    {r.content}
-                  </p>
-                ) : (
-                  <p className="text-muted-foreground">
-                    Encuesta sin comentario escrito.
-                  </p>
-                )}
-                {r.contactRequested && (
-                  <p className="text-sm flex items-center gap-1">
-                    <AlertTriangle className="h-4 w-4" />
-                    El huésped pidió que lo contacten.
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(r.areaRatings).map(([key, value]) => (
-                    <Badge key={key} variant="outline">
-                      {areaName(key)}: {value}/5
-                    </Badge>
-                  ))}
-                </div>
-                <Button variant="outline" onClick={() => setSelected(r.id)}>
-                  Ver opinión y seguimiento
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-          {!!reviews.data?.total && (
-            <div className="flex items-center justify-between">
-              <span className="text-sm">
-                {reviews.data.total} opiniones · Página {page}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  disabled={page === 1}
-                  onClick={() => setPage((p) => p - 1)}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={page * 50 >= reviews.data.total}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
-          )}
+        <TabsContent value="opinions" className="min-w-0 space-y-4">
+          <ReviewInboxTable
+            items={reviews.data?.items || []}
+            areas={areas.data || []}
+            total={reviews.data?.total || 0}
+            page={page}
+            loading={reviews.isLoading}
+            error={reviews.isError}
+            stats={stats}
+            onView={setSelected}
+            onComment={setComment}
+            onPage={setPage}
+            onRetry={() => reviews.refetch()}
+            onToday={() => chooseMode("today")}
+            showToday={dayMode !== "today"}
+            dateRange={period.from !== period.to}
+          />
         </TabsContent>
         <TabsContent value="invitations" className="space-y-3">
           <p className="text-sm text-muted-foreground">
@@ -721,6 +558,16 @@ export function ReviewsCenter() {
           ))}
         </TabsContent>
       </Tabs>
+      {comment && (
+        <ReviewComment
+          review={comment}
+          onClose={() => setComment(null)}
+          onDetail={() => {
+            setSelected(comment.id);
+            setComment(null);
+          }}
+        />
+      )}
       {selected && (
         <ReviewDetail
           id={selected}
