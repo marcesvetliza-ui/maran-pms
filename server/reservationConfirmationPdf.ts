@@ -72,6 +72,16 @@ export async function generateReservationConfirmationPdf(
   const guestName = guest
     ? `${guest.lastName?.toUpperCase() || ""} ${guest.firstName || ""}`.trim()
     : "Huésped";
+  const companion = (
+    await storage.getReservationCompanions(reservation.id)
+  ).find(
+    (person) =>
+      (!person.guestId || person.guestId !== reservation.guestId) &&
+      [person.lastName, person.firstName].some((name) => name?.trim()),
+  );
+  const companionName = companion
+    ? `${companion.lastName?.trim().toUpperCase() || ""} ${companion.firstName?.trim() || ""}`.trim()
+    : null;
   const nights = nightCount(reservation.checkInDate, reservation.checkOutDate);
   const totalAlojamiento = parseFloat(reservation.totalRoomAmount || "0");
   const ratePerNight = parseFloat(String(reservation.finalRatePerNight || 0));
@@ -257,7 +267,58 @@ export async function generateReservationConfirmationPdf(
     const colGap = 12;
     const colW = (contentW - colGap) / 2;
     const col2X = margin + colW + colGap;
-    const boxH = 90;
+    const guestTextW = colW - 24;
+    const guestNameSize = companionName ? 10 : 12;
+    const guestInfoSize = companionName ? 8 : 8.5;
+    const guestInfo = companionName
+      ? [
+          [
+            guest?.documentNumber ? `DNI: ${guest.documentNumber}` : null,
+            guest?.phone ? `Tel: ${guest.phone}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          guest?.email,
+        ].filter((line): line is string => Boolean(line))
+      : [
+          guest?.documentNumber ? `DNI: ${guest.documentNumber}` : null,
+          guest?.email,
+          guest?.phone,
+        ].filter((line): line is string => Boolean(line));
+    const guestNameH = doc
+      .font("Helvetica-Bold")
+      .fontSize(guestNameSize)
+      .heightOfString(guestName, { width: guestTextW });
+    const guestInfoHeights = guestInfo.map((line) =>
+      doc
+        .font("Helvetica")
+        .fontSize(guestInfoSize)
+        .heightOfString(line, { width: guestTextW }),
+    );
+    const companionLabelH = companionName
+      ? doc
+          .font("Helvetica-Bold")
+          .fontSize(6.5)
+          .heightOfString("ACOMPAÑANTE", { width: guestTextW })
+      : 0;
+    const companionNameH = companionName
+      ? doc
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .heightOfString(companionName, { width: guestTextW })
+      : 0;
+    // Normal names fit the original box; long names expand both columns together.
+    const boxH = Math.max(
+      90,
+      Math.ceil(
+        27 +
+          guestNameH +
+          2 +
+          guestInfoHeights.reduce((sum, height) => sum + height + 1, 0) +
+          (companionName ? 3 + companionLabelH + 1 + companionNameH : 0) +
+          6,
+      ),
+    );
 
     const drawColBox = (
       bx: number,
@@ -284,32 +345,32 @@ export async function generateReservationConfirmationPdf(
     drawColBox(margin, y, colW, boxH, "HUÉSPED PRINCIPAL");
     doc
       .fillColor("#111111")
-      .fontSize(12)
+      .fontSize(guestNameSize)
       .font("Helvetica-Bold")
-      .text(guestName, margin + 12, y + 27, { width: colW - 24 });
-    let guestInfoY = y + 43;
-    if (guest?.documentNumber) {
+      .text(guestName, margin + 12, y + 27, { width: guestTextW });
+    let guestInfoY = y + 27 + guestNameH + 2;
+    guestInfo.forEach((line, index) => {
       doc
         .fillColor("#555555")
-        .fontSize(8.5)
+        .fontSize(guestInfoSize)
         .font("Helvetica")
-        .text(`DNI: ${guest.documentNumber}`, margin + 12, guestInfoY);
-      guestInfoY += 12;
-    }
-    if (guest?.email) {
+        .text(line, margin + 12, guestInfoY, { width: guestTextW });
+      guestInfoY += guestInfoHeights[index] + 1;
+    });
+    if (companionName) {
+      const companionY = guestInfoY + 3;
       doc
-        .fillColor("#555555")
-        .fontSize(8.5)
-        .font("Helvetica")
-        .text(guest.email, margin + 12, guestInfoY, { width: colW - 24 });
-      guestInfoY += 12;
-    }
-    if (guest?.phone) {
+        .fillColor("#888888")
+        .fontSize(6.5)
+        .font("Helvetica-Bold")
+        .text("ACOMPAÑANTE", margin + 12, companionY, { width: guestTextW });
       doc
-        .fillColor("#555555")
-        .fontSize(8.5)
-        .font("Helvetica")
-        .text(guest.phone, margin + 12, guestInfoY, { width: colW - 24 });
+        .fillColor("#333333")
+        .fontSize(9)
+        .font("Helvetica-Bold")
+        .text(companionName, margin + 12, companionY + companionLabelH + 1, {
+          width: guestTextW,
+        });
     }
 
     // Room box
