@@ -76,7 +76,7 @@ export default function SurveyPage() {
   const [guestName, setGuestName] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
-  const { data, isLoading, error } = useQuery<any>({
+  const { data, isLoading, error, refetch } = useQuery<any>({
     queryKey: ["/api/survey", token],
     queryFn: async () => {
       const res = await fetch(`/api/survey/${token}`);
@@ -147,7 +147,10 @@ export default function SurveyPage() {
         <CardContent className="p-8 text-center space-y-4">
           <AlertTriangle className="h-16 w-16 text-amber-500 mx-auto" />
           <h1 className="text-xl font-bold">Encuesta no disponible</h1>
-          <p className="text-muted-foreground">{(error as any)?.error || "El link no es válido o ya venció."}</p>
+          <p className="text-muted-foreground">{(error as any)?.error || "No se pudo cargar la encuesta. Reintentá en unos instantes."}</p>
+          {![404, 409, 410].includes((error as any)?.status) && (
+            <Button variant="outline" onClick={() => refetch()}>Volver a intentar</Button>
+          )}
         </CardContent>
       </Card>
     </div>
