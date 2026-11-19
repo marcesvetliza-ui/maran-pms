@@ -1,0 +1,72 @@
+{
+  "date": "2026-11-19",
+  "owner_report": {
+    "created_reservation": "confirmed_by_owner",
+    "changed_room": "confirmed_by_owner",
+    "edit_dates_and_rates": "blocked_in_published_version",
+    "consumptions": "not_enabled_in_current_QA_scope"
+  },
+  "candidate": {
+    "commit": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+    "branch": "fix/xenia-pms-reservation-edit-20261119",
+    "pr": "https://github.com/marcesvetliza-ui/maran-pms/pull/146"
+  },
+  "cause": [
+    "QA omitted reservations:edit-accommodation",
+    "QA filter blocked GET reservation-edit-permission and POST nightly-pricing preview/apply"
+  ],
+  "local_validation": {
+    "node": "22.23.5",
+    "postgres": "new disposable Unix-socket cluster",
+    "core_tests": 12,
+    "compiled_https_browser_scenario": "passed",
+    "actual_UI_checks": [
+      "change rates and confirm proposal",
+      "extend stay with new-night rate",
+      "edit notes",
+      "reload and verify persisted data"
+    ],
+    "guards": [
+      "viewer cannot edit or preview",
+      "stale pricing revision rejected",
+      "unrelated charges and billing remain unavailable",
+      "different property and client sessions stay separate",
+      "later revoked permission not regranted by repeat setup"
+    ],
+    "general_types": "passed",
+    "both_builds": "passed",
+    "date_lint": "passed"
+  },
+  "schema_digest": "b1a5096d7e566a7ea6e1acea00ba12aff4fcd2386cbe9f5dea7485f320c5f881",
+  "schema_matches_previous_delivery": true,
+  "github_actions": {
+    "44547304827": {
+      "status": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44547304827"
+    },
+    "44547304781": {
+      "status": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44547304781"
+    },
+    "44547304784": {
+      "status": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44547304784"
+    },
+    "44547304877": {
+      "status": "success",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/44547304877"
+    }
+  },
+  "deployment": {
+    "services": [
+      "xenia-aurora-pms",
+      "xenia-brisa-pms"
+    ],
+    "pre_deploy": "npm run xenia:pms:setup:production",
+    "existing_databases_and_credentials": "preserved",
+    "remote_mutations_by_assistant": [],
+    "remote_acceptance": "pending"
+  },
+  "maran": "No changes to operating code paths, services, DNS or data in this update.",
+  "github_builds": "PMS QA and Xenia-Control Docker images passed"
+}
