@@ -1,8 +1,8 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Actualización: 19 de noviembre de 2026. Frentes activos: **continuidad de Maran; aceptación remota del PMS de Aurora; validación DNS de Brisa**. Se conserva la evidencia histórica de las entregas anteriores.
+Actualización: 19 de noviembre de 2026. Frentes activos: **continuidad de Maran; registro de aceptación de Alojamiento en Aurora y Brisa; respaldos y recuperación de Xenia**. Se conserva la evidencia histórica de las entregas anteriores.
 
-## Hito vigente: panel multihotel probado
+## Primer hito: panel multihotel probado
 
 Marcelo confirmó el ingreso remoto a `app.xeniapms.com`, dos establecimientos activos y las pruebas de reservas y perfiles. Aurora y Brisa conservan reservas distintas después de recargar. Responsable opera ambos; recepción sólo Aurora; consulta sólo Brisa sin escritura. Los tres perfiles de prueba no acceden a la administración central.
 
@@ -28,18 +28,27 @@ Marcelo confirmó que pudo crear una reserva en Aurora y moverla de habitación.
 
 La [PR 146](https://github.com/marcesvetliza-ui/maran-pms/pull/146), revisión `f5005dc7`, corrige la edición en las instalaciones existentes y añade un aviso sobre los circuitos pendientes. Se probaron actualización sin borrar datos, conservación de revocaciones, edición desde el navegador de fechas, tarifas y observaciones, persistencia al recargar, consulta sin escritura e aislamiento. Las cuatro verificaciones de GitHub y ambas imágenes de despliegue aprobaron. La publicación en los servicios **xenia-aurora-pms** y **xenia-brisa-pms** y su aceptación con la reserva existente siguen pendientes. Se conserva la ficha de cada instalación; el comando de preparación incorpora el permiso una sola vez. El [acta de esta corrección](evidencia/pms-edicion-2026-11-19.json) distingue el código probado del servicio publicado.
 
-## Próximos hitos
+## Alojamiento aceptado por el propietario y recuperación preparada
+
+Después de la corrección de edición, Marcelo confirmó «Perfecto todo». Luego respondió «Si anda bien» a la prueba de reservas separadas entre Aurora y Brisa, recepción exclusiva de Aurora y consulta de Brisa sin escritura. La [acta de aceptación funcional](evidencia/pms-aceptacion-funcional-2026-11-19.json) registra esas confirmaciones. Se avanza al respaldo y recuperación de Xenia. Permanecen pendientes las revisiones exactas instaladas, la comprobación específica de revocación y cierre central remotos y los demás circuitos operativos.
+
+La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md) distingue la base central, las dos de demostración del panel y las dos operativas de los PMS de prueba. Prepara el registro de las cinco copias y una restauración en una base nueva. La ruta de restauración nativa de Railway hacia otro volumen no se confirmó en la pantalla actual de la cuenta; la guía no indica restaurar sobre una base activa.
+
+Se ejecutó un [ensayo lógico local](evidencia/recuperacion-local-2026-11-19.json) de exportación y restauración de un PMS ficticio con PostgreSQL 17: igualdad de todas las filas y secuencias, relaciones de reserva, fechas, precios, observaciones, identidad y conservación de un cambio posterior del origen. Es evidencia local; no cierra la recuperación remota ni el arranque de una aplicación restaurada.
+
+## Antecedente de publicación del 19 de noviembre
 
 Marcelo confirmó el ingreso al PMS de Aurora y comunicó que Brisa continúa validando su DNS. La [evidencia del 19 de noviembre](evidencia/pms-publicacion-2026-11-19.json) registra el ingreso como prueba manual del propietario; las consultas DNS/HTTPS desde este entorno no pudieron resolver los tres dominios y no permiten concluir que estén caídos. El SHA servido por cada servicio sigue sin registrar.
 
 La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, corrige la ficha para **Hotel brisa** sin depender de su identificador textual. Las cuatro verificaciones de GitHub aprobaron las pruebas y las imágenes. La [guía corregida](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) conserva los ajustes manuales de Railway y la selección de la plantilla Brisa.
 
-1. Publicar la corrección de edición en los PMS de prueba y comprobar en Aurora fechas, tarifas y observaciones de la reserva existente después de recargar.
-2. Completar la validación DNS y HTTPS de Brisa; entrar a su PMS y crear una reserva distinta.
-3. Comparar ambos PMS en pestañas separadas, probar recepción y consulta y comprobar la revocación y el cierre central. Las pruebas previas del prototipo del panel no reemplazan estas pruebas en los PMS completos publicados.
-4. Registrar la revisión instalada y aceptar los resultados de cada servicio en Railway.
-5. Ensayar actualización independiente y restauración, y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
-6. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
+## Próximos hitos
+
+1. Registrar los despliegues activos y las revisiones servidas de panel, Aurora y Brisa.
+2. Completar las cinco copias de Railway y su configuración recuperable, siguiendo el paso 3.
+3. Restaurar una copia en una base nueva y comprobar sus datos; completar después el acceso y un flujo operativo en el entorno recuperado.
+4. Comprobar específicamente revocación y cierre central remotos, ensayar actualización independiente y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
+5. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
 
 El modo QA verifica el acceso central en cada API y bloquea temporalmente las operaciones si el panel no responde. Caja, fiscalidad, correo, OTAs, IA, check-in y checkout no están habilitados en este ensayo. Las reservas de demostración del panel se conservan separadas de las del PMS; no hay una migración de esos datos.
 

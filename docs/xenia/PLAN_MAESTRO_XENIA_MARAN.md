@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "19 de noviembre de 2026 · Versión 1.6"
+date: "19 de noviembre de 2026 · Versión 1.7"
 lang: es-AR
 ---
 
-**Estado:** plan en ejecución. La web comercial está publicada, el buzón de contacto fue probado por Marcelo y el panel central multihotel tiene aceptación manual con dos establecimientos ficticios. Marcelo confirmó el ingreso al PMS completo de Aurora; Brisa sigue pendiente de validación DNS. Las pruebas operativas remotas de estos PMS y su aceptación conjunta continúan abiertas.
+**Estado:** plan en ejecución. La web comercial, el buzón y el panel central tienen confirmación manual. Marcelo aceptó la edición de reservas y las pruebas de separación de datos, recepción de Aurora y consulta de Brisa en los PMS completos de Alojamiento de pruebas. La recuperación remota, las revisiones instaladas y los demás circuitos siguen pendientes.
 
-**Prioridad actual:** publicar la corrección de edición de alojamiento y comprobar en Aurora fechas, tarifas y observaciones de la reserva ya creada; completar el dominio de Brisa y probar aislamiento, permisos y cierre de sesión entre ambos PMS. Después se ensayan actualización y recuperación independientes y se continúa por módulos. El asistente se retoma sobre esta base. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** registrar las revisiones instaladas, respaldar las cinco bases de Xenia y ensayar recuperación sobre un destino nuevo. Después se completan actualización independiente, revocación y cierre central remotos y continuidad ante caída central antes de ampliar módulos o incorporar un hotel en uso. Maran conserva su operación y dominio actuales durante este trabajo.
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -107,6 +107,12 @@ La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `
 ## 2.7 Corrección de edición preparada el 19 de noviembre
 
 Marcelo confirmó la creación y el cambio de habitación de una reserva en Aurora y detectó el bloqueo de fechas y tarifas. La [PR 146](https://github.com/marcesvetliza-ui/maran-pms/pull/146), revisión `f5005dc7`, incorpora el permiso omitido de QA y permite las rutas de edición de alojamiento. La actualización conserva la identidad, el esquema, las reservas y las revocaciones posteriores del permiso. Las pruebas del navegador verificaron tarifas, extensión de fechas y observaciones después de recargar. La [evidencia](evidencia/pms-edicion-2026-11-19.json) mantiene pendiente la publicación y aceptación remota de esta corrección. Consumos, pagos y facturación continúan fuera de la etapa habilitada; la pantalla lo informa.
+
+## 2.8 Aceptación funcional de Alojamiento y preparación de recuperación
+
+Marcelo respondió «Perfecto todo» después de la corrección de edición y «Si anda bien» a la comprobación de datos separados, recepción exclusiva de Aurora y consulta sin escritura de Brisa. Se registra como aceptación manual del propietario en el alcance de Alojamiento con datos ficticios. La [acta](evidencia/pms-aceptacion-funcional-2026-11-19.json) conserva las confirmaciones y sus límites; no identifica por sí sola la revisión instalada ni acredita otros módulos, revocación remota, cierre de sesiones o recuperación completa.
+
+La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md) inventaría las cinco bases y prepara las copias en Railway y una restauración en destino nuevo. Un [ensayo local reproducible](evidencia/recuperacion-local-2026-11-19.json) comprobó exportación y restauración lógica de un PMS ficticio, igualdad de datos y secuencias, conservación de identidad y rechazo de otra identidad. Las copias y la recuperación remotas siguen pendientes.
 
 # 3. Organización, responsables y forma de seguimiento
 
@@ -500,8 +506,8 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | A06 · P0 | Completar matriz funcional de diferencias por módulo. | Técnico y áreas | Pendiente; A01 a A04. |
 | A07 · P0 | Registrar a Marcelo como responsable actual y definir delegación progresiva. | Marcelo | Hecha; roles confirmados en la versión 1.1. |
 | A08 · P0 | Confirmar fecha, alcance y criterios de apertura. | Marcelo y hotel | Pendiente; sección 11. |
-| A09 · P0 | Inventariar respaldos, adjuntos y recuperación de claves. | Infraestructura | Pendiente; A04. |
-| A10 · P0 | Restaurar en entorno aislado y medir recuperación. | Infraestructura y hotel | Pendiente; A09. |
+| A09 · P0 | Inventariar respaldos, adjuntos y recuperación de claves. | Infraestructura | En curso; inventario de cinco bases QA preparado; copias remotas, configuración privada y alcance de Maran pendientes. |
+| A10 · P0 | Restaurar en entorno aislado y medir recuperación. | Infraestructura y hotel | En curso; ensayo lógico local de PMS ficticio aprobado; recuperación remota y del hotel pendientes. |
 
 ## 14.2 Preparación de Maran
 
@@ -553,10 +559,10 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 |---|---|---|---|
 | H01 · P1 | Diseñar cliente, hotel, entidad fiscal y membresías. | Técnico y Administración | En curso; cliente, establecimientos y membresías probados en el panel; entidad fiscal pendiente. |
 | H02 · P1 | Resolver identidad y continuidad ante caída central. | Técnico | En curso; identidad central-PMS y revocación probadas en QA; continuidad ante caída central pendiente. |
-| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; ingreso remoto a Aurora confirmado por Marcelo; DNS de Brisa y aceptación operativa pendientes. |
-| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; ingreso remoto a Aurora confirmado; permisos y contexto de ambos PMS publicados pendientes de aceptación. |
+| H03 · P1 | Automatizar alta limpia de un hotel ficticio. | Infraestructura y técnico | En curso; Aurora y Brisa con Alojamiento aceptado por el propietario; referencias instaladas y alta general pendientes. |
+| H04 · P1 | Implementar selector, permisos y contexto del servidor. | Técnico | En curso; separación, recepción y consulta de Alojamiento aceptadas; completar referencias y otros circuitos. |
 | H05 · P1 | Separar archivos, colas, cachés, tareas e integraciones. | Técnico | Pendiente; H03. |
-| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; pruebas locales aprobadas; comparación remota pendiente del dominio de Brisa y de la prueba con ambos PMS. |
+| H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; comparación de reservas y perfiles aceptada en Alojamiento; otros módulos y evidencia técnica pendientes. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
 | I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar después del enlace de identidad multihotel. |

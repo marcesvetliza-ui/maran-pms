@@ -1,0 +1,50 @@
+{
+  "date": "2026-11-19",
+  "environment": "PMS completos de Alojamiento con datos ficticios de Aurora y Brisa",
+  "evidence_type": "owner_confirmation_in_conversation",
+  "confirmations": [
+    {
+      "statement": "Perfecto todo",
+      "context": "Después de las instrucciones para aplicar la corrección de edición de fechas y tarifas de la PR 146",
+      "recorded_as": "edición aceptada por el propietario; sin registro independiente del SHA servido"
+    },
+    {
+      "statement": "Si anda bien",
+      "context": "Prueba solicitada: reservas separadas Aurora/Brisa; recepción limitada a Aurora; consulta de Brisa sin escritura ni acceso a Aurora",
+      "recorded_as": "esas tres comprobaciones aceptadas por el propietario"
+    }
+  ],
+  "accepted_scope": [
+    "edición de alojamiento después de la corrección, según confirmación del propietario",
+    "reservas separadas entre PMS de Aurora y Brisa",
+    "recepción con acceso exclusivo a Aurora",
+    "consulta de Brisa sin escritura ni acceso a Aurora"
+  ],
+  "latest_candidate": {
+    "commit": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+    "pr": "https://github.com/marcesvetliza-ui/maran-pms/pull/146",
+    "source": "código candidato probado; no identifica por sí solo la revisión instalada"
+  },
+  "served_revisions": {
+    "control": null,
+    "aurora": null,
+    "brisa": null
+  },
+  "not_independently_observed": [
+    "revisiones y salud públicas actuales",
+    "resultado de validación DNS/certificado en el panel de Railway"
+  ],
+  "pending": [
+    "copias remotas de cinco bases y configuración",
+    "restauración remota sobre base nueva y arranque de aplicación recuperada",
+    "revocación y cierre central remotos específicos",
+    "actualización independiente por hotel",
+    "continuidad ante caída central",
+    "consumos, pagos, fiscalidad y otros módulos",
+    "recuperación y eventual incorporación del Maran operativo"
+  ],
+  "next_runbook": "PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md",
+  "local_recovery_evidence": "recuperacion-local-2026-11-19.json",
+  "remote_infrastructure_or_database_mutations_by_assistant": [],
+  "maran": "Se conserva su operación y configuración actuales; esta actualización no modifica sus datos ni servicios."
+}

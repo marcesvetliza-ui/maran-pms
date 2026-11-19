@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-19",
+  "started_at_utc": "2026-11-19T20:10:22.634Z",
+  "completed_at_utc": "2026-11-19T20:10:26.966Z",
+  "scope": "ensayo local de una base PMS ficticia; no es restauración de Railway ni aceptación del PMS restaurado por navegador",
+  "source_revision": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+  "tool_sha256": "ad45b8cd4085a9968f506f7eb2ba05a8ee49f55ffddd957465a69cf5699ae1c8",
+  "result": "passed",
+  "postgres": "17.11 (Debian 17.11-0+deb13u1)",
+  "schema_digest": "b1a5096d7e566a7ea6e1acea00ba12aff4fcd2386cbe9f5dea7485f320c5f881",
+  "archive_bytes": 312222,
+  "archive_sha256": "198d1890133c439f11833d33385e5cfa06982f12d31ac5a4b0bf691e46376dfd",
+  "dump_ms": 205,
+  "restore_ms": 396,
+  "total_ms": 4338,
+  "verified": {
+    "all_table_rows_and_sequences_equal": true,
+    "tables": 167,
+    "sequences": 23,
+    "identity_preserved": true,
+    "other_hotel_identity_rejected": true,
+    "reservations_prices_and_notes_preserved": true,
+    "no_orphan_reservation_guest_or_room": true,
+    "later_source_change_preserved": true,
+    "target_was_new_and_empty": true
+  },
+  "remote_services_modified": [],
+  "limitations": [
+    "Sin acceso a respaldos reales de Railway",
+    "Sin ensayo de arranque de una aplicación sobre la base restaurada",
+    "Sin medición de RPO/RTO del hotel",
+    "Sin respaldo/restauración remota del panel central, sus dos bases de demostración, Brisa, archivos o secretos"
+  ]
+}
