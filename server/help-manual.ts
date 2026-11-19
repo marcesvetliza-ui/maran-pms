@@ -5,17 +5,17 @@ MANUAL DEL SISTEMA — MARAN SUITE SYSTEM
 MÓDULO: RECEPCIÓN
 
 Cómo hacer una reserva nueva
-1. Ir a "Nueva Reserva" en el sidebar izquierdo
+1. Ir a "Reservas" en el sidebar izquierdo y hacer clic en "Nueva Reserva"
 2. Buscar el huésped escribiendo su nombre o DNI — si ya estuvo antes aparece en la lista. Si es nuevo, hacer clic en "Crear nuevo huésped" y completar nombre, documento, teléfono y email
 3. Seleccionar fechas de check-in y check-out
 4. Elegir el tipo de habitación y la habitación específica
 5. Seleccionar el plan tarifario (rack, corporativo, paquete, etc.)
 6. Completar el canal de origen (directo, Booking, Airbnb, Expedia, etc.)
 7. Agregar observaciones si corresponde
-8. Hacer clic en "Confirmar reserva" — el sistema genera el código RES-XXXX automáticamente
+8. Hacer clic en "Crear Reserva" — el sistema genera el código RES-XXXX automáticamente
 
-Cómo hacer una reserva rápida
-La reserva rápida se usa cuando hay poco tiempo. Ir al Planning, hacer clic en la celda de la habitación y fecha deseada, y completar los datos mínimos en el formulario que aparece.
+Cómo crear una reserva desde el Planning
+Ir al Planning y hacer clic en la celda libre de la habitación y fecha deseada. Se abre el mismo formulario de creación que en Reservas, con la habitación y la fecha seleccionadas. Completar y revisar los datos antes de confirmar.
 
 Cómo ver el Planning
 El Planning muestra todas las habitaciones en un calendario horizontal. Cada barra de color es una reserva. Los colores indican el estado: verde = confirmada, amarillo = pendiente, azul = en casa, gris = bloqueada. Se puede navegar por semanas con las flechas. Hacer clic en una reserva abre su detalle.

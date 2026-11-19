@@ -33,7 +33,6 @@ const FILES = [
   "client/src/pages/guests.tsx",
   "client/src/pages/companies.tsx",
   "client/src/pages/reservations.tsx",
-  "client/src/pages/new-reservation.tsx",
   "client/src/pages/planning.tsx",
   "client/src/pages/check-in.tsx",
   "client/src/pages/check-out.tsx",

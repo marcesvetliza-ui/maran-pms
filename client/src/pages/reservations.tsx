@@ -5790,6 +5790,17 @@ export default function ReservationsPage() {
   const [duplicateCheckOut, setDuplicateCheckOut] = useState("");
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | undefined>();
 
+  // Dashboard and retired bookmarks use the standard reservation dialog.
+  // Opening this dialog never creates a reservation until the user confirms.
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams);
+    if (params.get("new") !== "1" || params.has("view")) return;
+    setWaitlistEntryToConvert(null);
+    setSelectedReservation(undefined);
+    setDialogOpen(true);
+    navigate("/reservations", { replace: true });
+  }, [searchParams, navigate]);
+
   const todayStr = getLocalToday();
   const [dateMode, setDateMode] = useState<"upcoming" | "today" | "range" | "all" | "created" | "anuladas">("today");
   const effectiveSortMode = resolveReservationSortMode(dateMode, sortMode);

@@ -108,6 +108,14 @@ describe("AppSidebar — filtrado por resourceKey", () => {
     expect(screen.getByText("Seguridad de claves")).toBeInTheDocument();
   });
 
+  it("never renders the retired quick module even when every permission is granted",()=>{
+    authState.hasPermission=()=>true;renderSidebar();
+    expect(screen.queryByText('Reserva rápida')).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/new-reservation"]')).toBeNull();
+    expect(screen.getByRole('link',{name:'Reservas'})).toHaveAttribute('href','/reservations');
+    expect(screen.getByRole('link',{name:'Planning'})).toHaveAttribute('href','/planning');
+  });
+
   it("devOnly sigue aplicándose además de hasPermission (no se movió al modelo de permisos)", () => {
     authState.hasPermission = () => false;
     renderSidebar();

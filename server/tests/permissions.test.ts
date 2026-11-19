@@ -121,17 +121,17 @@ describe("grantPermission / revokePermission", () => {
 });
 
 describe("INITIAL_ROLE_PERMISSIONS — catálogo inicial del sidebar", () => {
-  it("tiene los 54 resourceKey del sidebar, incluida la planilla de Housekeeping", () => {
-    expect(Object.keys(INITIAL_ROLE_PERMISSIONS)).toHaveLength(54);
+  it("tiene los 53 resourceKey activos del sidebar, incluida la planilla de Housekeeping", () => {
+    expect(Object.keys(INITIAL_ROLE_PERMISSIONS)).toHaveLength(53);
   });
   it("habilita la planilla operativa a Housekeeping y Recepción sin otorgarla a roles ajenos",()=>{
     expect(INITIAL_ROLE_PERMISSIONS['sidebar:/housekeeping-daily-report']).toEqual(expect.arrayContaining(['housekeeping','ama_de_llaves','reception']));
     expect(INITIAL_ROLE_PERMISSIONS['sidebar:/housekeeping-daily-report']).not.toContain('restaurant');
   });
 
-  it("CORE_RECEPCION se aplica igual a los 10 ítems que lo comparten hoy", () => {
+  it("CORE_RECEPCION se aplica igual a los 9 ítems que lo comparten hoy", () => {
     const coreRecepcionKeys = [
-      "sidebar:/reservations", "sidebar:/new-reservation", "sidebar:/billing",
+      "sidebar:/reservations", "sidebar:/billing",
       "sidebar:/admin/booking-engine", "sidebar:/ota-channels", "sidebar:/channex",
       "sidebar:/groups", "sidebar:/companies", "sidebar:/agencies", "sidebar:/chatbot",
     ];
@@ -302,5 +302,20 @@ describe("API_RESOURCE_PERMISSIONS — resourceKey propios de Etapa 3 (no ligado
       expect(meta.label.length, key).toBeGreaterThan(0);
       expect(meta.section.length, key).toBeGreaterThan(0);
     }
+  });
+});
+
+
+describe("retired quick-reservation permission",()=>{
+  it.each(ALL_SYSTEM_ROLES)("denies historical quick-reservation grants for %s while preserving other grants",role=>{
+    setRolePermissionsCacheForTests([{role,resourceKey:'sidebar:/new-reservation'},{role,resourceKey:'sidebar:/reservations'}]);
+    expect(hasPermission(role,'sidebar:/new-reservation')).toBe(false);
+    expect(permissionsForRole(role)).toEqual(['sidebar:/reservations']);
+    expect(hasPermission(role,'sidebar:/reservations')).toBe(true);
+  });
+  it("does not seed, advertise or allow re-granting the retired module",async()=>{
+    expect(INITIAL_ROLE_PERMISSIONS['sidebar:/new-reservation']).toBeUndefined();
+    expect(RESOURCE_KEY_LABELS['sidebar:/new-reservation']).toBeUndefined();
+    await expect(grantPermission('admin','sidebar:/new-reservation')).rejects.toThrow('desactivado');
   });
 });

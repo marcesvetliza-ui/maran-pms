@@ -37,7 +37,6 @@ export const INITIAL_ROLE_PERMISSIONS: Record<string, SystemUserRole[]> = {
     "resp_administracion", "responsable_area", "jefe_recepcion", "comercial",
   ],
   "sidebar:/reservations": ["admin", "reception", "responsable_area", "jefe_recepcion", "comercial"],
-  "sidebar:/new-reservation": ["admin", "reception", "responsable_area", "jefe_recepcion", "comercial"],
   "sidebar:/check-in": [
     "admin", "manager", "ama_de_llaves", "housekeeping", "events", "reception",
     "responsable_area", "jefe_recepcion", "comercial",
@@ -355,7 +354,6 @@ export const RESOURCE_KEY_LABELS: Record<string, { label: string; section: strin
   "sidebar:/": { label: "Dashboard", section: "PMS — Recepción" },
   "sidebar:/planning": { label: "Planning", section: "PMS — Recepción" },
   "sidebar:/reservations": { label: "Reservas", section: "PMS — Recepción" },
-  "sidebar:/new-reservation": { label: "Reserva rápida", section: "PMS — Recepción" },
   "sidebar:/check-in": { label: "Check in", section: "PMS — Recepción" },
   "sidebar:/check-out": { label: "Check out", section: "PMS — Recepción" },
   "sidebar:/rooms": { label: "Habitaciones", section: "PMS — Recepción" },
@@ -513,6 +511,11 @@ export const ALL_SYSTEM_ROLES: SystemUserRole[] = [
   "responsable_area", "jefe_recepcion", "comercial",
 ];
 
+// Retired modules remain disabled even if historical grants are still stored.
+export function isRetiredResourceKey(resourceKey: string): boolean {
+  return resourceKey === "sidebar:/new-reservation";
+}
+
 let cache: Map<SystemUserRole, Set<string>> | null = null;
 
 /**
@@ -540,12 +543,13 @@ function requireCache(): Map<SystemUserRole, Set<string>> {
 
 /** ¿El rol tiene el resourceKey dado? Lee del caché en memoria, no de la DB. */
 export function hasPermission(role: SystemUserRole | string, resourceKey: string): boolean {
+  if (isRetiredResourceKey(resourceKey)) return false;
   return requireCache().get(role as SystemUserRole)?.has(resourceKey) ?? false;
 }
 
 /** Todos los resourceKey habilitados para un rol — para exponer "mis permisos" al cliente. */
 export function permissionsForRole(role: SystemUserRole | string): string[] {
-  return [...(requireCache().get(role as SystemUserRole) ?? [])];
+  return [...(requireCache().get(role as SystemUserRole) ?? [])].filter(key => !isRetiredResourceKey(key));
 }
 
 /** Solo para tests: fuerza el contenido del caché sin tocar la base. */
@@ -559,6 +563,7 @@ export function setRolePermissionsCacheForTests(entries: Array<{ role: SystemUse
 }
 
 export async function grantPermission(role: SystemUserRole, resourceKey: string): Promise<void> {
+  if (isRetiredResourceKey(resourceKey)) throw new Error("Este módulo está desactivado para todos los usuarios.");
   await db.insert(rolePermissions).values({ role, resourceKey }).onConflictDoNothing();
   await loadRolePermissionsCache();
 }
