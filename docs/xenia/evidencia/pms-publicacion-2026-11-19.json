@@ -1,0 +1,56 @@
+{
+  "date": "2026-11-19",
+  "source": "Reporte de Marcelo en esta conversación",
+  "owner_statement": "Bueno ya esta todo hecho, Brisa todavia esta haciendo lo del DNS, ya pude entrar al pms en Aurora",
+  "aurora": {
+    "origin": "https://aurora.qa.xeniapms.com",
+    "sign_in": "confirmed_by_owner",
+    "served_commit": null,
+    "remote_create_edit_persistence": "pending"
+  },
+  "brisa": {
+    "origin": "https://brisa.qa.xeniapms.com",
+    "dns_validation": "pending_by_owner_report",
+    "sign_in": "pending",
+    "served_commit": null
+  },
+  "latest_control_candidate": {
+    "commit": "e6551f026f22f56c58f595343bdbc259282b62a5",
+    "branch": "fix/xenia-brisa-pms-connection-20261118",
+    "pr": "https://github.com/marcesvetliza-ui/maran-pms/pull/139",
+    "served_commit_confirmed": false,
+    "github_successful_runs": [
+      44424582220,
+      44424582229,
+      44424582144,
+      44424582265
+    ]
+  },
+  "independent_public_checks": {
+    "result": "unavailable_from_this_environment",
+    "dns_error": "gaierror",
+    "https_error": "URLError",
+    "hosts": [
+      "app.xeniapms.com",
+      "aurora.qa.xeniapms.com",
+      "brisa.qa.xeniapms.com"
+    ],
+    "interpretation": "No permite concluir una caída pública ni reemplaza el reporte del propietario."
+  },
+  "pending_remote_acceptance": [
+    "Crear y editar una reserva ficticia de Aurora y comprobarla después de recargar",
+    "Validar DNS y HTTPS de Brisa e ingresar a su PMS",
+    "Comprobar datos distintos y ausencia de cruces entre PMS completos",
+    "Probar recepción, consulta, revocación y cierre central en los PMS publicados",
+    "Registrar las revisiones exactas instaladas",
+    "Ensayar actualización y restauración independientes",
+    "Resolver continuidad ante caída central antes de un hotel operativo"
+  ],
+  "actions_this_update": [
+    "Lectura de código y documentación",
+    "Intentos de consulta pública de DNS y healthz",
+    "Actualización de planificación y evidencia"
+  ],
+  "remote_mutations_this_update": [],
+  "maran": "Sin cambios en servicios, DNS, configuración ni datos durante esta actualización."
+}
