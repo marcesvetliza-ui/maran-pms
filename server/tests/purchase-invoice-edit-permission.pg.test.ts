@@ -71,8 +71,9 @@ describe.skipIf(!enabled)("Purchase invoice exceptional edit permission · real 
         await pool.query("DELETE FROM iibb_retentions WHERE invoice_id=$1", [f.id]);
         await pool.query("DELETE FROM purchase_invoices WHERE id=$1", [f.id]);
       }
-      await pool.query("DELETE FROM accounting_suppliers WHERE id=$1", [f.supplier]);
     }
+    for (const supplier of new Set(fixtures.map(f => f.supplier)))
+      await pool.query("DELETE FROM accounting_suppliers WHERE id=$1", [supplier]);
     await pool.query("DELETE FROM audit_logs WHERE user_id=$1", [actor]);
     await pool?.end();
   });
@@ -93,6 +94,65 @@ describe.skipIf(!enabled)("Purchase invoice exceptional edit permission · real 
     expect(await invoice(f.id)).toEqual(before); expect(await settlements(f.id)).toEqual(payments);
     const pending = await fixture(0);
     expect((await request("PATCH", `/api/purchase-invoices/${pending.id}`, { montoNeto: "120", cuentaContableId: account }, "resp_deposito")).status).toBe(200);
+  });
+  it.each(["admin", "resp_deposito"])("persists document date and number from the regular editor for %s", async role => {
+    const f = await fixture(0), before = await invoice(f.id), payments = await settlements(f.id);
+    const changed = await request("PATCH", `/api/purchase-invoices/${f.id}`, {
+      montoNeto: "100", cuentaContableId: account,
+      puntoVenta: "2", numeroComprobante: "8765", fechaEmision: "2026-10-31", periodo: "10/2026",
+    }, role);
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.body).toMatchObject({ punto_venta: "2", numero_comprobante: "8765", numero_comprobante_ext: "00002-00008765", fecha_emision: "2026-10-31", periodo: "10/2026", monto_total: "100.00", saldo_pendiente: "100.00", estado: "pendiente" });
+    const detail = await request("GET", `/api/purchase-invoices/${f.id}`, undefined, role);
+    expect(detail.body).toMatchObject({ numero_comprobante_ext: "00002-00008765", fecha_emision: "2026-10-31", periodo: "10/2026" });
+    expect(await settlements(f.id)).toEqual(payments);
+    const entry = (await pool.query("SELECT fecha::text,periodo FROM accounting_entries WHERE id=$1", [changed.body.asiento_id])).rows[0];
+    expect(entry).toEqual({ fecha: "2026-10-31", periodo: "10/2026" });
+    expect((await pool.query("SELECT DISTINCT comprobante_numero FROM accounting_entry_lines WHERE entry_id=$1", [changed.body.asiento_id])).rows).toEqual([{ comprobante_numero: "00002-00008765" }]);
+    expect((await pool.query("SELECT id FROM accounting_entries WHERE id=$1", [before.asiento_id])).rows).toHaveLength(0);
+  });
+  it("rejects a duplicate number atomically, including zero-padded equivalents", async () => {
+    const f = await fixture(0), original = await invoice(f.id);
+    const second = await request("POST", "/api/purchase-invoices", { tipoComprobante: "FACT-A", supplierId: f.supplier, puntoVenta: "1", numeroComprobante: "99999998", fechaEmision: "2026-11-18", periodo: "11/2026", montoNeto: "100", cuentaContableId: account }, "admin");
+    expect(second.status).toBe(201); fixtures.push({ id: second.body.id, supplier: f.supplier });
+    const before = await invoice(second.body.id);
+    const rejected = await request("PATCH", `/api/purchase-invoices/${before.id}`, { montoNeto: "120", cuentaContableId: account, puntoVenta: "00001", numeroComprobante: original.numero_comprobante.padStart(8, "0"), fechaEmision: "2026-10-31", periodo: "10/2026" }, "resp_deposito");
+    expect(rejected.status).toBe(409); expect(rejected.body.existingId).toBe(f.id);
+    expect(rejected.body.error).toContain("No se permiten duplicados");
+    expect(await invoice(before.id)).toEqual(before);
+    expect((await pool.query("SELECT id FROM accounting_entries WHERE origen_tipo='purchase_invoice' AND origen_id=$1", [before.id])).rows).toEqual([{ id: before.asiento_id }]);
+  });
+  it("serializes simultaneous renumbering to the same supplier document", async () => {
+    const f = await fixture(0);
+    const second = await request("POST", "/api/purchase-invoices", { tipoComprobante: "FACT-A", supplierId: f.supplier, puntoVenta: "1", numeroComprobante: "99999997", fechaEmision: "2026-11-18", periodo: "11/2026", montoNeto: "100", cuentaContableId: account }, "admin");
+    expect(second.status).toBe(201); fixtures.push({ id: second.body.id, supplier: f.supplier });
+    const results = await Promise.all([f.id, second.body.id].map(id => request("PATCH", `/api/purchase-invoices/${id}`, { montoNeto: "100", cuentaContableId: account, puntoVenta: "1", numeroComprobante: "88776655", fechaEmision: "2026-11-17", periodo: "11/2026" }, "resp_deposito")));
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect((await pool.query("SELECT id FROM purchase_invoices WHERE supplier_id=$1 AND numero_comprobante='88776655'", [f.supplier])).rows).toHaveLength(1);
+  });
+  it.each([
+    { fechaEmision: "2026-02-30" }, { fechaEmision: "" }, { numeroComprobante: " " },
+    { puntoVenta: "abc" }, { periodo: "13/2026" },
+  ])("rejects invalid documentary input without changing the record: %j", async input => {
+    const f = await fixture(0), before = await invoice(f.id);
+    const rejected = await request("PATCH", `/api/purchase-invoices/${f.id}`, { montoNeto: "100", cuentaContableId: account, ...input }, "resp_deposito");
+    expect(rejected.status).toBe(400); expect(await invoice(f.id)).toEqual(before);
+  });
+  it("retains omitted document fields and permits a number with no point of sale", async () => {
+    const f = await fixture(0), before = await invoice(f.id);
+    const unchanged = await request("PATCH", `/api/purchase-invoices/${f.id}`, { montoNeto: "100", cuentaContableId: account }, "admin");
+    expect(unchanged.status).toBe(200);
+    for (const key of ["punto_venta", "numero_comprobante", "numero_comprobante_ext", "fecha_emision", "periodo"]) expect(unchanged.body[key]).toEqual(before[key]);
+    const changed = await request("PATCH", `/api/purchase-invoices/${f.id}`, { montoNeto: "100", cuentaContableId: account, puntoVenta: "", numeroComprobante: "REF-000123", fechaEmision: "2026-11-17" }, "resp_deposito");
+    expect(changed.status).toBe(200); expect(changed.body).toMatchObject({ punto_venta: null, numero_comprobante: "REF-000123", numero_comprobante_ext: "REF-000123", fecha_emision: "2026-11-17", periodo: "11/2026" });
+  });
+  it("keeps the paid-document correction flow separate even with the exceptional edit permission", async () => {
+    const f = await fixture(), before = await invoice(f.id), payments = await settlements(f.id);
+    const rejected = await request("PATCH", `/api/purchase-invoices/${f.id}`, { montoNeto: "100", cuentaContableId: account, fechaEmision: "2026-11-17", numeroComprobante: "123456" });
+    expect(rejected.status).toBe(409); expect(rejected.body.error).toContain("Corregir datos");
+    expect(await invoice(f.id)).toEqual(before); expect(await settlements(f.id)).toEqual(payments);
+    const denied = await request("PATCH", `/api/purchase-invoices/${f.id}`, { montoNeto: "100", cuentaContableId: account, fechaEmision: "2026-11-17" }, "resp_deposito");
+    expect(denied.status).toBe(403); expect(await invoice(f.id)).toEqual(before);
   });
   it("corrects a paid invoice and its accounting entry while preserving every payment and OP", async () => {
     const f = await fixture(), payments = await settlements(f.id), original = await invoice(f.id);
