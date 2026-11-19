@@ -172,6 +172,40 @@ describe("Reseñas: filtros del servidor y seguimiento separado de la respuesta"
     );
     await within(screen.getByRole("dialog")).findByLabelText("Nota interna");
   });
+  it("abre las respuestas escritas desde el ojo aunque no haya comentario general", async () => {
+    const textReview = {
+      ...review,
+      content: "",
+      areaTextAnswers: { suggestion: "Más horarios para el SPA" },
+      areaQuestions: { suggestion: "¿Qué mejorarías?" },
+      notApplicable: ["room"],
+    };
+    state.request.mockImplementation(async (method: string, url: string) => ({
+      json: async () =>
+        url === "/api/reviews/areas"
+          ? areas
+          : url.includes("/options")
+            ? { rooms: [], roomTypes: [], channels: [] }
+            : url.includes("/analytics")
+              ? {}
+              : url.startsWith("/api/reviews?")
+                ? { items: [textReview], total: 1, pageSize: 50 }
+                : url === "/api/reviews/review"
+                  ? { review: textReview, events: [] }
+                  : [],
+    }));
+    renderCenter();
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Ver comentario de Huésped Prueba",
+      }),
+    );
+    expect(
+      within(await screen.findByRole("dialog")).getByText("¿Qué mejorarías?"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Más horarios para el SPA")).toBeInTheDocument();
+  });
   it("abre el original y guarda una nota de seguimiento sin enviar cambios al comentario ni los puntajes", async () => {
     renderCenter();
     const user = userEvent.setup();

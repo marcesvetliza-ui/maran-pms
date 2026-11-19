@@ -173,6 +173,7 @@ export function ReviewsCenter() {
     const id = new URLSearchParams(search).get("review");
     if (id) setSelected(id);
   }, [search]);
+  const [questionSector, setQuestionSector] = useState<SurveySector>("hotel");
   const [manual, setManual] = useState(false),
     [editingArea, setEditingArea] = useState<ReviewArea | null>(null);
   const params = new URLSearchParams(
@@ -641,6 +642,50 @@ export function ReviewsCenter() {
             separado. Desactivar una pregunta conserva sus respuestas
             anteriores.
           </p>
+          <div
+            className="flex flex-wrap items-center gap-2"
+            role="group"
+            aria-label="Encuesta a configurar"
+          >
+            {(Object.entries(surveySectors) as [SurveySector, string][]).map(
+              ([key, label]) => (
+                <Button
+                  key={key}
+                  variant={questionSector === key ? "default" : "outline"}
+                  aria-pressed={questionSector === key}
+                  onClick={() => setQuestionSector(key)}
+                >
+                  {label} (
+                  {
+                    (areas.data || []).filter(
+                      (a) =>
+                        (a.sectors || ["hotel"]).includes(key) &&
+                        a.active &&
+                        a.inSurvey,
+                    ).length
+                  }
+                  )
+                </Button>
+              ),
+            )}
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <h3 className="font-semibold">
+              Encuesta de {surveySectors[questionSector]}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Elegí las preguntas de este sector. Las preguntas compartidas
+              indican en qué otras encuestas aparecen.
+            </p>
+            <a
+              className="text-sm text-primary underline"
+              href={`/encuesta/general/${questionSector}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Ver encuesta de {surveySectors[questionSector]}
+            </a>
+          </div>
           {canConfigure && (
             <Button
               onClick={() =>
@@ -648,45 +693,55 @@ export function ReviewsCenter() {
                   key: "",
                   name: "",
                   question: "",
+                  questionType: "rating",
+                  sectors: [questionSector],
                   active: true,
                   inSurvey: true,
                   sortOrder: 10,
-                  notificationArea: "reception",
+                  notificationArea:
+                    questionSector === "hotel" ? "reception" : questionSector,
                 })
               }
             >
               <Plus className="h-4 w-4 mr-2" />
-              Agregar área
+              Agregar pregunta
             </Button>
           )}
-          {areas.data?.map((a) => (
-            <Card key={a.key}>
-              <CardContent className="p-4 flex justify-between gap-3">
-                <div>
-                  <strong>{a.name}</strong>
-                  <p className="text-sm">{a.question}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {!a.active
-                      ? "Desactivada"
-                      : a.inSurvey
-                        ? "Visible en la encuesta"
-                        : "Solo para seguimiento"}{" "}
-                    ·{" "}
-                    {(a.sectors || ["hotel"])
-                      .map((k) => surveySectors[k])
-                      .join(" · ")}{" "}
-                    · Avisos: {a.notificationArea}
-                  </p>
-                </div>
-                {canConfigure && (
-                  <Button variant="outline" onClick={() => setEditingArea(a)}>
-                    <Settings2 className="h-4 w-4 mr-1" />
-                    Editar
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+          {areas.data
+            ?.filter((a) => (a.sectors || ["hotel"]).includes(questionSector))
+            .map((a) => (
+              <Card key={a.key}>
+                <CardContent className="p-4 flex justify-between gap-3">
+                  <div>
+                    <strong>{a.name}</strong>
+                    <p className="text-sm">{a.question}</p>
+                    <Badge variant="outline">
+                      {a.questionType === "text"
+                        ? "Respuesta escrita"
+                        : "Calificación de 1 a 5"}
+                    </Badge>
+                    <p className="text-xs text-muted-foreground">
+                      {!a.active
+                        ? "Desactivada"
+                        : a.inSurvey
+                          ? "Visible en la encuesta"
+                          : "Solo para seguimiento"}{" "}
+                      ·{" "}
+                      {(a.sectors || ["hotel"])
+                        .map((k) => surveySectors[k])
+                        .join(" · ")}{" "}
+                      · Avisos: {a.notificationArea}
+                    </p>
+                  </div>
+                  {canConfigure && (
+                    <Button variant="outline" onClick={() => setEditingArea(a)}>
+                      <Settings2 className="h-4 w-4 mr-1" />
+                      Editar
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
         </TabsContent>
       </Tabs>
       {comment && (
@@ -849,6 +904,23 @@ function ReviewDetail({
                   </Badge>
                 ))}
               </div>
+              {Object.entries(r.areaTextAnswers || {}).map(([key, answer]) => (
+                <div key={key} className="space-y-1">
+                  <p className="text-sm font-medium">
+                    {r.areaQuestions[key] ||
+                      areas.find((a) => a.key === key)?.question ||
+                      key}
+                  </p>
+                  <p className="rounded bg-muted p-3 whitespace-pre-wrap break-words">
+                    {answer}
+                  </p>
+                </div>
+              ))}
+              {(r.notApplicable || []).map((key) => (
+                <p key={key} className="text-sm text-muted-foreground">
+                  {r.areaQuestions[key] || key}: No utilicé / No corresponde
+                </p>
+              ))}
               {r.nps !== null && <p>Recomendación: {r.nps}/10</p>}
               {r.contactRequested && (
                 <p className="font-medium">
@@ -866,7 +938,11 @@ function ReviewDetail({
                 </summary>
                 {Object.entries(r.areaQuestions).map(([key, question]) => (
                   <p key={key} className="text-sm mt-2">
-                    {question}: {r.areaRatings[key]}/5
+                    {question}:{" "}
+                    {r.areaTextAnswers?.[key] ||
+                      (r.notApplicable?.includes(key)
+                        ? "No utilicé / No corresponde"
+                        : `${r.areaRatings[key]}/5`)}
                   </p>
                 ))}
               </details>
@@ -1154,7 +1230,7 @@ function ManualReview({
           </summary>
           <div className="space-y-2 mt-2">
             {areas
-              .filter((a) => a.active)
+              .filter((a) => a.questionType !== "text" && a.active)
               .map((a) => (
                 <SelectField
                   key={a.key}
@@ -1207,17 +1283,18 @@ function AreaEditor({
   const [draft, setDraft] = useState({
     ...area,
     sectors: area.sectors || (["hotel"] as SurveySector[]),
+    questionType: area.questionType || "rating",
   });
   const save = useMutation({
     mutationFn: () => apiRequest("POST", "/api/reviews/areas", draft),
     onSuccess: () => {
       void invalidate();
       onClose();
-      toast({ title: "Área guardada" });
+      toast({ title: "Pregunta guardada" });
     },
     onError: (e: any) =>
       toast({
-        title: "No se pudo guardar el área",
+        title: "No se pudo guardar la pregunta",
         description: e.message,
         variant: "destructive",
       }),
@@ -1229,12 +1306,14 @@ function AreaEditor({
         if (!open) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{area.key ? "Editar área" : "Agregar área"}</DialogTitle>
+          <DialogTitle>
+            {area.key ? "Editar pregunta" : "Agregar pregunta"}
+          </DialogTitle>
         </DialogHeader>
         <label className="text-sm">
-          Nombre
+          Nombre breve de la pregunta
           <Input
             value={draft.name}
             onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
@@ -1263,6 +1342,23 @@ function AreaEditor({
             maxLength={250}
           />
         </label>
+        <SelectField
+          label="Tipo de respuesta"
+          value={draft.questionType}
+          onChange={(v) =>
+            setDraft((p) => ({ ...p, questionType: v as "rating" | "text" }))
+          }
+        >
+          <option value="rating">Calificación con estrellas (1 a 5)</option>
+          <option value="text">Respuesta abierta (texto)</option>
+        </SelectField>
+        {draft.sectors.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            Esta pregunta es compartida: al editarla cambia en todas las
+            encuestas seleccionadas. Para otro texto, agregá una pregunta
+            exclusiva del sector.
+          </p>
+        )}
         <label className="text-sm">
           Orden
           <Input
@@ -1276,7 +1372,11 @@ function AreaEditor({
           />
         </label>
         <SelectField
-          label="Destino del aviso por puntaje bajo"
+          label={
+            draft.questionType === "text"
+              ? "Área responsable"
+              : "Destino del aviso por puntaje bajo"
+          }
           value={draft.notificationArea}
           onChange={(v) => setDraft((p) => ({ ...p, notificationArea: v }))}
         >
@@ -1324,7 +1424,7 @@ function AreaEditor({
               setDraft((p) => ({ ...p, active: v === true }))
             }
           />
-          Área activa
+          Pregunta activa
         </label>
         <label className="flex gap-2 text-sm">
           <Checkbox
@@ -1345,7 +1445,7 @@ function AreaEditor({
           }
           onClick={() => save.mutate()}
         >
-          Guardar área
+          Guardar pregunta
         </Button>
       </DialogContent>
     </Dialog>

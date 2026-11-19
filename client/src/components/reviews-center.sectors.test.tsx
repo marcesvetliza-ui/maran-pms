@@ -161,3 +161,41 @@ it("keeps the mixed inbox compact and shows area columns after choosing a sector
     ).toBeInTheDocument(),
   );
 });
+
+it("edita encuestas por sector y permite agregar una pregunta abierta exclusiva", async () => {
+  show();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("tab", { name: "Áreas y preguntas" }));
+  await user.click(screen.getByRole("button", { name: "SPA (0)" }));
+  expect(
+    screen.getByRole("link", { name: "Ver encuesta de SPA" }),
+  ).toHaveAttribute("href", "/encuesta/general/spa");
+  await user.click(screen.getByRole("button", { name: "Agregar pregunta" }));
+  await user.type(
+    screen.getByLabelText("Nombre breve de la pregunta"),
+    "Sugerencias SPA",
+  );
+  await user.type(
+    screen.getByLabelText("Identificador (letras, números y guion bajo)"),
+    "spa_suggestions",
+  );
+  await user.type(
+    screen.getByLabelText("Pregunta", { exact: true }),
+    "¿Qué podríamos mejorar?",
+  );
+  await user.selectOptions(screen.getByLabelText("Tipo de respuesta"), "text");
+  expect(screen.getByRole("checkbox", { name: "SPA" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Hotel" })).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "Guardar pregunta" }));
+  await waitFor(() =>
+    expect(
+      state.request.mock.calls.some(
+        ([method, url, body]) =>
+          method === "POST" &&
+          url === "/api/reviews/areas" &&
+          body.questionType === "text" &&
+          JSON.stringify(body.sectors) === '["spa"]',
+      ),
+    ).toBe(true),
+  );
+});

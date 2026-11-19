@@ -8,31 +8,29 @@ vi.mock("wouter", () => ({
 import SurveyPage from "./survey";
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => {
-  fetcher = vi
-    .fn()
-    .mockImplementation(
-      async (_url, options) =>
-        new Response(
-          JSON.stringify(
-            options?.method === "POST"
-              ? { ok: true }
-              : {
-                  guestName: "Prueba",
-                  checkIn: "2026-11-17",
-                  checkOut: "2026-11-19",
-                  areas: [
-                    {
-                      key: "spa",
-                      name: "Spa",
-                      question: "¿Cómo fue tu experiencia en el Spa?",
-                    },
-                  ],
-                  googleMapsUrl: "https://maps.google.com/example",
-                },
-          ),
-          { status: 200, headers: { "Content-Type": "application/json" } },
+  fetcher = vi.fn().mockImplementation(
+    async (_url, options) =>
+      new Response(
+        JSON.stringify(
+          options?.method === "POST"
+            ? { ok: true }
+            : {
+                guestName: "Prueba",
+                checkIn: "2026-11-17",
+                checkOut: "2026-11-19",
+                areas: [
+                  {
+                    key: "spa",
+                    name: "Spa",
+                    question: "¿Cómo fue tu experiencia en el Spa?",
+                  },
+                ],
+                googleMapsUrl: "https://maps.google.com/example",
+              },
         ),
-    );
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+  );
   vi.stubGlobal("fetch", fetcher);
 });
 afterEach(() => {
@@ -103,6 +101,75 @@ describe("Encuesta pública breve y sin condicionar el enlace de Google al punta
         fetcher.mock.calls.find(([, o]) => o?.method === "POST")![1].body,
       ).areaRatings,
     ).toEqual({});
+  });
+  it("marca No utilicé aun sin puntaje previo y permite volver a calificar", async () => {
+    show();
+    const user = userEvent.setup();
+    const button = await screen.findByRole("button", {
+      name: "No utilicé este servicio / No corresponde",
+    });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Marcado: no utilicé/)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: "¿Cómo fue tu experiencia en el Spa?: 4 de 5",
+      }),
+    );
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    await user.click(button);
+    await user.click(
+      screen.getByRole("button", { name: "⭐ Calificación general: 5 de 5" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Enviar mi opinión" }));
+    await screen.findByText("¡Gracias por tu opinión!");
+    expect(
+      JSON.parse(
+        fetcher.mock.calls.find(([, o]) => o?.method === "POST")![1].body,
+      ),
+    ).toMatchObject({ areaRatings: {}, notApplicable: ["spa"] });
+  });
+  it("muestra y envía preguntas abiertas sin tratarlas como estrellas", async () => {
+    fetcher.mockImplementation(async (_url, options) =>
+      Response.json(
+        options?.method === "POST"
+          ? { ok: true }
+          : {
+              areas: [
+                {
+                  key: "suggestion",
+                  question: "¿Qué mejorarías?",
+                  questionType: "text",
+                },
+              ],
+            },
+      ),
+    );
+    show();
+    const user = userEvent.setup();
+    await user.type(
+      await screen.findByRole("textbox", {
+        name: "¿Qué mejorarías? (opcional)",
+      }),
+      "Más opciones sin TACC",
+    );
+    expect(
+      screen.queryByRole("button", { name: /¿Qué mejorarías.*de 5/ }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "⭐ Calificación general: 4 de 5" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Enviar mi opinión" }));
+    await screen.findByText("¡Gracias por tu opinión!");
+    expect(
+      JSON.parse(
+        fetcher.mock.calls.find(([, o]) => o?.method === "POST")![1].body,
+      ),
+    ).toMatchObject({
+      areaRatings: {},
+      areaTextAnswers: { suggestion: "Más opciones sin TACC" },
+    });
   });
   it("no pide calificaciones cuando el token ya fue respondido", async () => {
     fetcher.mockResolvedValue(

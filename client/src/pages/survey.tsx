@@ -19,12 +19,14 @@ function StarSelector({
   onChange,
   testId,
   optional = false,
+  notApplicable = false,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
   testId: string;
   optional?: boolean;
+  notApplicable?: boolean;
 }) {
   const [hover, setHover] = useState(0);
   return (
@@ -55,15 +57,23 @@ function StarSelector({
       {optional && (
         <button
           type="button"
-          className="text-xs underline text-muted-foreground"
-          onClick={() => onChange(0)}
+          aria-pressed={notApplicable}
+          className={`text-xs rounded-md border px-3 py-2 ${notApplicable ? "bg-primary/10 border-primary text-primary font-medium" : "border-muted-foreground/30 text-muted-foreground"}`}
+          onClick={() => {
+            setHover(0);
+            onChange(0);
+          }}
         >
           No utilicé este servicio / No corresponde
         </button>
       )}
       {value === 0 && (
         <p className="text-xs text-muted-foreground">
-          {optional ? "Sin evaluar (opcional)" : "Seleccioná una calificación"}
+          {notApplicable
+            ? "Marcado: no utilicé este servicio. No cuenta en el promedio."
+            : optional
+              ? "Sin evaluar (opcional)"
+              : "Seleccioná una calificación"}
         </p>
       )}
       {value > 0 && (
@@ -110,6 +120,10 @@ function SurveyForm({ token, sector }: { token?: string; sector?: string }) {
 
   const [ratings, setRatings] = useState({ overall: 0 });
   const [areaRatings, setAreaRatings] = useState<Record<string, number>>({});
+  const [areaTextAnswers, setAreaTextAnswers] = useState<
+    Record<string, string>
+  >({});
+  const [notApplicable, setNotApplicable] = useState<string[]>([]);
   const [nps, setNps] = useState("");
   const [contactRequested, setContactRequested] = useState(false);
   const [comment, setComment] = useState("");
@@ -145,6 +159,8 @@ function SurveyForm({ token, sector }: { token?: string; sector?: string }) {
           areaRatings: Object.fromEntries(
             Object.entries(areaRatings).filter(([, v]) => v > 0),
           ),
+          areaTextAnswers,
+          notApplicable,
           areaQuestions: Object.fromEntries(
             (data?.areas || []).map((a: any) => [a.key, a.question]),
           ),
@@ -297,18 +313,45 @@ function SurveyForm({ token, sector }: { token?: string; sector?: string }) {
               testId="stars-overall"
             />
             <div className="border-t pt-4 space-y-5">
-              {(data?.areas || []).map((a: any) => (
-                <StarSelector
-                  key={a.key}
-                  label={a.question}
-                  value={areaRatings[a.key] || 0}
-                  onChange={(v) =>
-                    setAreaRatings((p) => ({ ...p, [a.key]: v }))
-                  }
-                  testId={"stars-" + a.key}
-                  optional
-                />
-              ))}
+              {(data?.areas || []).map((a: any) =>
+                a.questionType === "text" ? (
+                  <div key={a.key} className="space-y-2">
+                    <Label htmlFor={`answer-${a.key}`}>
+                      {a.question} (opcional)
+                    </Label>
+                    <Textarea
+                      id={`answer-${a.key}`}
+                      value={areaTextAnswers[a.key] || ""}
+                      onChange={(e) =>
+                        setAreaTextAnswers((p) => ({
+                          ...p,
+                          [a.key]: e.target.value,
+                        }))
+                      }
+                      maxLength={2000}
+                      rows={3}
+                      placeholder="Escribí tu respuesta…"
+                    />
+                  </div>
+                ) : (
+                  <StarSelector
+                    key={a.key}
+                    label={a.question}
+                    value={areaRatings[a.key] || 0}
+                    notApplicable={notApplicable.includes(a.key)}
+                    onChange={(v) => {
+                      setAreaRatings((p) => ({ ...p, [a.key]: v }));
+                      setNotApplicable((p) =>
+                        v === 0
+                          ? [...new Set([...p, a.key])]
+                          : p.filter((k) => k !== a.key),
+                      );
+                    }}
+                    testId={"stars-" + a.key}
+                    optional
+                  />
+                ),
+              )}
             </div>
 
             <label className="block space-y-2 text-sm">

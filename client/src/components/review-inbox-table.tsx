@@ -99,7 +99,11 @@ export function ReviewInboxTable({
     compact
       ? []
       : items
-          .flatMap((r) => Object.keys(r.areaRatings))
+          .flatMap((r) => [
+            ...Object.keys(r.areaRatings),
+            ...Object.keys(r.areaTextAnswers || {}),
+            ...(r.notApplicable || []),
+          ])
           .filter(
             (key) => !restrictToAreas || areas.some((a) => a.key === key),
           ),
@@ -312,7 +316,25 @@ export function ReviewInboxTable({
                     </td>
                     {columns.map((a) => (
                       <td key={a.key} className="px-2 py-4 text-center">
-                        <Score value={r.areaRatings[a.key]} label={a.name} />
+                        {r.areaTextAnswers?.[a.key] ? (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label={`Ver respuesta a ${a.question} de ${r.guestName}`}
+                            onClick={() => onComment(r)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        ) : r.notApplicable?.includes(a.key) ? (
+                          <span
+                            className="text-xs text-muted-foreground"
+                            title="No utilicé / No corresponde"
+                          >
+                            N/C
+                          </span>
+                        ) : (
+                          <Score value={r.areaRatings[a.key]} label={a.name} />
+                        )}
                       </td>
                     ))}
                     <td className="px-2 py-4 text-center font-medium tabular-nums">
@@ -323,7 +345,8 @@ export function ReviewInboxTable({
                       )}
                     </td>
                     <td className="px-2 py-4 text-center">
-                      {r.content.trim() ? (
+                      {r.content.trim() ||
+                      Object.keys(r.areaTextAnswers || {}).length ? (
                         <Button
                           size="icon"
                           variant="ghost"
@@ -364,7 +387,7 @@ export function ReviewInboxTable({
             <p className="text-[11px] text-muted-foreground">
               {compact
                 ? "Elegí un sector para comparar puntajes por área."
-                : "— Sin evaluar · Escala de 1 a 5 por área"}
+                : "— Sin evaluar · N/C No corresponde · Estrellas de 1 a 5"}
             </p>
             <div className="flex items-center gap-3">
               <span className="text-xs text-muted-foreground">
@@ -413,7 +436,7 @@ export function ReviewComment({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-w-lg overflow-hidden rounded-2xl p-0">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-0">
         <div className="border-b bg-muted/20 px-6 py-5">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg">
@@ -431,6 +454,16 @@ export function ReviewComment({
           <blockquote className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words text-[15px] leading-relaxed">
             {review.content}
           </blockquote>
+          {Object.entries(review.areaTextAnswers || {}).map(([key, answer]) => (
+            <div key={key} className="mt-4">
+              <p className="text-sm font-medium">
+                {review.areaQuestions[key] || key}
+              </p>
+              <p className="whitespace-pre-wrap break-words text-sm mt-1">
+                {answer}
+              </p>
+            </div>
+          ))}
           <div className="mt-6 flex items-center justify-between gap-3 border-t pt-4">
             <span className="text-xs text-muted-foreground">
               Calificación general:{" "}

@@ -27,6 +27,8 @@ export const surveyAnswerSchema = z.object({
   ratingOverall: rating,
   areaRatings: z.record(rating.nullable()).default({}),
   areaQuestions: z.record(z.string().max(250)).optional(),
+  areaTextAnswers: z.record(z.string().trim().max(2000)).default({}),
+  notApplicable: z.array(z.string().max(60)).max(100).default([]),
   ratingRoom: rating.nullable().optional(),
   ratingCleanliness: rating.nullable().optional(),
   ratingService: rating.nullable().optional(),
@@ -56,6 +58,7 @@ export const reviewFiltersSchema = z.object({
 });
 export type ReviewFilters = z.infer<typeof reviewFiltersSchema>;
 export interface ReviewArea {
+  questionType?: "rating" | "text";
   sectors?: SurveySector[];
   key: string;
   name: string;
@@ -89,6 +92,8 @@ export interface ReviewItem {
   content: string;
   areaRatings: Record<string, number>;
   areaQuestions: Record<string, string>;
+  areaTextAnswers?: Record<string, string>;
+  notApplicable?: string[];
   sentiment: string | null;
   nps: number | null;
   contactRequested: boolean;

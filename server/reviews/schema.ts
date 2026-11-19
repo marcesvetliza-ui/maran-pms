@@ -83,5 +83,16 @@ export async function ensureReviewsSchema() {
     `),
     );
     await ensureReviewSectorSchema();
+    await db.execute(
+      sql.raw(`
+      ALTER TABLE review_areas ADD COLUMN IF NOT EXISTS question_type text NOT NULL DEFAULT 'rating' CHECK(question_type IN ('rating','text'));
+      ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS area_text_answers jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE survey_responses ADD COLUMN IF NOT EXISTS not_applicable text[] NOT NULL DEFAULT '{}';
+      ALTER TABLE survey_public_responses ADD COLUMN IF NOT EXISTS area_text_answers jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE survey_public_responses ADD COLUMN IF NOT EXISTS not_applicable text[] NOT NULL DEFAULT '{}';
+      ALTER TABLE guest_reviews ADD COLUMN IF NOT EXISTS area_text_answers jsonb NOT NULL DEFAULT '{}';
+      ALTER TABLE guest_reviews ADD COLUMN IF NOT EXISTS not_applicable text[] NOT NULL DEFAULT '{}';
+    `),
+    );
   });
 }
