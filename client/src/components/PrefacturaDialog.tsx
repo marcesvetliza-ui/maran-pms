@@ -1,3 +1,4 @@
+import { CancelledCollectionCorrection } from "./cancelled-collection-correction";
 import { compareReservationsByRoom } from "@/lib/reservation-list-order";
 import { prefacturaCollectionDifference,reservationCollectionReceiptPath } from '@shared/prefacturaCollection';
 import { isPostCheckoutCharge } from "@shared/postCheckout";
@@ -696,6 +697,29 @@ export function PrefacturaDialog({
     if (sources !== null) setSelectedIds(new Set(sources));
     if (remote.attempt.invoiceRequest?.tipoComprobante) setTipo(remote.attempt.invoiceRequest.tipoComprobante);
   }, [open, reservationId, discoveredOperation]);
+  const finishCancelledAttempt = async (result: any) => {
+        submission.current!.complete(reservationId);
+        setHasPendingSubmission(false); setSubmitError(null);
+        const next = newSettlementOperationId(); setCreditOperationId(next);
+        window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
+        queryClient.invalidateQueries({ queryKey: pendingOperationKey });
+        queryClient.invalidateQueries({ queryKey: operationStatusKey });
+        await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["/api/reservations"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/payments"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/folios"] }),
+          queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] }),
+        ]);
+        toast({ title: result.collectionReversed ? "Cobro anulado para refacturar" : "Intento anterior cerrado", description: result.collectionReversed ? "La anulación quedó registrada. Volvé a abrir la prefactura para elegir la forma de pago correcta y emitir la nueva factura." : "Se conserva la factura anulada. Volvé a abrir la habitación para revisar la cuenta vigente; no se emitió ni cobró nada." });
+        onClose(); return;
+  };
+  useEffect(() => {
+    if (open && hasPendingSubmission && receptionStatus?.collectionCorrectionCompleted) {
+      void finishCancelledAttempt({ collectionReversed: true });
+    }
+  }, [open, hasPendingSubmission, receptionStatus?.collectionCorrectionCompleted]);
+  const correctionViewVersion = viewScope.current.version;
   const correctReceptionAttempt = useMutation({
     onMutate: () => ({ version: viewScope.current.version }),
     mutationFn: async () => {
@@ -710,15 +734,7 @@ export function PrefacturaDialog({
         toast({ title: "Factura autorizada verificada", description: "No se volvió a emitir. Completá la operación pendiente para terminar su registro." }); return;
       }
       if (result.closedCancelled) {
-        submission.current!.complete(reservationId);
-        setHasPendingSubmission(false); setSubmitError(null);
-        const next = newSettlementOperationId(); setCreditOperationId(next);
-        window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
-        queryClient.invalidateQueries({ queryKey: pendingOperationKey });
-        queryClient.invalidateQueries({ queryKey: operationStatusKey });
-        await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
-        toast({ title: "Intento anterior cerrado", description: "Se conserva la factura anulada. Volvé a abrir la habitación para revisar la cuenta vigente; no se emitió ni cobró nada." });
-        onClose(); return;
+        await finishCancelledAttempt(result); return;
       }
       if (!result.corrected) return;
       const request = result.request || {};
@@ -2823,8 +2839,9 @@ export function PrefacturaDialog({
                 </div>}
                 {serverAttempt && !canCorrectExemptRejection && <p className="text-sm">Este intento requiere conciliación antes de continuar.</p>}
                 {hasPendingSubmission && receptionStatus && <p className="my-2 text-sm" data-testid="billing-operation-state">
-                  {receptionStatus.paymentConflictMessage || receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
+                  {(receptionStatus.cancelledCollection ? "La factura está anulada. Si el cobro se cargó por error, anulalo para poder refacturar con la forma de pago correcta." : receptionStatus.paymentConflictMessage) || receptionStatus.message || (receptionStatus.stage === "authorized" ? "La factura ya está emitida. Completá el registro pendiente sin volver a facturar." : receptionStatus.stage === "rejected" ? "ARCA rechazó este intento. Podés verificar el rechazo y corregir los datos." : receptionStatus.safeToCorrect ? "Este intento no llegó a solicitar autorización. Podés reintentar la misma operación o corregir los datos." : receptionStatus.stage === "uncertain" || receptionStatus.stage === "submitting" ? "Hay que verificar el resultado fiscal. Se conservará el mismo comprobante y los pagos originales." : "El intento original se conserva para una recuperación segura.")}
                 </p>}
+                {hasPendingSubmission && receptionStatus?.cancelledCollection && <CancelledCollectionCorrection key={`${reservationId}:${localOperationId}`} reservationId={String(reservationId)} operationId={localOperationId!} plan={receptionStatus.cancelledCollection} role={user?.role} disabled={isSubmitting || correctReceptionAttempt.isPending} onCompleted={result=>{if(viewScope.current.version===correctionViewVersion)void finishCancelledAttempt(result);}} />}
                 {hasPendingSubmission && (receptionStatus?.safeToCorrect || receptionStatus?.canVerifyRejection || receptionStatus?.canCloseCancelled) && <Button type="button" variant="outline" onClick={() => correctReceptionAttempt.mutate()} disabled={isSubmitting || correctReceptionAttempt.isPending} data-testid="button-correct-reception-attempt">{correctReceptionAttempt.isPending ? "Verificando…" : receptionStatus.canCloseCancelled ? "Cerrar intento de factura anulada" : receptionStatus.canVerifyRejection ? "Verificar rechazo y corregir datos" : "Corregir datos del intento"}</Button>}
                 {(hasPendingSubmission || hasPendingAccountCheckout) && (!serverAttempt || accountCheckoutAttempt) && (receptionStatus?.stage !== "cancelled" || accountCheckoutAttempt) && <Button onClick={() => {if(accountCheckoutAttempt)void doAccountCheckout();else void doSubmit();}} disabled={isSubmitting || folioLoading || !folio || (!accountCheckoutAttempt && (correctExemptRejection.isPending || correctReceptionAttempt.isPending || !!receptionStatus?.paymentConflicts?.length)) || (!accountCheckoutAttempt && (!!pointError || (receptionStatus?.stage === "blocked" && !receptionStatus?.canRetryNumberConflict) || receptionStatus?.canVerifyRejection === true || (receptionStatus?.stage === "corrected" && receptionStatus?.code !== "EXCESS_COLLECTION_SEPARATED")))} data-testid="button-retry-prefactura">
                   {isSubmitting ? "Procesando..." : "Completar operación pendiente"}
