@@ -1,6 +1,6 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Actualización: 18 de noviembre de 2026. Frentes activos: **continuidad de Maran; enlace del panel multihotel con una instalación completa del PMS de pruebas**. Los apartados iniciales conservan la evidencia histórica del 16 de noviembre.
+Actualización: 19 de noviembre de 2026. Frentes activos: **continuidad de Maran; aceptación remota del PMS de Aurora; validación DNS de Brisa**. Se conserva la evidencia histórica de las entregas anteriores.
 
 ## Hito vigente: panel multihotel probado
 
@@ -24,10 +24,16 @@ La captura de Settings aportada por Marcelo informa la retirada de Config as Cod
 
 ## Próximos hitos
 
-1. Publicar el paquete de pruebas de la PR 130 siguiendo su ficha; los controles automáticos están aprobados.
-2. Aceptar los PMS en Railway con Marcelo y registrar la revisión servida de cada servicio.
-3. Ensayar actualización independiente y restauración, y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
-4. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
+Marcelo confirmó el ingreso al PMS de Aurora y comunicó que Brisa continúa validando su DNS. La [evidencia del 19 de noviembre](evidencia/pms-publicacion-2026-11-19.json) registra el ingreso como prueba manual del propietario; las consultas DNS/HTTPS desde este entorno no pudieron resolver los tres dominios y no permiten concluir que estén caídos. El SHA servido por cada servicio sigue sin registrar.
+
+La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, corrige la ficha para **Hotel brisa** sin depender de su identificador textual. Las cuatro verificaciones de GitHub aprobaron las pruebas y las imágenes. La [guía corregida](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) conserva los ajustes manuales de Railway y la selección de la plantilla Brisa.
+
+1. Crear y editar una reserva ficticia en el PMS completo de Aurora; recargar y comprobar que se conserva.
+2. Completar la validación DNS y HTTPS de Brisa; entrar a su PMS y crear una reserva distinta.
+3. Comparar ambos PMS en pestañas separadas, probar recepción y consulta y comprobar la revocación y el cierre central. Las pruebas previas del prototipo del panel no reemplazan estas pruebas en los PMS completos publicados.
+4. Registrar la revisión instalada y aceptar los resultados de cada servicio en Railway.
+5. Ensayar actualización independiente y restauración, y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
+6. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
 
 El modo QA verifica el acceso central en cada API y bloquea temporalmente las operaciones si el panel no responde. Caja, fiscalidad, correo, OTAs, IA, check-in y checkout no están habilitados en este ensayo. Las reservas de demostración del panel se conservan separadas de las del PMS; no hay una migración de esos datos.
 
