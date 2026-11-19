@@ -215,7 +215,20 @@
           <section id="pms-configuration" class="card" hidden>
             <span class="eyebrow">CONEXIÓN DEL PMS DE PRUEBAS</span>
             <h2 id="pms-configuration-title"></h2>
+            <p id="pms-unavailable" hidden></p>
             <form id="pms-form">
+              <div class="field">
+                <label for="pms-template">Plantilla de pruebas</label>
+                <select id="pms-template" name="template" required>
+                  <option value="">Elegí Aurora o Brisa</option>
+                  <option value="aurora">Aurora</option>
+                  <option value="brisa">Brisa</option>
+                </select>
+                <small
+                  >Datos ficticios para preparar el PMS de este
+                  establecimiento.</small
+                >
+              </div>
               <div class="field">
                 <label for="pms-origin">Dirección del PMS</label>
                 <input

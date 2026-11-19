@@ -41,13 +41,23 @@ export class PmsBroker {
     principal: Principal,
     propertyId: string,
     requestedOrigin: string,
+    requestedTemplate?: "aurora" | "brisa",
   ) {
     this.store.requireAdmin(principal);
     const property = await this.store.authorize(principal, propertyId);
-    if (!["aurora-demo", "brisa-demo"].includes(property.slug))
+    // Existing clients may omit the template for the original demonstration slugs.
+    // A property's identity or display name must not decide whether it can connect.
+    const template =
+      requestedTemplate ??
+      (property.slug === "aurora-demo"
+        ? "aurora"
+        : property.slug === "brisa-demo"
+          ? "brisa"
+          : undefined);
+    if (template !== "aurora" && template !== "brisa")
       throw new ControlError(
-        409,
-        "Esta entrega conecta únicamente los establecimientos ficticios Aurora y Brisa.",
+        400,
+        "Elegí la plantilla de pruebas Aurora o Brisa.",
       );
     if (!property.modules.includes("lodging"))
       throw new ControlError(
@@ -67,6 +77,14 @@ export class PmsBroker {
       throw new ControlError(
         400,
         "El panel y el PMS deben tener orígenes distintos.",
+      );
+    if (
+      this.store.config.production &&
+      origin !== `https://${template}.qa.xeniapms.com`
+    )
+      throw new ControlError(
+        400,
+        `Esta plantilla de pruebas usa https://${template}.qa.xeniapms.com.`,
       );
     const secret = opaque();
     const connection = await this.store.central.connect();
@@ -106,6 +124,7 @@ export class PmsBroker {
         ...installation,
         clientSecret: secret,
         propertyName: property.name,
+        template,
       };
     } catch (error) {
       await connection.query("ROLLBACK");

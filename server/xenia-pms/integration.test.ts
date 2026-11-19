@@ -322,6 +322,151 @@ test(
       await page.getByTestId("button-create-reservation").click();
       const savedResponse = await savedInBrowser;
       assert.equal(savedResponse.status(), 201, await savedResponse.text());
+      const browserReservation = await savedResponse.json();
+      const permission = await request.get(
+        installations[0].origin + "/api/reservation-edit-permission",
+      );
+      assert.equal(permission.status(), 200);
+      assert.equal((await permission.json()).canEdit, true);
+      await page.goto(installations[0].origin + "/reservations");
+      await page.getByTestId("button-filter-all").click();
+      await page
+        .getByTestId("reservation-row-" + browserReservation.id)
+        .click();
+      const nightly = page.getByTestId("nightly-pricing-panel");
+      await expect(
+        nightly.getByRole("button", { name: "Editar tarifas", exact: true }),
+      ).toBeEnabled();
+      await nightly
+        .getByRole("button", { name: "Editar tarifas", exact: true })
+        .click();
+      await page
+        .getByLabel("Nueva tarifa común", { exact: true })
+        .fill("60000");
+      await page
+        .getByLabel("Motivo del cambio", { exact: true })
+        .fill("Prueba de tarifa desde el PMS");
+      const confirmPricing = async () => {
+        const preview = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+            `/api/reservations/${browserReservation.id}/nightly-pricing/preview`,
+        );
+        await page
+          .getByRole("button", { name: "Revisar propuesta", exact: true })
+          .click();
+        const proposal = await preview;
+        assert.equal(proposal.status(), 200, await proposal.text());
+        const saved = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname ===
+            `/api/reservations/${browserReservation.id}/nightly-pricing/apply`,
+        );
+        await page
+          .getByRole("button", { name: "Confirmar cambios", exact: true })
+          .click();
+        const response = await saved;
+        assert.equal(response.status(), 200, await response.text());
+        return response.json();
+      };
+      const repriced = await confirmPricing();
+      assert.equal(Number(repriced.totalRoomAmount), 120000);
+      await expect(
+        page.getByLabel("Nueva tarifa común", { exact: true }),
+      ).toBeHidden();
+      await page
+        .getByRole("button", { name: "Modificar estadía", exact: true })
+        .click();
+      const longerStay = new Date(
+        new Date(checkOut + "T12:00:00Z").getTime() + 86400000,
+      )
+        .toISOString()
+        .slice(0, 10);
+      await page.getByLabel("Nuevo egreso", { exact: true }).fill(longerStay);
+      await page
+        .getByLabel("Tarifa nueva " + checkOut.split("-").reverse().join("/"), {
+          exact: true,
+        })
+        .fill("65000");
+      await page
+        .getByLabel("Motivo del cambio", { exact: true })
+        .fill("Prueba de fechas desde el PMS");
+      const extended = await confirmPricing();
+      assert.equal(extended.checkOutDate, longerStay);
+      assert.equal(extended.nights, 3);
+      assert.equal(Number(extended.totalRoomAmount), 185000);
+      await expect(
+        page.getByLabel("Nuevo egreso", { exact: true }),
+      ).toBeHidden();
+      await page.getByTestId("button-edit-from-detail").click();
+      await page
+        .getByTestId("input-reservation-notes")
+        .fill("Observación editada desde la pantalla de Aurora");
+      const noteSaved = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+            `/api/reservations/${browserReservation.id}` &&
+          response.request().method() === "PATCH",
+      );
+      await page.getByTestId("button-submit-reservation").click();
+      const noteResponse = await noteSaved;
+      assert.equal(noteResponse.status(), 200, await noteResponse.text());
+      await page.reload();
+      await page.getByTestId("button-filter-all").click();
+      await page
+        .getByTestId("reservation-row-" + browserReservation.id)
+        .click();
+      await expect(nightly.locator("tbody tr")).toHaveCount(3);
+      await expect(nightly).toContainText("185.000,00");
+      const persisted = await request.get(
+        installations[0].origin + "/api/reservations/" + browserReservation.id,
+      );
+      const persistedReservation = await persisted.json();
+      assert.equal(
+        persistedReservation.notes,
+        "Observación editada desde la pantalla de Aurora",
+      );
+      assert.equal(persistedReservation.checkOutDate, longerStay);
+      assert.equal(Number(persistedReservation.totalRoomAmount), 185000);
+      assert.equal(persistedReservation.roomId, "xenia-qa-room-103");
+      if (process.env.XENIA_SCREENSHOT_DIR)
+        await page.screenshot({
+          path:
+            process.env.XENIA_SCREENSHOT_DIR +
+            "/aurora-edicion-alojamiento.png",
+        });
+      const stalePricing = await request.post(
+        installations[0].origin +
+          `/api/reservations/${browserReservation.id}/nightly-pricing/apply`,
+        {
+          headers,
+          data: {
+            revision: 0,
+            reason: "Solicitud anterior",
+            edit: {
+              kind: "rates",
+              dates: [checkIn],
+              rate: "1",
+              discountMode: "amount",
+              discountScope: "night",
+            },
+          },
+        },
+      );
+      assert.equal(stalePricing.status(), 409);
+      for (const route of [
+        `/api/reservations/${browserReservation.id}/charges`,
+        `/api/reservations/${browserReservation.id}/nightly-pricing/apply/extra`,
+      ])
+        assert.equal(
+          (
+            await request.post(installations[0].origin + route, {
+              headers,
+              data: {},
+            })
+          ).status(),
+          403,
+        );
       const created = await request.post(
         installations[0].origin + "/api/reservations",
         { headers, data: payload },
@@ -419,10 +564,23 @@ test(
         installations[1].origin + "/api/reservations",
       );
       assert.ok(!(await brisaReservations.text()).includes(reservation.id));
+      const viewerPermission = await viewerContext.request.get(
+        installations[1].origin + "/api/reservation-edit-permission",
+      );
+      assert.equal(viewerPermission.status(), 200);
+      assert.equal((await viewerPermission.json()).canEdit, false);
       for (const [route, method] of [
         ["/api/reservations", "post"],
         ["/api/rooms/xenia-qa-room-101", "patch"],
         ["/api/reservations/xenia-qa-reservation-1", "delete"],
+        [
+          "/api/reservations/xenia-qa-reservation-1/nightly-pricing/preview",
+          "post",
+        ],
+        [
+          "/api/reservations/xenia-qa-reservation-1/nightly-pricing/apply",
+          "post",
+        ],
       ] as const)
         assert.equal(
           (

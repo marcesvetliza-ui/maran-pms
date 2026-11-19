@@ -1,3 +1,5 @@
+import { ACCOMMODATION_PERMISSION } from "./accommodationPermission";
+
 export type XeniaPmsRole = "owner" | "manager" | "reception" | "viewer";
 export type XeniaPmsIdentity = {
   principalId: string;
@@ -22,6 +24,7 @@ export const XENIA_QA_WRITE_RESOURCES = [
   "sidebar:/new-reservation",
   "api:rooms:write",
   "api:rates:write",
+  ACCOMMODATION_PERMISSION,
 ];
 
 // This map is restricted to the QA installation. It does not alter the role

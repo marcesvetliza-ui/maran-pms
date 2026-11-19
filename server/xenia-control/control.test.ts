@@ -450,6 +450,48 @@ test("reception writes affect only the authorized hotel's database", async () =>
     "cancelled",
   );
 });
+test("PMS configuration accepts an explicit Brisa template and keeps authorization and module checks", async () => {
+  const endpoint = `/api/admin/properties/${brisa}/pms`;
+  const input = { origin: "https://brisa.qa.xeniapms.com", template: "brisa" };
+  assert.equal((await reception.request(endpoint, "POST", input)).status, 403);
+  assert.equal((await viewer.request(endpoint, "POST", input)).status, 403);
+  assert.equal(
+    (await owner.request(endpoint, "POST", { ...input, template: "other" }))
+      .status,
+    400,
+  );
+  const original = await control.store.authorize(
+    (await control.store.credentials("admin.demo"))!,
+    brisa,
+  );
+  try {
+    await control.store.central.query(
+      "UPDATE xenia_control.properties SET name='Hotel brisa',slug='hotel-brisa' WHERE id=$1",
+      [brisa],
+    );
+    const configured = await owner.request(endpoint, "POST", input);
+    assert.equal(configured.status, 201);
+    assert.equal(configured.data.template, "brisa");
+    assert.equal(configured.data.propertyId, brisa);
+    assert.equal(configured.data.propertyName, "Hotel brisa");
+    await control.store.central.query(
+      "UPDATE xenia_control.properties SET modules=ARRAY['restaurant'] WHERE id=$1",
+      [brisa],
+    );
+    assert.equal((await owner.request(endpoint, "POST", input)).status, 409);
+    await control.store.central.query(
+      "UPDATE xenia_control.properties SET modules=ARRAY['lodging'],status='provisioning' WHERE id=$1",
+      [brisa],
+    );
+    assert.equal((await owner.request(endpoint, "POST", input)).status, 409);
+  } finally {
+    await control.store.central.query(
+      "UPDATE xenia_control.properties SET name=$2,slug=$3,modules=$4,status=$5 WHERE id=$1",
+      [brisa, original.name, original.slug, original.modules, original.status],
+    );
+  }
+});
+
 test("CSRF and Origin protections reject forged mutations", async () => {
   assert.equal(
     (

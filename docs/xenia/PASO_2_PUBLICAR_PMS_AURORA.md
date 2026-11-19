@@ -1,6 +1,6 @@
 # Paso 2: abrir el PMS de Aurora desde Xenia
 
-Fecha: 18 de noviembre de 2026. Versión 2: configuración manual de Railway. Responsable: Marcelo. Alcance: instalaciones ficticias de Alojamiento. Esta guía corresponde al paquete `feat/xenia-pms-integration-20261118`; su publicación en Railway todavía debe realizarse.
+Fecha: 19 de noviembre de 2026. Versión 3: configuración manual de Railway y edición de alojamiento en los PMS existentes. Responsable: Marcelo. Alcance: instalaciones ficticias de Alojamiento. Marcelo confirmó el ingreso a Aurora y la creación y el cambio de habitación de una reserva. Brisa sigue validando DNS; la aceptación operativa de ambos PMS continúa abierta.
 
 El resultado será: **panel Xenia → Hotel Aurora → Abrir PMS → planning**, con la cuenta y los permisos que ya tenés. Maran mantiene su servicio, dominio, configuración y base actuales.
 
@@ -22,7 +22,7 @@ La instalación limpia crea tres habitaciones —101, 102 y 103—, una categor�
 1. Abrí Railway → proyecto **observant-possibility** → entorno **production**.
 2. Entrá en la tarjeta **Xenia-Control**. Las siguientes instrucciones son de esa tarjeta.
 3. Guardá la referencia del último despliegue que funciona. En `xenia-control-db → Backups`, generá una copia si está disponible en tu plan. Conservá el servicio y su volumen.
-4. En **Settings → Source**, mantené el repositorio `marcesvetliza-ui/maran-pms`, directorio raíz `/`, y elegí la rama `feat/xenia-pms-integration-20261118`.
+4. En **Settings → Source**, mantené el repositorio `marcesvetliza-ui/maran-pms`, directorio raíz `/`, y elegí la rama `fix/xenia-brisa-pms-connection-20261118` para obtener el panel con selección explícita de la plantilla.
 5. Usá los ajustes manuales. La interfaz de Railway informa que **Config as Code** está obsoleto, que sus archivos existentes funcionan hasta el **1 de diciembre de 2026** y que los servicios que nunca lo usaron no pueden activarlo. Quitá `/railway.xenia-control.json` de **Settings → Config-as-code → Railway Config File**, dejá ese campo sin una ruta personalizada y completá los campos siguientes antes de aplicar el despliegue:
 
    | Dónde se carga | Valor |
@@ -45,7 +45,7 @@ La instalación limpia crea tres habitaciones —101, 102 y 103—, una categor�
 1. Seleccioná **Hotel Aurora** en “Establecimiento activo”.
 2. Abrí la pestaña **Administración**.
 3. Buscá **Conexión del PMS de pruebas / PMS de Hotel Aurora**.
-4. En “Dirección del PMS”, escribí exactamente `https://aurora.qa.xeniapms.com`, sin rutas.
+4. Elegí **Aurora** en “Plantilla de pruebas”. En “Dirección del PMS”, escribí exactamente `https://aurora.qa.xeniapms.com`, sin rutas.
 5. Pulsá **Generar ficha de conexión** una sola vez.
 6. Guardá el contenido de la ficha en un gestor de contraseñas o documento privado. Incluye un secreto de sesión de 64 caracteres y el secreto de conexión entre servidores. No los envíes por chat ni en capturas.
 
@@ -89,7 +89,7 @@ No hace falta copiar una URL con contraseña a mano. Tampoco habilitar una conex
    - Valor: seleccioná la referencia a **xenia-aurora-pms-db → DATABASE_URL**.
    - La referencia esperada es `${{xenia-aurora-pms-db.DATABASE_URL}}`.
 
-4. En **Settings → Source → Connect Repo**, elegí `marcesvetliza-ui/maran-pms`, rama `feat/xenia-pms-integration-20261118` y directorio raíz `/`. Completá la configuración antes de aplicar el despliegue.
+4. En **Settings → Source → Connect Repo**, elegí `marcesvetliza-ui/maran-pms`, rama `fix/xenia-pms-reservation-edit-20261119` y directorio raíz `/`. Completá la configuración antes de aplicar el despliegue.
 5. Usá la configuración manual de **Settings → Deploy** indicada en la tabla del punto 8. Dejá **Railway Config File** sin una ruta personalizada; no cargues `/railway.xenia-pms.json`. El aviso de Railway impide activar Config as Code en servicios que no lo usaban.
 6. Revisá que la tarjeta tenga la ficha de Aurora y la referencia de su base nueva. No importes variables compartidas del PMS existente.
 7. No agregues claves ARCA/AFIP, Channex, correo, IA ni otros servicios reales a esta tarjeta.
@@ -133,16 +133,28 @@ No reutilices el destino ni el TXT del dominio `app.xeniapms.com`: el PMS tiene 
 2. Elegí **Hotel Aurora → Mi operación → Abrir PMS**.
 3. Debe abrirse el planning con la identidad de tu cuenta y una franja que diga **Hotel Aurora · Alojamiento · Pruebas con datos ficticios**.
 4. Revisá las habitaciones 101, 102 y 103. La reserva de ejemplo ocupa la 101 durante dos noches a partir del día siguiente a la preparación inicial.
-5. En una habitación libre, creá una reserva con un nombre ficticio. Modificá una observación, recargá y comprobá que siga registrada.
+5. En una habitación libre, creá una reserva con el huésped ficticio y la tarifa de prueba. Abrí su detalle: **Editar tarifas** permite revisar y confirmar un nuevo importe, y **Modificar estadía** permite cambiar las fechas y asignar la tarifa de las noches nuevas. En ambos casos completá el motivo, pulsá **Revisar propuesta** y después **Confirmar cambios**. Para una observación, usá **Editar datos de reserva → Guardar Cambios**. Recargá y comprobá fechas, tarifas, total y observación. En la lista de Reservas, seleccioná **Todas** o **Activas y futuras** si la reserva no corresponde al día actual.
 6. Volvé al panel, ingresá con la cuenta de recepción de Aurora que ya creaste y repetí el ingreso. No debe obtener administración central ni acceso a Brisa.
 7. Quitá temporalmente el permiso de esa cuenta desde Administración, con tu cuenta administradora. La siguiente consulta del PMS debe rechazar el acceso. Después podés volver a asignarle recepción.
 8. Cerrá sesión desde el panel. El acceso previo al PMS de esa cuenta debe quedar invalidado al consultar nuevamente.
 
 La sesión del PMS dura como máximo una hora. Si vence, volvé a ingresar desde Xenia. Abrir una pestaña nueva también puede requerir ese ingreso; no necesitás crear ni recordar otra contraseña para Aurora.
 
+### 7.1 Actualizar la edición en un PMS que ya está publicado
+
+La primera versión podía crear y mover reservas, pero omitía el permiso de edición de alojamiento y bloqueaba su consulta y las rutas de confirmación de noches y tarifas. La corrección se publica en los servicios **xenia-aurora-pms** y **xenia-brisa-pms**, con la rama `fix/xenia-pms-reservation-edit-20261119` en **Settings → Source**.
+
+Conservá las variables, la ficha y la conexión de base que ya tiene cada servicio. Mantené el comando de preparación `npm run xenia:pms:setup:production`, el arranque `node dist/index.cjs` y `/healthz`. Aplicá los cambios del servicio elegido y usá **Deploy latest commit**. La preparación comprueba la identidad y el esquema existentes, incorpora una sola vez el permiso de alojamiento a administración, responsable y recepción y conserva reservas y accesos. Las revocaciones posteriores de ese permiso se conservan al volver a desplegar.
+
+Cuando esté Online, recargá el PMS y repetí el punto 7.5 con la reserva existente. El panel Xenia-Control puede conservar la revisión que ya está usando. Consumos, pagos y facturación continúan fuera de esta etapa de pruebas; que esos circuitos no estén habilitados no indica un fallo del rol.
+
 ## 8. Repetir con Brisa después de aceptar Aurora
 
-El mismo paquete ya admite Brisa. Repetí los pasos seleccionando **Apart Brisa** en el panel y usando:
+El mismo paquete ya admite Brisa. Seleccioná el establecimiento **Hotel brisa** (o el nombre con que ya lo creaste), abrí **Administración → Conexión del PMS de pruebas**, elegí **Brisa** en “Plantilla de pruebas” y completá su dirección. No hace falta renombrar ni recrear el establecimiento; se conserva su identidad, su base y sus accesos. Si falta Alojamiento o el establecimiento no está activo, la tarjeta muestra el requisito pendiente.
+
+La corrección de esta opción está en `fix/xenia-brisa-pms-connection-20261118`. Para recibirla, cambiá únicamente la rama de **Xenia-Control** a esa rama en **Settings → Source**, conservá sus variables y los ajustes manuales del paso 2 y usá **Deploy latest commit**. Cuando esté Online, recargá el panel. Aurora puede conservar la rama y la ficha que ya tiene; esta actualización no requiere generar otra ficha de Aurora.
+
+Repetí la preparación de un servicio y una base nuevos para Brisa usando:
 
 | Elemento | Valor |
 | --- | --- |
