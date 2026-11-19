@@ -2,6 +2,7 @@ import rateLimit from "express-rate-limit";
 import QRCode from "qrcode";
 import {
   surveySectorSchema,
+  surveySectors,
   permittedReviewSectors,
 } from "@shared/survey-sectors";
 import {
@@ -296,6 +297,35 @@ export function registerReviewRoutes(app: Express) {
         VALUES('update','reviews',${actor(req)},'Configuración de área de encuesta','review_area',${a.key},${JSON.stringify(a)},now())`);
       });
       res.json({ ok: true });
+    }),
+  );
+  app.delete(
+    "/api/reviews/areas/:key/surveys/:sector",
+    ...configure,
+    wrap(async (req, res) => {
+      const key = areaSchema.shape.key.parse(req.params.key);
+      const sector = surveySectorSchema.parse(req.params.sector);
+      const result = await withDatabaseTransaction(async () => {
+        const [area] = (
+          await db.execute(
+            sql`SELECT key,sectors,in_survey FROM review_areas WHERE key=${key} FOR UPDATE`,
+          )
+        ).rows as { key: string; sectors: string[]; in_survey: boolean }[];
+        if (!area) throw new ReviewError("Pregunta no encontrada.", 404);
+        if (!area.in_survey || !area.sectors.includes(sector))
+          return { ok: true, alreadyRemoved: true };
+        const remaining = area.sectors.filter((value) => value !== sector);
+        // Keep the last sector so the question can be restored through Edit.
+        const sectors = remaining.length ? remaining : area.sectors;
+        const inSurvey = remaining.length ? area.in_survey : false;
+        await db.execute(
+          sql`UPDATE review_areas SET sectors=ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(sectors)}::jsonb)),in_survey=${inSurvey} WHERE key=${key}`,
+        );
+        await db.execute(sql`INSERT INTO audit_logs(action,module,user_name,description,entity_type,entity_id,details,timestamp)
+          VALUES('update','reviews',${actor(req)},${"Pregunta retirada de la encuesta de " + surveySectors[sector]},'review_area',${key},${JSON.stringify({ operation: "remove_from_survey", sector, before: { sectors: area.sectors, inSurvey: area.in_survey }, after: { sectors, inSurvey } })},now())`);
+        return { ok: true, alreadyRemoved: false };
+      });
+      res.json(result);
     }),
   );
   app.get(

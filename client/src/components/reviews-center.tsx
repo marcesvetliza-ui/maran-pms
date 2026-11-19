@@ -39,6 +39,16 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -725,7 +735,7 @@ export function ReviewsCenter() {
                         ? "Desactivada"
                         : a.inSurvey
                           ? "Visible en la encuesta"
-                          : "Solo para seguimiento"}{" "}
+                          : "Fuera de la encuesta · Disponible para seguimiento"}{" "}
                       ·{" "}
                       {(a.sectors || ["hotel"])
                         .map((k) => surveySectors[k])
@@ -778,7 +788,11 @@ export function ReviewsCenter() {
         />
       )}
       {editingArea && (
-        <AreaEditor area={editingArea} onClose={() => setEditingArea(null)} />
+        <AreaEditor
+          area={editingArea}
+          sector={questionSector}
+          onClose={() => setEditingArea(null)}
+        />
       )}
     </div>
   );
@@ -1274,12 +1288,15 @@ function ManualReview({
 
 function AreaEditor({
   area,
+  sector,
   onClose,
 }: {
   area: ReviewArea;
+  sector: SurveySector;
   onClose: () => void;
 }) {
   const { toast } = useToast();
+  const [confirmRemoval, setConfirmRemoval] = useState(false);
   const [draft, setDraft] = useState({
     ...area,
     sectors: area.sectors || (["hotel"] as SurveySector[]),
@@ -1299,6 +1316,30 @@ function AreaEditor({
         variant: "destructive",
       }),
   });
+  const remove = useMutation({
+    mutationFn: () =>
+      apiRequest(
+        "DELETE",
+        `/api/reviews/areas/${encodeURIComponent(area.key)}/surveys/${sector}`,
+      ),
+    onSuccess: () => {
+      void invalidate();
+      setConfirmRemoval(false);
+      onClose();
+      toast({
+        title: `Pregunta eliminada de la encuesta de ${surveySectors[sector]}`,
+      });
+    },
+    onError: (e: any) =>
+      toast({
+        title: "No se pudo eliminar la pregunta",
+        description: e.message,
+        variant: "destructive",
+      }),
+  });
+  const otherSectors = (area.sectors || ["hotel"]).filter(
+    (key) => key !== sector,
+  );
   return (
     <Dialog
       open
@@ -1435,19 +1476,69 @@ function AreaEditor({
           />
           Preguntar al huésped en la encuesta
         </label>
-        <Button
-          disabled={
-            save.isPending ||
-            !draft.name ||
-            !draft.question ||
-            !draft.key ||
-            !draft.sectors.length
-          }
-          onClick={() => save.mutate()}
-        >
-          Guardar pregunta
-        </Button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {area.key &&
+            area.inSurvey &&
+            (area.sectors || ["hotel"]).includes(sector) && (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={save.isPending || remove.isPending}
+                onClick={() => setConfirmRemoval(true)}
+              >
+                Eliminar de {surveySectors[sector]}
+              </Button>
+            )}
+          <Button
+            disabled={
+              save.isPending ||
+              remove.isPending ||
+              !draft.name ||
+              !draft.question ||
+              !draft.key ||
+              !draft.sectors.length
+            }
+            onClick={() => save.mutate()}
+          >
+            Guardar pregunta
+          </Button>
+        </div>
       </DialogContent>
+      <AlertDialog
+        open={confirmRemoval}
+        onOpenChange={(open) => {
+          if (!remove.isPending) setConfirmRemoval(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              ¿Eliminar esta pregunta de {surveySectors[sector]}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              “{area.question}” dejará de aparecer en la encuesta de{" "}
+              {surveySectors[sector]}. Las respuestas ya recibidas se conservan.
+              {otherSectors.length > 0 &&
+                ` Seguirá disponible en: ${otherSectors.map((key) => surveySectors[key]).join(", ")}.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={remove.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                remove.mutate();
+              }}
+            >
+              {remove.isPending ? "Eliminando…" : "Confirmar eliminación"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
