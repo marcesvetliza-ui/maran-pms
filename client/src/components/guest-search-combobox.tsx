@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import { useState, useEffect, useRef, useId } from "react";
 import { Search, UserPlus, Loader2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -101,7 +102,7 @@ export function GuestSearchCombobox({
         const res = await fetch(`/api/guests/search?q=${encodeURIComponent(query)}`, { credentials: "include" });
         const data = await res.json();
         if (!cancelled) {
-          setResults(data || []);
+          setResults((data || []).filter(isSelectableGuest));
           setShowDropdown(searchFocused.current);
         }
       } catch {

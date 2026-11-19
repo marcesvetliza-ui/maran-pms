@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import { formatDisplayDate } from "@shared/date-display";
 import { GuestStayProfileEditor } from "@/components/guest-stay-profile";
 import { getGuestStayProfile, guestStayProfileSchema } from "@shared/guestStayProfile";
@@ -1442,6 +1443,8 @@ export default function GuestsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/guests/search"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/spa/clients"] });
       toast({ title: "Huésped desactivado", description: "El huésped fue desactivado y no aparecerá en búsquedas." });
     },
     onError: (error: any) => {
@@ -1449,7 +1452,7 @@ export default function GuestsPage() {
     },
   });
 
-  const filteredGuests = guests?.filter((guest) => {
+  const filteredGuests = guests?.filter(isSelectableGuest).filter((guest) => {
     const fullName = `${guest.lastName} ${guest.firstName}`.toLowerCase();
     const matchesSearch =
       fullName.includes(searchQuery.toLowerCase()) ||

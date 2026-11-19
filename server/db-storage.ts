@@ -813,6 +813,8 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  // Includes inactive records for existing reservation/account references.
+  // New selections must use searchGuests() or filter with isSelectableGuest().
   async getGuests(): Promise<Guest[]> {
     return db.select().from(guests).where(visibleGuestCondition());
   }
@@ -843,6 +845,7 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(guests).where(
       and(
         visibleGuestCondition(),
+        eq(guests.active, true),
         ...wordConditions
       )
     ).limit(20);

@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import {HospitalitySpecialDates} from "@/components/hospitality-special-dates";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState,useEffect } from "react";
@@ -650,7 +651,7 @@ function PreferencesTab() {
     },
   });
 
-  const filteredGuests = guests.filter((g) => {
+  const filteredGuests = guests.filter(isSelectableGuest).filter((g) => {
     const q = search.toLowerCase();
     return (
       g.firstName.toLowerCase().includes(q) ||
@@ -1086,7 +1087,7 @@ function HistoryTab() {
     enabled: !!selectedGuestId,
   });
 
-  const filteredGuests = guests.filter((g) => {
+  const filteredGuests = guests.filter(isSelectableGuest).filter((g) => {
     const q = search.toLowerCase();
     return g.firstName.toLowerCase().includes(q) || g.lastName.toLowerCase().includes(q) ||
       (g.documentNumber && g.documentNumber.toLowerCase().includes(q));

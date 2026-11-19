@@ -72,3 +72,17 @@ describe("Búsqueda de clientes: navegación sin efectos financieros", () => {
     expect(screen.getByRole("textbox", { name: "Siguiente" })).toHaveFocus();
   });
 });
+
+it("does not offer inactive client results from an older search response", async () => {
+  const { select, submit } = setup();
+  const active = { ...guests[0], active: true };
+  const inactive = { ...guests[0], id: "inactive-client", firstName: "Prueba Inactiva", active: false };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json([inactive, active])));
+  const user = userEvent.setup();
+  await user.type(screen.getByRole("combobox"), "Prueba");
+  await screen.findByRole("option", { name: "Prueba Teclado" });
+  expect(screen.queryByRole("option", { name: "Prueba Inactiva Teclado" })).not.toBeInTheDocument();
+  await user.keyboard("{ArrowDown}{Enter}");
+  expect(select).toHaveBeenCalledExactlyOnceWith(active);
+  expect(submit).not.toHaveBeenCalled();
+});

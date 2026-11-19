@@ -54,3 +54,25 @@ describe("GuestSelector keyboard selection", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+it("does not offer deactivated cached search results, including through Enter", async () => {
+  const active = { ...guest, active: true };
+  const inactive = { ...guest, id: "inactive-match", firstName: "Marcelo Inactivo", active: false };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json([inactive, active])));
+  const onSelect = vi.fn(), onSubmit = vi.fn();
+  const user = userEvent.setup();
+  renderSelector(onSelect, onSubmit);
+  const input = screen.getByTestId("input-search-guest");
+  await user.type(input, "Marce");
+  await screen.findByTestId(`guest-result-${active.id}`);
+  expect(screen.queryByTestId(`guest-result-${inactive.id}`)).not.toBeInTheDocument();
+  await user.keyboard("{Enter}");
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith(active);
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
+it("keeps an inactive guest visible when already linked to an existing operation", () => {
+  const client = new QueryClient();
+  render(<QueryClientProvider client={client}><GuestSelector selectedGuest={{ ...guest, active: false } as any} onSelect={vi.fn()} onCreateNew={vi.fn()} /></QueryClientProvider>);
+  expect(screen.getByText("Svetliza Marcelo")).toBeInTheDocument();
+  expect(screen.queryByTestId("input-search-guest")).not.toBeInTheDocument();
+});

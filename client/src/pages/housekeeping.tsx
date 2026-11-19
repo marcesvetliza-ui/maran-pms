@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import "./housekeeping.css";
 import {loadHousekeepingBlockConflicts} from "@/lib/housekeeping-block-conflicts";
 import {useHousekeepingStatus} from "@/components/use-housekeeping-status";
@@ -542,7 +543,7 @@ function LostFoundForm({
   // Cuando se edita un item ya existente con guestId, mostramos el huésped cargado
   const displayedGuest = selectedGuest || (guestId ? guests.find(g => g.id === guestId) || null : null);
 
-  const filteredGuests = guests.filter(g => {
+  const filteredGuests = guests.filter(isSelectableGuest).filter(g => {
     const q = guestSearch.toLowerCase();
     return (
       g.firstName.toLowerCase().includes(q) ||

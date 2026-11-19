@@ -1,3 +1,4 @@
+import { isSelectableGuest } from "@shared/guest-selection";
 import { RestaurantAreaSettings } from '@/components/restaurant-area-settings';
 import {useRestaurantLayout} from '@/hooks/use-restaurant-layout';
 import {RestaurantItemQuantityPicker} from "@/components/restaurant-item-quantity-picker";
@@ -1199,6 +1200,7 @@ export default function RestaurantPage() {
   }, [isCloseDialogOpen]);
 
   type RestaurantGuest = {
+    active?: boolean;
     id: string; tipoPersona: string | null; firstName: string; lastName: string;
     email: string | null; phone: string | null; documentType: string | null;
     documentNumber: string | null; cuilCuit: string | null;
@@ -3936,7 +3938,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             <CardContent>
               {(() => {
                 const q = clientSearch.toLowerCase();
-                const filtered = restaurantGuests.filter(g =>
+                const filtered = restaurantGuests.filter(isSelectableGuest).filter(g =>
                   !q ||
                   `${g.firstName} ${g.lastName}`.toLowerCase().includes(q) ||
                   (g.email || "").toLowerCase().includes(q) ||
@@ -5625,7 +5627,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                         || (c.nombreFantasia || "").toLowerCase().includes(q)
                         || (c.cuilCuit || "").replace(/-/g,"").includes(closeBillingClientSearch.replace(/-/g,""));
                     }).slice(0, 5).map(c => ({ id: c.id, name: c.razonSocial, cuit: c.cuilCuit || "", vatCondition: c.condicionIva || "consumidor_final", type: "company" as const, condicionVenta: c.condicionVentaPredeterminada || "contado" })),
-                    ...restaurantGuests.filter(g => {
+                    ...restaurantGuests.filter(isSelectableGuest).filter(g => {
                       if (!g.cuilCuit && !g.documentNumber) return false;
                       const q = closeBillingClientSearch.toLowerCase();
                       const fullName = `${g.firstName} ${g.lastName || ""}`.toLowerCase();
@@ -7374,7 +7376,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                 const selectedClientId = reservationForm.watch("clientId");
                 const selectedName = reservationForm.watch("guestName");
                 const q = reservationClientSearch.toLowerCase();
-                const guestResults = q.length >= 2 ? restaurantGuests.filter(g =>
+                const guestResults = q.length >= 2 ? restaurantGuests.filter(isSelectableGuest).filter(g =>
                   `${g.firstName} ${g.lastName}`.toLowerCase().includes(q) ||
                   (g.phone || "").includes(q) ||
                   (g.email || "").toLowerCase().includes(q) ||
