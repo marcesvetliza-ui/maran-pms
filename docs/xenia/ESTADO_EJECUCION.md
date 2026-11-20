@@ -1,6 +1,6 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Actualización: 20 de noviembre de 2026. Frentes activos: **continuidad de Maran; registro de aceptación de Alojamiento en Aurora y Brisa; respaldos y recuperación de Xenia**. Se conserva la evidencia histórica de las entregas anteriores.
+Actualización: 20 de noviembre de 2026. Prioridad activa: **asistente piloto de soporte en Xenia antes del 30/11, con objetivo 29/11; continuidad de Maran**. Los ensayos adicionales del multihotel quedan pausados. Se conserva la evidencia de Alojamiento y recuperación ya obtenida.
 
 ## Primer hito: panel multihotel probado
 
@@ -60,13 +60,23 @@ Se preparó el [paso 3.1](PASO_3_1_PROBAR_PMS_SOBRE_COPIA_AURORA.md): registrar 
 
 El procedimiento es una preparación y todavía no se ejecutó el cambio de conexión. Conserva la revisión, ficha, dominio, configuración central y demás servicios. El acceso de salud no fue consultable mediante la herramienta web. Marcelo pegó la respuesta de Aurora: **status ok**, **mode qa**, revisión **f5005dc7d2a702198cb953b59df99b1d92cbbe53**, propertyId **b6cb1d1d-fda6-479b-aff9-83484758993d** y clientId **8a2f6959-32dc-4916-a1e4-3341a17423ee**. Coincide con la revisión probada; queda registrada la identidad previa. La conexión temporal y su regreso aún no se ejecutaron. Siguen pendientes los IDs de despliegue y las revisiones de panel y Brisa.
 
+## Cambio de prioridad: asistente piloto antes del 30/11
+
+Marcelo pidió detener el avance de los ensayos de multihotel y priorizar el asistente piloto. Confirmó **«No, sigue con la base original»**: no cambió la conexión de Aurora a la copia recuperada. El paso 3.1 queda pausado y conserva sus instrucciones para una continuación posterior.
+
+Se preparó el [sprint con objetivo 29/11](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md) y se actualizó el plan maestro a versión 1.8. Las tareas I01–I05 pasan a prioridad P0 con objetivos fechados; I01 está en curso. El tablero conserva sus 56 tareas.
+
+La consulta de GitHub confirmó el piloto **advance/assistant-pilot-20261114 → 63b34fcc** y la integración **feature/xenia-support-approval-foundation → bc8e64f0** del 15/11. Se revisaron reglas, guía de activación, servicio de chat, presupuesto y configuración de arranque. Hay implementación de conversación con capturas, reserva y conciliación de gasto, avisos y revisión. Esto acredita código disponible, no la configuración efectivamente publicada ni calidad del modelo real. Se pidió el estado del chat visible en Xenia.
+
+El piloto inicial lee código y documentación de su ambiente y el contexto aportado por el usuario. No accede a operaciones reales ni ARCA. Se conserva el máximo acordado de US$1 diario; la configuración persistida y el perfil de precios deben verificarse antes de nuevas llamadas. La lectura operativa ampliada, contabilidad, vigilancia normativa y ejecución de correcciones quedan para etapas posteriores.
+
 ## Próximos hitos
 
-1. Completar los IDs de despliegue y las revisiones de panel y Brisa; Aurora ya tiene salud, revisión f5005dc7 e identidad previas al ensayo registradas por respuesta del propietario.
-2. Completar las referencias de las cinco copias confirmadas por Marcelo, la configuración recuperable y el momento PITR seleccionado.
-3. Completar los controles del conjunto de datos recuperado y ejecutar el paso 3.1, con salud, ingreso central, reserva, permisos y regreso confirmado a la conexión original de Aurora QA.
-4. Comprobar específicamente revocación y cierre central remotos, ensayar actualización independiente y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
-5. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
+1. Confirmar el estado del chat en el Xenia existente y las revisiones efectivas del PMS y su asistente.
+2. Fijar candidato compatible y completar lo que falte de conversación, capturas, historial, permisos y límite monetario, con objetivo 24/11.
+3. Aceptar cinco casos anonimizados con Marcelo y comprobar avisos; objetivo 27/11.
+4. Habilitar y observar el piloto acotado de Xenia el 28–29/11, dentro del presupuesto y conservando el funcionamiento del PMS.
+5. Retomar después la recuperación integral, referencias pendientes, revocación/cierre central remotos, actualización independiente y continuidad antes de incorporar un hotel en uso.
 
 El modo QA verifica el acceso central en cada API y bloquea temporalmente las operaciones si el panel no responde. Caja, fiscalidad, correo, OTAs, IA, check-in y checkout no están habilitados en este ensayo. Las reservas de demostración del panel se conservan separadas de las del PMS; no hay una migración de esos datos.
 
