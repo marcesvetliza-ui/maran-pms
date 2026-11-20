@@ -1,6 +1,8 @@
 # Paso 3.1: probar el PMS sobre la copia recuperada de Aurora
 
-Fecha: 20 de noviembre de 2026. Versión 1. Responsable de la ejecución en Railway: Marcelo. Estado: **preparado; cambio de conexión todavía no ejecutado**.
+Fecha: 20 de noviembre de 2026. Versión 1. Responsable de la ejecución en Railway: Marcelo. Estado: **pausado por cambio de prioridad; cambio de conexión no ejecutado**.
+
+**Pausa del 20/11:** Marcelo priorizó el [asistente piloto antes del 30/11](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md) y confirmó que Aurora sigue en su base original. Este procedimiento se conserva para retomarlo después; no iniciar ahora el cambio de conexión.
 
 ## Objetivo y alcance
 
