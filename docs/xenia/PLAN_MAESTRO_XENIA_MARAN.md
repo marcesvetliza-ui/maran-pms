@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "19 de noviembre de 2026 · Versión 1.7"
+date: "20 de noviembre de 2026 · Versión 1.8"
 lang: es-AR
 ---
 
-**Estado:** plan en ejecución. La web comercial, el buzón y el panel central tienen confirmación manual. Marcelo aceptó la edición de reservas y las pruebas de separación de datos, recepción de Aurora y consulta de Brisa en los PMS completos de Alojamiento de pruebas. La recuperación remota, las revisiones instaladas y los demás circuitos siguen pendientes.
+**Estado:** plan en ejecución. Web, correo, panel y Alojamiento QA tienen aceptación manual. Se confirmó la muestra de una reserva recuperada de Aurora y su revisión f5005dc7; el ensayo operativo sobre la copia queda pausado. Aurora sigue con su base original según Marcelo. La recuperación integral y los demás circuitos conservan sus controles pendientes.
 
-**Prioridad actual:** registrar las revisiones instaladas, respaldar las cinco bases de Xenia y ensayar recuperación sobre un destino nuevo. Después se completan actualización independiente, revocación y cierre central remotos y continuidad ante caída central antes de ampliar módulos o incorporar un hotel en uso. Maran conserva su operación y dominio actuales durante este trabajo.
+**Prioridad actual:** asistente piloto de soporte en Xenia antes del **30/11/2026**, con objetivo de entrega el **29/11**. Se aprovecha el chat existente y se priorizan utilidad, permisos, historial, límites y aceptación con casos concretos. Los ensayos adicionales del multihotel quedan pausados; Maran conserva su operación y dominio actuales. [Sprint del asistente](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md).
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -374,6 +374,8 @@ La automatización actual que vincula `main` con producción se revisará despu�
 
 # 10. Asistente piloto dentro de Soporte
 
+**Prioridad actualizada el 20/11:** ejecutar el [sprint del piloto con objetivo 29/11](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md). El soporte conversacional aislado de Xenia avanza sin esperar el cierre completo del multihotel. La lectura operativa del hotel, el control contable/fiscal continuo y el ejecutor automático siguen en etapas posteriores.
+
 El piloto debe ofrecer a los colaboradores un chat donde describan problemas, adjunten capturas y reciban asistencia clara. La calidad se verificará con conversaciones reales anonimizadas: qué entendió, qué evidencia utilizó, qué puede resolver y qué debe elevar.
 
 ## 10.1 Alcance inicial
@@ -565,11 +567,11 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | H06 · P1 | Probar aislamiento con dos hoteles y sesiones cruzadas. | Técnico | En curso; comparación de reservas y perfiles aceptada en Alojamiento; otros módulos y evidencia técnica pendientes. |
 | H07 · P1 | Ensayar alta, exportación y baja documentadas. | Técnico y Administración | Pendiente; H06. |
 | H08 · P2 | Medir costos y preparar piloto comercial adicional. | Marcelo y equipo | Pendiente; H06 y H07. |
-| I01 · P1 | Auditar estado real del asistente en Xenia. | Técnico | Pendiente; código revisado, retomar después del enlace de identidad multihotel. |
-| I02 · P1 | Validar presupuesto US$1, concurrencia e incertidumbre. | Técnico | Pendiente; I01. |
-| I03 · P1 | Validar aprobaciones, bandeja y correo de Marcelo. | Técnico y Marcelo | Pendiente; I01. |
-| I04 · P1 | Evaluar calidad con casos reales anonimizados. | Marcelo y colaboradores | Pendiente; I02 e I03. |
-| I05 · P1 | Habilitar piloto acotado en Xenia y medir resultado. | Marcelo y técnico | Pendiente; I04 y publicación revisada. |
+| I01 · P0 | Auditar estado real del asistente en Xenia. | Técnico | En curso; código del piloto revisado; contrastar publicación, revisiones y configuración. Objetivo 21/11. |
+| I02 · P0 | Validar presupuesto US$1, concurrencia e incertidumbre. | Técnico | Pendiente de verificar presupuesto persistido y configuración real; reutilizar evidencia existente. Objetivo 24/11. |
+| I03 · P0 | Validar aprobaciones, bandeja y correo de Marcelo. | Técnico y Marcelo | Pendiente de comprobar bandeja, permisos y entrega de avisos del piloto. Objetivo 24/11. |
+| I04 · P0 | Evaluar calidad con casos reales anonimizados. | Marcelo y colaboradores | Pendiente; cinco casos anonimizados y aceptación de respuestas reales. Objetivo 27/11. |
+| I05 · P0 | Habilitar piloto acotado en Xenia y medir resultado. | Marcelo y técnico | Pendiente; piloto acotado en Xenia con aceptación, límites y seguimiento. Objetivo 29/11. |
 | I06 · P2 | Llevar módulo validado a Maran con permisos y límites. | Marcelo y técnico | Pendiente; I05 y aceptación del hotel. |
 | I07 · P1 | Preparar consultas de diagnóstico de solo lectura por hotel y usuario. | Técnico | Pendiente; I01, permisos y casos de prueba. |
 | I08 · P1 | Implementar controles contables con hallazgos y evidencia, sin modificar operaciones. | Técnico y revisión contable | Pendiente; I07 y reglas de conciliación revisadas. |
@@ -592,7 +594,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 
 **Ya realizado:** relevamiento inicial, revisión del piloto, compra de cuatro dominios, home comercial pública, buzón de contacto probado y primera entrega del panel multihotel con aceptación manual. Las evidencias y sus límites están resumidos en la sección 2.4.
 
-**Siguiente trabajo:** preparar el arranque reproducible de un PMS ficticio para Aurora, conservar las verificaciones recientes de sesión de la base estable y definir el enlace entre identidad central y usuario local. Después se ensaya Brisa y se completa la integración por módulos. Los esquemas de las actuales reservas de demostración y del PMS operativo requieren una transición explícita.
+**Siguiente trabajo:** completar la revisión del asistente publicado de Xenia, fijar candidato y validar una conversación completa con captura, seguimiento, permisos y presupuesto. El objetivo es el piloto acotado del 29/11. Aurora y Brisa conservan el Alojamiento ya aceptado; los ensayos de recuperación y la integración adicional por módulos se retoman después, sin convertir la muestra recuperada en una aceptación integral.
 
 **Direcciones actuales:** web comercial en [xeniapms.com](https://xeniapms.com) y panel central en [app.xeniapms.com](https://app.xeniapms.com). El buzón `contacto@xeniapms.com` está activo según la prueba de Marcelo. La dirección privada inicial se conserva como referencia histórica en los anexos de preparación.
 
