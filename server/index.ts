@@ -7,6 +7,7 @@ import { registerDebugAssetRoutes } from "./debug-assets-routes";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import {createApiLimiter} from "./apiRateLimit";
+import { installStartupReadiness } from "./startup-readiness";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
 
@@ -30,19 +31,10 @@ const httpServer = createServer(app);
 const PORT = parseInt(process.env.PORT || "5000", 10);
 let startupReady = false;
 
-app.get("/health", (_req, res) => {
-  res.status(200).json({ status: startupReady ? "ready" : "starting" });
-});
-app.use((req, res, next) => {
-  if (startupReady) return next();
-  if (req.path === "/") {
-    return res.status(200).json({ status: "starting" });
-  }
-  return res.status(503).json({ message: "La aplicación se está iniciando" });
-});
+installStartupReadiness(app, () => startupReady);
 
 if (process.env.NODE_ENV === "production") {
-  serveStaticFiles(app); // serves index.html → healthcheck returns 200
+  serveStaticFiles(app); // Startup gate keeps requests waiting until required initialization is ready.
 }
 httpServer.listen({ port: PORT, host: "0.0.0.0", reusePort: true }, () => {
   log(`serving on port ${PORT}`);

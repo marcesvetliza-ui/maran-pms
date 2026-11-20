@@ -32,11 +32,11 @@ class Channel {
   receive(data: unknown) { for (const listener of this.listeners) listener(new MessageEvent("message", { data })); }
   static emit(data: unknown) { for (const instance of Channel.instances) instance.receive(data); }
 }
-function install(me: () => Promise<Response>, logout: () => Promise<Response> = async () => json({})) {
+function install(me: () => Promise<Response>, logout: () => Promise<Response> = async () => json({}), permissions: () => Promise<Response> = async () => json({ role: identity.role, resourceKeys: ["sidebar:/reservations"] })) {
   const fetch = vi.fn(async (url: any, options?: RequestInit) => {
     if (String(url) === "/api/auth/me") return me();
     if (String(url) === "/api/auth/logout") return logout();
-    if (String(url) === "/api/permissions/mine") return json({ role: identity.role, resourceKeys: ["sidebar:/reservations"] });
+    if (String(url) === "/api/permissions/mine") return permissions();
     return json([]);
   });
   vi.stubGlobal("fetch", fetch); return fetch;
@@ -50,6 +50,25 @@ beforeEach(() => {
 afterEach(() => { cleanup(); queryClient.clear(); localStorage.clear(); vi.unstubAllGlobals(); Channel.instances.clear(); });
 
 describe("authentication handling in the mounted application", () => {
+  it("recovers an initial permissions outage without logging out or replaying any business operation", async () => {
+    let reads = 0;
+    const fetch = install(async () => json(identity), undefined,
+      async () => ++reads === 1 ? json({}, 503) : json({ role: identity.role, resourceKeys: ["sidebar:/reservations"] }));
+    render(<App />);
+    expect(await screen.findByLabelText("Reserva sin guardar", {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(reads).toBe(2); expect(screen.queryByTestId("card-login")).not.toBeInTheDocument();
+    expect(fetch.mock.calls.some(([, options]) => options?.method === "POST")).toBe(false);
+  });
+  it("explains a permission cooldown and automatically resumes once it ends", async () => {
+    let reads = 0;
+    install(async () => json(identity), undefined,
+      async () => ++reads === 1 ? new Response("{}", { status: 429, headers: { "Retry-After": "6" } }) : json({ role: identity.role, resourceKeys: ["sidebar:/reservations"] }));
+    render(<App />);
+    expect(await screen.findByText("El servidor pidió esperar un momento. La carga se reintentará automáticamente.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reintentar carga" })).toBeDisabled();
+    expect(screen.queryByLabelText("Reserva sin guardar")).not.toBeInTheDocument(); expect(reads).toBe(1);
+    expect(await screen.findByLabelText("Reserva sin guardar", {}, { timeout: 8000 })).toBeInTheDocument(); expect(reads).toBe(2);
+  }, 10000);
   it("shows reconnection instead of login when the server is still starting", async () => {
     let calls = 0; install(async () => ++calls === 1 ? json({}, 503) : json(identity)); render(<App />);
     expect(await screen.findByText("Reconectando con el sistema")).toBeInTheDocument();

@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { reloadStaleChunkOnce } from "@/lib/chunk-recovery";
 
 interface Props {
   children: ReactNode;
@@ -36,10 +37,10 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: { componentStack: string }) {
     console.error("[ErrorBoundary]", error, info.componentStack);
 
-    // Si es un error de chunk (deploy reciente), recargar automáticamente
+    // A stale build or a network outage can both fail a dynamic import.
+    // Try a fresh document once, then leave a working manual recovery action.
     if (isChunkError(error)) {
-      console.warn("[ErrorBoundary] Chunk load error detectado — recargando página...");
-      window.location.reload();
+      reloadStaleChunkOnce();
     }
   }
 
@@ -64,7 +65,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <h2 className="text-lg font-semibold">Algo salió mal</h2>
             <p className="text-sm text-muted-foreground max-w-sm">
               {chunkError
-                ? "Se publicó una nueva versión del sistema. La página se recargará automáticamente."
+                ? "No se pudieron cargar los archivos de esta sección. Puede haber una actualización o un problema de conexión. Podés recargar la página para volver a intentar."
                 : (this.props.fallbackLabel ?? "Ocurrió un error inesperado en esta sección. Podés intentar recargar o contactar al soporte.")}
             </p>
           </div>
