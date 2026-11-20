@@ -558,7 +558,8 @@ function AuthenticatedApp() {
   if(user && !posChecking && !permissionsReady && permissions.isError){
     return <><div role="alert" className="min-h-screen flex flex-col items-center justify-center gap-4 p-6">
       <p>No se pudieron cargar tus permisos. Tu sesión sigue abierta; podés reintentar.</p>
-      <Button onClick={()=>permissions.refetch()}>Reintentar carga</Button>
+      {permissions.retryAt > Date.now() && <p className="text-sm text-muted-foreground">El servidor pidió esperar un momento. La carga se reintentará automáticamente.</p>}
+      <Button disabled={permissions.isFetching || permissions.retryAt > Date.now()} onClick={()=>permissions.refetch()}>{permissions.isFetching ? "Reintentando…" : "Reintentar carga"}</Button>
     </div>{connectionNotice}</>;
   }
 
