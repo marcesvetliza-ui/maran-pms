@@ -1470,6 +1470,23 @@ export function PrefacturaDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, emittedInvoices, groupAccount.data, folio]);
 
+  useEffect(() => {
+    const previous = submission.current!.pending(reservationId);
+    if (!open || !folio || invoicesLoading || !hasPendingSubmission ||
+        !receptionStatus?.financiallyComplete || !receptionStatus?.departureReopened ||
+        previous?.invoiceRequest?.creditOperationId !== receptionStatus.operationId) return;
+    // The original departure already committed before the stay was reopened.
+    // Clear only its local recovery; preserve fiscal documents and ledger rows.
+    // A new departure must use a fresh operation and the current folio balance.
+    submission.current!.complete(reservationId);
+    setHasPendingSubmission(false); setSubmitError(null); setCheckoutFailed(false);
+    setSelectedIds(new Set(allBillableItems.map(item => item.id)));
+    const next = newSettlementOperationId(); setCreditOperationId(next);
+    window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
+    void queryClient.invalidateQueries({ queryKey: pendingOperationKey });
+    toast({ title: 'Operación anterior completada', description: 'La estadía fue reabierta. Revisá los cargos actuales para facturar o realizar un nuevo check-out.' });
+  }, [open, reservationId, folio, invoicesLoading, hasPendingSubmission, receptionStatus]);
+
   // El desplegable de PV nunca debe quedar sin opciones: si no hay pos_configs
   // activas para este hotel (lo normal, es una feature opcional de multi-POR-área),
   // se ofrece igual el PV único de billing_config en vez de dejarlo vacío.

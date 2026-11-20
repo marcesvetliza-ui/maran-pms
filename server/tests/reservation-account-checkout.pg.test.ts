@@ -69,11 +69,54 @@ describe.skipIf(!enabled)("atomic checkout with the operational balance transfer
     const { registerReservationsRoutes } = await import("../routes/reservations");
     const app = express(); app.use(express.json());
     app.use((req: any, _res, next) => { req.isAuthenticated = () => true; req.user = actor; next(); });
-    registerReservationsRoutes(app); server = app.listen(0, "127.0.0.1");
+    registerReservationsRoutes(app);
+    const {registerReceptionOperationRoutes}=await import('../billing/receptionOperations');
+    registerReceptionOperationRoutes(app);
+    server = app.listen(0, "127.0.0.1");
     await new Promise<void>(resolve => server.once("listening", resolve));
     base = `http://127.0.0.1:${(server.address() as any).port}`;
   });
   afterAll(async () => { if (server) await new Promise<void>(resolve => server.close(() => resolve())); await pool?.end(); const { pool: applicationPool } = await import("../db"); await applicationPool.end(); vi.restoreAllMocks(); });
+
+  it.each(['retained','reversed','missing_audit','different_account'])('handles a previously completed departure after reopening without reissuing or transferring it again (%s)',async scenario=>{
+    const f=await fixture(),operationId=randomUUID(),departureId=randomUUID();
+    try{
+      await pool!.query('DELETE FROM charges WHERE reservation_id=$1',[f.id]);
+      await pool!.query('UPDATE reservations SET total_room_amount=147000 WHERE id=$1',[f.id]);
+      await pool!.query("UPDATE payments SET amount=147000,method='cuenta_corriente' WHERE reservation_id=$1",[f.id]);
+      await pool!.query("INSERT INTO charges(id,reservation_id,description,amount,date,category) VALUES($1,$2,'Cochera',7500,CURRENT_DATE,'otros')",[`${f.id}-parking`,f.id]);
+      const invoice=(await pool!.query("UPDATE sales_invoices SET tipo_comprobante='FA',monto_total=147000,monto_neto=147000,cash_forma_pago='cuenta_corriente',credit_reapplication_intent=$2 WHERE reserva_id=$1 RETURNING id",[f.id,JSON.stringify({operationId,status:'completed',settlement:{status:'completed'}})])).rows[0].id;
+      const debt={operationId:departureId,entityType:'guest',entityId:scenario==='different_account'?f.company:f.guest,maximumBalance:7500};
+      const snapshot={reservaId:f.id,cashFormaPago:'cuenta_corriente',creditOperationId:operationId,prefacturaRecovery:{version:2,payments:[],checkoutRequested:true,checkoutDebtAccount:debt}};
+      await pool!.query("INSERT INTO billing_operations(operation_id,owner_type,owner_id,payload_hash,request_snapshot,fiscal_identity,stage,invoice_id) VALUES($1,'reservation',$2,'synthetic',$3,'{}','authorized',$4)",[operationId,f.id,JSON.stringify(snapshot),invoice]);
+      const departure=await post(f,{...payload(f),operationId:departureId,expectedBalance:'7500.00'});
+      expect(departure.status,JSON.stringify(departure.body)).toBe(200);
+      await pool!.query("UPDATE reservations SET status='checked_in',checked_out_at=NULL WHERE id=$1",[f.id]);
+      await pool!.query("UPDATE rooms SET status='occupied' WHERE id=$1",[f.room]);
+      await pool!.query("INSERT INTO charges(id,reservation_id,description,amount,date,category) VALUES($1,$2,'JUSTO',64000,CURRENT_DATE,'restaurant')",[`${f.id}-new-restaurant`,f.id]);
+      if(scenario==='reversed'){
+        const {voidReservationPaymentWithLedger}=await import('../reservationPaymentVoid');
+        const {db}=await import('../db');
+        await db.transaction(tx=>voidReservationPaymentWithLedger(tx,departure.body.paymentId,actor.id,'Synthetic approved correction of account transfer'));
+      }
+      if(scenario==='missing_audit')await pool!.query("DELETE FROM audit_logs WHERE entity_id=$1 AND details::jsonb->>'operationId'=$2",[f.id,departureId]);
+      const before=await facts(f),journal=(await pool!.query('SELECT * FROM billing_operations WHERE operation_id=$1',[operationId])).rows;
+      const response=await fetch(`${base}/api/billing/reservations/${f.id}/operations/${operationId}/reception-status`);
+      const status=await response.json() as any;expect(response.status).toBe(200);
+      const completed=['retained','reversed'].includes(scenario);
+      expect(status).toMatchObject({financiallyComplete:completed,departureReopened:completed,invoice:{id:invoice}});
+      const discovered=await(await fetch(`${base}/api/billing/reservations/${f.id}/pending-operation`)).json() as any;
+      if(completed)expect(discovered.pending).toBeNull();else expect(discovered.pending.operationId).toBe(operationId);
+      expect(await facts(f)).toEqual(before);
+      expect((await pool!.query('SELECT * FROM billing_operations WHERE operation_id=$1',[operationId])).rows).toEqual(journal);
+      if(scenario==='retained'){
+        const fresh=await post(f,{...payload(f),expectedBalance:'64000.00'});expect(fresh.status,JSON.stringify(fresh.body)).toBe(200);
+        const after=await facts(f);expect(after.reservation).toBe('checked_out');expect(after.invoices).toEqual(before.invoices);
+        expect(after.payments.filter(p=>p.payment_request_id===departureId)).toEqual(before.payments.filter(p=>p.payment_request_id===departureId));
+        expect(after.accounts.filter(m=>m.amount==='64000.00')).toHaveLength(1);
+      }
+    }finally{await pool!.query('DELETE FROM billing_operations WHERE operation_id=$1',[operationId]);await clean(f)}
+  });
 
   it.each(['0.01','3500.00'])('moves a late-checkout balance of %s to the guest while preserving an issued, corrected-payment attempt',async amount=>{
     const f=await fixture(),operationId=randomUUID(),paymentRequestId=randomUUID();
