@@ -488,6 +488,31 @@ describe.skipIf(!available)("precios nocturnos · PostgreSQL y middleware reales
       expect((await request(`${pathFor(idFor("partial"))}/preview`,body)).status).toBe(409);
     } finally {await applicationPool.query("DELETE FROM packages WHERE id=$1",[pkg]);}
   });
+  it("previews and confirms the package's charged category for an upgrade without moving rooms or changing money records",async()=>{
+    const pkg=idFor('upgrade-package'),chargedType=idFor('charged-type');
+    await applicationPool.query("INSERT INTO room_types(id,code,name) VALUES($1::text,$1::text,'Synthetic charged category')",[chargedType]);
+    await applicationPool.query("INSERT INTO packages(id,code,name,nights,base_price,status,created_at) VALUES($1::text,$1::text,'Synthetic upgrade package',3,265000,'active',now())",[pkg]);
+    try {
+      await applicationPool.query("INSERT INTO package_room_prices(package_id,room_type_id,price) VALUES($1,$2,265000),($1,$3,340000)",[pkg,chargedType,idFor('type')]);
+      await applicationPool.query("UPDATE reservations SET is_upgrade=true,original_room_type_id=$2 WHERE id=$1",[editable,chargedType]);
+      const before=await saved(),evidence=await moneyEvidence();
+      const body={revision:0,reason:'Aplicar paquete conservando el upgrade',edit:{kind:'package',packageId:pkg}};
+      const preview=await request(`${pathFor()}/preview`,body);
+      expect(preview.status).toBe(200);expect(preview.data.newTotalCents).toBe(26500000);
+      expect((await saved()).totalRoomAmount).toBe(before.totalRoomAmount);
+      const applied=await request(`${pathFor()}/apply`,{...body,edit:{...body.edit,expectedTotalCents:26500000}});
+      expect(applied.status).toBe(200);expect(applied.data.totalRoomAmount).toBe('265000.00');
+      expect(applied.data.roomId).toBe(before.roomId);expect(applied.data.roomTypeId).toBe(before.roomTypeId);
+      expect(applied.data.originalRoomTypeId).toBe(chargedType);expect(applied.data.isUpgrade).toBe(true);
+      expect(applied.data.checkInDate).toBe(before.checkInDate);expect(applied.data.checkOutDate).toBe(before.checkOutDate);
+      expect(await moneyEvidence()).toEqual(evidence);
+    } finally {
+      await applicationPool.query("UPDATE reservations SET is_upgrade=false,original_room_type_id=null WHERE id=$1",[editable]);
+      await applicationPool.query("DELETE FROM package_room_prices WHERE package_id=$1",[pkg]);
+      await applicationPool.query("DELETE FROM packages WHERE id=$1",[pkg]);
+      await applicationPool.query("DELETE FROM room_types WHERE id=$1",[chargedType]);
+    }
+  });
   it("requires a reviewed package price and rejects catalog changes before applying",async()=>{
     const pkg=idFor("changed-package");await applicationPool.query("INSERT INTO packages(id,code,name,nights,base_price,status,created_at) VALUES($1::text,$1::text,'Synthetic Changed',3,300000,'active',now())",[pkg]);
     try {
