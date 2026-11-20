@@ -41,7 +41,7 @@
   ],
   "served_revisions": {
     "control": null,
-    "aurora": null,
+    "aurora": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
     "brisa": null
   },
   "remote_restore_executed": true,
@@ -63,7 +63,7 @@
   "remote_mutations_by_assistant": [],
   "pending": [
     "remaining backup IDs, timestamps with zone and retention",
-    "served revisions and initial Aurora health/identity receipt",
+    "active deployment IDs; control and Brisa served revisions; Aurora f5005dc7 and initial identity now recorded",
     "selected PITR recovery point with timezone and PostgreSQL versions",
     "complete recovered dataset, sequences, relationships and installation identity verification",
     "temporary Aurora QA application recovery test, permissions and confirmed return to original connection",
@@ -115,6 +115,11 @@
       "stage": "one_reservation_manual_check_accepted",
       "observation": "Owner confirmed room 103, Huesped Prueba and notes match the original, completing manual sample check in addition to screenshot comparison of dates and prices. No application cutover yet.",
       "source": "owner reply: si perfecto"
+    },
+    {
+      "stage": "aurora_health_baseline_recorded",
+      "observation": "Owner-pasted /healthz reports ok, qa, tested revision f5005dc7d2a702198cb953b59df99b1d92cbbe53 and Aurora property/client IDs before temporary connection switch.",
+      "source": "owner response in conversation"
     }
   ],
   "remote_restore": {
@@ -278,8 +283,24 @@
       "temporary_database_reference": "${{xenia-aurora-restore-db.DATABASE_URL}}",
       "return_database_reference": "${{xenia-aurora-pms-db.DATABASE_URL}}",
       "scope": "same existing Aurora QA application, domain, client identity and code; temporary database connection then return to original",
-      "initial_health_and_revision": "pending owner response; public web tool could not access health endpoints",
-      "remote_mutations_by_assistant": []
+      "initial_health_and_revision": "confirmed by owner-pasted /healthz response before database switch",
+      "remote_mutations_by_assistant": [],
+      "health_before_switch": {
+        "date": "2026-11-20",
+        "source": "owner pasted response in conversation",
+        "endpoint": "https://aurora.qa.xeniapms.com/healthz",
+        "response": {
+          "status": "ok",
+          "mode": "qa",
+          "revision": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+          "propertyId": "b6cb1d1d-fda6-479b-aff9-83484758993d",
+          "clientId": "8a2f6959-32dc-4916-a1e4-3341a17423ee"
+        },
+        "revision_matches_tested_candidate": true,
+        "source_identity_recorded": true,
+        "target_identity_checked": false,
+        "deployment_id": null
+      }
     }
   },
   "health_read_attempt": {
