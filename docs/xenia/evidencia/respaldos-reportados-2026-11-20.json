@@ -46,7 +46,7 @@
   },
   "remote_restore_executed": true,
   "pitr_status": "independent_restored_service_online_in_owner_screenshot",
-  "recovery_method": "Railway PITR into independent sibling service xenia-aurora-restore-db; Online visible and one reservation partially inspected via owner screenshots; comparison with original and complete validation pending",
+  "recovery_method": "Railway PITR into independent sibling service xenia-aurora-restore-db; Online and one reservation dates and prices compared with original through owner screenshots; complete validation pending",
   "independent_target": "xenia-aurora-restore-db",
   "official_sources": [
     {
@@ -65,7 +65,7 @@
     "remaining backup IDs, timestamps with zone and retention",
     "served revisions",
     "selected PITR recovery point with timezone and restored PostgreSQL version",
-    "compare observed restored reservation with original at selected PITR point; inspect notes, referenced guest and room, installation identity and remaining data",
+    "inspect reservation notes and referenced guest and room; verify installation identity, exact PITR point and remaining data",
     "recovered application flow and permissions in coordinated isolated test",
     "other database recovery drills and production recovery measures"
   ],
@@ -105,6 +105,11 @@
       "stage": "restored_reservation_fields_visible",
       "observation": "Owner screenshots show RES-1795097940326-24, 2026-11-20 to 2026-11-24, 4 nights, nightly rates 50000 + 50000 + 50000 + 150000 and room total 300000. Arithmetic is consistent; original comparison and relationships pending.",
       "source": "owner screenshots"
+    },
+    {
+      "stage": "original_reservation_compared",
+      "observation": "Original Aurora Folio screenshot matches restored reservation code RES-1795097940326-24, stay 2026-11-20 to 2026-11-24, four nights, nightly amounts 50000/50000/50000/150000, total ARS 300000 and confirmed status. Original displays room 103 and Huesped Prueba; related restored rows and notes pending.",
+      "source": "owner screenshot"
     }
   ],
   "remote_restore": {
@@ -127,10 +132,10 @@
     "restored_data_checked": false,
     "recovered_application_checked": false,
     "manual_volume_snapshot_restoration_tested": false,
-    "limit": "Selected reservation fields read from owner screenshots and their arithmetic checked. No direct database queries, comparison against original, referenced row checks, installation binding verification or recovered application flow executed by the assistant.",
-    "restored_data_validation": "partial_owner_screenshots_only",
+    "limit": "Owner screenshots of the original PMS and restored database show matching reservation code, dates, four nights, all nightly amounts, total and confirmed status. Referenced database rows, notes, installation binding, complete dataset and recovered application flow remain unverified; no direct remote database queries by assistant.",
+    "restored_data_validation": "partial_one_reservation_compared_in_owner_screenshots",
     "reservation_values_checked": true,
-    "original_reservation_compared": false,
+    "original_reservation_compared": true,
     "reservation_screenshot_evidence": {
       "source": "five owner screenshots of Railway Database / reservations / Edit row",
       "displayed_capture_date": "2026-11-20",
@@ -190,11 +195,62 @@
         "average_per_night": "75000.00",
         "stored_average_matches": true
       },
-      "comparison_against_original": "pending",
+      "comparison_against_original": "selected fields matched via owner screenshots: code, dates, nights, nightly amounts, total and status",
       "referenced_guest_row_checked": false,
       "referenced_room_row_checked": false,
       "reference_scope": "room_id is visible; room_number 103 is not independently verified in public.rooms",
       "method_limit": "Screenshots show one reservation in the restored database; this is not a full data audit or an application recovery test."
-    }
+    },
+    "original_reservation_screenshot_evidence": {
+      "source": "owner screenshot of original Aurora PMS planning reservation / Folio",
+      "displayed_capture_date_time": "2026-11-20 10:44",
+      "display_time_zone": "not explicit; no UTC conversion applied",
+      "origin": "https://aurora.qa.xeniapms.com/planning",
+      "reservation_code": "RES-1795097940326-24",
+      "guest_display_name": "Huesped Prueba",
+      "room_number_displayed": "103",
+      "room_type_label": "Doble de prueba",
+      "status_label": "Confirmada",
+      "check_in_date": "2026-11-20",
+      "check_out_date": "2026-11-24",
+      "nights": 4,
+      "currency_displayed": "ARS",
+      "nightly_rates": [
+        {
+          "date": "2026-11-20",
+          "amount": "50000.00"
+        },
+        {
+          "date": "2026-11-21",
+          "amount": "50000.00"
+        },
+        {
+          "date": "2026-11-22",
+          "amount": "50000.00"
+        },
+        {
+          "date": "2026-11-23",
+          "amount": "150000.00"
+        }
+      ],
+      "total_room_amount": "300000.00",
+      "notes_visible": false,
+      "matches_restored_screenshots": {
+        "reservation_code": true,
+        "check_in_date": true,
+        "check_out_date": true,
+        "nights": true,
+        "all_nightly_amounts": true,
+        "total_room_amount": true,
+        "confirmed_status": true
+      },
+      "comparison_limit": "Source UI room and guest labels are visible; corresponding room and guest rows in restored database have not yet been inspected. Notes and exact PITR target time remain pending."
+    },
+    "remaining_reservation_checks": [
+      "restored room row id xenia-qa-room-103 and room_number 103",
+      "restored guest row id ac6f9cc1-8b4d-404b-ab89-a2846aa2471d and displayed full name Huesped Prueba",
+      "reservation notes against source",
+      "installation identity and complete data checks"
+    ]
   }
 }
