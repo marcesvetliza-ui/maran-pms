@@ -120,6 +120,11 @@
       "stage": "aurora_health_baseline_recorded",
       "observation": "Owner-pasted /healthz reports ok, qa, tested revision f5005dc7d2a702198cb953b59df99b1d92cbbe53 and Aurora property/client IDs before temporary connection switch.",
       "source": "owner response in conversation"
+    },
+    {
+      "stage": "application_recovery_trial_paused",
+      "observation": "Owner prioritizes assistant pilot before 30/11 and confirms Aurora remains on original database; temporary connection switch not applied.",
+      "source": "owner conversation"
     }
   ],
   "remote_restore": {
@@ -278,7 +283,7 @@
     "qa_original_connection_restored": null,
     "application_recovery_plan": {
       "document": "docs/xenia/PASO_3_1_PROBAR_PMS_SOBRE_COPIA_AURORA.md",
-      "status": "prepared_not_executed",
+      "status": "paused_by_owner_to_prioritize_assistant_pilot",
       "application_service": "xenia-aurora-pms",
       "temporary_database_reference": "${{xenia-aurora-restore-db.DATABASE_URL}}",
       "return_database_reference": "${{xenia-aurora-pms-db.DATABASE_URL}}",
@@ -300,7 +305,16 @@
         "source_identity_recorded": true,
         "target_identity_checked": false,
         "deployment_id": null
-      }
+      },
+      "pause_date": "2026-11-20",
+      "priority_document": "docs/xenia/SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md"
+    },
+    "qa_original_connection_state": {
+      "source": "owner reply on 2026-11-20",
+      "statement": "No, sigue con la base original",
+      "service": "xenia-aurora-pms",
+      "database": "xenia-aurora-pms-db",
+      "connection_change_applied": false
     }
   },
   "health_read_attempt": {
