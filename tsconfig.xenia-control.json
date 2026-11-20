@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["server/xenia-control/**/*.ts"],
+  "exclude": ["server/xenia-control/**/*.test.ts"],
+  "compilerOptions": { "incremental": false }
+}
