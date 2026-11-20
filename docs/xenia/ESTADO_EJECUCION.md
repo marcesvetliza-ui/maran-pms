@@ -1,6 +1,6 @@
 # Estado de ejecución de Xenia y continuidad de Maran
 
-Actualización: 19 de noviembre de 2026. Frentes activos: **continuidad de Maran; registro de aceptación de Alojamiento en Aurora y Brisa; respaldos y recuperación de Xenia**. Se conserva la evidencia histórica de las entregas anteriores.
+Actualización: 20 de noviembre de 2026. Frentes activos: **continuidad de Maran; registro de aceptación de Alojamiento en Aurora y Brisa; respaldos y recuperación de Xenia**. Se conserva la evidencia histórica de las entregas anteriores.
 
 ## Primer hito: panel multihotel probado
 
@@ -42,10 +42,16 @@ Marcelo confirmó el ingreso al PMS de Aurora y comunicó que Brisa continúa va
 
 La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, corrige la ficha para **Hotel brisa** sin depender de su identificador textual. Las cuatro verificaciones de GitHub aprobaron las pruebas y las imágenes. La [guía corregida](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) conserva los ajustes manuales de Railway y la selección de la plantilla Brisa.
 
+## Cinco respaldos confirmados el 20 de noviembre
+
+Marcelo confirmó «Sí, las cinco están terminadas» para las bases central, Aurora y Brisa del panel y Aurora y Brisa de los PMS completos. Se registra como confirmación del propietario; los IDs, horarios con zona confirmada, retención y despliegues asociados todavía no fueron aportados al acta. La [evidencia del reporte](evidencia/respaldos-reportados-2026-11-20.json) mantiene esos campos pendientes y no declara una restauración ejecutada.
+
+Se contrastó la documentación oficial de Railway: [restaurar una copia de volumen](https://docs.railway.com/volumes/backups) vuelve a montar la copia en el servicio existente; [PITR](https://docs.railway.com/volumes/point-in-time-recovery) recupera el punto elegido en un servicio nuevo. La captura de `xenia-aurora-pms-db` muestra la copia del 20 de noviembre a las 08:32, de 872 MB, y PITR desactivado. Se prepara su activación en Aurora de pruebas, seguida de la recuperación a un servicio nuevo cuando exista un rango archivado disponible. No hay programación de copias de volumen visible en esa tarjeta. La guía se actualizó con esa distinción. No se activó PITR ni se modificaron servicios, volúmenes, conexiones o datos remotos desde esta conversación.
+
 ## Próximos hitos
 
 1. Registrar los despliegues activos y las revisiones servidas de panel, Aurora y Brisa.
-2. Completar las cinco copias de Railway y su configuración recuperable, siguiendo el paso 3.
+2. Completar las referencias de las cinco copias confirmadas por Marcelo y la configuración recuperable; elegir el método de ensayo independiente con el paso 3.
 3. Restaurar una copia en una base nueva y comprobar sus datos; completar después el acceso y un flujo operativo en el entorno recuperado.
 4. Comprobar específicamente revocación y cierre central remotos, ensayar actualización independiente y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
 5. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
