@@ -32,7 +32,7 @@ La [PR 146](https://github.com/marcesvetliza-ui/maran-pms/pull/146), revisión `
 
 Después de la corrección de edición, Marcelo confirmó «Perfecto todo». Luego respondió «Si anda bien» a la prueba de reservas separadas entre Aurora y Brisa, recepción exclusiva de Aurora y consulta de Brisa sin escritura. La [acta de aceptación funcional](evidencia/pms-aceptacion-funcional-2026-11-19.json) registra esas confirmaciones. Se avanza al respaldo y recuperación de Xenia. Permanecen pendientes las revisiones exactas instaladas, la comprobación específica de revocación y cierre central remotos y los demás circuitos operativos.
 
-La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md) distingue la base central, las dos de demostración del panel y las dos operativas de los PMS de prueba. Prepara el registro de las cinco copias y una restauración en una base nueva. La ruta de restauración nativa de Railway hacia otro volumen no se confirmó en la pantalla actual de la cuenta; la guía no indica restaurar sobre una base activa.
+La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md) distingue la base central, las dos de demostración del panel y las dos operativas de los PMS de prueba. Conserva el registro de las cinco copias y el ensayo en una base nueva. El apartado del 20 de noviembre distingue la restauración de volumen de la recuperación PITR efectivamente realizada por el propietario.
 
 Se ejecutó un [ensayo lógico local](evidencia/recuperacion-local-2026-11-19.json) de exportación y restauración de un PMS ficticio con PostgreSQL 17: igualdad de todas las filas y secuencias, relaciones de reserva, fechas, precios, observaciones, identidad y conservación de un cambio posterior del origen. Es evidencia local; no cierra la recuperación remota ni el arranque de una aplicación restaurada.
 
@@ -42,17 +42,21 @@ Marcelo confirmó el ingreso al PMS de Aurora y comunicó que Brisa continúa va
 
 La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, corrige la ficha para **Hotel brisa** sin depender de su identificador textual. Las cuatro verificaciones de GitHub aprobaron las pruebas y las imágenes. La [guía corregida](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) conserva los ajustes manuales de Railway y la selección de la plantilla Brisa.
 
-## Cinco respaldos confirmados el 20 de noviembre
+## Cinco respaldos y recuperación PITR de Aurora, 20 de noviembre
 
-Marcelo confirmó «Sí, las cinco están terminadas» para las bases central, Aurora y Brisa del panel y Aurora y Brisa de los PMS completos. Se registra como confirmación del propietario; los IDs, horarios con zona confirmada, retención y despliegues asociados todavía no fueron aportados al acta. La [evidencia del reporte](evidencia/respaldos-reportados-2026-11-20.json) mantiene esos campos pendientes y no declara una restauración ejecutada.
+Marcelo confirmó «Sí, las cinco están terminadas» para las bases central, Aurora y Brisa del panel y Aurora y Brisa de los PMS completos. Se registra como confirmación del propietario; los IDs, horarios con zona confirmada, retención y despliegues asociados todavía no fueron aportados al acta. La [evidencia del reporte](evidencia/respaldos-reportados-2026-11-20.json) conserva esos campos pendientes y distingue la creación del destino de la validación de sus datos.
 
-Se contrastó la documentación oficial de Railway: [restaurar una copia de volumen](https://docs.railway.com/volumes/backups) vuelve a montar la copia en el servicio existente; [PITR](https://docs.railway.com/volumes/point-in-time-recovery) recupera el punto elegido en un servicio nuevo. La captura de `xenia-aurora-pms-db` muestra la copia del 20 de noviembre a las 08:32, de 872 MB, y PITR desactivado. Se prepara su activación en Aurora de pruebas, seguida de la recuperación a un servicio nuevo cuando exista un rango archivado disponible. No hay programación de copias de volumen visible en esa tarjeta. La guía se actualizó con esa distinción. No se activó PITR ni se modificaron servicios, volúmenes, conexiones o datos remotos desde esta conversación.
+Se contrastó la documentación oficial de Railway: [restaurar una copia de volumen](https://docs.railway.com/volumes/backups) vuelve a montar la copia en el servicio existente; [PITR](https://docs.railway.com/volumes/point-in-time-recovery) recupera el punto elegido en un servicio nuevo. La primera captura de Aurora muestra una copia manual del 20 de noviembre a las 08:32, de 872 MB, PITR desactivado y ninguna programación de copias de volumen visible.
+
+Marcelo activó PITR en Aurora de pruebas. Una captura intermedia mostró la espera del primer respaldo y los archivos de cambios. Después realizó la recuperación: la captura con reloj 10:22 muestra **xenia-aurora-restore-db Online**, **xenia-aurora-pms-db Online** y **xenia-aurora-pms Online**, con el enlace del PMS a la base original visible. Se registra la recuperación PITR en un servicio independiente; el punto elegido y los datos del destino todavía no están validados. Este resultado no acredita la restauración de las cinco copias manuales ni un flujo operativo desde una aplicación recuperada.
+
+La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md), versión 3, indica cómo abrir la base recuperada en modo lectura y comprobar reservas, habitación, huésped, precios, observaciones e identidad. Las acciones remotas de Railway fueron realizadas por Marcelo. El asistente no modificó servicios, volúmenes, conexiones o datos remotos. Maran continúa fuera del ensayo.
 
 ## Próximos hitos
 
 1. Registrar los despliegues activos y las revisiones servidas de panel, Aurora y Brisa.
-2. Completar las referencias de las cinco copias confirmadas por Marcelo y la configuración recuperable; elegir el método de ensayo independiente con el paso 3.
-3. Restaurar una copia en una base nueva y comprobar sus datos; completar después el acceso y un flujo operativo en el entorno recuperado.
+2. Completar las referencias de las cinco copias confirmadas por Marcelo, la configuración recuperable y el momento PITR seleccionado.
+3. Validar los datos de **xenia-aurora-restore-db**, ya Online tras la recuperación PITR; completar después el acceso y un flujo operativo en el entorno recuperado.
 4. Comprobar específicamente revocación y cierre central remotos, ensayar actualización independiente y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
 5. Incorporar los demás circuitos por módulo. El asistente continúa después de esta base.
 
