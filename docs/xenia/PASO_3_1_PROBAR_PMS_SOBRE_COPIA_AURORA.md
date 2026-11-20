@@ -21,6 +21,22 @@ La prueba usa el **mismo servicio xenia-aurora-pms**, con el mismo dominio, fich
 
 Las referencias de la tabla son expresiones de Railway, no conexiones con contraseñas. Antes de editar se conserva la referencia que efectivamente tiene el servicio.
 
+## Salud de partida registrada
+
+Marcelo compartió el resultado de **/healthz** antes del cambio de conexión, el 20 de noviembre de 2026:
+
+```json
+{
+  "status": "ok",
+  "mode": "qa",
+  "revision": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+  "propertyId": "b6cb1d1d-fda6-479b-aff9-83484758993d",
+  "clientId": "8a2f6959-32dc-4916-a1e4-3341a17423ee"
+}
+```
+
+La revisión coincide con el código probado. Es una respuesta aportada por el propietario; la lectura web directa no estuvo disponible desde esta herramienta. Al conectar a la copia se comparan estos mismos campos. El ID del despliegue y el momento exacto PITR todavía deben anotarse. El cambio de conexión aún no se ejecutó.
+
 ## 1. Registrar la configuración antes del cambio
 
 1. Abrí **https://aurora.qa.xeniapms.com/healthz**. Guardá el resultado con status, mode, revision, propertyId y clientId. Se espera status **ok**, mode **qa**. El contenido corresponde a salud e identidad pública; no requiere publicar secretos.
