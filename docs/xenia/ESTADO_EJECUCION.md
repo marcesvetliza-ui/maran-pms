@@ -58,11 +58,11 @@ La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md), versión 4, con
 
 Se preparó el [paso 3.1](PASO_3_1_PROBAR_PMS_SOBRE_COPIA_AURORA.md): registrar salud, revisión e identidad actuales; conectar temporalmente **xenia-aurora-pms** a **xenia-aurora-restore-db**; comprobar ingreso, una reserva de prueba y permisos; y volver a **xenia-aurora-pms-db**. Usa el mismo servicio y origen QA, sin una segunda aplicación pública con la identidad de Aurora. La preparación valida identidad y esquema; /healthz consulta la identidad de la base conectada.
 
-El procedimiento es una preparación y todavía no se ejecutó el cambio de conexión. Conserva la revisión, ficha, dominio, configuración central y demás servicios. El acceso público de salud no fue consultable mediante la herramienta web; se pidió a Marcelo el resultado de Aurora para registrar la versión previa. Esa limitación de lectura no prueba una caída.
+El procedimiento es una preparación y todavía no se ejecutó el cambio de conexión. Conserva la revisión, ficha, dominio, configuración central y demás servicios. El acceso de salud no fue consultable mediante la herramienta web. Marcelo pegó la respuesta de Aurora: **status ok**, **mode qa**, revisión **f5005dc7d2a702198cb953b59df99b1d92cbbe53**, propertyId **b6cb1d1d-fda6-479b-aff9-83484758993d** y clientId **8a2f6959-32dc-4916-a1e4-3341a17423ee**. Coincide con la revisión probada; queda registrada la identidad previa. La conexión temporal y su regreso aún no se ejecutaron. Siguen pendientes los IDs de despliegue y las revisiones de panel y Brisa.
 
 ## Próximos hitos
 
-1. Registrar los despliegues activos y las revisiones servidas de panel, Aurora y Brisa.
+1. Completar los IDs de despliegue y las revisiones de panel y Brisa; Aurora ya tiene salud, revisión f5005dc7 e identidad previas al ensayo registradas por respuesta del propietario.
 2. Completar las referencias de las cinco copias confirmadas por Marcelo, la configuración recuperable y el momento PITR seleccionado.
 3. Completar los controles del conjunto de datos recuperado y ejecutar el paso 3.1, con salud, ingreso central, reserva, permisos y regreso confirmado a la conexión original de Aurora QA.
 4. Comprobar específicamente revocación y cierre central remotos, ensayar actualización independiente y resolver continuidad ante una caída central antes de incorporar un hotel en uso.
