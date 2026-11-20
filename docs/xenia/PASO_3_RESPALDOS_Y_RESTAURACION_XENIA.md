@@ -1,8 +1,8 @@
 # Paso 3: respaldos y ensayo de recuperación de Xenia
 
-Fecha: 20 de noviembre de 2026. Versión 2: copias confirmadas y elección del método de recuperación. Responsable: Marcelo. Alcance: Aurora, Brisa y el panel de pruebas de Xenia, en `observant-possibility`. La operación actual de Maran se conserva.
+Fecha: 20 de noviembre de 2026. Versión 3: recuperación PITR de Aurora en un servicio independiente y validación pendiente. Responsable: Marcelo. Alcance: Aurora, Brisa y el panel de pruebas de Xenia, en `observant-possibility`. La operación actual de Maran se conserva.
 
-Marcelo aceptó la separación de reservas y los perfiles de recepción de Aurora y consulta de Brisa. Marcelo confirmó que las cinco copias terminaron. Este paso prepara la recuperación de esos datos y de sus accesos. Las revisiones exactas instaladas y la restauración remota todavía deben registrarse y comprobarse.
+Marcelo aceptó la separación de reservas y los perfiles de recepción de Aurora y consulta de Brisa. Marcelo confirmó que las cinco copias terminaron. Este paso prepara la recuperación de esos datos y de sus accesos. La recuperación PITR de Aurora creó un servicio nuevo que aparece Online en la captura del propietario. Las revisiones exactas instaladas, el punto elegido, los datos recuperados y el acceso desde una aplicación todavía deben registrarse y comprobarse.
 
 ## 1. Guardar la referencia del punto de recuperación
 
@@ -51,25 +51,41 @@ Guardá esta tabla en el acta del punto de recuperación:
 
 Registrá también los tres despliegues activos del punto 1. Conservá sus variables en el gestor privado para poder recuperar la configuración correspondiente al respaldo.
 
-## 4. Preparar el ensayo remoto en una base nueva
+## 4. Validar la recuperación remota de Aurora
 
-El primer destino del ensayo será una base nueva llamada **xenia-aurora-restore-db**, sin aplicación ni dominio conectados. Si se usa PITR, lo creará Railway al recuperar; si se usa exportación lógica, se provisiona vacío. Antes de restaurar se comprueban las versiones de PostgreSQL de origen, herramientas y destino. Una copia nativa del volumen y una exportación lógica son procedimientos distintos.
+### 4.1. Recuperación PITR realizada por el propietario
+
+Marcelo activó PITR en **xenia-aurora-pms-db**, esperó su primera cobertura y realizó la recuperación en **xenia-aurora-restore-db**. La captura del 20 de noviembre, con reloj visible 10:22 sin zona explícita, muestra la base recuperada Online, la base original Online y **xenia-aurora-pms** Online. El diagrama conserva el enlace del PMS a la base original. Falta registrar el momento exacto seleccionado en PITR y verificar el contenido del destino.
 
 La documentación de Railway distingue el **Restore** de volumen, que cambia el volumen montado en el servicio existente, de **PITR**, que recupera un punto en un servicio nuevo. [Copias de volumen](https://docs.railway.com/volumes/backups) · [PITR](https://docs.railway.com/volumes/point-in-time-recovery).
 
-La captura del 20 de noviembre muestra PITR desactivado en Aurora. El siguiente paso es **Enable PITR** y aguardar su primer respaldo y un rango de recuperación disponible. Esta activación reinicia esa base y agrega almacenamiento facturado por uso. Las copias manuales no generan un archivo PITR retroactivo. Con PITR el proveedor crea el destino; para la alternativa lógica se prepara una base vacía. Ambos ensayos se registran por separado.
+Este ensayo utiliza el archivo de PITR. No prueba la restauración de las cinco copias manuales de volumen. La cobertura PITR empieza con su propio primer respaldo y no permite recuperar momentos anteriores a ese inicio.
 
-Para la alternativa lógica, el procedimiento previsto es:
+### 4.2. Siguiente paso en Railway: lectura de los datos recuperados
+
+1. Abrí **xenia-aurora-restore-db → Database**. Comprobá el nombre de la tarjeta antes de consultar datos.
+2. En el listado de tablas, buscá **reservations**, del esquema **public**. Si la vista ofrece selector de esquema, elegí public. Si la vista no muestra las tablas, guardá una captura de esa pantalla para adaptar las instrucciones.
+3. Buscá la reserva ficticia usada en las pruebas por su **reservation_code**. Revisá **check_in_date**, **check_out_date**, **room_id**, **guest_id**, **nightly_pricing**, **total_room_amount** y **notes**.
+4. Contrastá esos datos con la reserva en el PMS original, teniendo en cuenta el momento elegido para la recuperación. Un cambio del origen posterior a ese momento debe seguir únicamente en el origen; no implica un error de la copia.
+5. Abrí las tablas **rooms** y **guests** del destino y comprobá que existen los registros con los IDs usados por la reserva. El número de habitación está en **room_number**.
+6. Para la validación técnica, registrá versión de PostgreSQL y comprobá **xenia_pms.installation**: **property_id**, **client_id**, **template** y **schema_digest** deben conservar la identidad de Aurora. Compará también cantidades, relaciones y secuencias al punto recuperado. La presencia de unas filas en la interfaz constituye una comprobación inicial, no una verificación integral.
+7. Registrá el punto PITR con zona horaria, el servicio de destino, el resultado de las lecturas y los controles que falten. Conservá las referencias privadas fuera del chat.
+
+Durante esta lectura, el PMS de Aurora mantiene su conexión a **xenia-aurora-pms-db**. El destino se inspecciona sin conectar otra aplicación pública con la misma identidad. Las consultas de datos aún no fueron realizadas ni confirmadas.
+
+### 4.3. Alternativa lógica para un ensayo posterior
+
+El procedimiento lógico ensayado localmente se conserva como alternativa. Antes de usarlo remotamente:
 
 1. Confirmar el punto de recuperación, la versión de PostgreSQL y las referencias privadas de origen y destino. La versión se puede consultar técnicamente con `SHOW server_version;`.
-2. Crear el destino vacío y comprobar que corresponde a una base nueva del proyecto de pruebas.
-3. Exportar una copia lógica consistente del PMS de Aurora con `pg_dump`, o usar una copia nativa sólo si el proveedor ofrece y confirma un destino independiente.
-4. Restaurar la copia lógica con `pg_restore`, con detención ante errores y dentro de una transacción, sobre el destino vacío. Las conexiones reales se administran por un canal privado; no se pegan en el acta ni en el chat.
+2. Crear otro destino vacío, independiente de las bases actuales y del destino PITR ya creado.
+3. Exportar una copia lógica consistente del PMS de Aurora con `pg_dump`.
+4. Restaurar con `pg_restore`, con detención ante errores y dentro de una transacción, sobre ese destino vacío. Las conexiones reales se administran por un canal privado.
 5. Comparar tablas, cantidades, relaciones, secuencias, fechas, tarifas, observaciones e identidad de instalación con el punto respaldado.
 6. Comprobar que la base original conserva sus datos posteriores al punto de recuperación.
 7. Registrar duración, versiones, resultado y componentes pendientes. El tiempo de un ensayo local pequeño no se usa como tiempo de recuperación del hotel.
 
-Estas instrucciones preparan el ensayo remoto; no declaran que haya sido ejecutado. La ejecución técnica en Railway se concreta una vez confirmadas las copias y la compatibilidad de versiones.
+La recuperación PITR realizada no ejecuta esta alternativa lógica ni sustituye su acta.
 
 ## 5. Conservar la identidad al recuperar el PMS
 
@@ -88,7 +104,7 @@ Se ejecutó `pg_dump` y `pg_restore` con PostgreSQL 17, en un clúster nuevo por
 
 La herramienta se ejecuta desde un checkout de la entrega QA `f5005dc7` o compatible, con dependencias instaladas, el esquema QA compilado y PostgreSQL local. Recibe la carpeta de binarios locales y la ruta de su acta de salida; crea y elimina su propio clúster. No acepta conexiones de Railway ni utiliza `DATABASE_URL`.
 
-El resultado valida el procedimiento lógico en el entorno local. Las cinco copias fueron confirmadas por el propietario. Permanecen pendientes sus referencias y la restauración de Railway, el acceso de una aplicación al destino recuperado, el panel central, Brisa, los componentes externos y la medición de recuperación del hotel.
+El resultado valida el procedimiento lógico en el entorno local. Las cinco copias fueron confirmadas por el propietario. La recuperación PITR de Aurora muestra un destino independiente Online. Permanecen pendientes las referencias de las copias, el punto PITR elegido, la validación de los datos remotos, el acceso de una aplicación al destino recuperado, el panel central, Brisa, los componentes externos y la medición de recuperación del hotel.
 
 ## 7. Criterio para cerrar el paso
 
