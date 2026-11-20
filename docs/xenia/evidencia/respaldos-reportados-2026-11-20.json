@@ -46,7 +46,7 @@
   },
   "remote_restore_executed": true,
   "pitr_status": "independent_restored_service_online_in_owner_screenshot",
-  "recovery_method": "Railway PITR into independent sibling service xenia-aurora-restore-db; target Online visible in owner screenshot; remote data validation pending",
+  "recovery_method": "Railway PITR into independent sibling service xenia-aurora-restore-db; Online visible and one reservation partially inspected via owner screenshots; comparison with original and complete validation pending",
   "independent_target": "xenia-aurora-restore-db",
   "official_sources": [
     {
@@ -65,7 +65,7 @@
     "remaining backup IDs, timestamps with zone and retention",
     "served revisions",
     "selected PITR recovery point with timezone and restored PostgreSQL version",
-    "remote restored table and reservation validation, including prices, notes, relationships and installation identity",
+    "compare observed restored reservation with original at selected PITR point; inspect notes, referenced guest and room, installation identity and remaining data",
     "recovered application flow and permissions in coordinated isolated test",
     "other database recovery drills and production recovery measures"
   ],
@@ -100,6 +100,11 @@
       "stage": "independent_service_created",
       "observation": "xenia-aurora-restore-db Online; original xenia-aurora-pms-db and xenia-aurora-pms also Online",
       "source": "owner screenshot and statement: listo perfecto"
+    },
+    {
+      "stage": "restored_reservation_fields_visible",
+      "observation": "Owner screenshots show RES-1795097940326-24, 2026-11-20 to 2026-11-24, 4 nights, nightly rates 50000 + 50000 + 50000 + 150000 and room total 300000. Arithmetic is consistent; original comparison and relationships pending.",
+      "source": "owner screenshots"
     }
   ],
   "remote_restore": {
@@ -122,6 +127,74 @@
     "restored_data_checked": false,
     "recovered_application_checked": false,
     "manual_volume_snapshot_restoration_tested": false,
-    "limit": "Online confirms visible service status; no remote table contents, installation binding or recovered application flow inspected by the assistant."
+    "limit": "Selected reservation fields read from owner screenshots and their arithmetic checked. No direct database queries, comparison against original, referenced row checks, installation binding verification or recovered application flow executed by the assistant.",
+    "restored_data_validation": "partial_owner_screenshots_only",
+    "reservation_values_checked": true,
+    "original_reservation_compared": false,
+    "reservation_screenshot_evidence": {
+      "source": "five owner screenshots of Railway Database / reservations / Edit row",
+      "displayed_capture_date": "2026-11-20",
+      "displayed_capture_times": [
+        "10:35",
+        "10:36"
+      ],
+      "display_time_zone": "not explicit; no UTC conversion applied",
+      "target_service": "xenia-aurora-restore-db",
+      "table": "public.reservations",
+      "reservation_code": "RES-1795097940326-24",
+      "pricing_scheme": "nightly_v1",
+      "pricing_revision": 1,
+      "guest_id": "ac6f9cc1-8b4d-404b-ab89-a2846aa2471d",
+      "room_type_id": "xenia-qa-type",
+      "room_id": "xenia-qa-room-103",
+      "rate_plan_id": "xenia-qa-rate",
+      "check_in_date": "2026-11-20",
+      "check_out_date": "2026-11-24",
+      "nights": 4,
+      "base_rate_per_night": "75000.00",
+      "final_rate_per_night": "75000.00",
+      "discount_type": "none",
+      "discount_value": "0.00",
+      "total_room_amount": "300000.00",
+      "nightly_pricing": [
+        {
+          "date": "2026-11-20",
+          "rateCents": 5000000,
+          "discountCents": 0
+        },
+        {
+          "date": "2026-11-21",
+          "rateCents": 5000000,
+          "discountCents": 0
+        },
+        {
+          "date": "2026-11-22",
+          "rateCents": 5000000,
+          "discountCents": 0
+        },
+        {
+          "date": "2026-11-23",
+          "rateCents": 15000000,
+          "discountCents": 0
+        }
+      ],
+      "status": "confirmed",
+      "source_field": "directo",
+      "number_of_guests": 1,
+      "notes_visible": false,
+      "arithmetic_checks": {
+        "calendar_nights_match": true,
+        "nightly_dates_match_stay": true,
+        "nightly_total_cents": 30000000,
+        "nightly_total_matches_room_amount": true,
+        "average_per_night": "75000.00",
+        "stored_average_matches": true
+      },
+      "comparison_against_original": "pending",
+      "referenced_guest_row_checked": false,
+      "referenced_room_row_checked": false,
+      "reference_scope": "room_id is visible; room_number 103 is not independently verified in public.rooms",
+      "method_limit": "Screenshots show one reservation in the restored database; this is not a full data audit or an application recovery test."
+    }
   }
 }
