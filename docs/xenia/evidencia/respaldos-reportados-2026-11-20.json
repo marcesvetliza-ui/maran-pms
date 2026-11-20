@@ -44,10 +44,10 @@
     "aurora": null,
     "brisa": null
   },
-  "remote_restore_executed": false,
-  "pitr_status": "off_in_owner_screenshot",
-  "recovery_method": "prepare Aurora PITR activation, wait for first archived backup and recover into a new sibling service",
-  "independent_target": "new service or empty database; existing services keep current connections",
+  "remote_restore_executed": true,
+  "pitr_status": "independent_restored_service_online_in_owner_screenshot",
+  "recovery_method": "Railway PITR into independent sibling service xenia-aurora-restore-db; target Online visible in owner screenshot; remote data validation pending",
+  "independent_target": "xenia-aurora-restore-db",
   "official_sources": [
     {
       "url": "https://docs.railway.com/volumes/backups",
@@ -64,8 +64,10 @@
   "pending": [
     "remaining backup IDs, timestamps with zone and retention",
     "served revisions",
-    "activate PITR on Aurora and verify first archive restore range",
-    "independent remote data recovery and application validation"
+    "selected PITR recovery point with timezone and restored PostgreSQL version",
+    "remote restored table and reservation validation, including prices, notes, relationships and installation identity",
+    "recovered application flow and permissions in coordinated isolated test",
+    "other database recovery drills and production recovery measures"
   ],
   "maran": "No operating service, data, credentials or connection changed.",
   "aurora_screenshot": {
@@ -82,5 +84,44 @@
       "backup_reference": null
     },
     "volume_backup_schedule": "No backup schedule"
+  },
+  "recovery_progress": [
+    {
+      "stage": "before_enable",
+      "observation": "PITR off; Aurora Online; manual volume backup 2026-11-20 08:32, 872 MB",
+      "source": "owner screenshot"
+    },
+    {
+      "stage": "enabled_waiting",
+      "observation": "PITR enabled; no coverage yet; waiting for first WAL archive and base backup; Aurora Online",
+      "source": "owner screenshot"
+    },
+    {
+      "stage": "independent_service_created",
+      "observation": "xenia-aurora-restore-db Online; original xenia-aurora-pms-db and xenia-aurora-pms also Online",
+      "source": "owner screenshot and statement: listo perfecto"
+    }
+  ],
+  "remote_restore": {
+    "method": "Railway PostgreSQL PITR",
+    "execution_source": "owner performed Railway UI steps",
+    "project": "observant-possibility",
+    "environment": "production",
+    "source_service": "xenia-aurora-pms-db",
+    "target_service": "xenia-aurora-restore-db",
+    "target_status_in_screenshot": "Online",
+    "original_database_status_in_screenshot": "Online",
+    "original_pms_status_in_screenshot": "Online",
+    "original_pms_url_in_screenshot": "https://aurora.qa.xeniapms.com",
+    "original_pms_to_original_database_edge_visible": true,
+    "screenshot_displayed_date_time": "2026-11-20 10:22",
+    "screenshot_time_zone": "not explicit; no UTC conversion applied",
+    "selected_recovery_time": null,
+    "restored_postgresql_version": null,
+    "restored_schema_identity_checked": false,
+    "restored_data_checked": false,
+    "recovered_application_checked": false,
+    "manual_volume_snapshot_restoration_tested": false,
+    "limit": "Online confirms visible service status; no remote table contents, installation binding or recovered application flow inspected by the assistant."
   }
 }
