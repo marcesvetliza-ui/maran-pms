@@ -1,8 +1,8 @@
 # Paso 3: respaldos y ensayo de recuperación de Xenia
 
-Fecha: 19 de noviembre de 2026. Responsable: Marcelo. Alcance: Aurora, Brisa y el panel de pruebas de Xenia, en `observant-possibility`. La operación actual de Maran se conserva.
+Fecha: 20 de noviembre de 2026. Versión 2: copias confirmadas y elección del método de recuperación. Responsable: Marcelo. Alcance: Aurora, Brisa y el panel de pruebas de Xenia, en `observant-possibility`. La operación actual de Maran se conserva.
 
-Marcelo aceptó la separación de reservas y los perfiles de recepción de Aurora y consulta de Brisa. Este paso prepara la recuperación de esos datos y de sus accesos. Las revisiones exactas instaladas y la restauración remota todavía deben registrarse y comprobarse.
+Marcelo aceptó la separación de reservas y los perfiles de recepción de Aurora y consulta de Brisa. Marcelo confirmó que las cinco copias terminaron. Este paso prepara la recuperación de esos datos y de sus accesos. Las revisiones exactas instaladas y la restauración remota todavía deben registrarse y comprobarse.
 
 ## 1. Guardar la referencia del punto de recuperación
 
@@ -43,19 +43,23 @@ Guardá esta tabla en el acta del punto de recuperación:
 
 | Base | Referencia de copia | Fecha y hora con zona | Estado | Retención o vencimiento |
 | --- | --- | --- | --- | --- |
-| xenia-control-db | Pendiente | Pendiente | Pendiente | Pendiente |
-| xenia-aurora-db | Pendiente | Pendiente | Pendiente | Pendiente |
-| xenia-brisa-db | Pendiente | Pendiente | Pendiente | Pendiente |
-| xenia-aurora-pms-db | Pendiente | Pendiente | Pendiente | Pendiente |
-| xenia-brisa-pms-db | Pendiente | Pendiente | Pendiente | Pendiente |
+| xenia-control-db | Pendiente registrar | Pendiente registrar | Terminada, según Marcelo | Pendiente registrar |
+| xenia-aurora-db | Pendiente registrar | Pendiente registrar | Terminada, según Marcelo | Pendiente registrar |
+| xenia-brisa-db | Pendiente registrar | Pendiente registrar | Terminada, según Marcelo | Pendiente registrar |
+| xenia-aurora-pms-db | Pendiente registrar | Pendiente registrar | Terminada, según Marcelo | Pendiente registrar |
+| xenia-brisa-pms-db | Pendiente registrar | Pendiente registrar | Terminada, según Marcelo | Pendiente registrar |
 
 Registrá también los tres despliegues activos del punto 1. Conservá sus variables en el gestor privado para poder recuperar la configuración correspondiente al respaldo.
 
 ## 4. Preparar el ensayo remoto en una base nueva
 
-El primer destino del ensayo será una base nueva llamada **xenia-aurora-restore-db**, sin aplicación ni dominio conectados. Antes de crearla se comprueban las versiones de PostgreSQL de origen, herramientas y destino. Una copia nativa del volumen y una exportación lógica son procedimientos distintos.
+El primer destino del ensayo será una base nueva llamada **xenia-aurora-restore-db**, sin aplicación ni dominio conectados. Si se usa PITR, lo creará Railway al recuperar; si se usa exportación lógica, se provisiona vacío. Antes de restaurar se comprueban las versiones de PostgreSQL de origen, herramientas y destino. Una copia nativa del volumen y una exportación lógica son procedimientos distintos.
 
-La ruta de restauración de Railway hacia otro volumen no fue contrastada con la pantalla actual de la cuenta. Por eso esta guía no indica usar **Restore** sobre una de las cinco bases activas. El ensayo técnico previsto es:
+La documentación de Railway distingue el **Restore** de volumen, que cambia el volumen montado en el servicio existente, de **PITR**, que recupera un punto en un servicio nuevo. [Copias de volumen](https://docs.railway.com/volumes/backups) · [PITR](https://docs.railway.com/volumes/point-in-time-recovery).
+
+La captura del 20 de noviembre muestra PITR desactivado en Aurora. El siguiente paso es **Enable PITR** y aguardar su primer respaldo y un rango de recuperación disponible. Esta activación reinicia esa base y agrega almacenamiento facturado por uso. Las copias manuales no generan un archivo PITR retroactivo. Con PITR el proveedor crea el destino; para la alternativa lógica se prepara una base vacía. Ambos ensayos se registran por separado.
+
+Para la alternativa lógica, el procedimiento previsto es:
 
 1. Confirmar el punto de recuperación, la versión de PostgreSQL y las referencias privadas de origen y destino. La versión se puede consultar técnicamente con `SHOW server_version;`.
 2. Crear el destino vacío y comprobar que corresponde a una base nueva del proyecto de pruebas.
@@ -84,7 +88,7 @@ Se ejecutó `pg_dump` y `pg_restore` con PostgreSQL 17, en un clúster nuevo por
 
 La herramienta se ejecuta desde un checkout de la entrega QA `f5005dc7` o compatible, con dependencias instaladas, el esquema QA compilado y PostgreSQL local. Recibe la carpeta de binarios locales y la ruta de su acta de salida; crea y elimina su propio clúster. No acepta conexiones de Railway ni utiliza `DATABASE_URL`.
 
-El resultado valida el procedimiento lógico en el entorno local. Permanecen pendientes las copias y la restauración de Railway, el acceso de una aplicación al destino recuperado, el panel central, Brisa, los componentes externos y la medición de recuperación del hotel.
+El resultado valida el procedimiento lógico en el entorno local. Las cinco copias fueron confirmadas por el propietario. Permanecen pendientes sus referencias y la restauración de Railway, el acceso de una aplicación al destino recuperado, el panel central, Brisa, los componentes externos y la medición de recuperación del hotel.
 
 ## 7. Criterio para cerrar el paso
 
