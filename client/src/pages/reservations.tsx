@@ -254,7 +254,7 @@ export function ReservationFormDialog({
     reservation?.agency || null
   );
 
-  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
+  const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>((reservation?.isUpgrade && reservation.originalRoomTypeId) || reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
   const [selectedPackageId, setSelectedPackageId] = useState<string>("");
 
   const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
@@ -395,7 +395,7 @@ export function ReservationFormDialog({
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
       setSelectedAgency(reservation?.agency || null);
-      setSelectedRoomTypeId(reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
+      setSelectedRoomTypeId((reservation?.isUpgrade && reservation.originalRoomTypeId) || reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
       setFormData({
         reservationCode: reservation?.reservationCode || "",
         guestId: reservation?.guestId || "",
@@ -1176,14 +1176,21 @@ export function ReservationFormDialog({
                   value={isUpgrade ? (formData.originalRoomTypeId || selectedRoomTypeId) : selectedRoomTypeId}
                   onValueChange={isUpgrade
                     ? (value) => {
-                        // En modo upgrade solo cambia el tipo de referencia tarifaria;
-                        // NO se borran las tarifas existentes — el punto del upgrade es
-                        // mantener la tarifa original del huésped en la nueva categoría.
+                        // Un paquete usa el precio de la categoría a cobrar. La habitación
+                        // física del upgrade se conserva; sin paquete se mantiene el importe
+                        // acordado. Las estadías nightly_v1 cambian de paquete con revisión.
                         setSelectedRoomTypeId(value);
-                        setFormData(prev => ({
-                          ...prev,
-                          originalRoomTypeId: value,
-                        }));
+                        const pkg = activePackages.find(p => p.id === selectedPackageId);
+                        setFormData(prev => {
+                          const roomPrice = pkg?.roomPrices?.find(rp => rp.roomTypeId === value);
+                          return {
+                            ...prev,
+                            originalRoomTypeId: value,
+                            ...(pkg && reservation?.pricingScheme !== "nightly_v1"
+                              ? buildPackagePricingPatch(Number(roomPrice ? roomPrice.price : pkg.basePrice), Number(prev.nights) || pkg.nights || 1)
+                              : {}),
+                          };
+                        });
                       }
                     : handleRoomTypeChange}
                 >

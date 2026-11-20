@@ -4,8 +4,10 @@ export function packageNightlyProposal(reservation: any, pkg: any, before: Price
   if (!pkg || pkg.status !== "active") pricingError("El paquete no está disponible.", 409);
   if (pkg.nights !== before.length) pricingError("La duración del paquete no coincide con la reserva. Modificá primero la estadía desde el Folio.", 409);
   if ((pkg.validFrom && reservation.checkInDate < pkg.validFrom) || (pkg.validUntil && before.some(n => n.date > pkg.validUntil))) pricingError("El paquete no está vigente para las fechas de esta reserva.", 409);
-  const roomPrice = pkg.roomPrices?.find((p: any) => p.roomTypeId === reservation.roomTypeId);
-  if (pkg.roomTypeId && pkg.roomTypeId !== reservation.roomTypeId && !roomPrice) pricingError("El paquete no tiene precio para la categoría de esta reserva.", 409);
+  const chargedRoomTypeId = reservation.isUpgrade && reservation.originalRoomTypeId
+    ? reservation.originalRoomTypeId : reservation.roomTypeId;
+  const roomPrice = pkg.roomPrices?.find((p: any) => p.roomTypeId === chargedRoomTypeId);
+  if (pkg.roomTypeId && pkg.roomTypeId !== chargedRoomTypeId && !roomPrice) pricingError("El paquete no tiene precio para la categoría de esta reserva.", 409);
   if (reservation.voucherId || Number(reservation.voucherAppliedAmount || 0) > 0) pricingError("La reserva tiene un voucher aplicado. Revisá su aplicación antes de cambiarla a paquete.", 409);
   const total = moneyCents(roomPrice ? roomPrice.price : pkg.basePrice);
   const base = Math.floor(total / before.length), remainder = total % before.length;
