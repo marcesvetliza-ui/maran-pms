@@ -20,6 +20,9 @@ export async function verifySaleCatalog(items: unknown): Promise<string | null> 
     let name: string | undefined;
     if (source === "accommodation" && id === "alojamiento") {
       name = "Alojamiento en Hotel Maran";
+    } else if (source === "charge_type") {
+      const result = await db.execute(sql`SELECT description FROM charge_types WHERE id = ${id} AND active = true LIMIT 1`);
+      name = (result.rows[0] as { description?: string } | undefined)?.description;
     } else if (source === "restaurant") {
       const result = await db.execute(sql`SELECT name FROM menu_items WHERE id = ${id} AND is_available IS DISTINCT FROM 'false' AND is_active IS DISTINCT FROM 'false' LIMIT 1`);
       name = (result.rows[0] as { name?: string } | undefined)?.name;

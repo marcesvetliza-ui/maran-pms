@@ -72,6 +72,37 @@ runWithPg("Centro de Comprobantes: revisión y emisión con PostgreSQL", () => {
     }
   });
 
+  it("emite un cargo de habitación del catálogo sin crear consumos ni mover stock", async () => {
+    const name = `Cargo directo ${randomUUID()}`;
+    const guest = await pool!.query("INSERT INTO guests (first_name, last_name, vat_condition) VALUES ($1, 'Prueba', 'consumidor_final') RETURNING id", [name]);
+    const preset = await pool!.query("INSERT INTO charge_types (label, description, default_amount, category, active) VALUES ($1, 'Cochera por día', '7500.00', 'otros', true) RETURNING id", [name]);
+    const guestId: string = guest.rows[0].id;
+    const presetId: string = preset.rows[0].id;
+    let invoiceId: number | undefined;
+    const before = await pool!.query("SELECT (SELECT COUNT(*)::int FROM charges) AS charges, (SELECT COUNT(*)::int FROM stock_movements) AS stock");
+    try {
+      const response = await fetch(`${url}/api/billing/invoices`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        tipoComprobante: "FB", recipientMode: "centro_comprobantes", recipientEntity: { type: "guest", id: guestId },
+        cliente: { razonSocial: `${name} Prueba`, condicionIva: "Consumidor Final" },
+        cashArea: "recepcion", cashFormaPago: "efectivo", cashFormaPagoDetalle: [{ method: "efectivo", amount: 7500 }],
+        items: [{ descripcion: "Cochera por día", cantidad: 1, precioUnitario: 7500, alicuotaIva: "21", subtotalNeto: 6198.35, subtotal: 7500, catalogItem: { source: "charge_type", id: presetId } }],
+      }) });
+      const result = await response.json() as any;
+      expect(response.status).toBe(201);
+      invoiceId = result.id ?? result.invoice?.id;
+      const saved = await pool!.query("SELECT monto_total, items FROM sales_invoices WHERE id = $1", [invoiceId]);
+      expect(Number(saved.rows[0]?.monto_total)).toBe(7500);
+      expect(saved.rows[0]?.items[0]?.catalogItem).toEqual({ source: "charge_type", id: presetId });
+      const after = await pool!.query("SELECT (SELECT COUNT(*)::int FROM charges) AS charges, (SELECT COUNT(*)::int FROM stock_movements) AS stock");
+      expect(after.rows[0]).toEqual(before.rows[0]);
+    } finally {
+      if (invoiceId) await pool!.query("DELETE FROM cash_movements WHERE source_type = 'comprobante' AND source_id = $1", [String(invoiceId)]);
+      if (invoiceId) await pool!.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
+      await pool!.query("DELETE FROM charge_types WHERE id = $1", [presetId]);
+      await pool!.query("DELETE FROM guests WHERE id = $1", [guestId]);
+    }
+  });
+
   it("divide Caja y Cuenta Corriente, conserva importes y reintenta sin duplicar", async () => {
     const name = `Cobro dividido ${randomUUID()}`;
     const guest = await pool!.query("INSERT INTO guests (first_name, last_name, vat_condition) VALUES ($1, 'Prueba', 'consumidor_final') RETURNING id", [name]);

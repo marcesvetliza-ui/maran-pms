@@ -1,4 +1,5 @@
 import { CancelledCollectionCorrection } from "./cancelled-collection-correction";
+import { RestaurantConsumptionDetail, restaurantOrderNumberForCharge } from "./restaurant-consumption-detail";
 import { compareReservationsByRoom } from "@/lib/reservation-list-order";
 import { prefacturaCollectionDifference,reservationCollectionReceiptPath } from '@shared/prefacturaCollection';
 import { isPostCheckoutCharge } from "@shared/postCheckout";
@@ -35,7 +36,7 @@ import {
 import {
   LogOut, Receipt, Printer, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   CircleCheck, AlertCircle, Loader2, Building2, User,
-   Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
+   Eye, Edit2, Check, X, FileText, AlertTriangle, MinusCircle, PlusCircle, ArrowRightLeft, RotateCcw,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -630,6 +631,8 @@ export function PrefacturaDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  const [restaurantVoucher, setRestaurantVoucher] = useState<{ reservationId: string; orderNumber: string } | null>(null);
+
   // Transfer charge sub-dialog (single charge)
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
   const [transferCharge, setTransferCharge] = useState<{ id: string; description: string; maxAmount: number; originalAmount?: number } | null>(null);
@@ -856,6 +859,7 @@ export function PrefacturaDialog({
       setSaleCondition(postCheckoutOnly ? "cuenta_corriente" : "contado");
       setTransferDialogOpen(false);
       setTransferCharge(null);
+      setRestaurantVoucher(null);
       setShowBulkTransfer(false);
       setShowPartialWarning(false);
       setShowCollectionWarning(false);
@@ -2581,12 +2585,14 @@ export function PrefacturaDialog({
                       });
                       return (folio.charges || []).filter((charge: any) => !isReservationCreditNoteAdjustment(charge)).flatMap(chargeUnits).map((charge: any) => {
                         const isUnit = !!unitParent(String(charge.id));
+                        const restaurantOrderNum = restaurantOrderNumberForCharge(charge);
                         const isTransfer = charge.category === "transfer_out" || charge.category === "transfer_in";
                         const isReversal = charge.description?.includes("[rev:") ?? false;
                         const alreadyReversed = reversedIds.has(String(charge.id));
                         return (
                           <ChargeRow
                             key={charge.id}
+                            onViewOrigin={restaurantOrderNum ? () => setRestaurantVoucher({reservationId:String(reservationId),orderNumber:restaurantOrderNum}) : undefined}
                             editAction={!postCheckoutOnly && !isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && !fullyInvoicedChargeIds.has(String(charge.id)) ? <ReservationChargeEdit reservationId={String(reservationId)} chargeId={String(charge.id)} onEditDescription={charge.category === "restaurant" ? () => startEdit(String(charge.id), itemDescriptions[String(charge.id)] || charge.description) : undefined} onSaved={() => { setItemDescriptions(prev => { const next = { ...prev }; delete next[String(charge.id)]; return next; }); }} /> : undefined}
                             voidAction={!postCheckoutOnly && !isUnit && !isSubmitting && !hasPendingSubmission && !isTransfer && charge.status !== "anulado" && !(invoicedAmountsByCharge[String(charge.id)] > 0.005) ? <ReservationChargeVoid reservationId={String(reservationId)} charge={{id:String(charge.id),description:charge.description,amount:String(charge.amount),category:charge.category}} role={user?.role} onSaved={()=>{setItemDescriptions(prev=>{const next={...prev};delete next[String(charge.id)];return next;});}}/> : undefined}
                             id={String(charge.id)}
@@ -3087,6 +3093,11 @@ export function PrefacturaDialog({
           <DialogFooter><Button type="button" variant="outline" disabled={createBillingCompany.isPending} onClick={() => setShowCreateCompany(false)}>Cancelar alta de empresa</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RestaurantConsumptionDetail
+        orderNumber={open && restaurantVoucher?.reservationId === String(reservationId) ? restaurantVoucher.orderNumber : null}
+        onClose={() => setRestaurantVoucher(null)}
+      />
 
       {/* Transfer charge sub-dialog (single charge) */}
       <TransferChargeDialog
@@ -3884,8 +3895,9 @@ function NotaDebitoDialog({
 function ChargeRow({
   id, amount, description, date, alreadyPaid, selected, onToggle,
   editing, editingValue, onStartEdit, onEditChange, onSaveEdit, onCancelEdit,
-  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction, voidAction, selectionDisabled,
+  onTransfer, onRevert, alreadyReversed, alreadyInvoiced, category, editAction, voidAction, selectionDisabled, onViewOrigin,
 }: {
+  onViewOrigin?: () => void;
   editAction?: React.ReactNode;
   voidAction?: React.ReactNode;
   selectionDisabled?: boolean;
@@ -4024,6 +4036,7 @@ function ChargeRow({
         {isTransfer ? "—" : `$${fmtMoney(pending)}`}
       </TableCell>
       <TableCell className="w-20 whitespace-nowrap text-right">
+        {onViewOrigin && <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" title="Ver detalle del consumo" data-testid={`button-view-origin-prefactura-charge-${id}`} onClick={event => { event.stopPropagation(); onViewOrigin(); }}><Eye className="h-3 w-3 mr-1" />Ver origen</Button>}
         {editAction}
         {voidAction}
         {!isTransfer && onTransfer ? (

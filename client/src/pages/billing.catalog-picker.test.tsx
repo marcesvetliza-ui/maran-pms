@@ -2,9 +2,9 @@
  * Tests for EmitirFacturaDialog — "Agregar desde catálogo"
  *
  * Instead of only free-text item rows, Venta offers an optional catalog
- * picker next to "Agregar ítem" with all three sources always available —
+ * picker next to "Agregar ítem" with all sources available through area filters —
  * a fixed "Alojamiento en Hotel Maran" entry, the restaurant menu (Café
- * Justo), and spa treatments — grouped by origin, regardless of cashArea.
+ * Justo), and spa treatments — grouped by origin. cashArea only sets the default filter.
  * Billing often mixes departments on one invoice (a room charge with a spa
  * treatment, a restaurant order billed from recepción, etc.), so the picker
  * isn't restricted to the current area. Picking an entry fills the
@@ -72,12 +72,13 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     vi.unstubAllGlobals();
   });
 
-  it("ofrece las tres fuentes juntas (alojamiento, carta, spa) sin importar cashArea", async () => {
+  it("permite ver todas las fuentes desde Recepción al elegir Todos", async () => {
     const user = userEvent.setup();
     // Facturando desde recepción, pero igual puede agregar un ítem de spa o de restaurant.
     renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion" });
 
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(screen.getByRole("button", { name: "Todos" }));
     await waitFor(() => {
       expect(screen.getByTestId("catalog-item-alojamiento")).toBeInTheDocument();
       expect(screen.getByTestId("catalog-item-mi-1")).toBeInTheDocument();
@@ -92,6 +93,7 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     renderDialog({ allowedTipos: ["FA"], cashArea: "recepcion" });
 
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(screen.getByRole("button", { name: "SPA" }));
     await user.click(await screen.findByTestId("catalog-item-tr-2"));
 
     const row = screen.getByTestId("item-row-0");
@@ -104,6 +106,7 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     renderDialog({ allowedTipos: ["FA"], cashArea: "spa" });
 
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(screen.getByRole("button", { name: "Recepción" }));
     await user.click(await screen.findByTestId("catalog-item-alojamiento"));
 
     const row = screen.getByTestId("item-row-0");
@@ -202,6 +205,7 @@ describe("EmitirFacturaDialog — Agregar desde catálogo", () => {
     renderDialog({ allowedTipos: ["FB"], requireLinkedRecipient: true, cashArea: "recepcion", showPaymentMethod: true });
     await user.click(screen.getByTestId("button-consumidor-final"));
     await user.click(await screen.findByTestId("btn-add-item-from-catalog"));
+    await user.click(screen.getByRole("button", { name: "Restaurante" }));
     await user.click(await screen.findByTestId("catalog-item-mi-1"));
 
     await user.click(screen.getByTestId("center-add-payment"));
