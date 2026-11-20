@@ -30,6 +30,26 @@ function setup(failOnce=false,changedBalance=false,overrides:{folio?:any;reserva
 describe('Prefactura checkout with a documented/transfer balance in Cuenta Corriente',()=>{
   beforeEach(()=>{sessionStorage.clear();vi.stubGlobal('open',vi.fn());});
   afterEach(()=>{cleanup();vi.unstubAllGlobals();sessionStorage.clear();});
+  it('releases a completed prior departure after reopening and keeps the new balance and unbilled charges',async()=>{
+    const operationId=crypto.randomUUID(),oldDeparture=crypto.randomUUID();
+    sessionStorage.setItem(`prefactura-pending:${id}`,JSON.stringify({ownerReservationId:id,invoiceRequest:{reservaId:id,creditOperationId:operationId,tipoComprobante:'FA',items:[{descripcion:'Alojamiento',cantidad:1,precioUnitario:147000}],sourceChargeIds:['accommodation:2026-11-12'],sourceChargeAmounts:{'accommodation:2026-11-12':147000}},invoice:{id:1784,reserva_id:id},payments:[],checkoutRequested:true,checkoutDebtAccount:{operationId:oldDeparture,entityType:'agency',entityId:'original-agency',entityName:'Original agency',maximumBalance:7500}}));
+    const current={...folio,roomTotal:147000,roomRate:147000,nights:1,accommodationNights:[{date:'2026-11-12',rateCents:14700000,discountCents:0}],
+      charges:[{id:'parking',description:'Cochera',amount:'7500.00',category:'otros',status:'active',date:'2026-11-12'},{id:'restaurant',description:'JUSTO',amount:'64000.00',category:'restaurant',status:'active',date:'2026-11-14'}],
+      payments:[{id:'agency-lodging',amount:'147000.00',method:'cuenta_corriente',status:'active',invoiceRef:JSON.stringify({id:1784})},{id:'old-departure',amount:'7500.00',method:'cuenta_corriente',status:'active'}],totalPayments:154500,totalCharges:71500,grandTotal:218500,balance:64000,financialSummary:{operationalFolioBalance:64000}};
+    const {fetchMock,onCheckoutComplete}=setup(false,false,{folio:current,invoices:[{id:1784,tipo_comprobante:'FA',estado:'emitida',monto_total:'147000.00',source_charge_ids:['accommodation:2026-11-12'],source_charge_amounts:{'accommodation:2026-11-12':147000}}],status:{operationId,stage:'authorized',financiallyComplete:true,departureReopened:true}});
+    await waitFor(()=>expect(sessionStorage.getItem(`prefactura-pending:${id}`)).toBeNull());
+    expect(screen.getByTestId('checkout-outstanding-balance')).toHaveTextContent('$64.000,00');
+    expect(screen.queryByTestId('button-retry-prefactura')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(`reservation-settlement-operation:${id}`)).not.toBe(operationId);
+    expect(fetchMock.mock.calls.filter(([,o])=>o?.method==='POST')).toHaveLength(0);
+    const user=userEvent.setup();await user.click(screen.getByTestId('button-checkout-balance-to-account'));
+    expect(screen.getByRole('dialog',{name:'Check-out con deuda en cuenta corriente'})).toHaveTextContent('$64.000,00');
+    await user.click(screen.getByTestId('confirm-account-checkout'));
+    await waitFor(()=>expect(onCheckoutComplete).toHaveBeenCalledTimes(1));
+    const writes=fetchMock.mock.calls.filter(([,o])=>o?.method==='POST');expect(writes).toHaveLength(1);
+    expect(String(writes[0][0])).toContain('/check-out-to-account');const body=JSON.parse(String(writes[0][1]?.body));
+    expect(body).toMatchObject({expectedBalance:'64000.00',entityType:'guest',entityId:'account-guest'});expect(body.operationId).not.toBe(oldDeparture);
+  });
   it('shows the full $70,000 transfer, asks for confirmation, and closes without another invoice',async()=>{
     const {fetchMock,onCheckoutComplete}=setup();const user=userEvent.setup();
     const button=await screen.findByRole('button',{name:'Cerrar y pasar a Cuenta Corriente'});

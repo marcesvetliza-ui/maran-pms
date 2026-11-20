@@ -63,10 +63,35 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const cancelledCollection = collectionCorrectionCompleted ? null : await cancelledReceptionCollection(db, operation, invoice);
   const departure = recovery?.checkoutDebtAccount && recovery.checkoutRequested
     ? (await db.execute(sql`SELECT status FROM reservations WHERE id=${operation.owner_id}`)).rows[0] as any : null;
-  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone && (!departure || departure.status === 'checked_out');
+  const debt = recovery?.checkoutDebtAccount;
+  // Reopening a stay does not undo its already committed account transfer.
+  // Prove that exact departure by its payment key, linked account movement and
+  // atomic checkout audit. Matching amounts or the current room status alone
+  // must never authorize dropping an unfinished recovery attempt.
+  // Later reversals affect the live balance, not the historical completion of
+  // that departure. Its original ledger rows and audit must still match.
+  const completedDeparture = departure && departure.status !== 'checked_out' &&
+    typeof debt?.operationId === 'string' && typeof debt?.entityId === 'string' &&
+    ['guest','company','agency'].includes(debt?.entityType) && Number.isFinite(Number(debt.maximumBalance)) && Number(debt.maximumBalance) > 0
+    ? (await db.execute(sql`SELECT p.id FROM payments p JOIN account_movements m ON m.payment_id=p.id
+      WHERE p.reservation_id=${operation.owner_id} AND p.payment_request_id=${debt.operationId}
+        AND p.method='cuenta_corriente'
+        AND p.amount>0 AND p.amount<=${String(debt.maximumBalance)}::numeric
+        AND p.reference=${`checkout-cc:${operation.owner_id}:${debt.operationId}`}
+        AND m.reservation_id=p.reservation_id AND m.entity_type=${debt.entityType} AND m.entity_id=${debt.entityId}
+        AND m.type='cargo' AND m.amount=p.amount AND m.reference=p.reference
+        AND EXISTS(SELECT 1 FROM audit_logs a WHERE a.entity_type='reservation' AND a.entity_id=p.reservation_id
+          AND a.action='update' AND a.module='reservations'
+          AND a.details::jsonb->>'operationId'=${debt.operationId} AND a.details::jsonb->>'paymentId'=p.id
+          AND a.details::jsonb->>'amount'=p.amount::text
+          AND a.details::jsonb->>'accountEntityType'=${debt.entityType} AND a.details::jsonb->>'accountEntityId'=${debt.entityId})
+      LIMIT 1`)).rows.length > 0 : false;
+  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone && (!departure || departure.status === 'checked_out' || completedDeparture);
   return {
     operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled, canRetryNumberConflict,
-    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, cancelledCollection, collectionCorrectionCompleted, code: operation.error_code,
+    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete,
+    departureReopened: completedDeparture && departure?.status === 'checked_in',
+    cancelledCollection, collectionCorrectionCompleted, code: operation.error_code,
     paymentConflictMessage: paymentConflicts.length ? "El cobro de este intento ya existe, pero fue modificado o requiere conciliación. Administración debe revisar el pago vinculado; no se volverá a cobrar ni a cambiar su forma de pago. El check-out se gestiona por separado desde la reserva, trasladando el saldo actual a Cuenta Corriente si corresponde." : null,
     message: invoice?.estado === "anulada" ? `La factura ${invoice.tipo_comprobante} ${invoice.punto_venta}-${invoice.numero} de este intento está anulada. ${canCloseCancelled ? "Podés cerrar el intento anterior sin emitir ni cobrar y volver a revisar la cuenta vigente." : "Su anulación o sus cobros requieren conciliación antes de cerrar el intento."}` : operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}${conflict ? `, está ocupada por el comprobante interno #${conflict.id}` : ", necesita volver a verificarse"}. Al completar la operación se consultará ARCA y se recuperará el borrador anterior si hay evidencia suficiente, conservando los importes y pagos originales.` : archived ? "El borrador anterior fue archivado después de verificar que ARCA no lo autorizó. Revisá sus datos antes de preparar un nuevo intento." : null,
     invoice: issued ? { id: invoice.id, tipoComprobante: invoice.tipo_comprobante, puntoVenta: invoice.punto_venta, numero: invoice.numero, montoTotal: invoice.monto_total, cae: invoice.cae, paymentId: invoice.payment_id } : null,

@@ -18,6 +18,26 @@ describe("Pagos recuperados con evidencia exacta", () => {
 });
 
 describe("Discovery of issued invoices after a partial credit note", () => {
+  const reopenedOperation: any = { operation_id: 'issued-stay', owner_id: 'r1', owner_type: 'reservation', invoice_id: 125, stage: 'authorized', request_snapshot: {
+    cashFormaPago: 'cuenta_corriente', prefacturaRecovery: { version: 2, payments: [], checkoutRequested: true,
+      checkoutDebtAccount: {operationId:'departure-1',entityType:'agency',entityId:'agency-1',maximumBalance:7500} }
+  } };
+  it.each([true,false])('only releases a reopened departure recovery with exact durable transfer evidence (%s)',async committed=>{
+    vi.mocked(db.execute).mockReset()
+      .mockResolvedValueOnce({rows:[{id:125,estado:'emitida',credit_reapplication_intent:{status:'completed',settlement:{status:'completed'}}}]} as any)
+      .mockResolvedValueOnce({rows:[{status:'checked_in'}]} as any)
+      .mockResolvedValueOnce({rows:committed?[{id:'original-transfer'}]:[]} as any);
+    const result=await receptionOperationStatus(reopenedOperation);
+    expect(result).toMatchObject({financiallyComplete:committed,departureReopened:committed,invoice:{id:125}});
+    expect(vi.mocked(db.execute)).toHaveBeenCalledTimes(3);
+  });
+  it('does not release an unfinished invoice settlement even after its departure was committed',async()=>{
+    vi.mocked(db.execute).mockReset()
+      .mockResolvedValueOnce({rows:[{id:125,estado:'emitida',credit_reapplication_intent:{status:'completed',settlement:{status:'pending'}}}]} as any)
+      .mockResolvedValueOnce({rows:[{status:'checked_in'}]} as any)
+      .mockResolvedValueOnce({rows:[{id:'original-transfer'}]} as any);
+    expect(await receptionOperationStatus(reopenedOperation)).toMatchObject({financiallyComplete:false,attempt:{invoice:null}});
+  });
   it('explains a modified receipt without acknowledging it or allowing a second collection',async()=>{
     vi.mocked(db.execute).mockResolvedValueOnce({rows:[{id:77,estado:'emitida'}]} as any).mockResolvedValueOnce({rows:[{...saved,method:'transferencia'}]} as any);
     const result=await receptionOperationStatus({operation_id:'original',owner_id:'r1',invoice_id:77,stage:'authorized',request_snapshot:{prefacturaRecovery:{version:2,payments:[payment],checkoutRequested:false}}} as any);
