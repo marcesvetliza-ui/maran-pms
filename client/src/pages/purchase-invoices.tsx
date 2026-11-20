@@ -3031,6 +3031,7 @@ export default function PurchaseInvoices() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [metadataInvoice,setMetadataInvoice] = useState<Invoice|null>(null);
   const [opSupplier, setOpSupplier] = useState<CCItem | null>(null);
+  const [ccSearch, setCcSearch] = useState("");
   const [anularId, setAnularId] = useState<number | null>(null);
   const [anularError, setAnularError] = useState("");
   const [detailInvoice, setDetailInvoice] = useState<Invoice | null>(null);
@@ -3134,6 +3135,13 @@ export default function PurchaseInvoices() {
   };
 
   const totalSaldo = ccItems.reduce((s, c) => s + $n(c.totalSaldo), 0);
+  const ccSearchText = ccSearch.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es");
+  const ccSearchCuit = /^[\d\s.-]+$/.test(ccSearch.trim()) ? ccSearch.replace(/\D/g, "") : "";
+  const visibleCcItems = ccItems.filter(item => {
+    const name = (item.razonSocial || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es");
+    return !ccSearchText || name.includes(ccSearchText) || (!!ccSearchCuit && (item.cuit || "").replace(/\D/g, "").includes(ccSearchCuit));
+  }).sort((a, b) => (a.razonSocial || "").trim().localeCompare((b.razonSocial || "").trim(), "es", { sensitivity: "base", numeric: true }) || a.id - b.id);
+
 
   const estadoBadge = (estado: string) => {
     if (estado === "pendiente") return <Badge variant="outline" className="border-amber-500 text-amber-600"><Clock className="h-3 w-3 mr-1" />Pendiente</Badge>;
@@ -3343,14 +3351,22 @@ export default function PurchaseInvoices() {
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <span>Proveedores con saldo pendiente</span>
-                  <span className="text-base font-normal text-destructive">Total: ${fmt(totalSaldo)}</span>
+                  <span className="text-base font-normal text-destructive">Total general: ${fmt(totalSaldo)}</span>
                 </CardTitle>
+                <div className="flex flex-wrap items-center gap-2 pt-3">
+                  <div className="relative w-full max-w-md">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input aria-label="Buscar proveedor con saldo pendiente" placeholder="Buscar proveedor o CUIT..." value={ccSearch} onChange={e => setCcSearch(e.target.value)} className="pl-9" data-testid="input-search-cc-suppliers" />
+                  </div>
+                  {ccSearch && <Button variant="ghost" size="sm" onClick={() => setCcSearch("")}>Limpiar búsqueda</Button>}
+                </div>
+                <p className="text-xs text-muted-foreground">{visibleCcItems.length} de {ccItems.length} proveedores · Orden alfabético</p>
               </CardHeader>
               <CardContent className="p-0">
-                {ccItems.length === 0 ? (
+                {visibleCcItems.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <CheckCircle2 className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                    No hay saldos pendientes
+                    {ccItems.length ? "No hay proveedores que coincidan con la búsqueda" : "No hay saldos pendientes"}
                   </div>
                 ) : (
                   <Table>
@@ -3364,7 +3380,7 @@ export default function PurchaseInvoices() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {ccItems.map((item) => (
+                      {visibleCcItems.map((item) => (
                         <TableRow key={item.id} data-testid={`row-cc-${item.id}`}>
                           <TableCell className="font-medium">{item.razonSocial}</TableCell>
                           <TableCell className="font-mono text-sm">{item.cuit}</TableCell>

@@ -1,3 +1,4 @@
+import { RestaurantConsumptionDetail, restaurantOrderNumberForCharge } from "@/components/restaurant-consumption-detail";
 import { isSelectableGuest } from "@shared/guest-selection";
 import {SurveyInvitation} from "@/components/survey-invitation";
 import {ReservationCollectionReceipts} from '@/components/reservation-collection-receipts';
@@ -2754,16 +2755,6 @@ export function ReservationDetailDialog({
     }
   }, [anularLinkedInvoice?.nota_credito_id]);
 
-  const { data: restaurantVoucherDetail, isLoading: isLoadingVoucher } = useQuery<any>({
-    queryKey: ["/api/restaurant/orders/by-number", restaurantVoucherOrderNum],
-    queryFn: async () => {
-      const res = await fetch(`/api/restaurant/orders/by-number/${restaurantVoucherOrderNum}`, { credentials: "include" });
-      if (!res.ok) throw new Error("No encontrado");
-      return res.json();
-    },
-    enabled: !!restaurantVoucherOrderNum,
-  });
-
   const { data: changelog = [] } = useQuery<any[]>({
     queryKey: ["/api/reservations", reservation.id, "changelog"],
     queryFn: async () => {
@@ -4001,9 +3992,7 @@ export function ReservationDetailDialog({
               <div className="wf-charge-list divide-y">
                 {consumptionCharges.map((charge) => {
                   const isAnulado = (charge as any).status === "anulado";
-                  const restaurantOrderNum = charge.category === "restaurant"
-                    ? (charge.description.match(/Pedido\s+(\S+)/)?.[1] ?? null)
-                    : null;
+                  const restaurantOrderNum = restaurantOrderNumberForCharge(charge);
                   return (
                   <div key={charge.id} className={`wf-ledger-row flex items-center justify-between ${isAnulado ? "opacity-50 bg-muted/30" : ""}`} data-testid={`charge-row-${charge.id}`}>
                     <div className="wf-charge-description flex items-center gap-2 flex-wrap flex-1 min-w-0">
@@ -4089,67 +4078,7 @@ export function ReservationDetailDialog({
               </div>
             </div>
 
-            {/* Dialog detalle consumo restaurant */}
-            <Dialog open={!!restaurantVoucherOrderNum} onOpenChange={(o) => { if (!o) setRestaurantVoucherOrderNum(null); }}>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Detalle de Consumo — Restaurante</DialogTitle>
-                  {restaurantVoucherDetail && (
-                    <DialogDescription>
-                      Pedido #{restaurantVoucherDetail.orderNumber}
-                      {restaurantVoucherDetail.waiterName ? ` · Mozo: ${restaurantVoucherDetail.waiterName}` : ""}
-                    </DialogDescription>
-                  )}
-                </DialogHeader>
-                {isLoadingVoucher ? (
-                  <div className="space-y-2 py-4">
-                    <Skeleton className="h-4 w-full" />
-                    <Skeleton className="h-4 w-3/4" />
-                    <Skeleton className="h-4 w-1/2" />
-                  </div>
-                ) : restaurantVoucherDetail ? (
-                  <div className="space-y-3">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Descripción</TableHead>
-                          <TableHead className="text-center w-14">Cant.</TableHead>
-                          <TableHead className="text-right w-28">Subtotal</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(restaurantVoucherDetail.items || []).map((item: any) => {
-                          const customName = (item.notes || "").match(/^\[(.+?)\]/)?.[1];
-                          const displayName = customName || item.menuItemName || "Ítem";
-                          return (
-                            <TableRow key={item.id}>
-                              <TableCell className="text-sm">
-                                {displayName}
-                                {item.notes && !customName && <span className="block text-xs text-muted-foreground">{item.notes}</span>}
-                              </TableCell>
-                              <TableCell className="text-center text-sm">{item.quantity}</TableCell>
-                              <TableCell className="text-right text-sm font-medium">
-                                ${parseFloat(item.subtotal || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                    <div className="flex justify-between font-semibold text-sm pt-1 border-t px-1">
-                      <span>Total</span>
-                      <span>${parseFloat(restaurantVoucherDetail.total || "0").toLocaleString("es-AR", { minimumFractionDigits: 2 })}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">* Precio incluye IVA. El desglose se realiza al facturar al huésped.</p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-4 text-center">No se encontró el detalle del pedido.</p>
-                )}
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setRestaurantVoucherOrderNum(null)}>Cerrar</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <RestaurantConsumptionDetail orderNumber={restaurantVoucherOrderNum} onClose={() => setRestaurantVoucherOrderNum(null)} />
 
             {isGroupReservation&&<GroupRoomAccount key={reservation.id} reservationId={String(reservation.id)} onSaved={async()=>{await refetchPayments();await refetchCharges();}}/>}
             <div className="border rounded-lg">

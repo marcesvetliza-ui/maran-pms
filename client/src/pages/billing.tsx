@@ -1,3 +1,5 @@
+import { BillingCatalogPicker, defaultCatalogArea, type CatalogArea, type SaleCatalogOption, type SaleCatalogGroup } from "@/components/billing-catalog-picker";
+import type { ChargeType } from "@shared/schema";
 import { isSelectableGuest } from "@shared/guest-selection";
 import {billingPointOptions} from "@shared/billing-point-of-sale";
 import { giftVoucherExpiryError } from "@shared/gift-voucher-expiry";
@@ -35,7 +37,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -842,7 +843,7 @@ type Item = {
   subtotalNeto: number;
   subtotal: number;
   /** Origen elegido en el catálogo del Centro de Comprobantes. */
-  catalogItem?: { source: "accommodation" | "restaurant" | "spa"; id: string };
+  catalogItem?: { source: "accommodation" | "charge_type" | "restaurant" | "spa"; id: string };
   /** Tratamiento de spa_treatments elegido desde "Agregar desde catálogo" —
    * permite registrar la venta como turno vendido pendiente de agendar. */
   spaTreatmentId?: string;
@@ -1018,6 +1019,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   const [items, setItems] = useState<Item[]>([newItem()]);
   const [catalogPickerOpen, setCatalogPickerOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogArea, setCatalogArea] = useState<CatalogArea>(() => defaultCatalogArea(cashArea));
+  useEffect(() => { setCatalogArea(defaultCatalogArea(cashArea)); }, [cashArea]);
   // Buscador de catálogo propio de cada renglón — a diferencia del botón único
   // "Agregar desde catálogo" (que agrega o completa la primera fila vacía), deja
   // buscar y cambiar el concepto de una fila puntual sin tener que quitarla y
@@ -1072,11 +1075,11 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     select: data => data.filter(isSelectableGuest),
   });
 
-  // Catálogo de ítems para "Agregar desde catálogo" — se ofrecen las tres
-  // fuentes siempre, sin importar cashArea: una factura de recepción a
-  // menudo también lleva un consumo de restaurant o un tratamiento de spa
-  // (y viceversa), así que restringir por área solo obligaba a cargarlos a
-  // mano. Agrupado por origen para que quede claro de dónde sale cada ítem.
+  // Keep every source available; the selected operating area only sets the
+  // initial catalog filter. Browsing another area never changes cashArea.
+  const { data: chargeTypesData = [] } = useQuery<ChargeType[]>({
+    queryKey: ["/api/charge-types"], enabled: open,
+  });
   const { data: menuItemsData = [] } = useQuery<any[]>({
     queryKey: ["/api/restaurant/menu/items"],
     enabled: open,
@@ -1093,26 +1096,30 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     enabled: open,
   });
   const skuByInventoryId = new Map(inventoryCatalogData.map((item: any) => [String(item.id), String(item.sku || "")]));
-  type CatalogItem = { id: string; source: "accommodation" | "restaurant" | "spa"; descripcion: string; precioUnitario: number; codigo?: string; spaTreatmentId?: string };
-  const catalogGroups: { label: string; options: CatalogItem[] }[] = [
-    { label: "Alojamiento", options: [{ id: "alojamiento", source: "accommodation" as const, descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
+  type CatalogItem = SaleCatalogOption;
+  const compareCatalogNames = (a: CatalogItem, b: CatalogItem) => (a.label || a.descripcion).localeCompare(b.label || b.descripcion, "es", { sensitivity: "base", numeric: true });
+  const catalogGroups: SaleCatalogGroup[] = [
+    { label: "Alojamiento", area: "recepcion" as const, options: [{ id: "alojamiento", source: "accommodation" as const, descripcion: "Alojamiento en Hotel Maran", precioUnitario: 0 }] },
     {
-      label: "Restaurant (Café Justo)",
-      options: menuItemsData
-        .filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
+      label: "Cargos de habitación", area: "recepcion" as const,
+      options: chargeTypesData.filter(preset => preset.active !== false)
+        .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || a.label.localeCompare(b.label, "es", { sensitivity: "base", numeric: true }))
+        .map(preset => ({ id: preset.id, source: "charge_type" as const, label: preset.label, descripcion: preset.description,
+          precioUnitario: preset.allowPriceEdit ? 0 : Number(preset.defaultAmount) || 0, variable: preset.allowPriceEdit, referencePrice: Number(preset.defaultAmount) || 0 })),
+    },
+    {
+      label: "Restaurant (Café Justo)", area: "restaurant" as const,
+      options: menuItemsData.filter((m: any) => m.isAvailable !== "false" && m.isActive !== "false")
         .map((m: any) => ({ id: m.id, source: "restaurant" as const, descripcion: m.name, precioUnitario: parseFloat(m.price) || 0,
-          codigo: skuByInventoryId.get(String(m.inventoryItemId)) || undefined })),
+          codigo: skuByInventoryId.get(String(m.inventoryItemId)) || undefined })).sort(compareCatalogNames),
     },
     {
-      label: "Spa",
-      // spaTreatmentId (no solo id, que acá coincide) deja explícito que esta
-      // es la única fuente del catálogo que registra "turno vendido" al elegirse.
-      options: spaTreatmentsData
-        .filter((t: any) => t.isActive !== "false")
-        .map((t: any) => ({ id: t.id, source: "spa" as const, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })),
+      label: "Spa", area: "spa" as const,
+      options: spaTreatmentsData.filter((t: any) => t.isActive !== "false")
+        .map((t: any) => ({ id: t.id, source: "spa" as const, descripcion: t.name, precioUnitario: parseFloat(t.price) || 0, spaTreatmentId: t.id })).sort(compareCatalogNames),
     },
-  ].filter(g => g.options.length > 0);
-  const catalogOptions: CatalogItem[] = catalogGroups.flatMap(g => g.options);
+  ].filter(group => group.options.length > 0);
+  const catalogOptions: CatalogItem[] = catalogGroups.flatMap(group => group.options);
 
   const entityResults: any[] = entitySearch.length >= 2
     ? [
@@ -1388,8 +1395,7 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
     });
   }
 
-  // Elegir un ítem del catálogo (alojamiento fijo / carta de restaurant / tratamientos
-  // de spa, según cashArea) rellena la primera fila vacía en vez de siempre agregar una
+  // Elegir un ítem del catálogo (alojamiento, cargos de habitación, carta o SPA) rellena la primera fila vacía en vez de siempre agregar una
   // nueva — así el renglón inicial en blanco no queda huérfano cuando el usuario
   // elige del catálogo sin haber tocado nada todavía.
   function addCatalogItem(option: CatalogItem) {
@@ -1692,6 +1698,8 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
   });
 
   function resetForm() {
+    setCatalogArea(defaultCatalogArea(cashArea)); setCatalogPickerOpen(false); setRowCatalogPickerOpen(null);
+    setCatalogSearch(""); setRowCatalogSearch("");
     centerAttemptRef.current = null;
     // Respect a caller-restricted tipo list (e.g. the Centro de Comprobantes
     // locking a single tipo already chosen in its selector) instead of always
@@ -2491,55 +2499,16 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="end">
-                    <Command shouldFilter={false}>
-                      <CommandInput
-                        placeholder="Buscar por nombre o código..."
-                        value={catalogSearch}
-                        onValueChange={setCatalogSearch}
-                        data-testid="input-catalog-search"
-                      />
-                      <CommandList>
-                        <CommandEmpty>Sin resultados.</CommandEmpty>
-                        {catalogGroups.map(group => {
-                          const term = catalogSearch.trim().toLowerCase();
-                          const matches = term
-                            ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
-                            : group.options;
-                          if (matches.length === 0) return null;
-                          return (
-                            <CommandGroup key={group.label} heading={group.label}>
-                              {matches.slice(0, 50).map(o => (
-                                <CommandItem
-                                  key={o.id}
-                                  value={o.id}
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onSelect={() => {
-                                    addCatalogItem(o);
-                                    setCatalogPickerOpen(false);
-                                    setCatalogSearch("");
-                                  }}
-                                  data-testid={`catalog-item-${o.id}`}
-                                >
-                                  <span className="min-w-0 flex-1 break-words">{o.descripcion}
-                                    {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
-                                  </span>
-                                  {o.precioUnitario > 0 && (
-                                    <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
-                                  )}
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          );
-                        })}
-                      </CommandList>
-                    </Command>
+                    <BillingCatalogPicker groups={catalogGroups} area={catalogArea} onAreaChange={setCatalogArea} search={catalogSearch} onSearchChange={setCatalogSearch} onSelect={option => {
+                      addCatalogItem(option); setCatalogPickerOpen(false); setCatalogSearch("");
+                    }} />
                   </PopoverContent>
                 </Popover>
               )}
               {!requireLinkedRecipient && !hideAddItems && !lockItems && <Button variant="outline" size="sm" onClick={() => setItems(p => [...p, newItem()])} data-testid="btn-add-item"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar ítem</Button>}
             </div>
           </div>
-          <div className="text-xs text-muted-foreground">{isFA ? "Ingrese precios sin IVA (neto)" : isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
+          <div className="text-xs text-muted-foreground">{isFC ? "Factura C: no discrimina IVA. Ingrese el precio final (el neto es igual al total)." : "Ingrese precios con IVA incluido"}</div>
           <div className="space-y-2">
             {items.map((item, idx) => (
               <div key={idx} className="border rounded-lg p-3 space-y-2" data-testid={`item-row-${idx}`}>
@@ -2561,48 +2530,9 @@ export function EmitirFacturaDialog({ open, onClose, onBackToSource, config, ini
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-80 p-0 z-[100] pointer-events-auto" align="start">
-                          <Command shouldFilter={false}>
-                            <CommandInput
-                              placeholder="Buscar por nombre o código..."
-                              value={rowCatalogSearch}
-                              onValueChange={setRowCatalogSearch}
-                              data-testid={`input-item-catalog-search-${idx}`}
-                            />
-                            <CommandList>
-                              <CommandEmpty>Sin resultados.</CommandEmpty>
-                              {catalogGroups.map(group => {
-                                const term = rowCatalogSearch.trim().toLowerCase();
-                                const matches = term
-                                  ? group.options.filter(o => o.descripcion.toLowerCase().includes(term) || o.codigo?.toLowerCase().includes(term))
-                                  : group.options;
-                                if (matches.length === 0) return null;
-                                return (
-                                  <CommandGroup key={group.label} heading={group.label}>
-                                    {matches.slice(0, 50).map(o => (
-                                      <CommandItem
-                                        key={o.id}
-                                        value={o.id}
-                                        onMouseDown={(e) => e.preventDefault()}
-                                        onSelect={() => {
-                                          selectCatalogItemForRow(idx, o);
-                                          setRowCatalogPickerOpen(null);
-                                          setRowCatalogSearch("");
-                                        }}
-                                        data-testid={`item-catalog-option-${idx}-${o.id}`}
-                                      >
-                                        <span className="min-w-0 flex-1 break-words">{o.descripcion}
-                                          {o.codigo && <span className="block text-xs text-muted-foreground">Código: {o.codigo}</span>}
-                                        </span>
-                                        {o.precioUnitario > 0 && (
-                                          <span className="text-xs text-muted-foreground ml-2">${fPeso(o.precioUnitario)}</span>
-                                        )}
-                                      </CommandItem>
-                                    ))}
-                                  </CommandGroup>
-                                );
-                              })}
-                            </CommandList>
-                          </Command>
+                          <BillingCatalogPicker groups={catalogGroups} area={catalogArea} onAreaChange={setCatalogArea} search={rowCatalogSearch} onSearchChange={setRowCatalogSearch} rowIndex={idx} onSelect={option => {
+                            selectCatalogItemForRow(idx, option); setRowCatalogPickerOpen(null); setRowCatalogSearch("");
+                          }} />
                         </PopoverContent>
                       </Popover>
                     ) : (
