@@ -1,0 +1,86 @@
+{
+  "reported_on": "2026-11-20",
+  "source": "owner_confirmation_in_conversation",
+  "statement": "Sí, las cinco están terminadas",
+  "backups": [
+    {
+      "database": "xenia-control-db",
+      "status": "completed_by_owner_report",
+      "backup_reference": null,
+      "created_at": null,
+      "retention": null
+    },
+    {
+      "database": "xenia-aurora-db",
+      "status": "completed_by_owner_report",
+      "backup_reference": null,
+      "created_at": null,
+      "retention": null
+    },
+    {
+      "database": "xenia-brisa-db",
+      "status": "completed_by_owner_report",
+      "backup_reference": null,
+      "created_at": null,
+      "retention": null
+    },
+    {
+      "database": "xenia-aurora-pms-db",
+      "status": "completed_by_owner_report",
+      "backup_reference": null,
+      "created_at": null,
+      "retention": null
+    },
+    {
+      "database": "xenia-brisa-pms-db",
+      "status": "completed_by_owner_report",
+      "backup_reference": null,
+      "created_at": null,
+      "retention": null
+    }
+  ],
+  "served_revisions": {
+    "control": null,
+    "aurora": null,
+    "brisa": null
+  },
+  "remote_restore_executed": false,
+  "pitr_status": "off_in_owner_screenshot",
+  "recovery_method": "prepare Aurora PITR activation, wait for first archived backup and recover into a new sibling service",
+  "independent_target": "new service or empty database; existing services keep current connections",
+  "official_sources": [
+    {
+      "url": "https://docs.railway.com/volumes/backups",
+      "checked_on": "2026-11-20",
+      "finding": "Volume snapshot restore remounts a restored volume on the existing service and redeploys it."
+    },
+    {
+      "url": "https://docs.railway.com/volumes/point-in-time-recovery",
+      "checked_on": "2026-11-20",
+      "finding": "PITR restores into a new sibling service; availability starts after its own first post-enable backup, independently of manual volume snapshots."
+    }
+  ],
+  "remote_mutations_by_assistant": [],
+  "pending": [
+    "remaining backup IDs, timestamps with zone and retention",
+    "served revisions",
+    "activate PITR on Aurora and verify first archive restore range",
+    "independent remote data recovery and application validation"
+  ],
+  "maran": "No operating service, data, credentials or connection changed.",
+  "aurora_screenshot": {
+    "source": "owner screenshot in conversation",
+    "service": "xenia-aurora-pms-db",
+    "service_status": "Online",
+    "pitr": "Point-in-time recovery is off",
+    "enable_control": "Enable PITR",
+    "volume_backup": {
+      "displayed_created_at": "2026-11-20 08:32",
+      "display_timezone": "not explicit in screenshot; no UTC conversion applied",
+      "displayed_size": "872 MB",
+      "restore_control_visible": true,
+      "backup_reference": null
+    },
+    "volume_backup_schedule": "No backup schedule"
+  }
+}
