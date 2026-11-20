@@ -1,5 +1,10 @@
 # Activación del chat de Soporte en Xenia
 
+La [entrega revisable del 20/11/2026](assistant-pilot-handoff-20261120.md) amplía
+esta guía con cronología, pruebas ejecutadas, diagnóstico del guard de revisión
+y una evaluación pequeña preparada. Su rama candidata debe desplegarse en ambos
+componentes con la misma revisión antes de atribuirle resultados publicados.
+
 Destino autorizado: proyecto Railway `observant-possibility`, PMS de Xenia en
 `https://demo.maranpms.com.ar`. La rama del piloto es
 `feature/xenia-support-approval-foundation`. Esta entrega no se integra a `main`

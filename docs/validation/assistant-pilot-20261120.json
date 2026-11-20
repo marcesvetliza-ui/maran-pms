@@ -1,0 +1,134 @@
+{
+  "date": "2026-11-20",
+  "timezone": "America/Buenos_Aires",
+  "kind": "local-synthetic-validation",
+  "baseRevision": "bc8e64f080711bba9b36b83cc955c2afde935fec",
+  "branch": "feat/xenia-assistant-handoff-20261120",
+  "tests": [
+    {
+      "log": "assistant-tests-final.log",
+      "scope": "assistant suite",
+      "passed": 321,
+      "files": 30,
+      "exitCode": 0
+    },
+    {
+      "log": "gateway-workflow-tests.log",
+      "scope": "gateway and decision workflow",
+      "passed": 19,
+      "files": 2,
+      "exitCode": 0
+    },
+    {
+      "log": "frontend-tests.log",
+      "scope": "React UI",
+      "passed": 30,
+      "files": 3,
+      "exitCode": 0
+    },
+    {
+      "log": "postgres-tests.log",
+      "scope": "owned synthetic PostgreSQL",
+      "passed": 28,
+      "files": 6,
+      "exitCode": 0
+    }
+  ],
+  "totalPassedAcrossListedSuites": 398,
+  "browser": {
+    "kind": "synthetic-browser-verification",
+    "checks": {
+      "draftAfterConnectionFailure": true,
+      "nativeSend": true,
+      "idempotentRetry": true,
+      "unifiedChronology": true,
+      "reloadWithoutNewWork": true
+    },
+    "backend": "HTTP fixture",
+    "provider": "none",
+    "paidCalls": 0,
+    "hotelOperations": false,
+    "requests": 2,
+    "syntheticWorkItems": 1,
+    "pageErrors": []
+  },
+  "builds": {
+    "pms": "passed",
+    "assistant": "passed",
+    "evaluation-dispatcher": "passed",
+    "technical-evaluator": "passed",
+    "chat-evaluator": "passed"
+  },
+  "typeChecks": {
+    "application": "passed",
+    "assistantService": "passed"
+  },
+  "workflowLint": "passed",
+  "runtime": {
+    "node": "v24.19.0",
+    "postgres": "17.11, owned temporary Unix-socket cluster",
+    "browser": "local Chromium",
+    "dockerImageExecuted": false
+  },
+  "provider": "simulated or absent",
+  "realModelGenerations": 0,
+  "actualProviderTokens": 0,
+  "actualProviderUsd": 0,
+  "hotelOperationsExecuted": false,
+  "emailsSent": false,
+  "remoteDeploymentVerified": false,
+  "review": {
+    "technicalReviewer": "Codex (AI), source and automated checks",
+    "humanTechnicalReview": "pending",
+    "humanUsefulnessReview": "pending"
+  },
+  "evaluationPlan": "prepared; no real model call",
+  "sourceSha256": {
+    ".github/workflows/support-conversational-pilot.yml": "c7956fbfbf94e1a6012a819c8ad6db98e22341fa4927d9b58a0fc400380656c1",
+    "client/src/components/support-change-review.tsx": "f31715a53eefe1f83a41e3543963b23d2eff08f1e022a59733d831dbffde72ed",
+    "client/src/components/support-chat-panel.test.tsx": "511b8b76e472c54b202107148f79e67e082073717d7d3f9cddafb8b5195831de",
+    "client/src/components/support-chat-panel.tsx": "7307bdc71fa857efe0907cb2b22970bef45c45dbba9d675596c807ec7137cd1f",
+    "docs/asistente-conversacional-xenia-despliegue.md": "adb92a20396bb92e5abf5911e288a9c3f306a133530d0017100b6ca20ad47916",
+    "docs/asistente-evaluacion-railway.md": "242b94c6779a86c6d5f6824a5f7de818c82bcebfbb2ecf2dd0cd137397628c1a",
+    "docs/assistant-pilot-handoff-20261120.md": "b9207e27f38ead7aa752adc8948255d318d2247f9e559fcc8ec6f3f1400d2bc9",
+    "package.json": "bb4fcf58e904c63a9e4af42ff589e46745e5420bb291e0bb34a79452772e7ba1",
+    "script/test-assistant-postgres.mjs": "aaa19cfb9aa76399ec31ef5330224752ff41b8284e10f3d24e1c82dcb3562f1b",
+    "script/verify-support-chat-browser.mjs": "6a03c3826f00f23cc754d15e36573f77fb789b54227a1c9376a62a662e240173",
+    "server/tests/programming-assistant-chat-evaluation.test.ts": "4ce25f020d290baf82872225b6e6df4e7c05083091e6c66abf9e48cca31cd73c",
+    "server/tests/programming-assistant-chat.test.ts": "1822cce429e8d67d85b79c99bae0c82a8ebfe3d13e923634687a6fb01bf7853e",
+    "server/tests/programming-assistant-evaluation-selection.test.ts": "73fd0ffb76ffd3ed63f8155be67463b507d35e1d7b43e1239ae0c034fd09bc6f",
+    "server/tests/programming-assistant-timeline.test.ts": "b7619deef87cff7df06c81217cf5baac03ccda74e1b5a5567f8680ac6922842f",
+    "server/tests/support-conversational.pg.test.ts": "73a0fd8645dc58f186f756b7aa32d75f6d74d4fa87d4c5708dc2373bedfc4579",
+    "services/programming-assistant/Evaluation.Dockerfile": "968d42f0620efafe2cc4b059b79f530ca3474b02c591bcbc2c0b3d060ba80972",
+    "services/programming-assistant/chat-conversation.ts": "2b8b4988a63f349f66c48b34a843c7f7d23d6d3f112540b01f2f644d949b9e8a",
+    "services/programming-assistant/chat-evaluation-cases.ts": "a069edfabc4685af3f630034296b023e1a07c816f4c64a52aacabc85b7f041cb",
+    "services/programming-assistant/chat-evaluation-entry.ts": "ecfe8ded1a6ee075eed6333537c5f6635cb1cac261020e5d0c21251b77a7ba3b",
+    "services/programming-assistant/chat-evaluation.ts": "6b3fcd88939c5bc5d1aaf7aa00e32ef77972a707bc7d09f94e46df9f7d154476",
+    "services/programming-assistant/chat-service.ts": "0d9051337d4e4a679a255443d42a037348e51e220ad17a724aed78dc4f655a40",
+    "services/programming-assistant/evaluation-models-entry.ts": "906fb9aaa1d2676a464d6649f66d60e02d281f48149af5a2f4b24c1d6595dddb",
+    "services/programming-assistant/evaluation-models.ts": "91ecfc3e4efc06e7fbb9e40284bf6f4dad5e947e73b98f6ba62f642b1c445773",
+    "services/programming-assistant/evaluation-profile.ts": "888e5269617a146c9a3730d7217e71875d27d541fa23f836557148c9065c385e",
+    "services/programming-assistant/metered-responses.ts": "08c16ade93d06ed4974863718ed8c09cf9fe8ab3266e748645defb1d15ab89f9",
+    "shared/programming-support.ts": "17ec4566c7343626f6cc4f8d522440cc1b1e6d465f99b96cec2e6c96f47c0bee",
+    "shared/support-timeline.ts": "e60042ada2de86f1e563572c5dee3a7927818230d306126d2386b53da3b956cc"
+  },
+  "logsSha256": {
+    "app-types.log": "baad2734aecc5d2a8d5a2285bed4f2c785e561fd787752587121c50f49ccbfe8",
+    "assistant-tests-final.log": "bfd0ba4eb20a89bf695ad9057b20122894c24ca072efbc2212115527ca99054a",
+    "baseline-assistant-tests.log": "9589324c4634b1e4da3f0ba6dc6fc6acfabaf98c0bc5ecdceff4af5f73d5f2c0",
+    "browser-test.log": "56a1bba7cfc7eb4f07b692c1d5bcb6f9d79699bee6f0ed174979c8bc27d9c3e0",
+    "build.log": "a277d7b997a2d6507792826cfadaeb65c92a456dd733b442ccf8836c46773611",
+    "evaluation-chat-plan.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evaluation-revision.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evaluation-tests.log": "f784756e3907205ca359d8179d4cca257cc5ccde1155d3f80301b7bef8d24210",
+    "frontend-tests.log": "b09f1d2e640907d88ee828c509d748e4e23f306bcbe7d2d5d0d71da335eab0d7",
+    "gateway-workflow-tests.log": "82eec89766d903cd6bda2c5959f5b7fa712d7a710022a29a10dc21e3a47afa97",
+    "legacy-evaluation-dry-run.log": "265f38b24a0b628df93e44a2e73803174d19f5c68542845c4c227ce42c99dad3",
+    "postgres-tests.log": "45835f3ee75c5aee1dd20da190dae1e937f361cc176e42e360a63cc08132fcd1",
+    "service-bundles.log": "b6344a3c5edfcd26935e1fce3dfa7ed0b79095ce97fb884792745b5d53f6546b",
+    "service-dependencies.log": "6539f2b1d6cf3daf33922fd0b68b6c06b067c5c3b86619528f6a246674eb6ecb",
+    "service-types.log": "e0d5fd0bdebcba8fe9c7e303d0e6bfcfbbc4cda1af1190b751ea1251221ce456",
+    "targeted-server-tests.log": "22465095b56743477af1f426793ad32135c6812f23b139ff2dbec5458e769d69",
+    "workflow-lint.log": "b0bc9bdd0d43f1d25fd5579edf06de97785e0a26c42e3935f37a8d33c569bd59"
+  }
+}

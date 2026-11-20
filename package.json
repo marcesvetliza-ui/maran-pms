@@ -14,6 +14,7 @@
     "db:migrate:ci": "tsx script/ci-migrate.ts",
     "test:watch": "vitest",
     "test:assistant": "vitest run --config vitest.assistant.config.ts",
+    "test:assistant:postgres": "node script/test-assistant-postgres.mjs",
     "eval:assistant": "tsx services/programming-assistant/evaluate.ts",
     "lint:dates": "bash script/check-date-patterns.sh",
     "test:dates": "bash script/test-check-date-patterns.sh",

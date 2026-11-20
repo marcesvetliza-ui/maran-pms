@@ -7,7 +7,7 @@ import {
   supportChatMessageSchema,
   supportBudgetChangeSchema,
 } from "../../shared/support-chat";
-import type { SupportTicket } from "../../shared/programming-support";
+import type { SupportMessage, SupportTicket } from "../../shared/programming-support";
 import { diagnosisState } from "../../shared/programming-support";
 import { supportReportText } from "../../shared/support-report-presentation";
 import { permitsCodeProposal } from "../../shared/support-recommendation";
@@ -376,6 +376,7 @@ export async function registerSupportChat(
         {
           id: randomUUID(),
           author: "user",
+          kind: "observation",
           text: payload.text || "Adjunté una captura.",
           createdAt: now,
           ...(images.length ? { images } : {}),
@@ -506,8 +507,10 @@ export async function registerSupportChat(
         );
         ticket.visualContext = response.observations || ticket.visualContext;
         let answer = response.reply;
+        let provenance: Pick<SupportMessage, "kind" | "reportId" | "revision" | "certainty" | "validationStatus"> = { kind: "reply" };
         if (response.action === "investigate") {
           if (!(await store.admitResearch(ticket.id, ticket.createdBy))) {
+            provenance = { kind: "status" };
             answer =
               "Guardé el caso. Ya se alcanzó el cupo diario de investigaciones técnicas del hotel. Podemos continuarlo al renovarse a las 00:00 de Argentina o pedir revisión humana.";
             ticket.status = "received";
@@ -541,11 +544,17 @@ export async function registerSupportChat(
               ticket.report = null;
               delete ticket.reportId;
               ticket.status = "needs_info";
+              provenance = { kind: "clarification" };
               answer = result.clarification.questions.join("\n\n");
             } else {
               ticket.report = result.report;
               ticket.reportStale = false;
               ticket.reportId = randomUUID();
+              provenance = {
+                kind: "diagnosis", reportId: ticket.reportId,
+                revision: config.version, certainty: result.report.certainty,
+                validationStatus: result.report.validationStatus,
+              };
               delete ticket.clarification;
               ticket.status = diagnosisState(result.report);
               answer = [
@@ -584,6 +593,7 @@ export async function registerSupportChat(
             author: "assistant",
             text: answer,
             createdAt: new Date().toISOString(),
+            ...provenance,
           },
         ];
         ticket.lastError = null;

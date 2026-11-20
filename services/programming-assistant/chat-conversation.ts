@@ -3,6 +3,7 @@ import type { SupportTicket } from "../../shared/programming-support";
 import type { ResponsesClient } from "./responses-transport";
 import { supportChatRules } from "./chat-rules";
 import { investigationCase } from "./context";
+import { SupportPaused } from "./chat-store";
 
 const outputSchema = {
   type: "object" as const,
@@ -43,8 +44,9 @@ export async function converse(
       "Se conservan las últimas 40 intervenciones. Los informes anteriores no son evidencia nueva.",
   });
   if (prompt.length > 95000)
-    throw Error(
-      "La conversación requiere una nueva consulta con el problema actual.",
+    throw new SupportPaused(
+      "context_limit",
+      "El historial de esta conversación es demasiado extenso para otra respuesta. Quedó guardado; abrí una nueva consulta con el problema actual y los datos relevantes.",
     );
   const response = await client.responses.create(
     {

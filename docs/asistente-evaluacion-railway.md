@@ -1,6 +1,11 @@
 Prueba aislada en Xenia
 ======================
 
+**Registro histórico:** los presupuestos, ramas y resultados que siguen
+corresponden a tandas anteriores. No autorizan otra ejecución. Para la entrega
+del 20/11, consultar [el inventario y protocolo actuales](assistant-pilot-handoff-20261120.md),
+que separan el chat normal, el evaluador técnico y el ensayo pequeño preparado.
+
 El presupuesto inicial de USD 10 para tres casos está autorizado. La consulta del catálogo ya funcionó en Railway. Todavía no se ha ejecutado ninguna inferencia real ni se ha validado la calidad de los diagnósticos.
 
 En Railway, proyecto `observant-possibility`, usar el servicio temporal `support-codex-evaluation` y rama `feature/xenia-support-approval-foundation`. El servicio existente del asistente se llama actualmente `charismatic-wonder`; no modificar su despliegue.

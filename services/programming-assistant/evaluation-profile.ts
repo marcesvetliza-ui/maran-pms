@@ -1,8 +1,17 @@
 /** Prices copied by the user from the official model page on 2026-11-09.
  * This profile only applies to the authorized isolated three-case evaluation. */
 export function evaluationRevisionAllowed(env:Record<string,string|undefined>) {
+  return evaluationRevisionSelection(env).reason === 'selected';
+}
+/** Only commit-shaped metadata is printable. Invalid values may contain secrets. */
+export function evaluationRevisionSelection(env:Record<string,string|undefined>) {
   const approved=env.SUPPORT_EVALUATION_RUN_REVISION||'',actual=env.RAILWAY_GIT_COMMIT_SHA||'';
-  return /^[a-f0-9]{8,40}$/.test(approved)&&/^[a-f0-9]{40}$/.test(actual)&&actual.startsWith(approved);
+  const selectedRevision=/^[a-f0-9]{8,40}$/.test(approved)?approved:null;
+  const runningRevision=/^[a-f0-9]{40}$/.test(actual)?actual:null;
+  const reason=!runningRevision?'running_revision_missing_or_invalid'
+    :!selectedRevision?'selection_missing_or_invalid'
+    :!runningRevision.startsWith(selectedRevision)?'revision_mismatch':'selected';
+  return {selectedRevision,runningRevision,reason};
 }
 export function evaluationProfile(env:Record<string,string|undefined>):Record<string,string> {
   if(!env.SUPPORT_EVALUATION_PROFILE)return {};

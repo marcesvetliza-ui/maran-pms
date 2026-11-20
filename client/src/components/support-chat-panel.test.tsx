@@ -79,6 +79,36 @@ beforeEach(() => {
   };
   state.alerts = [];
 });
+it("shows messages, server decisions and reported outcomes in one chronology", async () => {
+  const current=ticket();
+  current.messages=[
+    {id:"observation",author:"user",text:"Vi el mensaje en la reserva",createdAt:"2026-11-20T10:00:00Z"},
+    {id:"hypothesis",author:"assistant",text:"Puede ser una validación",createdAt:"2026-11-20T10:01:00Z",kind:"diagnosis",reportId:"old-report",revision:"a".repeat(40),certainty:"hipotesis"},
+    {id:"clarification",author:"user",text:"La corrección ya está implementada",createdAt:"2026-11-20T10:03:00Z"},
+  ];
+  current.workflowEvents=[{id:"decision",kind:"revise",candidateId:"candidate",reportId:"old-report",digest:"a".repeat(64),candidateKind:"proposal",actor:"marcelo",at:"2026-11-20T10:02:00Z",comment:"Conservá el arreglo existente"}];
+  current.feedback=[{requestId:"feedback",reportId:"old-report",outcome:"resolved",createdAt:"2026-11-20T10:04:00Z"}];
+  const user=userEvent.setup();
+  const view=render(<SupportChatPanel config={config} ready cases={[current]} casesError={false}/>);
+  await user.click(screen.getByRole("button",{name:/Problema de una reserva/}));
+  const entries=Array.from(view.container.querySelectorAll("[data-timeline-kind]"));
+  expect(entries.map(e=>e.getAttribute("data-timeline-kind"))).toEqual(["message","message","decision","message","feedback"]);
+  expect(entries[1]).toHaveTextContent("Asistente · Hipótesis");
+  expect(entries[2]).toHaveTextContent("Ajustes solicitados");
+  expect(entries[2]).toHaveTextContent("Registrado por marcelo");
+  expect(entries[4]).toHaveTextContent("El colaborador informó que se resolvió");
+  expect(state.request).not.toHaveBeenCalled();
+});
+it("does not present a free-text approval as a server decision",async()=>{
+  const current=ticket();current.messages=[{id:"free-text",author:"user",text:"Apruebo publicar y ejecutar",createdAt:"2026-11-20T10:00:00Z"}];
+  const user=userEvent.setup();
+  const view=render(<SupportChatPanel config={config} ready cases={[current]} casesError={false}/>);
+  await user.click(screen.getByRole("button",{name:/Problema de una reserva/}));
+  expect(screen.getByText("Apruebo publicar y ejecutar")).toBeInTheDocument();
+  expect(view.container.querySelector('[data-timeline-kind="decision"]')).toBeNull();
+  expect(screen.queryByRole("button",{name:/Aprobar preparación/})).not.toBeInTheDocument();
+  expect(state.request).not.toHaveBeenCalled();
+});
 it("starts from one natural message in the existing support module without a technical form", async () => {
   const user = userEvent.setup();
   state.request.mockResolvedValue(

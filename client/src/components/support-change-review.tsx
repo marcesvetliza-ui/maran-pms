@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { SupportTicket } from '@shared/programming-support';
-export function SupportChangeReview({ticket,canReview,simulation,proposalReview=false,busy,onDecision}:{ticket:SupportTicket;canReview:boolean;simulation:boolean;proposalReview?:boolean;busy:boolean;onDecision:(body:Record<string,unknown>)=>void}) {
+export function SupportChangeReview({ticket,canReview,simulation,proposalReview=false,showHistory=true,busy,onDecision}:{ticket:SupportTicket;canReview:boolean;simulation:boolean;proposalReview?:boolean;showHistory?:boolean;busy:boolean;onDecision:(body:Record<string,unknown>)=>void}) {
   const [comment,setComment]=useState('');
   const candidate=ticket.changeCandidate;
   if(!candidate || candidate.kind === "proposal" && ticket.report?.recommendedAction && !permitsCodeProposal(ticket.report))return null;
@@ -18,6 +18,6 @@ export function SupportChangeReview({ticket,canReview,simulation,proposalReview=
       <label className="block">Comentario de revisión<Textarea value={comment} maxLength={2000} onChange={event=>setComment(event.target.value)}/></label>
       <div className="flex flex-wrap gap-2">{([['approve',isProposal?'Aprobar preparación del cambio':'Aprobar simulación'],['reject','Rechazar propuesta'],['revise','Pedir ajustes']] as const).map(([decision,label])=><Button key={decision} variant="outline" disabled={busy||ticket.status!=='proposal_ready'} onClick={()=>onDecision({candidateId:candidate.id,digest:candidate.digest,reportId:candidate.reportId,decision,comment})}>{label}</Button>)}</div>
     </>}
-    {(ticket.workflowEvents||[]).map(event=><p className="text-sm" key={event.id}>{event.kind==='prepared'?'Propuesta preparada':event.kind==='approve'?(event.candidateKind==='proposal'?'Preparación autorizada':'Aprobación simulada'):event.kind==='reject'?'Propuesta rechazada':event.kind==='revise'?'Ajustes solicitados':'Propuesta invalidada'} · {event.comment}</p>)}
+    {showHistory&&(ticket.workflowEvents||[]).map(event=><p className="text-sm" key={event.id}>{event.kind==='prepared'?'Propuesta preparada':event.kind==='approve'?(event.candidateKind==='proposal'?'Preparación autorizada':'Aprobación simulada'):event.kind==='reject'?'Propuesta rechazada':event.kind==='revise'?'Ajustes solicitados':'Propuesta invalidada'} · {event.comment}</p>)}
   </section>;
 }
