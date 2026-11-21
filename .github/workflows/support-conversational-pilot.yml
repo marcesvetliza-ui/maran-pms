@@ -48,3 +48,8 @@ jobs:
       - run: npx vitest run --config vitest.server.pg.config.ts server/tests/support-conversational.pg.test.ts server/tests/support-approval-foundation.pg.test.ts server/tests/support-proposal-chat.pg.test.ts server/tests/support-codex-configuration.pg.test.ts
       - run: npm run build
       - run: npx esbuild services/programming-assistant/index.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/xenia-assistant.mjs
+      - name: Compilar los ejecutores aislados de evaluación
+        run: |
+          npx esbuild services/programming-assistant/evaluation-models-entry.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/support-evaluation/evaluation.mjs
+          npx esbuild services/programming-assistant/codex-evaluate.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/support-evaluation/evaluator.mjs
+          npx esbuild services/programming-assistant/chat-evaluation-entry.ts --bundle --platform=node --format=esm --packages=external --outfile=/tmp/support-evaluation/chat-evaluator.mjs

@@ -10,6 +10,7 @@ import {
 } from "../../services/programming-assistant/chat-store";
 import { validateSupportImage } from "../../services/programming-assistant/chat-images";
 import { meteredResponses } from "../../services/programming-assistant/metered-responses";
+import { converse } from "../../services/programming-assistant/chat-conversation";
 
 const image = {
   name: "captura.png",
@@ -17,6 +18,13 @@ const image = {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=",
 };
 describe("conversational support boundaries", () => {
+  it("stops oversized conversation context with an actionable message before any provider call",async()=>{
+    const create=vi.fn();
+    const ticket={title:"Caso extenso",messages:Array.from({length:40},(_,i)=>({id:String(i),author:"user",text:"x".repeat(3000),createdAt:"2026-11-20T10:00:00Z"})),report:null} as any;
+    await expect(converse(ticket,[],{responses:{create}} as any,"synthetic-model"))
+      .rejects.toMatchObject({reason:"context_limit",message:expect.stringContaining("Quedó guardado")});
+    expect(create).not.toHaveBeenCalled();
+  });
   it("pins standard pricing and quarantines a provider response charged under another tier", async () => {
     const store = {
       reserve: vi.fn(async () => "call-id"),

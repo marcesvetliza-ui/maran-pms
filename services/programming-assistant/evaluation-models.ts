@@ -1,6 +1,6 @@
 /** Isolated, non-inference credential/model check. Never starts the assistant. */
 import OpenAI from 'openai';
-import { evaluationProfile,evaluationRevisionAllowed } from './evaluation-profile';
+import { evaluationProfile,evaluationRevisionAllowed,evaluationRevisionSelection } from './evaluation-profile';
 
 const fail=(code:string):never=>{throw Object.assign(new Error(code),{evaluationCode:code});};
 export function safeFailure(error:unknown) {
@@ -13,6 +13,12 @@ export function safeFailure(error:unknown) {
   if(e?.name==='APIConnectionTimeoutError')return 'api_connection_timeout';
   if(e?.name==='APIConnectionError')return 'api_connection_failed';
   return 'model_catalog_check_failed';
+}
+export function evaluationFailureDetails(error:unknown,env:Record<string,string|undefined>) {
+  const code=safeFailure(error);
+  return {error:code,inferenceEnabled:false,
+    ...(code==='evaluation_revision_not_selected'?{revisionCheck:evaluationRevisionSelection(env)}:{}),
+  };
 }
 
 export async function discoverModels(client: { models: { list(): PromiseLike<AsyncIterable<{id:string}>> } }) {
@@ -32,6 +38,18 @@ export async function main() {
     fail('operational_credentials_present');
   }
   const action=process.env.SUPPORT_EVALUATION_ACTION || 'dry-run';
+  if(action==='chat-plan'||action==='chat-evaluate') {
+    if(action==='chat-evaluate'&&!evaluationRevisionAllowed(process.env))fail('evaluation_revision_not_selected');
+    // This small chat run never applies the old USD 10 profile.
+    await import(new URL('./chat-evaluator.mjs',import.meta.url).href);
+    return;
+  }
+  if(action==='revision') {
+    console.log(JSON.stringify({component:'isolated-evaluation-runner',action,
+      revisionCheck:evaluationRevisionSelection(process.env),
+      providerTurns:0,inferenceEnabled:false}));
+    return;
+  }
   if(action==='evaluate') {
     if(!evaluationRevisionAllowed(process.env))fail('evaluation_revision_not_selected');
     Object.assign(process.env,evaluationProfile(process.env));

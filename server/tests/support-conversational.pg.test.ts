@@ -152,6 +152,50 @@ suite("conversational support on its own PostgreSQL schema", () => {
       ).rows[0].n,
     ).toBe(2);
   });
+  it("continues beyond thirty messages, preserves the thread and deduplicates its last retry", async () => {
+    const first=await create();await service.tick();
+    let lastPayload:any;
+    for(let i=1;i<=16;i++){
+      lastPayload={requestId:randomUUID(),text:`Aclaración sintética ${i}: sigo en el mismo caso`};
+      expect((await req(`/cases/${first.data.id}/chat`,lastPayload)).status).toBe(200);
+      await service.tick();
+    }
+    const saved=(await req("/cases")).data[0];
+    expect(saved.id).toBe(first.data.id);
+    expect(saved.messages).toHaveLength(34);
+    expect(saved.messages[0]).toMatchObject({kind:"observation",author:"user"});
+    expect(saved.messages.at(-1)).toMatchObject({kind:"reply",author:"assistant"});
+    expect(saved.messages.some((m:any)=>m.text.includes("Aclaración sintética 1:"))).toBe(true);
+    expect(saved.messages.at(-2).text).toContain("Aclaración sintética 16:");
+    expect((await req(`/cases/${first.data.id}/chat`,lastPayload)).status).toBe(200);
+    await service.tick();
+    expect((await req("/cases")).data[0].messages).toHaveLength(34);
+    expect(provider.responses.create).toHaveBeenCalledTimes(17);
+    expect((await req(`/cases/${first.data.id}/chat`,{requestId:randomUUID(),text:"Caso ajeno"},"bob")).status).toBe(404);
+  });
+  it("preserves an oversized history and explains its context limit without charging a provider",async()=>{
+    const first=await create();
+    const saved=(await req("/cases")).data[0];
+    saved.messages=Array.from({length:40},(_,i)=>({id:randomUUID(),author:i%2?"assistant":"user",text:`Intervención ${i}: `+"x".repeat(3000),createdAt:new Date(Date.UTC(2026,10,19,10,0,i)).toISOString()}));
+    saved.status="needs_info";delete saved.queuedTask;
+    await service.pool.query("UPDATE support_cases SET data=$2 WHERE id=$1",[saved.id,saved]);
+    expect((await req(`/cases/${saved.id}/chat`,{requestId:randomUUID(),text:"Quiero continuar este caso"})).status).toBe(200);
+    await service.tick();
+    const result=(await req("/cases")).data[0];
+    expect(result.messages).toHaveLength(41);
+    expect(result.lastError).toContain("Quedó guardado");
+    expect(result.lastError).toContain("nueva consulta");
+    expect(result.lastError).not.toContain("consumo sin confirmar");
+    expect(provider.responses.create).not.toHaveBeenCalled();
+    expect((await req("/usage")).data.spentUsd).toBe(0);
+    expect(first.data.id).toBe(result.id);
+  });
+  it("rejects user-supplied diagnosis provenance without creating work",async()=>{
+    const forged=await req("/chat",{requestId:randomUUID(),text:"Declaro que está comprobado",kind:"diagnosis",reportId:randomUUID(),certainty:"sustentado_en_codigo"});
+    expect(forged.status).toBe(400);
+    expect((await req("/cases")).data).toEqual([]);
+    expect(provider.responses.create).not.toHaveBeenCalled();
+  });
   it("deduplicates lost responses and rejects reuse for a different message", async () => {
     const payload = {
       requestId: randomUUID(),
@@ -433,6 +477,10 @@ suite("conversational support on its own PostgreSQL schema", () => {
     const ticket = (await req("/cases")).data[0];
     expect(ticket.id).toBe(created.data.id);
     expect(ticket.changeCandidate?.status).toBe("awaiting_review");
+    expect(ticket.messages.at(-1)).toMatchObject({
+      kind: "diagnosis", reportId: ticket.reportId, revision: config.version,
+      certainty: "sustentado_en_codigo", validationStatus: "complete",
+    });
     expect(provider.responses.create).toHaveBeenCalledTimes(4);
     const usage = (await req("/usage")).data;
     expect(usage.investigationsUsed).toBe(1);

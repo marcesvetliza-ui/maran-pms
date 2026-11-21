@@ -117,6 +117,13 @@ export type SupportMessage = {
   text: string;
   createdAt: string;
   images?: Array<{id:string;name:string}>;
+  // Optional for historical cases. Only the service stamps this provenance;
+  // conversational request schemas never accept these fields from a user.
+  kind?: "observation" | "reply" | "clarification" | "diagnosis" | "status";
+  reportId?: string;
+  revision?: string;
+  certainty?: SupportDiagnosis["certainty"];
+  validationStatus?: SupportDiagnosis["validationStatus"];
 };
 export type SupportTicket = {
   id: string;

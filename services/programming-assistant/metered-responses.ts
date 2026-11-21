@@ -22,7 +22,7 @@ export type MeteredProvider = {
 };
 /** Every generation, including reviewer/correction sessions, passes this gate. */
 export function meteredResponses(
-  store: ChatStore,
+  store: Pick<ChatStore, "reserve" | "settle" | "uncertain">,
   provider: MeteredProvider,
   caseId: string,
   owner: string,

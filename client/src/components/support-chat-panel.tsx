@@ -4,6 +4,7 @@ import { MessageSquare, Paperclip, Send, Plus, Loader2, X } from "lucide-react";
 import type { SupportTicket } from "@shared/programming-support";
 import type { SupportUsage, SupportAlert } from "@shared/support-chat";
 import { supportReportText } from "@shared/support-report-presentation";
+import { supportTimeline, supportMessageLabel, supportDecisionLabel } from "@shared/support-timeline";
 import { apiRequest, parseApiErrorPayload } from "@/lib/queryClient";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { Button } from "@/components/ui/button";
@@ -173,7 +174,7 @@ export function SupportChatPanel({
       top: thread.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [ticket?.id, ticket?.messages?.length, ticket?.status]);
+  }, [ticket?.id, ticket?.messages?.length, ticket?.workflowEvents?.length, ticket?.feedback?.length, ticket?.status]);
   const working = ticket && ["queued", "investigating"].includes(ticket.status);
   const refresh = async () => {
     await Promise.all([
@@ -395,29 +396,40 @@ export function SupportChatPanel({
                 </p>
               </div>
             )}
-            {ticket?.messages?.map((message) => (
+            {ticket && supportTimeline(ticket).map((entry) => entry.type === "message" ? (
               <article
-                key={message.id}
-                className={`max-w-[95%] rounded-xl p-3 text-sm ${message.author === "user" ? "ml-auto bg-primary/10" : "bg-muted"}`}
+                key={entry.id}
+                data-timeline-kind="message"
+                className={`max-w-[95%] rounded-xl p-3 text-sm ${entry.message.author === "user" ? "ml-auto bg-primary/10" : "bg-muted"}`}
               >
                 <p className="mb-1 text-xs font-semibold">
-                  {message.author === "user"
-                    ? owns
-                      ? "Vos"
-                      : "Colaborador"
-                    : message.author === "assistant"
-                      ? "Asistente"
-                      : "Sistema"}
+                  {supportMessageLabel(entry.message, owns)}
                 </p>
                 <p className="whitespace-pre-wrap break-words">
-                  {message.text}
+                  {entry.message.text}
                 </p>
-                {message.images?.map((i) => (
+                {entry.message.images?.map((i) => (
                   <SavedImage key={i.id} {...i} userId={config.userId} />
                 ))}
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {formatHotelDateTime(message.createdAt)}
+                  {formatHotelDateTime(entry.at)}
                 </p>
+              </article>
+            ) : (
+              <article key={entry.id} data-timeline-kind={entry.type} className="rounded-xl border p-3 text-sm">
+                <p className="font-semibold">
+                  {entry.type === "decision"
+                    ? supportDecisionLabel(entry.event)
+                    : entry.feedback.outcome === "resolved"
+                      ? "El colaborador informó que se resolvió"
+                      : "El colaborador informó que sigue pendiente"}
+                </p>
+                {entry.type === "decision" && <>
+                  <p className="whitespace-pre-wrap break-words">{entry.event.comment}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Registrado por {entry.event.actor}</p>
+                  {entry.event.kind === "approve" && <p className="mt-1 text-xs">Esta decisión no publica cambios ni modifica operaciones.</p>}
+                </>}
+                <p className="mt-2 text-xs text-muted-foreground">{formatHotelDateTime(entry.at)}</p>
               </article>
             ))}
             {working && (
@@ -467,6 +479,7 @@ export function SupportChatPanel({
                 canReview={!!config.canReview}
                 simulation={false}
                 proposalReview={!!config.proposalReview}
+                showHistory={false}
                 busy={busy}
                 onDecision={(fields) =>
                   void post(`/cases/${ticket.id}/decision`, fields)
