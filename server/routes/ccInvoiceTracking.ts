@@ -10,8 +10,10 @@ import {
   backfillCcInvoiceRecipients,
 } from "../ccInvoiceTracking";
 import { requireAuth, requireRole, requirePermission } from "../auth";
+import { registerCcTrackingReportRoutes } from "../ccTrackingReport";
 
 export function registerCcInvoiceTrackingRoutes(app: Express) {
+  registerCcTrackingReportRoutes(app);
   // Vincula retroactivamente facturas CC emitidas antes de que este
   // seguimiento existiera (ver backfillCcInvoiceRecipients). Un solo uso
   // por lote de facturas sin vincular — se puede correr más de una vez sin
