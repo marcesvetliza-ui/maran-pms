@@ -1,3 +1,4 @@
+import { AgencyProductionReport } from '@/components/agency-production-report';
 import { CcCorrectAllocationsAction } from "@/components/cc-correct-allocations-action";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useEffect } from "react";
@@ -36,15 +37,6 @@ const agencyFormSchema = insertAgencySchema.extend({
 });
 
 type AgencyFormData = z.infer<typeof agencyFormSchema>;
-
-interface AgencyReportItem {
-  agency: Agency;
-  totalReservations: number;
-  totalRevenue: number;
-  commissionRate: number;
-  totalCommission: number;
-  totalNights: number;
-}
 
 interface AgencyStats {
   totalReservations: number;
@@ -175,8 +167,6 @@ export default function AgenciesPage() {
     }
   }, []);
   const [selectedAgencyId, setSelectedAgencyId] = useState<string | null>(null);
-  const [reportFrom, setReportFrom] = useState("");
-  const [reportTo, setReportTo] = useState("");
   const [viewingAccountAgency, setViewingAccountAgency] = useState<Agency | null>(null);
   const [viewingAgencyDetail, setViewingAgencyDetail] = useState<Agency | null>(null);
   const [registerPaymentOpen, setRegisterPaymentOpen] = useState(false);
@@ -201,17 +191,6 @@ export default function AgenciesPage() {
       return res.json();
     },
     enabled: !!selectedAgencyId,
-  });
-
-  const { data: reportData = [], isLoading: reportLoading } = useQuery<AgencyReportItem[]>({
-    queryKey: ["/api/agencies/report", reportFrom, reportTo],
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (reportFrom) params.set("from", reportFrom);
-      if (reportTo) params.set("to", reportTo);
-      const res = await fetch(`/api/agencies/report?${params}`);
-      return res.json();
-    },
   });
 
   const { data: accountData, refetch: refetchAccount } = useQuery<{
@@ -427,7 +406,7 @@ export default function AgenciesPage() {
           </TabsTrigger>
           <TabsTrigger value="report" data-testid="tab-agencies-report">
             <BarChart3 className="h-4 w-4 mr-2" />
-            Reporte de Comisiones
+            Producción por agencia
           </TabsTrigger>
         </TabsList>
 
@@ -591,14 +570,14 @@ export default function AgenciesPage() {
                   <div className="p-4 rounded-lg bg-accent/50">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                       <CalendarDays className="h-4 w-4" />
-                      Reservas Totales
+                      Reservas Realizadas
                     </div>
                     <p className="text-2xl font-bold" data-testid="text-agency-total-reservations">{agencyStats.totalReservations}</p>
                   </div>
                   <div className="p-4 rounded-lg bg-accent/50">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                       <DollarSign className="h-4 w-4" />
-                      Facturación Total
+                      Importe de Alojamiento
                     </div>
                     <p className="text-2xl font-bold" data-testid="text-agency-total-revenue">
                       ${agencyStats.totalRevenue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
@@ -616,7 +595,7 @@ export default function AgenciesPage() {
                   <div className="p-4 rounded-lg bg-accent/50">
                     <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
                       <CalendarDays className="h-4 w-4" />
-                      Noches Totales
+                      Noches Realizadas
                     </div>
                     <p className="text-2xl font-bold" data-testid="text-agency-total-nights">{agencyStats.totalNights}</p>
                   </div>
@@ -626,103 +605,7 @@ export default function AgenciesPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="report" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <BarChart3 className="h-5 w-5" />
-                Reporte Global de Comisiones
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm text-muted-foreground">Desde</label>
-                  <Input
-                    type="date"
-                    value={reportFrom}
-                    onChange={(e) => setReportFrom(e.target.value)}
-                    data-testid="input-report-from"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm text-muted-foreground">Hasta</label>
-                  <Input
-                    type="date"
-                    value={reportTo}
-                    onChange={(e) => setReportTo(e.target.value)}
-                    data-testid="input-report-to"
-                  />
-                </div>
-              </div>
-
-              {reportLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Agencia</TableHead>
-                      <TableHead className="text-right">Reservas</TableHead>
-                      <TableHead className="text-right">Noches</TableHead>
-                      <TableHead className="text-right">Facturación</TableHead>
-                      <TableHead className="text-right">Comisión %</TableHead>
-                      <TableHead className="text-right">Comisión $</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {reportData.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                          No hay datos para el período seleccionado
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      <>
-                        {reportData.map((item) => (
-                          <TableRow key={item.agency.id} data-testid={`row-report-${item.agency.id}`}>
-                            <TableCell className="font-medium">
-                              {item.agency.nombreFantasia || item.agency.razonSocial}
-                            </TableCell>
-                            <TableCell className="text-right">{item.totalReservations}</TableCell>
-                            <TableCell className="text-right">{item.totalNights}</TableCell>
-                            <TableCell className="text-right">
-                              ${item.totalRevenue.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Badge variant="secondary">{item.commissionRate}%</Badge>
-                            </TableCell>
-                            <TableCell className="text-right font-medium">
-                              ${item.totalCommission.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        <TableRow className="bg-accent/30 font-bold">
-                          <TableCell>TOTAL</TableCell>
-                          <TableCell className="text-right">
-                            {reportData.reduce((s, i) => s + i.totalReservations, 0)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {reportData.reduce((s, i) => s + i.totalNights, 0)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            ${reportData.reduce((s, i) => s + i.totalRevenue, 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                          </TableCell>
-                          <TableCell className="text-right">-</TableCell>
-                          <TableCell className="text-right">
-                            ${reportData.reduce((s, i) => s + i.totalCommission, 0).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
-                          </TableCell>
-                        </TableRow>
-                      </>
-                    )}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <TabsContent value="report" className="space-y-4"><AgencyProductionReport /></TabsContent>
       </Tabs>
 
       <Sheet open={!!viewingAccountAgency} onOpenChange={(open) => { if (!open) setViewingAccountAgency(null); }}>

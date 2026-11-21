@@ -11,6 +11,7 @@ import { eq, and, inArray, gte, lte, sql, getTableColumns, isNull, desc } from "
 import { getArgentinaOperationalDate } from "../utils/argentinaDateTime";
 import { activeSalesRecord } from "../salesArchive";
 import { visibleGuestCondition } from "../guest-visibility";
+import { registerAgencyProductionRoutes } from "./agency-production";
 import { registerCcReceiptCashRepairRoutes } from "./cc-receipt-cash-repair";
 
 const PAYMENT_TOLERANCE = 0.01;
@@ -335,62 +336,7 @@ export function registerGuestsRoutes(app: Express) {
     }
   });
 
-  app.get("/api/agencies/report", async (req, res) => {
-    try {
-      const from = req.query.from as string;
-      const to = req.query.to as string;
-      const allAgencies = await storage.getAgencies();
-      const allReservations = await storage.getReservations();
-
-      const report = allAgencies.map(agency => {
-        let agencyReservations = allReservations.filter(r => r.agencyId === agency.id);
-        if (from) agencyReservations = agencyReservations.filter(r => r.checkInDate >= from);
-        if (to) agencyReservations = agencyReservations.filter(r => r.checkOutDate <= to);
-
-        const totalRevenue = agencyReservations.reduce((sum, r) => sum + parseFloat(r.totalRoomAmount || "0"), 0);
-        const commissionRate = parseFloat(agency.commissionRate || "0");
-        const totalCommission = totalRevenue * (commissionRate / 100);
-
-        return {
-          agency,
-          totalReservations: agencyReservations.length,
-          totalRevenue,
-          commissionRate,
-          totalCommission,
-          totalNights: agencyReservations.reduce((sum, r) => sum + (r.nights || 0), 0),
-        };
-      });
-
-      res.json(report);
-    } catch (error) {
-      res.status(500).json({ error: "Error generating agency report" });
-    }
-  });
-
-  app.get("/api/agencies/:id/stats", async (req, res) => {
-    try {
-      const agency = await storage.getAgency(req.params.id);
-      if (!agency) {
-        return res.status(404).json({ error: "Agency not found" });
-      }
-      const allReservations = await storage.getReservations();
-      const agencyReservations = allReservations.filter(r => r.agencyId === agency.id);
-      const totalRevenue = agencyReservations.reduce((sum, r) => sum + parseFloat(r.totalRoomAmount || "0"), 0);
-      const commissionRate = parseFloat(agency.commissionRate || "0");
-      const totalCommission = totalRevenue * (commissionRate / 100);
-
-      res.json({
-        totalReservations: agencyReservations.length,
-        totalRevenue,
-        commissionRate,
-        totalCommission,
-        totalNights: agencyReservations.reduce((sum, r) => sum + (r.nights || 0), 0),
-        activeReservations: agencyReservations.filter(r => ["confirmed", "checked_in", "pending"].includes(r.status)).length,
-      });
-    } catch (error) {
-      res.status(500).json({ error: "Error fetching agency stats" });
-    }
-  });
+  registerAgencyProductionRoutes(app);
 
   app.get("/api/agencies/:id", async (req, res) => {
     try {
