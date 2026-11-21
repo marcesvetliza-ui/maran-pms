@@ -1,4 +1,5 @@
 import { useAuth } from "@/App";
+import { CcTrackingDownloads } from "./cc-tracking-downloads";
 import {
   Dialog,
   DialogContent,
@@ -379,6 +380,7 @@ function ListadoTab() {
   const {
     data: rows = [],
     isLoading,
+    isFetching,
     isError: listError,
     refetch,
   } = useQuery<TrackingRow[]>({
@@ -416,6 +418,12 @@ function ListadoTab() {
   const unknown = rows.filter(
     (r) => r.documentStatus !== "manual" && r.saldoPendiente == null,
   ).length;
+  const downloadFilters = new URLSearchParams();
+  if (from) downloadFilters.set('from', from);
+  if (to) downloadFilters.set('to', to);
+  if (estado !== 'todos') downloadFilters.set('estado', estado);
+  if (search) downloadFilters.set('search', search);
+  if (documentStatus !== 'todos') downloadFilters.set('documentStatus', documentStatus);
 
   return (
     <div className="space-y-4">
@@ -460,7 +468,7 @@ function ListadoTab() {
         <div className="space-y-1">
           <Label className="text-xs">Situación documental</Label>
           <Select value={documentStatus} onValueChange={setDocumentStatus}>
-            <SelectTrigger className="w-60">
+            <SelectTrigger className="w-60" data-testid="select-cc-tracking-document-filter">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -489,6 +497,7 @@ function ListadoTab() {
         </div>
       </div>
 
+      <CcTrackingDownloads scope="list" url={`/api/cc-invoice-tracking/export?${downloadFilters}`} filename={`seguimiento-cc-${from || 'inicio'}-${to || 'actual'}`} disabled={isLoading || isFetching || listError || !rows.length} />
       {isLoading ? (
         <Loader2 className="h-6 w-6 animate-spin mx-auto my-8" />
       ) : listError ? (
@@ -568,6 +577,7 @@ function InformeMensualTab() {
   const {
     data: summary,
     isLoading,
+    isFetching,
     isError: reportError,
   } = useQuery<MonthSummary>({
     queryKey: ["/api/cc-invoice-tracking/month", year, month],
@@ -621,6 +631,7 @@ function InformeMensualTab() {
         >
           <Printer className="h-4 w-4 mr-2" /> Imprimir
         </Button>
+        <CcTrackingDownloads scope="month" url={`/api/cc-invoice-tracking/month/${year}/${month}/export`} filename={`seguimiento-cc-mensual-${year}-${String(month).padStart(2, '0')}`} disabled={isLoading || isFetching || reportError || !summary || !Number.isInteger(year) || year < 1900 || year > 9999} />
       </div>
 
       {isLoading ? (
