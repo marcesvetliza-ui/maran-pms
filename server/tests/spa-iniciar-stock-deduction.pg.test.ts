@@ -1,5 +1,5 @@
 /**
- * Al pasar un turno a "en curso" ahora se descuentan los insumos del
+ * Al pasar un turno a "en curso" o directamente a "completado" se descuentan los insumos del
  * tratamiento (antes solo se descontaban al cerrar la cuenta o vincular
  * una factura — nunca al iniciar el servicio en sí). deductStockFromSpaAccount
  * es idempotente por cuenta, así que un cierre posterior no lo descuenta
@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import express from "express";
 import * as http from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 const pool = process.env.DATABASE_URL
@@ -75,7 +75,7 @@ async function waitUntilStockMovementExists(itemId: string) {
   throw new Error("El movimiento de stock no se registró a tiempo");
 }
 
-runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
+runIfDatabaseIsConfigured('Iniciar o completar un turno descuenta insumos una sola vez', () => {
   beforeAll(async () => {
     if (pool) await startServer();
   });
@@ -85,7 +85,7 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
     await pool?.end();
   });
 
-  it("descuenta el insumo al pasar a en curso, con auditoría, y no lo descuenta dos veces al reintentarlo", async () => {
+  it.each(["in_progress", "completed"])("descuenta el insumo al pasar a %s sin repetirlo al completar, reintentar o cerrar después", async status => {
     if (!pool) throw new Error("DATABASE_URL no está configurado");
     const suffix = randomUUID();
     const treatmentId = `treatment-${suffix}`;
@@ -120,6 +120,7 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
       const createResponse = await request("POST", "/api/spa/appointments", {
         cabinId, treatmentId, guestName: "Pedro Suárez",
         appointmentDate: "2026-10-05", startTime: "10:00", endTime: "11:00",
+        status: "confirmed",
       });
       expect(createResponse.status).toBe(201);
       appointmentId = createResponse.body.id;
@@ -128,8 +129,21 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
       const stockAfterCreate = await pool.query("SELECT current_stock FROM inventory_items WHERE id = $1", [itemId]);
       expect(stockAfterCreate.rows[0].current_stock).toBe("500.000");
 
-      const startResponse = await request("PATCH", `/api/spa/appointments/${appointmentId}`, { status: "in_progress" });
+      const accountBefore = (await pool.query('SELECT * FROM spa_accounts WHERE id=$1',[accountId])).rows;
+      const paymentsBefore = (await pool.query('SELECT * FROM spa_payments WHERE account_id=$1 ORDER BY id',[accountId])).rows;
+      if (status === "completed") {
+        const { storage } = await import("../db-storage");
+        const fault = vi.spyOn(storage,"deductStockFromSpaAccount").mockRejectedValueOnce(new Error("Synthetic consumption failure"));
+        try {
+          expect((await request("PATCH", `/api/spa/appointments/${appointmentId}`, { status })).status).toBe(500);
+          expect((await pool.query('SELECT status FROM spa_appointments WHERE id=$1',[appointmentId])).rows[0].status).toBe('confirmed');
+          expect((await pool.query('SELECT current_stock FROM inventory_items WHERE id=$1',[itemId])).rows[0].current_stock).toBe('500.000');
+        } finally { fault.mockRestore(); }
+      }
+
+      const startResponse = await request("PATCH", `/api/spa/appointments/${appointmentId}`, { status });
       expect(startResponse.status).toBe(200);
+      expect(startResponse.body.status).toBe(status);
       // El flag interno usado para decidir si descontar nunca debe filtrarse en la respuesta.
       expect(startResponse.body.enteringInProgress).toBeUndefined();
 
@@ -154,6 +168,13 @@ runIfDatabaseIsConfigured('Iniciar turno descuenta insumos', () => {
       expect(stockAfterSecondCall.rows[0].current_stock).toBe("480.000");
       const movementsAfterSecondCall = await pool.query("SELECT id FROM stock_movements WHERE item_id = $1 AND source_type='spa_account'", [itemId]);
       expect(movementsAfterSecondCall.rows).toHaveLength(1);
+      const completions = await Promise.all([request("PATCH", `/api/spa/appointments/${appointmentId}`, { status: "completed" }), request("PATCH", `/api/spa/appointments/${appointmentId}`, { status: "completed" })]);
+      expect(completions.map(r=>r.status)).toEqual([200,200]);
+      expect((await pool.query('SELECT status FROM spa_appointments WHERE id=$1',[appointmentId])).rows[0].status).toBe('completed');
+      expect((await pool.query('SELECT current_stock FROM inventory_items WHERE id=$1',[itemId])).rows[0].current_stock).toBe('480.000');
+      expect((await pool.query("SELECT id FROM stock_movements WHERE item_id=$1 AND source_type='spa_account'",[itemId])).rows).toHaveLength(1);
+      expect((await pool.query('SELECT * FROM spa_accounts WHERE id=$1',[accountId])).rows).toEqual(accountBefore);
+      expect((await pool.query('SELECT * FROM spa_payments WHERE account_id=$1 ORDER BY id',[accountId])).rows).toEqual(paymentsBefore);
     } finally {
       if (appointmentId) {
         await pool.query("DELETE FROM stock_movements WHERE item_id = $1", [itemId]);
