@@ -304,7 +304,7 @@ const appointmentStatusColors: Record<string, string> = {
   pending: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/30",
   confirmed: "bg-blue-500/20 text-blue-700 dark:text-blue-400 border-blue-500/30",
   in_progress: "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30",
-  completed: "bg-gray-500/20 text-gray-700 dark:text-gray-400 border-gray-500/30",
+  completed: "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30",
   cancelled: "bg-red-500/20 text-red-700 dark:text-red-400 border-red-500/30",
   no_show: "bg-orange-500/20 text-orange-700 dark:text-orange-400 border-orange-500/30",
 };
@@ -1095,7 +1095,8 @@ export default function SpaPage() {
         setIsCancelConfirmOpen(false);
         setSelectedAppointment(null);
       }
-      toast({ title: variables.status === "cancelled" ? "Turno cancelado" : "Turno actualizado" });
+      if (variables.status === "completed") setSelectedAppointment(null);
+      toast({ title: variables.status === "cancelled" ? "Turno cancelado" : variables.status === "completed" ? "Turno completado" : "Turno actualizado" });
     },
     onError: (e: Error) => {
       toast({ title: "Error al actualizar el turno", description: parseApiError(e), variant: "destructive" });
@@ -3428,15 +3429,14 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
                       <Pencil className="h-4 w-4 mr-1" /> Editar
                     </Button>
                   )}
-                  {selectedAppointment.status === "confirmed" && (
+                  {["confirmed", "in_progress"].includes(selectedAppointment.status) && (
                     <Button variant="default" size="sm" onClick={() => {
-                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "in_progress" });
-                      setSelectedAppointment(null);
-                    }} disabled={updateAppointmentMutation.isPending} data-testid="button-start-appointment">
-                      Iniciar
+                      updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "completed" });
+                    }} disabled={updateAppointmentMutation.isPending} data-testid="button-complete-appointment">
+                      Marcar como completado
                     </Button>
                   )}
-                  {["in_progress", "confirmed"].includes(selectedAppointment.status) && selectedAccount && selectedAccount.status === "open" && (
+                  {["in_progress", "confirmed", "completed"].includes(selectedAppointment.status) && selectedAccount && selectedAccount.status === "open" && (
                     <Button variant="default" size="sm" onClick={handleOpenFolio} data-testid="button-open-folio">
                       <CreditCard className="h-4 w-4 mr-1" /> Folio
                     </Button>

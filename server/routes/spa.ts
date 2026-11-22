@@ -1570,11 +1570,11 @@ export function registerSpaRoutes(app: Express) {
           );
         }
 
-        if(enteringInProgress){const account=await storage.getSpaAccountByAppointment(updated.id);if(account)await storage.deductStockFromSpaAccount(account.id,req.user!.id);}
+        if(enteringInProgress || enteringCompleted){const account=await storage.getSpaAccountByAppointment(updated.id);if(account)await storage.deductStockFromSpaAccount(account.id,req.user!.id);}
         return { ...updated, enteringInProgress };
       });
 
-      // Al iniciar el turno se consume el insumo del tratamiento, sin
+      // Al iniciar o completar directamente se consume el insumo del tratamiento, sin
       // esperar a que se cobre o se cierre la cuenta — deductStockFromSpaAccount
       // es idempotente por cuenta, así que el cierre posterior no lo descuenta
       // dos veces.
