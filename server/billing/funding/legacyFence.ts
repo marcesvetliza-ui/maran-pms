@@ -1,13 +1,16 @@
 import type { Request, Response } from "express";
 import type { PoolClient } from "pg";
 import { FundingError, identifier, type Scope } from "./contracts";
+import { spaAppointmentCancellationSchema } from "@shared/spaAppointmentCancellation";
 
 /** Operational actions have their own auth, availability and stock checks.
- * Never exempt identity, treatment, room settlement, cancellation or payments. */
+ * Never exempt identity, treatment, room settlement or payments. Cancellation
+ * accepts only status + reason and its handler changes the schedule/audit. */
 export function isSpaOperationalRequest(req:Pick<Request,"method"|"path"|"body">) {
  if(req.method==="POST"&&/^\/spa\/appointments\/[^/]+\/move$/.test(req.path))return true;
  if(req.method!=="PATCH"||!/^\/spa\/appointments\/[^/]+$/.test(req.path))return false;
  const body=req.body;
+ if(spaAppointmentCancellationSchema.safeParse(body).success)return true;
  return !!body&&typeof body==="object"&&!Array.isArray(body)&&Object.keys(body).length>0
   &&Object.keys(body).every(key=>["status","notes"].includes(key))
   &&(body.status===undefined||["confirmed","in_progress","completed"].includes(body.status));
