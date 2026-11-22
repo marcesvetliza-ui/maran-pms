@@ -1087,10 +1087,15 @@ export default function SpaPage() {
     mutationFn: async ({ id, status, motivoAnulacion }: { id: string; status: string; motivoAnulacion?: string }) => {
       return apiRequest("PATCH", `/api/spa/appointments/${id}`, { status, motivoAnulacion });
     },
-    onSuccess: () => {
+    onSuccess: (_response, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments"] });
       queryClient.invalidateQueries({ queryKey: ["/api/spa/appointments/cancellations/in-shift"] });
-      toast({ title: "Turno actualizado" });
+      if (variables.status === "cancelled") {
+        setCancelReason("");
+        setIsCancelConfirmOpen(false);
+        setSelectedAppointment(null);
+      }
+      toast({ title: variables.status === "cancelled" ? "Turno cancelado" : "Turno actualizado" });
     },
     onError: (e: Error) => {
       toast({ title: "Error al actualizar el turno", description: parseApiError(e), variant: "destructive" });
@@ -1665,9 +1670,6 @@ export default function SpaPage() {
   const handleCancelAppointment = () => {
     if (selectedAppointment) {
       updateAppointmentMutation.mutate({ id: selectedAppointment.id, status: "cancelled", motivoAnulacion: cancelReason.trim() });
-      setCancelReason("");
-      setIsCancelConfirmOpen(false);
-      setSelectedAppointment(null);
     }
   };
 

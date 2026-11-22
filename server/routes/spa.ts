@@ -1,7 +1,9 @@
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { spaPlanningMoveSchema, spaMoveEndTime } from "@shared/spaPlanningMove";
+import { spaAppointmentCancellationSchema } from "@shared/spaAppointmentCancellation";
 import type { Express } from "express";
 import { voidSpaPayment } from "../spaCancellation";
+import { lockSpaAppointmentCancellation } from "../spaAppointmentCancellation";
 import { storage } from "../db-storage";
 import { db, pool, withDatabaseTransaction } from "../db";
 import {
@@ -1395,7 +1397,11 @@ export function registerSpaRoutes(app: Express) {
 
   app.patch("/api/spa/appointments/:id", requireAuth, requirePermission(SPA_WRITE_RESOURCE_KEY), async (req, res) => {
     try {
-      if (req.body.status === "cancelled" && !String(req.body?.motivoAnulacion || "").trim()) return res.status(400).json({ error: "Indicá el motivo de cancelación" });
+      if (req.body.status === "cancelled") {
+        const cancellation = spaAppointmentCancellationSchema.safeParse(req.body);
+        if (!cancellation.success) return res.status(400).json({ error: "La cancelación solo admite el estado cancelado y un motivo de entre 1 y 2000 caracteres." });
+        req.body = cancellation.data;
+      }
       if (req.body.status !== undefined && !isValidSpaStatus(req.body.status)) {
         return res.status(400).json({ error: "El estado del turno no es válido" });
       }
@@ -1406,10 +1412,16 @@ export function registerSpaRoutes(app: Express) {
 
       const appointment = await withDatabaseTransaction(async () => {
         const tx=db;
+        if (req.body.status === "cancelled") await lockSpaAppointmentCancellation(tx, req.params.id);
         await tx.execute(sql`SELECT id FROM spa_appointments WHERE id = ${req.params.id} FOR UPDATE`);
         const [current] = await tx.select().from(spaAppointments).where(eq(spaAppointments.id, req.params.id));
         if (!current) {
           throw Object.assign(new Error("Turno no encontrado"), { statusCode: 404 });
+        }
+
+        // Retrying a cancellation preserves the original reason and audit row.
+        if (req.body.status === "cancelled" && current.status === "cancelled") {
+          return { ...current, enteringInProgress: false };
         }
 
         const cabinId = req.body.cabinId ?? current.cabinId;
@@ -1571,6 +1583,9 @@ export function registerSpaRoutes(app: Express) {
 
       res.json(appointmentResponse);
     } catch (error: any) {
+      if (req.body?.status === "cancelled" && ["55P03", "40P01", "40001"].includes(error?.code)) {
+        return res.status(409).json({ error: "Hay otra operación en curso en este turno o su cuenta. Esperá a que termine y reintentá la cancelación." });
+      }
       res.status(error?.statusCode || 500).json({
         error: "Error updating appointment",
         message: error?.message || "Error al actualizar el turno",
