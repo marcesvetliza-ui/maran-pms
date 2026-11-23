@@ -370,32 +370,32 @@ export default function CheckOutPage() {
           </Card>
 
           {isLoading ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-48" />)}
             </div>
           ) : filteredReservations && filteredReservations.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {filteredReservations
                 .slice()
                 .sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0"))
                 .map((reservation) => (
-                  <Card key={reservation.id} className="hover-elevate" data-testid={`checkout-card-${reservation.id}`}>
+                  <Card key={reservation.id} className="min-w-0 flex flex-col hover-elevate" data-testid={`checkout-card-${reservation.id}`}>
                     <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 font-semibold">
+                      <div className="flex min-w-0 flex-col gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 font-semibold">
                             {reservation.guest?.lastName?.[0]}{reservation.guest?.firstName?.[0]}
                           </div>
-                          <div>
-                            <CardTitle className="text-lg">
+                          <div className="min-w-0 flex-1">
+                            <CardTitle className="text-lg [overflow-wrap:anywhere]">
                               {reservation.guest?.lastName} {reservation.guest?.firstName}
                             </CardTitle>
-                            <CardDescription>{reservation.guest?.phone || reservation.guest?.email}</CardDescription>
+                            <CardDescription className="[overflow-wrap:anywhere]">{reservation.guest?.phone || reservation.guest?.email}</CardDescription>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
+                        <div className="flex min-w-0 flex-wrap items-start gap-1" data-testid={`checkout-statuses-${reservation.id}`}>
                           {((reservation as any).groupId || (reservation as any).isGroup) && (
-                            <Badge variant="outline" className="max-w-64 whitespace-normal text-right border-violet-300 text-violet-700 dark:border-violet-700 dark:text-violet-300" data-testid={`badge-group-${reservation.id}`}>
+                            <Badge variant="outline" className="block max-w-full whitespace-normal [overflow-wrap:anywhere] border-violet-300 text-violet-700 dark:border-violet-700 dark:text-violet-300" data-testid={`badge-group-${reservation.id}`}>
                               {(reservation as any).groupName || "Grupo"}{(reservation as any).groupCode && <span className="ml-1 opacity-70"> · {(reservation as any).groupCode}</span>}
                             </Badge>
                           )}
@@ -412,14 +412,14 @@ export default function CheckOutPage() {
                             <Badge className="text-xs bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-400" data-testid={`badge-early-${reservation.id}`}>Salida {formatDateAR(reservation.checkOutDate)}</Badge>
                           )}
                           {(reservation as any).lateCheckOut && (
-                            <Badge className="text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border border-yellow-300 dark:border-yellow-700" data-testid={`badge-late-checkout-${reservation.id}`}>
+                            <Badge className="max-w-full whitespace-normal [overflow-wrap:anywhere] text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border border-yellow-300 dark:border-yellow-700" data-testid={`badge-late-checkout-${reservation.id}`}>
                               🕐 Late Check-out{(reservation as any).lateCheckOutTime ? ` · ${(reservation as any).lateCheckOutTime} hs` : ""}
                             </Badge>
                           )}
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent className="flex flex-1 flex-col gap-3">
                       <div className="flex items-center gap-2 mb-1">
                         <DoorOpen className="h-4 w-4 text-muted-foreground" />
                         <span className="text-2xl font-bold text-primary tracking-tight">{reservation.room?.roomNumber}</span>
@@ -454,7 +454,7 @@ export default function CheckOutPage() {
                           <div className="line-clamp-2" style={{ whiteSpace: "pre-wrap" }}>{reservation.notes}</div>
                         </div>
                       )}
-                      <div className="pt-2">
+                      <div className="mt-auto pt-2">
                         <Button
                           variant="outline"
                           className="w-full border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400 dark:hover:bg-orange-900/20"
