@@ -12,7 +12,7 @@ vi.mock('../auth',()=>({requireAuth:(req:any,res:any,next:any)=>{if(!identity)re
 let pool:typeof import('../db').pool, service:typeof import('../channex/inbound'), manual:typeof import('../channex/manualAssignment');
 let arrival:string,departure:string,server:any,base:string,actor:string,reader:string;
 const fixtures:any[]=[];
-async function fixture(count=1,legacyVat=false){
+async function fixture(count=1,legacyVat=false,allRooms=false){
  const id=randomUUID(),type=randomUUID(),other=randomUUID(),plan=randomUUID();const f={id,type,other,plan,legacyVat,rev:randomUUID(),booking:randomUUID()};fixtures.push(f);
  for(const [t,name] of [[type,'Synthetic Premium'],[other,'Synthetic Suite']])await pool.query('INSERT INTO room_types(id,code,name,max_occupancy) VALUES($1::text,$1,$2,3)',[t,name]);
  await pool.query("INSERT INTO rate_plans(id,name,room_type_id,base_rate,currency) VALUES($1,'Synthetic USD',$2,999,'USD')",[plan,type]);
@@ -20,7 +20,7 @@ async function fixture(count=1,legacyVat=false){
  await pool.query("INSERT INTO channex_connections(id,label,environment,channex_property_id,base_url,is_active,created_at) VALUES($1::text,'Synthetic assignment','demo',$1,$2,true,now())",[id,STAGING_URL]);
  await pool.query("INSERT INTO channex_room_type_mappings(id,connection_id,channex_room_type_id,channex_room_type_title,room_type_id,created_at) VALUES($1::text,$1,'remote-type','Original Premium',$2,now())",[id,type]);
  await pool.query("INSERT INTO channex_rate_plan_mappings(id,connection_id,channex_room_type_id,channex_rate_plan_id,channex_rate_plan_title,rate_plan_id,created_at) VALUES($1::text,$1,'remote-type','remote-plan','USD',$2,now())",[id,plan]);
- await pool.query("INSERT INTO channex_ari_settings(connection_id,floor,room_ids,currency,enabled,capture_started_at) VALUES($1,3,$2,'USD',true,now())",[id,[`${type}-0`]]);
+ await pool.query("INSERT INTO channex_ari_settings(connection_id,floor,room_ids,currency,enabled,capture_started_at) VALUES($1,3,$2,'USD',true,now())",[id,allRooms?null:[`${type}-0`]]);
  await pool.query('INSERT INTO channex_inbound_settings(connection_id,enabled,settlement_exchange_rate) VALUES($1,true,1500)',[id]);
  await service.persistInboundRevision(pool,id,payload(f));return f;
 }
@@ -57,7 +57,7 @@ describe.skipIf(!enabled)('manual OTA inbox assignment with category warning and
   const original=(await pool.query('SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0];
   await service.applyInboundRevision(f.id,f.rev);
   expect(await state(f)).toHaveLength(0);
-  expect((await pool.query('SELECT review_code FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0].review_code).toBe('INVALID_ROOM_MAPPING');
+  expect((await pool.query('SELECT review_code FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0].review_code).toBe('MANUAL_ASSIGNMENT_REQUIRED');
   const ordinary=await manual.getInboundAssignmentOptions(f.id,f.rev,false);
   expect(ordinary.rooms[0].choices).toEqual([]);
   identity=actor;
@@ -120,8 +120,41 @@ describe.skipIf(!enabled)('manual OTA inbox assignment with category warning and
   identity=actor;expect((await post(f,body)).status).toBe(400);expect((await post(f,{...clean,reason:' '})).status).toBe(400);
   expect(await post(f,clean)).toMatchObject({status:200,body:{applied:true}});expect((await state(f))).toHaveLength(1);
  });
- it('honors the selected physical-room scope in automatic application',async()=>{
-  const f=await fixture(2);await pool.query("UPDATE rooms SET status='maintenance' WHERE id=$1",[`${f.type}-0`]);await service.applyInboundRevision(f.id,f.rev);expect(await state(f)).toHaveLength(0);expect((await pool.query('SELECT review_code FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0].review_code).toBe('NO_PILOT_ROOM_AVAILABLE');
+ it('keeps a new booking in the inbox even when a mapped room is available',async()=>{
+  const f=await fixture(2);await service.applyInboundRevision(f.id,f.rev);expect(await state(f)).toHaveLength(0);expect((await pool.query('SELECT review_code FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0].review_code).toBe('MANUAL_ASSIGNMENT_REQUIRED');
+  const preview=await manual.getInboundAssignmentOptions(f.id,f.rev,false);expect(preview.rooms[0].choices.map(r=>r.id)).toEqual([`${f.type}-0`]);
+  await pool.query("UPDATE rooms SET status='maintenance' WHERE id=$1",[`${f.type}-0`]);expect((await manual.getInboundAssignmentOptions(f.id,f.rev,false)).rooms[0].choices).toEqual([]);
+ });
+ it('holds availability before assignment and replaces the hold with the chosen room without double counting',async()=>{
+  const f=await fixture(2,false,true),{buildAriValues}=await import('../channex/ari');
+  const availability=async()=>{const c=await pool.connect();try{return (await buildAriValues(c,{id:f.id,channex_property_id:f.id,floor:3,room_ids:null,currency:'USD'},[{id:'manual-hold',kind:'availability',date_from:arrival,date_to:arrival,room_type_id:f.type,rate_plan_id:null,attempts:0}],arrival))[0].availability;}finally{c.release();}};
+  expect(await availability()).toBe(1);const before=(await pool.query('SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0];
+  await service.applyInboundRevision(f.id,f.rev);expect(await state(f)).toHaveLength(0);expect(await availability()).toBe(1);
+  const options=await manual.getInboundAssignmentOptions(f.id,f.rev,false);await service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-1`));
+  expect((await state(f))[0].room_id).toBe(`${f.type}-1`);expect(await availability()).toBe(1);expect((await pool.query('SELECT payload,payload_hash FROM channex_inbound_revisions WHERE connection_id=$1',[f.id])).rows[0]).toEqual(before);
+ });
+ it('keeps disjoint Executive and Twin quotas separate while reception chooses the actual room',async()=>{
+  const f=await fixture(2,false,true),{buildAriValues}=await import('../channex/ari');
+  await pool.query('UPDATE channex_ari_settings SET enabled=false WHERE connection_id=$1',[f.id]);await pool.query('UPDATE channex_inbound_settings SET enabled=false WHERE connection_id=$1',[f.id]);
+  await pool.query('UPDATE channex_room_type_mappings SET room_ids=$2::text[] WHERE connection_id=$1',[f.id,[`${f.type}-0`]]);
+  await pool.query("INSERT INTO channex_room_type_mappings(connection_id,channex_room_type_id,channex_room_type_title,room_type_id,room_ids,created_at)VALUES($1,'remote-twin','Twin',$2,$3::text[],now())",[f.id,f.type,[`${f.type}-1`]]);
+  await pool.query('UPDATE channex_ari_settings SET enabled=true WHERE connection_id=$1',[f.id]);await pool.query('UPDATE channex_inbound_settings SET enabled=true WHERE connection_id=$1',[f.id]);
+  const availability=async()=>{const c=await pool.connect();try{return (await buildAriValues(c,{id:f.id,channex_property_id:f.id,floor:3,room_ids:null,currency:'USD'},[{id:'split-hold',kind:'availability',date_from:arrival,date_to:arrival,room_type_id:f.type,rate_plan_id:null,attempts:0}],arrival)).map(v=>[v.room_type_id,v.availability]);}finally{c.release();}};
+  await service.applyInboundRevision(f.id,f.rev);expect(await availability()).toEqual([['remote-twin',1],['remote-type',0]]);
+  const options=await manual.getInboundAssignmentOptions(f.id,f.rev,true);await service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-1`,{confirmScopeChange:true}));
+  expect(await availability()).toEqual([['remote-twin',0],['remote-type',1]]);
+ });
+ it('releases an unassigned booking on a minimal cancellation without creating a PMS reservation',async()=>{
+  const f=await fixture(),{buildAriValues}=await import('../channex/ari');await service.applyInboundRevision(f.id,f.rev);
+  const cancelled={id:randomUUID(),attributes:{property_id:f.id,booking_id:f.booking,inserted_at:'2026-11-16T22:00:00Z',status:'cancelled'}};
+  await service.persistInboundRevision(pool,f.id,cancelled);await service.applyInboundRevision(f.id,cancelled.id);expect(await state(f)).toHaveLength(0);
+  const c=await pool.connect();try{const values=await buildAriValues(c,{id:f.id,channex_property_id:f.id,floor:3,room_ids:[`${f.type}-0`],currency:'USD'},[{id:'cancel-hold',kind:'availability',date_from:arrival,date_to:arrival,room_type_id:f.type,rate_plan_id:null,attempts:0}],arrival);expect(values[0].availability).toBe(1);}finally{c.release();}
+ });
+ it('does not move an assigned stay to a different free room when a modified date conflicts',async()=>{
+  const f=await fixture(2,false,true),options=await manual.getInboundAssignmentOptions(f.id,f.rev,false);await service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-1`));
+  const changed=payload(f,'modified',randomUUID(),'2026-11-16T22:00:00Z');
+  await pool.query("INSERT INTO maintenance_blocks(room_id,block_from,block_to,blocked_by)VALUES($1,$2,$3,'synthetic')",[`${f.type}-1`,arrival,departure]);
+  try{await service.persistInboundRevision(pool,f.id,changed);await service.applyInboundRevision(f.id,changed.id);expect((await state(f))[0].room_id).toBe(`${f.type}-1`);expect((await pool.query('SELECT status FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2',[f.id,changed.id])).rows[0].status).toBe('review');}finally{await pool.query('DELETE FROM maintenance_blocks WHERE room_id=$1',[`${f.type}-1`]);}
  });
  it('rolls back every unit, guest, link and settlement when mandatory manual audit fails',async()=>{
   const f=await fixture(2);const revision=payload(f,'new',f.rev,'2026-11-16T20:46:00Z',2);
@@ -139,7 +172,8 @@ describe.skipIf(!enabled)('manual OTA inbox assignment with category warning and
  });
  it('does not bypass an overlapping physical reservation even after accepting a group warning',async()=>{
   const f=await fixture();const options=await manual.getInboundAssignmentOptions(f.id,f.rev,true);
-  const otherBooking={...f,booking:randomUUID(),rev:randomUUID()};await service.persistInboundRevision(pool,f.id,payload(otherBooking));await service.applyInboundRevision(f.id,otherBooking.rev);
+  const otherBooking={...f,booking:randomUUID(),rev:randomUUID()};await service.persistInboundRevision(pool,f.id,payload(otherBooking));
+  const otherOptions=await manual.getInboundAssignmentOptions(f.id,otherBooking.rev,true);await service.applyInboundRevision(f.id,otherBooking.rev,request(otherOptions,`${f.type}-0`));
   await expect(service.applyInboundRevision(f.id,f.rev,request(options,`${f.type}-0`,{overrideTentativeGroupWarning:true}))).rejects.toMatchObject({code:'ASSIGNMENT_ROOM_UNAVAILABLE'});expect(await state(f)).toHaveLength(1);
  });
 

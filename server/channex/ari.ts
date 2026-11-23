@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { validateRoomSelections, RoomSelectionError } from "./roomSelection";
 import { calendarEffective, MAX_CALENDAR_CELLS, type CalendarCell } from "@shared/rate-calendar";
+import { loadPendingInventoryDemand } from './inboundInventory';
 
 export type AriEvent = { id: string; kind: 'availability' | 'restrictions'; date_from: string; date_to: string; room_type_id: string | null; rate_plan_id: string | null; attempts: number; reason?: string; changed_fields?: string[] | null };
 export type OccupancyPrice = { occupancy: number; rate: string };
@@ -68,6 +69,11 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
   const affected = (typeId: string, day: string, planId?: string) => events.some(e => e.date_from <= day && e.date_to >= day && (!e.room_type_id || e.room_type_id === typeId) && (!e.rate_plan_id || !planId || e.rate_plan_id === planId));
   const values: AriValue[] = [];
   if (events[0].kind === 'availability') {
+    // Read channel holds before physical inventory: a concurrent assignment can
+    // conservatively count twice until its queued refresh, never release early.
+    let pending;
+    try { pending=await loadPendingInventoryDemand(c,connection,dates); }
+    catch(error){throw new AriConfigurationError(error instanceof Error?error.message:'Revisá las reservas pendientes del canal.');}
     const rows = (await c.query(`WITH dates AS (SELECT unnest($3::date[]) AS day),
    blocked_groups AS (
     SELECT g.id,b.room_type_id,d.day,sum(b.quantity)::int AS quantity FROM groups g
@@ -89,10 +95,11 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
       AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos')
       AND NOT EXISTS(SELECT 1 FROM reservations b WHERE b.room_id=r.id AND b.status IN ('tentative','pending','reserved','confirmed','web_checkin','checked_in') AND b.check_in_date<=d.day AND b.check_out_date>d.day)
       AND NOT EXISTS(SELECT 1 FROM maintenance_blocks b WHERE b.room_id=r.id AND b.block_from<=d.day AND b.block_to>=d.day)
-    )-COALESCE(u.quantity,0))::int AS availability
+    )-COALESCE(u.quantity,0)-COALESCE(h.quantity,0))::int AS availability
    FROM channex_room_type_mappings m CROSS JOIN dates d
    LEFT JOIN unassigned u ON u.room_type_id=m.room_type_id AND u.day=d.day
-   WHERE m.connection_id=$1 AND m.channex_room_type_id=ANY($4::text[]) ORDER BY m.channex_room_type_id,d.day`, [connection.id, connection.floor, dates, targetIds, connection.room_ids ?? null])).rows;
+   LEFT JOIN jsonb_to_recordset($6::jsonb) AS h(channex_room_type_id text,day date,quantity int) ON h.channex_room_type_id=m.channex_room_type_id AND h.day=d.day
+   WHERE m.connection_id=$1 AND m.channex_room_type_id=ANY($4::text[]) ORDER BY m.channex_room_type_id,d.day`, [connection.id, connection.floor, dates, targetIds, connection.room_ids ?? null,JSON.stringify(pending)])).rows;
     for (const r of rows) if (affected(r.room_type_id, r.day)) values.push({ property_id: connection.channex_property_id, room_type_id: r.channex_room_type_id, date_from: r.day, date_to: r.day, availability: r.availability });
   } else {
     const plans = (await c.query(`SELECT m.channex_rate_plan_id,m.channex_room_type_id,m.rate_plan_id,m.sell_mode,m.rate_mode,m.occupancies,p.room_type_id,p.base_rate,p.currency,p.valid_from::text,p.valid_to::text,

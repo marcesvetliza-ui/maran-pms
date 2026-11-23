@@ -21,13 +21,13 @@ export function ChannexInboundSettings({ connectionId, mode = "inbox" }: { conne
   });
   if (!access?.read || (mode === "controls" && !canWrite)) return null;
   if (mode === "inbox") return <div className="space-y-3">
-    {query.data && <p className="text-sm text-muted-foreground">Recepción automática: {query.data.serverEnabled && query.data.settings.enabled ? "activa" : "pausada"}.</p>}
+    {query.data && <p className="text-sm text-muted-foreground">Recepción de reservas: {query.data.serverEnabled && query.data.settings.enabled ? "activa" : "pausada"}.</p>}
     <ChannexReservationsInbox key={connectionId} connectionId={connectionId} canRetry={!!access?.bookings} pending={action.isPending}
       onRetry={revisionId => action.mutate({ method: "POST", path: "/retry", body: { revisionId } })} />
     {action.error && <p role="alert" className="text-destructive">{action.error.message}</p>}
   </div>;
   return <Card><CardHeader><CardTitle className="text-base">Recepción de reservas de Channex</CardTitle></CardHeader><CardContent className="space-y-3">
-    <p className="text-sm">El receptor guarda las revisiones del canal y aplica las reservas al PMS cuando la conexión y el servidor están habilitados. Las revisiones se guardan antes de confirmar su recepción a Channex. Los cambios se aplican al alcance configurado; los conflictos quedan para revisión.</p>
+    <p className="text-sm">Las reservas nuevas quedan en esta bandeja para que recepción elija la habitación y las asigne al PMS. Las revisiones se guardan antes de confirmar su recepción a Channex. Los cambios y las cancelaciones posteriores se procesan sobre la reserva existente; los conflictos quedan para revisión.</p>
     <p className="text-sm font-medium">{query.data?.serverEnabled ? "Recepción habilitada en el servidor." : "Conexión entrante desactivada en el servidor."}</p>
     {canWrite&&<ChannexReadiness key={connectionId} connectionId={connectionId} />}
     {query.isLoading ? <p>Cargando estado…</p> : query.error ? <p role="alert">No se pudo consultar la recepción.</p> : query.data ? <>

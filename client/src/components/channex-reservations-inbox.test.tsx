@@ -46,3 +46,10 @@ it('opens details by keyboard and hides retry for read-only reception',async()=>
 it('shows query failures without treating the inbox as empty',async()=>{
  vi.mocked(apiRequest).mockRejectedValue(new Error('offline'));mount();expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo consultar la bandeja');
 });
+
+it('shows an accepted new booking as waiting for reception and never retries or assigns on its own',async()=>{
+ const waiting={...booking,booking_status:'new',status:'review',review_code:'MANUAL_ASSIGNMENT_REQUIRED',inbox_view:'new',reservations:[],revision_count:1};
+ vi.mocked(apiRequest).mockImplementation(async(_method,url)=>new Response(JSON.stringify(String(url).includes('/booking-detail/')?{notes:null,notesStatus:'none',settlements:[]}:String(url).includes('/history/')?{total:1,revisions:[waiting]}:{counts:{attention:1,new:1,modified:0,cancelled:0,all:1},channels:['Booking.com'],bookings:[waiting],page:1,pageSize:25}),{headers:{'Content-Type':'application/json'}}));
+ const onRetry=mount();await screen.findByText('Pendiente de asignación');const user=userEvent.setup();await user.click(screen.getByRole('button',{name:/Ver detalle de Ana Perez/}));const dialog=await screen.findByRole('dialog');
+ expect(within(dialog).getByRole('button',{name:'Asignar al PMS'})).toBeEnabled();expect(within(dialog).queryByRole('button',{name:'Reintentar revisión'})).not.toBeInTheDocument();expect(within(dialog).getByText('Todavía no hay una reserva vinculada en el PMS.')).toBeInTheDocument();expect(onRetry).not.toHaveBeenCalled();expect(vi.mocked(apiRequest).mock.calls.every(([method])=>method==='GET')).toBe(true);
+});

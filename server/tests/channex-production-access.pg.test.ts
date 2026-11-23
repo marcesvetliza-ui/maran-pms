@@ -114,7 +114,13 @@ suite('Production preparation and actual per-user access',()=>{
   await pool.query("INSERT INTO channex_inbound_settings(connection_id,enabled) VALUES($1,true)",[id]);
   const service=await import('../channex/inbound');
   const revision=(date:string,status:string,minute:number)=>({id:randomUUID(),attributes:{property_id:conn,booking_id:booking,inserted_at:new Date(Date.now()+minute*60000).toISOString(),status,arrival_date:date,departure_date:addDays(date,1),amount:'100',currency:'ARS',customer:{name:'Synthetic',surname:'Channel'},rooms:[{id:'production-room',room_type_id:'production-category',rate_plan_id:'production-plan',occupancy:{adults:1},days:{[date]:'100'}}]}});
-  const apply=async(payload:any)=>{await service.persistInboundRevision(pool,id,payload);await service.applyInboundRevision(id,payload.id);expect((await pool.query('SELECT status,review_code FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2',[id,payload.id])).rows[0]).toMatchObject({status:'applied',review_code:null});};
+  const apply=async(payload:any)=>{await service.persistInboundRevision(pool,id,payload);await service.applyInboundRevision(id,payload.id);
+   const state=()=>pool.query('SELECT status,review_code FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2',[id,payload.id]);
+   if((await state()).rows[0].review_code==='MANUAL_ASSIGNMENT_REQUIRED'){
+    const {getInboundAssignmentOptions}=await import('../channex/manualAssignment'),options=await getInboundAssignmentOptions(id,payload.id,false);
+    await service.applyInboundRevision(id,payload.id,{expectedPayloadHash:options.payloadHash,expectedConfigurationHash:options.configurationHash,assignments:{'production-room':options.rooms[0].choices[0].id},reason:'Synthetic reception choice',confirmCategoryChange:false,confirmScopeChange:false,actor:{id:admin,name:'Synthetic Reception'},canOverrideScope:false});
+   }
+   expect((await state()).rows[0]).toMatchObject({status:'applied',review_code:null});};
   await apply(revision(day,'new',0));
   const local=async()=>(await pool.query('SELECT r.*,rm.floor FROM reservations r JOIN rooms rm ON rm.id=r.room_id JOIN channex_inbound_rooms l ON l.reservation_id=r.id WHERE l.connection_id=$1',[id])).rows[0];
   expect(await local()).toMatchObject({status:'confirmed',total_room_amount:'100.00',pricing_scheme:'nightly_v1'});expect([1,2]).toContain((await local()).floor);

@@ -25,13 +25,14 @@ type Inbox = { channels?:string[]; counts: Record<View, number>; bookings: Booki
 const views: [View, string][] = [['attention', 'Requieren atención'], ['new', 'Nuevas'], ['modified', 'Modificadas'], ['cancelled', 'Canceladas'], ['all', 'Todas']];
 const bookingLabels: Record<string,string> = {new:'Nueva',modified:'Modificada',cancelled:'Cancelada'};
 const appliedLabels: Record<string,string> = {applied:'Aplicada al PMS',pending:'Pendiente de aplicar',review:'Requiere revisión',stale:'Anterior a la versión ya aplicada'};
+const integrationLabel=(r:Revision)=>r.review_code==='MANUAL_ASSIGNMENT_REQUIRED'?'Pendiente de asignación':appliedLabels[r.status]||'Estado por revisar';
 function amount(r: Revision) {
  if (!r.currency || r.amount == null || !/^\d+(\.\d+)?$/.test(r.amount)) return 'Importe no informado';
  return `${r.currency} ${new Intl.NumberFormat('es-AR', {minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(r.amount))}`;
 }
 function Result({revision:r}: {revision:Revision}) {
- return <><p>Integración: {appliedLabels[r.status] || 'Estado por revisar'} · {r.acked_at ? 'Recepción confirmada a Channex' : 'Confirmación pendiente'}</p>
- {r.review_code && <p className="text-destructive">{reasons[r.review_code] || 'Revisá la reserva y su configuración'}</p>}</>;
+ return <><p>Integración: {integrationLabel(r)} · {r.acked_at ? 'Recepción confirmada a Channex' : 'Confirmación pendiente'}</p>
+ {r.review_code && <p className={r.review_code==='MANUAL_ASSIGNMENT_REQUIRED'?'text-muted-foreground':'text-destructive'}>{reasons[r.review_code] || 'Revisá la reserva y su configuración'}</p>}</>;
 }
 function History({connectionId, revisionId}: {connectionId:string;revisionId:string}) {
  const [page,setPage]=useState(1);
@@ -58,7 +59,7 @@ function BookingDetail({connectionId,booking:r,canRetry,pending,onRetry,assignOp
  return <div className="space-y-5 text-sm">
  <section className="grid gap-3 sm:grid-cols-2"><div><p className="text-muted-foreground">Canal / referencia</p><p>{r.channel||'Canal no informado'} · {r.reference||r.booking_id||'Sin identificar'}</p></div><div><p className="text-muted-foreground">Estadía</p><p>{formatDisplayDate(r.arrival||r.reservations[0]?.checkInDate)} → {formatDisplayDate(r.departure||r.reservations[0]?.checkOutDate)}</p></div><div><p className="text-muted-foreground">Importe original del canal</p><p className="font-medium">{amount(r)}</p></div><div><p className="text-muted-foreground">Última recepción</p><p>{formatDisplayDateTime(r.created_at)}</p></div></section>
  <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold">Estado de la reserva</h3><p>Canal: {bookingLabels[r.booking_status||'']||'Estado no identificado'}</p><Result revision={r}/>
- {canRetry&&r.status==='review'&&!['INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'')&&<Button variant="outline" disabled={pending} onClick={()=>onRetry(r.revision_id)}>Reintentar revisión</Button>}</section>
+ {canRetry&&r.status==='review'&&!['MANUAL_ASSIGNMENT_REQUIRED','INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'')&&<Button variant="outline" disabled={pending} onClick={()=>onRetry(r.revision_id)}>Reintentar revisión</Button>}</section>
  {canRetry&&canAssign(r)&&<div>{assigning?<ChannexManualAssignment key={r.revision_id} connectionId={connectionId} revisionId={r.revision_id} onAssigned={onAssigned}/>:<Button onClick={()=>setAssigning(true)}>Asignar al PMS</Button>}</div>}
  <section className="space-y-2"><h3 className="font-semibold">Habitaciones y reserva en PMS</h3>{r.reservations.length?r.reservations.map(local=><div key={local.id} className="rounded border p-3"><p>{local.category} · Habitación {local.roomNumber}</p><p>{formatDisplayDate(local.checkInDate)} → {formatDisplayDate(local.checkOutDate)}</p><a className="underline text-primary" href={pmsLink(local.id)}>Ver reserva en PMS {local.code}</a></div>):<p className="text-muted-foreground">Todavía no hay una reserva vinculada en el PMS.</p>}</section>
  {q.isLoading?<p>Cargando conversión y observaciones…</p>:q.error?<div role="alert"><p>No se pudo consultar la conversión y las observaciones.</p><Button variant="outline" onClick={()=>void q.refetch()}>Volver a consultar detalle</Button></div>:q.data&&<>
@@ -103,7 +104,7 @@ export function ChannexReservationsInbox({connectionId,canRetry,pending,onRetry}
  <td className="px-4 py-3">{r.reservations.length?r.reservations.map(local=><div key={local.id}><span className="font-medium">{local.roomNumber}</span><span className="text-xs text-muted-foreground block">{local.category}</span></div>):<span className="text-muted-foreground">Sin asignar en PMS</span>}</td>
  <td className="px-4 py-3 whitespace-nowrap">{formatDisplayDate(r.arrival||r.reservations[0]?.checkInDate)}</td><td className="px-4 py-3 whitespace-nowrap">{formatDisplayDate(r.departure||r.reservations[0]?.checkOutDate)}</td>
  <td className="px-4 py-3 whitespace-nowrap font-medium tabular-nums">{amount(r)}</td>
- <td className="px-4 py-3"><div className="space-y-1"><Badge variant={r.booking_status==='cancelled'?'destructive':'secondary'}>{bookingLabels[r.booking_status||'']||'Sin identificar'}</Badge><span className={`block text-xs ${r.status==='review'?'text-destructive':'text-muted-foreground'}`}>{appliedLabels[r.status]||'Estado por revisar'}</span></div></td>
+ <td className="px-4 py-3"><div className="space-y-1"><Badge variant={r.booking_status==='cancelled'?'destructive':'secondary'}>{bookingLabels[r.booking_status||'']||'Sin identificar'}</Badge><span className={`block text-xs ${r.status==='review'&&r.review_code!=='MANUAL_ASSIGNMENT_REQUIRED'?'text-destructive':'text-muted-foreground'}`}>{integrationLabel(r)}</span></div></td>
  <td className="px-4 py-3"><Button size="sm" variant="outline" aria-label={`Ver detalle de ${guest(r)} · ${r.reference||r.booking_id||r.revision_id}`} onClick={e=>{e.stopPropagation();openDetail(r);}}>Ver detalle</Button>{canRetry&&canAssign(r)&&<Button size="sm" className="mt-2" onClick={e=>{e.stopPropagation();openDetail(r,true);}}>Asignar al PMS</Button>}</td>
  </tr>)}
  </tbody></table></div>

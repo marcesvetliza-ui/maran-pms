@@ -16,6 +16,7 @@ export const reasons: Record<string, string> = {
   ROOM_IDENTITY_REQUIRES_REVIEW: "Channex cambió identificadores de habitaciones sin una correspondencia única; requiere revisión",
   MISSING_ROOM_ID: "Las habitaciones necesitan identificadores estables", CANCELLED_BOOKING_REOPEN: "La reserva ya estaba cancelada",
   CANCELLED_ROOM_REOPEN: "La habitación estaba cancelada", PMS_APPLY_REQUIRES_REVIEW: "El PMS requiere revisión antes de aplicar los cambios",
-  MANUAL_ASSIGNMENT_REQUIRES_REVIEW: "La asignación fue excepcional; revisá la modificación del canal desde la reserva del PMS",
+  MANUAL_ASSIGNMENT_REQUIRED: "Pendiente de asignación: elegí la habitación desde esta bandeja",
+  MANUAL_ASSIGNMENT_REQUIRES_REVIEW: "La modificación requiere revisar la asignación desde la reserva del PMS",
   LOCAL_STAY_REQUIRES_REVIEW: "Revisá el estado de la estadía antes de modificarla",
 };
