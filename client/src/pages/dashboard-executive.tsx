@@ -1,4 +1,6 @@
 import {LodgingNotice} from "@/components/lodging-notice";
+import { OccupancyMethodology } from '@/components/occupancy-methodology';
+import type { OccupancySummary } from '@shared/lodgingOccupancy';
 import { formatDisplayDate } from "@shared/date-display";
 import { useState, useMemo } from "react";
 import { getArgentinaToday, toArgentinaDateStr, getArgentinaFirstOfMonth } from "@/lib/date-utils";
@@ -56,6 +58,7 @@ type PreviousYear = {
 };
 
 type ExecutiveStats = {
+  occupancySummary?: OccupancySummary;
   alojamiento?: { resumen: {roomNights:number;capacityNights:number}; advertencias:Record<string,number>; criterio:string; proyeccion:{revenue:number;roomNights:number} };
   occupancyRate: number;
   occupiedRooms: number;
@@ -309,7 +312,7 @@ export default function DashboardExecutive() {
             <Card data-testid="kpi-occupancy">
               <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Ocupación
+                  {stats.occupancySummary?.basis === 'reserved' ? 'Ocupación reservada' : stats.occupancySummary?.basis === 'mixed' ? 'Ocupación del período' : 'Ocupación realizada'}
                 </CardTitle>
                 <Bed className="h-5 w-5 text-muted-foreground" />
               </CardHeader>
@@ -318,7 +321,7 @@ export default function DashboardExecutive() {
                   {stats.occupancyRate?.toFixed(1)}%
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {stats.alojamiento?.resumen.roomNights ?? 0} habitaciones-noche del período. Ahora: {stats.occupiedRooms} de {stats.totalRooms} habitaciones ocupadas.
+                  {stats.occupancySummary?.roomNights ?? stats.alojamiento?.resumen.roomNights ?? 0} habitaciones-noche {stats.occupancySummary?.basis === 'reserved' ? 'reservadas' : stats.occupancySummary?.basis === 'mixed' ? 'realizadas y reservadas' : 'realizadas'} del período. Ahora: {stats.occupiedRooms} de {stats.totalRooms} habitaciones ocupadas.
                 </p>
                 <TrendIndicator
                   current={stats.occupancyRate}
@@ -397,6 +400,7 @@ export default function DashboardExecutive() {
       <Card data-testid="chart-occupancy">
         <CardHeader>
           <CardTitle>Ocupación por Día</CardTitle>
+          <OccupancyMethodology />
         </CardHeader>
         <CardContent>
           {occupancyLoading ? (
