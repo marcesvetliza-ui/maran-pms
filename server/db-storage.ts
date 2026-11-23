@@ -1,4 +1,5 @@
 import { voidReservationPaymentWithLedger } from "./reservationPaymentVoid";
+import { restaurantTablePlacement } from '@shared/restaurant-layout';
 import { lodgingOccupancy } from '@shared/lodgingOccupancy';
 import { guardGroupGuestReplacement, lockGroupAssignmentFinancialWriter } from './groupGuestReplacement';
 import {hospitalityNotificationVisibility,applyHospitalityNotificationStatus,requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from './hospitalityNotifications';
@@ -4520,8 +4521,20 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable> {
-    const [created] = await db.insert(restaurantTables).values(table as any).returning();
-    return created;
+    return withDatabaseTransaction(async () => {
+      await db.execute(sql`SELECT pg_advisory_xact_lock(hashtext('restaurant-layout'))`);
+      const [area] = await db.select().from(restaurantAreas).where(eq(restaurantAreas.id, table.areaId));
+      if (!area || area.isActive !== 'true' || area.hasTables !== 'true') {
+        throw Object.assign(new Error('Elegí un sector activo que admita mesas.'), { statusCode: 400 });
+      }
+      const active = await db.select().from(restaurantTables).where(and(eq(restaurantTables.areaId, area.id), eq(restaurantTables.isActive, 'true')));
+      const position = restaurantTablePlacement(active, area.areaType).firstFree;
+      if (!position) throw Object.assign(new Error('El plano de este sector está completo. Liberá una posición o elegí otro sector; la mesa no fue creada.'), { statusCode: 409 });
+      // The server allocates a cell under the same lock as layout saves. Old
+      // clients may still send a stale, occupied or out-of-bounds position.
+      const [created] = await db.insert(restaurantTables).values({ ...table, ...position } as any).returning();
+      return created;
+    });
   }
 
   async updateRestaurantTable(id: string, table: Partial<InsertRestaurantTable>): Promise<RestaurantTable | undefined> {

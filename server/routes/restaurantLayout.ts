@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import { sql } from 'drizzle-orm';
 import { db,withDatabaseTransaction } from '../db';
 import { requirePermission } from '../auth';
-import { restaurantLayoutSchema,type RestaurantLayoutRequest } from '@shared/restaurant-layout';
+import { restaurantLayoutSchema,restaurantGridSize,type RestaurantLayoutRequest } from '@shared/restaurant-layout';
 const conflict=(message:string)=>Object.assign(new Error(message),{statusCode:409});
 export async function saveRestaurantLayout(input:RestaurantLayoutRequest){
  return withDatabaseTransaction(async()=>{
@@ -21,7 +21,8 @@ export async function saveRestaurantLayout(input:RestaurantLayoutRequest){
   const occupied=(await db.execute(sql`SELECT id,area_id,position_x,position_y FROM restaurant_tables WHERE area_id IN (${sql.join(areaIds,sql`,`)}) AND is_active='true' ORDER BY id FOR UPDATE`)).rows as any[];
   for(const patch of input.tables){
    const area=areas.find(a=>a.id===patch.areaId);
-   if(patch.positionX>=(area.area_type==='event'?5:8)||patch.positionY>=(area.area_type==='event'?3:6))throw conflict('La posición está fuera del plano del sector.');
+   const {columns,rows}=restaurantGridSize(area.area_type);
+   if(patch.positionX>=columns||patch.positionY>=rows)throw conflict('La posición está fuera del plano del sector.');
    const collision=occupied.some(row=>{const moved=input.tables.find(p=>p.id===row.id);return row.id!==patch.id&&row.area_id===patch.areaId&&(moved?.positionX??row.position_x)===patch.positionX&&(moved?.positionY??row.position_y)===patch.positionY;});
    if(collision)throw conflict('Otra mesa ocupa esa posición. Revisá el plano antes de guardar.');
   }
