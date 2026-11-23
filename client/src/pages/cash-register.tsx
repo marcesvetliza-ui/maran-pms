@@ -3,6 +3,7 @@ import { CashCardRectificationHistory } from '@/components/cash-card-rectificati
 import { CASH_DOCUMENT_LABELS, cashDocumentSummary, type CashDocumentEvidence } from "@shared/cash-document-classification";
 import { ReservationCancellationHistory } from "@/components/reservation-cancellation-history";
 import { canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
+import { isXeniaPmsQa, useXeniaInstallation } from "@/components/xenia-pms-context";
 import { formatDisplayDate } from "@shared/date-display";
 import { informationalSummary } from "@/lib/cash-informational-summary";
 import { Fragment, useState, useEffect, useMemo } from "react";
@@ -543,8 +544,10 @@ export function printClosingSummary(
 
 function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: CashConfig; shiftRefreshToken: number }) {
   const { user, hasPermission } = useAuth();
+  const { data: qaInstallation } = useXeniaInstallation();
   // Etapa 3 del ABM de usuarios: mismo resourceKey server-side.
-  const canOperate = canOperateCash(user?.username, area);
+  const canOperate = canOperateCash(user?.username, area, isXeniaPmsQa && qaInstallation?.operationsEnabled
+    ? { xeniaQa: true, role: user?.role || "" } : undefined);
   const isAdmin = hasPermission("api:cash:area-admin");
   const { toast } = useToast();
   const [openShiftDialog, setOpenShiftDialog] = useState(false);
@@ -676,12 +679,13 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
 
   const openShiftMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", "/api/cash/shifts/open", {
+      const response = await apiRequest("POST", "/api/cash/shifts/open", {
         area,
         openedBy,
         notes: openNotes || undefined,
         turnoTipo: turnoTipoOpen || undefined,
       });
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
@@ -770,17 +774,18 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
 
   const closeShiftMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", `/api/cash/shifts/${currentShift!.id}/close`, {
+      const response = await apiRequest("POST", `/api/cash/shifts/${currentShift!.id}/close`, {
         closedBy,
         efectivoContado,
         operadorSiguiente: (operadorSiguiente === "_ninguno" || !operadorSiguiente.trim()) ? null : operadorSiguiente.trim(),
         notes: closeNotes || undefined,
         turnoTipo: turnoTipoClose || undefined,
       });
+      return response.json();
     },
     onSuccess: (result: any) => {
       const sysEfect = movements.filter(m => !m.anulado && isEfectivo(m.paymentMethod) && m.movementType !== "informational").reduce((s, m) => s + (m.movementType === "income" ? 1 : -1) * parseFloat(String(m.amount)), 0);
-      setClosingSummaryData({ shift: { ...currentShift!, closedBy, closedAt: new Date().toISOString() }, movements, turnoNuevo: result.turnoNuevo, efectivoContado, efectivoSistema: sysEfect });
+      setClosingSummaryData({ shift: result.shift, movements, turnoNuevo: result.turnoNuevo, efectivoContado, efectivoSistema: sysEfect });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/movements"] });
       queryClient.invalidateQueries({ queryKey: ["/api/cash/summary"] });
@@ -796,7 +801,7 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
 
   const tomarTurnoMutation = useMutation({
     mutationFn: async ({ operador, turnoTipo }: { operador: string; turnoTipo: string }) => {
-      return apiRequest("PATCH", `/api/cash/shifts/${currentShift!.id}/tomar`, { operador, turnoTipo });
+      return (await apiRequest("PATCH", `/api/cash/shifts/${currentShift!.id}/tomar`, { operador, turnoTipo })).json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/cash/shifts/current"] });
@@ -902,13 +907,13 @@ function AreaTab({ area, config, shiftRefreshToken }: { area: string; config: Ca
                 <DollarSign className="h-5 w-5" />
                 Movimientos
               </CardTitle>
-              <Button
+              {!isXeniaPmsQa && <Button
                 onClick={() => setMovementDialog(true)}
                 data-testid={`btn-manual-movement-${area}`}
               >
                 <Plus className="h-4 w-4 mr-2" />
                 {isAdmin ? "Registrar movimiento manual" : "Registrar fondo inicial"}
-              </Button>
+              </Button>}
             </CardHeader>
             <CardContent>
               {movementsLoading ? (
@@ -3153,6 +3158,26 @@ function DuplicatePaymentLinksTab() {
 }
 
 export default function CashRegister() {
+  return isXeniaPmsQa ? <XeniaQaCashRegister /> : <OperationalCashRegister />;
+}
+
+function XeniaQaCashRegister() {
+  const { data: installation } = useXeniaInstallation();
+  const { data: configs = [], isPending, isError, refetch } = useQuery<CashConfig[]>({
+    queryKey: ["/api/cash/configs"], enabled: !!installation?.operationsEnabled,
+    queryFn: async () => (await apiRequest("GET", "/api/cash/configs")).json(),
+  });
+  if (!installation?.operationsEnabled) return <p className="p-6">Caja todavía no está habilitada para esta prueba.</p>;
+  if (isPending) return <p className="p-6" role="status">Cargando Caja…</p>;
+  if (isError) return <div className="p-6" role="alert">No se pudo cargar Caja. <Button onClick={() => void refetch()}>Reintentar</Button></div>;
+  const reception = configs.find(config => config.area === "reception" && config.isActive);
+  return <main className="p-6 space-y-4"><h1 className="text-2xl font-bold">Caja de recepción · Prueba</h1>
+    <p>Los cobros registrados en las estadías aparecen aquí. El cierre compara los cobros con el efectivo contado; no emite comprobantes fiscales.</p>
+    {reception ? <AreaTab area="reception" config={reception} shiftRefreshToken={0} /> : <p role="alert">Falta preparar la Caja de recepción de esta instalación.</p>}
+  </main>;
+}
+
+function OperationalCashRegister() {
   const { user, hasPermission } = useAuth();
   const { data: configs, isLoading } = useQuery<CashConfig[]>({
     queryKey: ["/api/cash/configs"],

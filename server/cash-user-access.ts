@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express";
 import { canViewCash, canOperateCash, hasGlobalCashAccess } from "@shared/cash-user-access";
+import type {} from "./xenia-pms/request-context";
 
 export const requireCashView: RequestHandler = (req, res, next) => {
   if (!canViewCash(req.user?.username)) {
@@ -33,7 +34,9 @@ export function cashShiftAccess(loadArea: (id: string) => Promise<string | undef
           return;
         }
       }
-      if (typeof area !== "string" || !canOperateCash(req.user?.username, area)) {
+      const qa = req.xeniaPmsAccess?.operationsEnabled
+        ? { xeniaQa: true as const, role: req.user?.role || "" } : undefined;
+      if (typeof area !== "string" || !canOperateCash(req.user?.username, area, qa)) {
         res.status(403).json({ error: "No tenés permiso para abrir, tomar o cerrar esta caja." });
         return;
       }

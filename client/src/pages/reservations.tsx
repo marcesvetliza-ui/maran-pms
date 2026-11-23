@@ -12,6 +12,9 @@ import { createReservationPaymentSubmission } from "@/lib/reservation-payment-su
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
+import { isXeniaPmsQa, useXeniaInstallation } from "@/components/xenia-pms-context";
+import { XeniaQaCheckout } from "@/components/xenia-qa-checkout";
+import { qaOperationId, confirmQaOperation } from "@/lib/xenia-qa-operation";
 import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { RevertCheckout } from "@/components/revert-checkout";
@@ -2343,6 +2346,12 @@ export function ReservationDetailDialog({
     refetchOnMount: "always",
   });
   const reservation = liveReservation || initialReservation;
+  const { data: qaInstallation } = useXeniaInstallation();
+  const { user: qaActor } = useAuth();
+  const qaReadOnly = isXeniaPmsQa && (!qaInstallation?.operationsEnabled ||
+    (currentUserRole || qaActor?.role) === "xenia_viewer");
+  const qaScope = `${qaInstallation?.propertyId}:${qaActor?.id}:${reservation.id}`;
+  const [qaCheckoutOpen, setQaCheckoutOpen] = useState(false);
   const detailAccommodationAccess = useQuery<{ canEdit: boolean }>({
     queryKey: ["/api/reservation-edit-permission"],
     enabled: open,
@@ -2355,8 +2364,8 @@ export function ReservationDetailDialog({
   const isGroupReservation = Boolean((reservation as any).groupId || (reservation as any).isGroup);
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
-  const canAnularPago = !currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole);
-  const canAnularCargo = canVoidReservationCharge(currentUserRole);
+  const canAnularPago = !isXeniaPmsQa && (!currentUserRole || ["admin", "manager", "jefe_recepcion"].includes(currentUserRole));
+  const canAnularCargo = !isXeniaPmsQa && canVoidReservationCharge(currentUserRole);
 
   // Bug K: Fetch emitted invoices for this reservation so we can lock charges that were
   // already invoiced (prevent cancel/transfer of billed items).
@@ -2419,6 +2428,10 @@ export function ReservationDetailDialog({
   };
 
   const requestCheckout = () => {
+    if (isXeniaPmsQa) {
+      if (!qaReadOnly) setQaCheckoutOpen(true);
+      return;
+    }
     if (availableAdvancePayments.length > 0) {
       setUninvoicedWarningAction("checkout");
       setShowUninvoicedWarning(true);
@@ -2575,7 +2588,7 @@ export function ReservationDetailDialog({
   const [showFacturar, setShowFacturar] = useState(false);
   const [showFacturarMode, setShowFacturarMode] = useState<"billing" | "checkout">("billing");
   const [facturaEmitida, setFacturaEmitida] = useState(false);
-  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"] });
+  const { data: billingConfig } = useQuery<any>({ queryKey: ["/api/billing/config"], enabled: !isXeniaPmsQa });
 
   // Companions
   type CompanionForm = { firstName: string; lastName: string; documentType: string; documentNumber: string; dateOfBirth: string; nationality: string; guestId?: string | null };
@@ -2790,6 +2803,7 @@ export function ReservationDetailDialog({
       if (!res.ok) return [];
       return res.json();
     },
+    enabled: !isXeniaPmsQa,
   });
 
   const { data: folioCreditNotes = [] } = useQuery<any[]>({
@@ -2818,14 +2832,22 @@ export function ReservationDetailDialog({
 
   const addChargeMutation = useMutation({
     mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string; isRecurring?: boolean; unitAmount?: string }) => {
-      return apiRequest("POST", "/api/charges", chargeData);
+      const response = await apiRequest("POST", "/api/charges", isXeniaPmsQa
+        ? { ...chargeData, operationId: qaOperationId(sessionStorage, "charge:" + qaScope, chargeData) }
+        : chargeData);
+      return isXeniaPmsQa ? response.json() : response;
     },
     onSuccess: () => {
+      if (isXeniaPmsQa) confirmQaOperation(sessionStorage, "charge:" + qaScope);
       refetchCharges();
       setShowAddCharge(false);
       setNewCharge({ description: "", amount: "", category: "otros" });
+      setSelectedPreset(null);
+      setChargeQty(1);
+      setIsRecurringCharge(false);
       toast({ title: "Cargo agregado", description: "El cargo ha sido registrado en el folio." });
     },
+    onError: (error: any) => toast({ title: "No se confirmó el consumo", description: parseApiError(error) || "Actualizá el folio antes de reintentar.", variant: "destructive" }),
   });
 
   const deleteChargeMutation = useMutation({
@@ -2907,7 +2929,13 @@ export function ReservationDetailDialog({
           paymentRequestId: paymentData.paymentRequestId,
         });
       }
-      return apiRequest("POST", "/api/payments", paymentData);
+      const response = await apiRequest("POST", "/api/payments", paymentData);
+      if (isXeniaPmsQa) {
+        const saved = await response.clone().json();
+        if (!saved?.id || saved.reservationId !== paymentData.reservationId)
+          throw Error("No se pudo confirmar la respuesta del cobro. Revisá el folio antes de reintentar.");
+      }
+      return response;
     },
     onSuccess: () => {
       refetchPayments();
@@ -3050,9 +3078,6 @@ export function ReservationDetailDialog({
       date: getLocalToday(),
       ...(isRecurringCharge && { isRecurring: true, unitAmount: newCharge.amount }),
     });
-    setSelectedPreset(null);
-    setChargeQty(1);
-    setIsRecurringCharge(false);
   };
 
   // Quickly add one more unit of an existing charge (for cochera, etc.)
@@ -3150,7 +3175,9 @@ export function ReservationDetailDialog({
           ...(row.companyId ? { companyId: row.companyId } : {}),
           ...(row.agencyId ? { agencyId: row.agencyId } : {}),
         };
-        const paymentRequestId = paymentSubmission.current.requestId(index, payload);
+        const paymentRequestId = isXeniaPmsQa
+          ? qaOperationId(sessionStorage, `payment:${qaScope}:${index}`, payload)
+          : paymentSubmission.current.requestId(index, payload);
         const res = await addPaymentMutation.mutateAsync({ ...payload, paymentRequestId } as any);
         // Capture the created payment's ID so we can optionally link an invoice
         try {
@@ -3166,10 +3193,11 @@ export function ReservationDetailDialog({
       }
     }
     setShowAddPayment(false);
+    if (isXeniaPmsQa) validRows.forEach((_, index) => confirmQaOperation(sessionStorage, `payment:${qaScope}:${index}`));
     setPaymentRows([{ amount: "", method: "efectivo", reference: "", billingTarget: "guest" }]);
     toast({ title: "Pago registrado", description: `${successCount} pago(s) confirmado(s).` });
     // Only offer invoice linking when a single advance was registered (clear intent)
-    if (successCount === 1 && lastPaymentId) {
+    if (!isXeniaPmsQa && successCount === 1 && lastPaymentId) {
       setInvoicingPaymentId(lastPaymentId);
     }
     } finally {
@@ -3825,7 +3853,7 @@ export function ReservationDetailDialog({
               <div className="wf-panel-heading compact">
                 <div><p className="wf-section-kicker">CARGOS ADICIONALES</p><h3>Consumos</h3></div>
                 <div className="wf-heading-end"><span className="wf-total-tag">${fmtMoney(totalConsumptions)}</span>
-                {!isLocked && (
+                {!isLocked && !qaReadOnly && (
                 <Button size="sm" variant="outline" onClick={() => setShowAddCharge(!showAddCharge)} data-testid="button-add-charge">
                   <Plus className="h-4 w-4 mr-1" />
                   Agregar consumo
@@ -4013,7 +4041,7 @@ export function ReservationDetailDialog({
                       <span className={`font-medium tabular-nums ${isAnulado ? "line-through text-muted-foreground" : ""}`} data-testid={`text-charge-amount-${charge.id}`}>
                         ${fmtMoney(charge.amount)}
                       </span>
-                      {!isLocked && !isAnulado && <ReservationChargeEdit reservationId={reservation.id} chargeId={String(charge.id)} />}
+                      {!isXeniaPmsQa && !isLocked && !isAnulado && <ReservationChargeEdit reservationId={reservation.id} chargeId={String(charge.id)} />}
                       {restaurantOrderNum && (
                         <Button
                           size="sm"
@@ -4026,7 +4054,7 @@ export function ReservationDetailDialog({
                           <Eye className="h-3 w-3 mr-1" />Ver origen
                         </Button>
                       )}
-                      {!isLocked && !isAnulado && (
+                      {!isLocked && !isAnulado && !qaReadOnly && (
                         <>
                         <Button 
                           size="icon" 
@@ -4052,7 +4080,7 @@ export function ReservationDetailDialog({
                           <ArrowRightLeft className="h-3 w-3 mr-1" />Transferir
                         </Button>
                         )}
-                        {canVoidReservationCharge(currentUserRole, charge.category) && !invoicedChargeIds.has(String(charge.id)) && (
+                        {!isXeniaPmsQa && canVoidReservationCharge(currentUserRole, charge.category) && !invoicedChargeIds.has(String(charge.id)) && (
                         <Button 
                           size="sm"
                           variant="outline"
@@ -4153,7 +4181,7 @@ export function ReservationDetailDialog({
               <div className="wf-panel-heading compact">
                 <div><p className="wf-section-kicker">COBROS</p><h3>{isGroupReservation ? "Pagos aplicados" : "Pagos registrados"}</h3></div>
                 <div className="wf-heading-end"><span className="wf-paid-tag">${fmtMoney(totalPayments)} recibidos</span>
-                {!isLocked && (
+                {!isLocked && !qaReadOnly && (
                 <Button size="sm" variant="outline" onClick={() => {
                   if(isGroupReservation){setShowFacturarMode('billing');setShowFacturar(true);return;}
                   if (!showAddPayment) {
@@ -4224,7 +4252,7 @@ export function ReservationDetailDialog({
                             <SelectItem value="tarjeta_credito">Crédito</SelectItem>
                             <SelectItem value="transferencia">Transferencia</SelectItem>
                             <SelectItem value="mercadopago">MercadoPago</SelectItem>
-                            {!isGroupReservation && <SelectItem value="cuenta_corriente">Cta. Cte.</SelectItem>}
+                            {!isGroupReservation && !isXeniaPmsQa && <SelectItem value="cuenta_corriente">Cta. Cte.</SelectItem>}
                           </SelectContent>
                         </Select>
                         <div className="flex gap-1 items-center">
@@ -4483,7 +4511,7 @@ export function ReservationDetailDialog({
                           <Undo2 className="h-3 w-3 mr-1" />Re-vincular
                         </Button>
                       )}
-                      {canInvoiceReservationPayment(payment as any) && (
+                      {!isXeniaPmsQa && canInvoiceReservationPayment(payment as any) && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -4680,7 +4708,7 @@ export function ReservationDetailDialog({
                   <span>{hasRoomVoucher ? "PENDIENTE DE COMPROBANTE" : "PENDIENTE DE FACTURACIÓN"}</span>
                   <span>{groupFiscalKnown?`$${fmtMoney(pendingBilling)}`:"Consultar cobertura grupal"}</span>
                 </div>
-                {pendingBilling > 0.01 && !showAddPayment && !isLocked && (
+                {pendingBilling > 0.01 && !showAddPayment && !isLocked && !isXeniaPmsQa && (
                   <div className="flex flex-col gap-2 mt-2">
                     <Button
                       size="sm"
@@ -4702,7 +4730,7 @@ export function ReservationDetailDialog({
                     </Button>
                   </div>
                 )}
-                {pendingBilling <= 0.01 && !isLocked && (
+                {pendingBilling <= 0.01 && !isLocked && !isXeniaPmsQa && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -4940,7 +4968,7 @@ export function ReservationDetailDialog({
             {typeof operationalActions === "function"
               ? operationalActions({ onCheckout: requestCheckout })
               : operationalActions}
-            {reservation.status === "checked_out" && <RevertCheckout reservationId={reservation.id} onComplete={() => onOpenChange(false)} />}
+            {!isXeniaPmsQa && reservation.status === "checked_out" && <RevertCheckout reservationId={reservation.id} onComplete={() => onOpenChange(false)} />}
             <Button
               variant="outline"
               onClick={printConfirmation}
@@ -4949,7 +4977,7 @@ export function ReservationDetailDialog({
               <FileText className="h-4 w-4 mr-2" />
               Confirmación
             </Button>
-            {!isLocked && <Button size="sm" variant="outline" onClick={() => {
+            {!isXeniaPmsQa && !isLocked && <Button size="sm" variant="outline" onClick={() => {
               setBulkSelectedChargeIds(new Set());
               setBulkIncludeAccommodation(false);
               setBulkTargetReservationId("");
@@ -4969,7 +4997,7 @@ export function ReservationDetailDialog({
                 Editar datos de reserva
               </Button>
             )}
-            {!operationalActions && reservation.status === "checked_in" && (
+            {!operationalActions && !qaReadOnly && reservation.status === "checked_in" && (
               <Button
                 variant="outline"
                 className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-300"
@@ -5593,7 +5621,7 @@ export function ReservationDetailDialog({
       </Dialog>
 
       {/* Prefactura / Facturar Saldo / Check-out desde folio */}
-      <PrefacturaDialog
+      {!isXeniaPmsQa && <PrefacturaDialog
         open={showFacturar}
         onClose={() => setShowFacturar(false)}
         reservationId={reservation.id}
@@ -5603,7 +5631,9 @@ export function ReservationDetailDialog({
           setFacturaEmitida(true);
           if (operationalActions) onOpenChange(false);
         }}
-      />
+      />}
+      {isXeniaPmsQa && <XeniaQaCheckout open={qaCheckoutOpen} reservationId={reservation.id}
+        onClose={() => setQaCheckoutOpen(false)} onComplete={() => { setQaCheckoutOpen(false); onOpenChange(false); }} />}
     </Dialog>
   );
 }

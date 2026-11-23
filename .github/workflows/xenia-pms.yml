@@ -6,10 +6,14 @@ on:
         main,
         feat/xenia-multihotel-foundation-20261117,
         feat/xenia-pms-integration-20261118,
+        fix/xenia-pms-reservation-edit-20261119,
       ]
     paths:
       - "server/xenia-control/**"
       - "server/xenia-pms/**"
+      - "server/routes/reservations.ts"
+      - "server/cash-user-access.ts"
+      - "server/db-storage.ts"
       - "server/auth.ts"
       - "server/index.ts"
       - "client/src/**"
@@ -50,6 +54,8 @@ jobs:
         run: |
           npm run xenia:test
           npm run xenia:pms:test
+          npx vitest run client/src/lib/xenia-qa-operation.test.ts client/src/components/xenia-qa-checkout.test.tsx
+          npx vitest run --config vitest.server.config.ts server/tests/cash-user-access.test.ts server/tests/cash-user-access-middleware.test.ts
           npm run xenia:test:browser
       - name: Compilar las imágenes independientes
         run: |

@@ -59,6 +59,7 @@ import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning } from "@/
 import { getBedConfigLabel } from "@/lib/planning-utils";
 import { GuestSelector, CompanySelector } from "@/components/entity-selector";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
+import { isXeniaPmsQa } from "@/components/xenia-pms-context";
 import type { ReservationWithDetails, Guest, Company, RoomType, RoomWithType, RatePlan, InsertGuest, InsertCompany, WebCheckin, GuestPreference } from "@shared/schema";
 
 interface WebCheckinListItem extends WebCheckin {
@@ -260,7 +261,8 @@ export default function CheckInPage() {
 
   const checkInMutation = useMutation({
     mutationFn: async ({ id, motivo }: { id: string; motivo?: string }) => {
-      return apiRequest("POST", `/api/reservations/${id}/check-in`, motivo ? { motivo } : {});
+      const response = await apiRequest("POST", `/api/reservations/${id}/check-in`, motivo ? { motivo } : {});
+      return isXeniaPmsQa ? response.json() : response;
     },
     onSuccess: () => {
       const shouldOpenBilling = postCheckInActionRef.current === "billing";
@@ -286,7 +288,7 @@ export default function CheckInPage() {
       setRetroactivoMotivo("");
       setPendingCheckInId(null);
       setSelectedReservation(null);
-      if (shouldOpenBilling && reservationForBilling) {
+      if (!isXeniaPmsQa && shouldOpenBilling && reservationForBilling) {
         setPrefacturaReservation(reservationForBilling);
         setPrefacturaOpen(true);
       }
@@ -1540,7 +1542,7 @@ export default function CheckInPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="grid shrink-0 grid-cols-2 gap-2 border-t pt-3 sm:space-x-0">
-            <Button
+            {!isXeniaPmsQa && <Button
               variant="outline"
               className="col-span-2 w-full"
               onClick={() => {
@@ -1552,7 +1554,7 @@ export default function CheckInPage() {
             >
               <CreditCard className="h-4 w-4 mr-2" />
               Confirmar check-in y cobrar
-            </Button>
+            </Button>}
             <AlertDialogCancel
               className="mt-0 w-full sm:mt-0"
               onClick={() => { postCheckInActionRef.current = "none"; }}

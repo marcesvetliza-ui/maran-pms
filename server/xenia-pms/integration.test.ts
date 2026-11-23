@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { exerciseQaOperations } from "./operations.acceptance";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import {
   readFileSync,
@@ -46,11 +47,12 @@ async function port() {
   return value;
 }
 
-test(
-  "full PMS: central sign-in, planning, reservations, independent hotels and immediate revocation",
+for (const operationsEnabled of [false, true]) test(
+  `full PMS: central sign-in, isolation and revocation (operations=${operationsEnabled})`,
   { timeout: 180000 },
   async () => {
     const fixture = createDisposableXeniaPostgres();
+    const screenshotDir = process.env.XENIA_SCREENSHOT_DIR ? process.env.XENIA_SCREENSHOT_DIR + (operationsEnabled ? "/operations" : "/lodging") : undefined;
     let control: Awaited<ReturnType<typeof createControlApp>> | undefined;
     let browser: Browser | undefined;
     const servers: Server[] = [],
@@ -144,6 +146,7 @@ test(
           PORT: String(backendPort),
           NODE_EXTRA_CA_CERTS: cert,
           XENIA_PMS_MODE: "qa",
+          XENIA_PMS_OPERATIONS_ENABLED: String(operationsEnabled),
           DATABASE_URL: databaseUrl,
           SESSION_SECRET: randomBytes(40).toString("hex"),
           XENIA_PMS_ORIGIN: origin,
@@ -191,6 +194,7 @@ test(
       });
       const context = await browser.newContext({
         ignoreHTTPSErrors: true,
+        timezoneId: "America/Argentina/Buenos_Aires",
         locale: "es-AR",
         viewport: { width: 1440, height: 1000 },
       });
@@ -225,10 +229,10 @@ test(
       await expect(page.getByTestId("xenia-pms-context")).toContainText(
         "Hotel Aurora",
       );
-      if (process.env.XENIA_SCREENSHOT_DIR) {
-        mkdirSync(process.env.XENIA_SCREENSHOT_DIR, { recursive: true });
+      if (screenshotDir) {
+        mkdirSync(screenshotDir, { recursive: true });
         await page.screenshot({
-          path: process.env.XENIA_SCREENSHOT_DIR + "/aurora-planning.png",
+          path: screenshotDir + "/aurora-planning.png",
         });
       }
       const request = context.request;
@@ -429,10 +433,10 @@ test(
       assert.equal(persistedReservation.checkOutDate, longerStay);
       assert.equal(Number(persistedReservation.totalRoomAmount), 185000);
       assert.equal(persistedReservation.roomId, "xenia-qa-room-103");
-      if (process.env.XENIA_SCREENSHOT_DIR)
+      if (screenshotDir)
         await page.screenshot({
           path:
-            process.env.XENIA_SCREENSHOT_DIR +
+            screenshotDir +
             "/aurora-edicion-alojamiento.png",
         });
       const stalePricing = await request.post(
@@ -488,7 +492,7 @@ test(
       );
       for (const route of [
         "/api/billing/emit",
-        "/api/charges",
+        ...(operationsEnabled ? [] : ["/api/charges"]),
         "/api/channex/ari/sync",
         "/api/system-users",
       ])
@@ -519,6 +523,7 @@ test(
         ).status(),
         403,
       );
+      if (operationsEnabled) await exerciseQaOperations(page, installations[0], screenshotDir);
       // An authenticated Aurora browser cannot reuse its cookie on Brisa.
       assert.equal(
         (
@@ -542,6 +547,7 @@ test(
 
       const viewerContext = await browser.newContext({
         ignoreHTTPSErrors: true,
+        timezoneId: "America/Argentina/Buenos_Aires",
       });
       const viewer = await viewerContext.newPage();
       // Starting in the PMS before central login must resume the pending request.
@@ -551,9 +557,9 @@ test(
       await expect(viewer.getByTestId("xenia-pms-context")).toContainText(
         "Apart Brisa",
       );
-      if (process.env.XENIA_SCREENSHOT_DIR)
+      if (screenshotDir)
         await viewer.screenshot({
-          path: process.env.XENIA_SCREENSHOT_DIR + "/brisa-consulta.png",
+          path: screenshotDir + "/brisa-consulta.png",
         });
       const guestResponse = await viewerContext.request.get(
         installations[1].origin + "/api/guests",
@@ -571,6 +577,10 @@ test(
       assert.equal((await viewerPermission.json()).canEdit, false);
       for (const [route, method] of [
         ["/api/reservations", "post"],
+        ["/api/payments", "post"],
+        ["/api/charges", "post"],
+        ["/api/cash/shifts/open", "post"],
+        ["/api/reservations/xenia-qa-reservation-1/check-in", "post"],
         ["/api/rooms/xenia-qa-room-101", "patch"],
         ["/api/reservations/xenia-qa-reservation-1", "delete"],
         [
@@ -605,10 +615,17 @@ test(
       await viewerContext.close();
       const adminContext = await browser.newContext({
         ignoreHTTPSErrors: true,
+        timezoneId: "America/Argentina/Buenos_Aires",
       });
       const admin = await adminContext.newPage();
       await admin.goto(config.origin);
       await admin.locator("[data-persona=owner]").click();
+      if (operationsEnabled) {
+        await admin.goto(installations[1].origin + "/xenia/start");
+        await admin.waitForURL(installations[1].origin + "/planning");
+        await exerciseQaOperations(admin, installations[1], screenshotDir);
+        await admin.goto(config.origin);
+      }
       await admin.locator("#property-selector").selectOption(aurora.id);
       await admin.locator("#admin-tab").click();
       await admin.locator("#pms-origin").fill(installations[0].origin);
@@ -623,13 +640,14 @@ test(
       await expect(admin.locator("#pms-connection-sheet")).toHaveValue("");
       await adminContext.close();
       assert.deepEqual(errors, []);
-      if (process.env.XENIA_SCREENSHOT_DIR) {
-        mkdirSync(process.env.XENIA_SCREENSHOT_DIR, { recursive: true });
+      if (screenshotDir) {
+        mkdirSync(screenshotDir, { recursive: true });
         writeFileSync(
-          process.env.XENIA_SCREENSHOT_DIR + "/pms-acceptance.json",
+          screenshotDir + "/pms-acceptance.json",
           JSON.stringify(
             {
               status: "passed",
+              operationsEnabled,
               environment:
                 "disposable local PostgreSQL and compiled PMS over HTTPS",
               checks: [
@@ -650,13 +668,13 @@ test(
       }
     } catch (error) {
       console.error(diagnostics.slice(-25).join("\n"));
-      if (browser && process.env.XENIA_SCREENSHOT_DIR) {
-        mkdirSync(process.env.XENIA_SCREENSHOT_DIR, { recursive: true });
+      if (browser && screenshotDir) {
+        mkdirSync(screenshotDir, { recursive: true });
         for (const context of browser.contexts())
           for (const page of context.pages()) {
             await page
               .screenshot({
-                path: process.env.XENIA_SCREENSHOT_DIR + "/failed.png",
+                path: screenshotDir + "/failed.png",
               })
               .catch(() => {});
             console.error(

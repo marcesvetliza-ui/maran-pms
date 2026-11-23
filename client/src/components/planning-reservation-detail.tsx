@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/App";
+import { isXeniaPmsQa, useXeniaInstallation } from "./xenia-pms-context";
 import { getLocalToday } from "@/lib/utils";
 import type { ReservationWithDetails } from "@shared/schema";
 
@@ -34,6 +35,8 @@ export function ReservationDetailModal({
 }) {
   const { toast } = useToast();
   const { user } = useAuth();
+  const { data: qaInstallation } = useXeniaInstallation();
+  const qaCanOperate = !isXeniaPmsQa || (qaInstallation?.operationsEnabled && ["admin", "manager", "reception"].includes(user?.role || ""));
   const [cancelReservation, setCancelReservation] = useState<ReservationWithDetails | null>(null);
   const [retroDialogOpen, setRetroDialogOpen] = useState(false);
   const [retroMotivo, setRetroMotivo] = useState("");
@@ -50,12 +53,14 @@ export function ReservationDetailModal({
   });
 
   const checkInMutation = useMutation({
-    mutationFn: async ({ motivo }: { motivo?: string } = {}) =>
-      apiRequest(
+    mutationFn: async ({ motivo }: { motivo?: string } = {}) => {
+      const response = await apiRequest(
         "POST",
         `/api/reservations/${reservationId}/check-in`,
         motivo ? { motivo } : {},
-      ),
+      );
+      return isXeniaPmsQa ? response.json() : response;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({
@@ -149,14 +154,16 @@ export function ReservationDetailModal({
       })()
     : false;
   const canCheckIn =
+    qaCanOperate &&
     (reservation?.status === "confirmed" ||
       reservation?.status === "web_checkin" ||
       reservation?.status === "pending" ||
       reservation?.status === "tentative") &&
     isCheckInDateValid;
   const canCheckOut =
-    reservation?.status === "checked_in" && isCheckOutDateValid;
+    qaCanOperate && reservation?.status === "checked_in" && isCheckOutDateValid;
   const canUndoCheckIn =
+    !isXeniaPmsQa &&
     reservation?.status === "checked_in" &&
     reservation?.checkInDate === todayLocal;
   const canCancel =

@@ -34,4 +34,15 @@ describe("hotel approved cash roster", () => {
     expect(canOperateCash("martin.gimenez", "restaurante")).toBe(true);
     for (const area of ["events", "eventos", "", "constructor", "__proto__"]) expect(canOperateCash("admin", area)).toBe(false);
   });
+  it("scopes a verified Xenia QA context to reception without expanding the ordinary roster", () => {
+    const username = "xenia.11111111-1111-4111-8111-111111111111";
+    expect(canOperateCash(username, "reception")).toBe(false);
+    for (const role of ["admin", "manager", "reception"]) {
+      expect(canOperateCash(username, "reception", { xeniaQa: true, role })).toBe(true);
+      expect(canOperateCash(username, "restaurant", { xeniaQa: true, role })).toBe(false);
+    }
+    expect(canOperateCash(username, "reception", { xeniaQa: true, role: "xenia_viewer" })).toBe(false);
+    expect(canOperateCash("new-admin", "reception", { xeniaQa: true, role: "admin" })).toBe(false);
+    expect(hasGlobalCashAccess(username)).toBe(false);
+  });
 });
