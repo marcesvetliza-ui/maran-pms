@@ -1,4 +1,5 @@
 import {LodgingNotice} from "@/components/lodging-notice";
+import { OccupancyMethodology } from '@/components/occupancy-methodology';
 import { fetchReportJson } from "@/lib/report-request";
 import { ReportQueryError } from "@/components/report-query-error";
 import { formatDisplayDate } from "@shared/date-display";
@@ -464,8 +465,8 @@ export default function ReportsPage() {
       case "occupancy":
         if (occupancy.data) {
           exportCSV(
-            ["Fecha", "Hab. Disponibles", "Hab. Ocupadas", "% Ocupación"],
-            occupancy.data.map((r) => [formatDisplayDate(r.date), String(r.available), String(r.occupied), formatOccupancyPercentage(r.occupancy)]),
+            ["Fecha", "Hab. Disponibles", "Alojadas / realizadas", "Reservadas por venir", "% Ocupación"],
+            occupancy.data.map((r) => [formatDisplayDate(r.date), String(r.available), String(r.occupied), String(r.forecast ?? 0), formatOccupancyPercentage(r.occupancy)]),
             "ocupacion"
           );
         }
@@ -802,6 +803,7 @@ export default function ReportsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Ocupación Diaria</CardTitle>
+              <OccupancyMethodology />
             </CardHeader>
             <CardContent>
               {occupancy.isLoading ? (
@@ -825,8 +827,8 @@ export default function ReportsPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Fecha</TableHead>
-                          <TableHead className="text-right">Sin ocupación realizada</TableHead>
-                          <TableHead className="text-right">Hab. ocupadas (realizado)</TableHead><TableHead className="text-right">Reservadas por venir</TableHead>
+                          <TableHead className="text-right">Hab. disponibles</TableHead>
+                          <TableHead className="text-right">Alojadas / realizadas</TableHead><TableHead className="text-right">Reservadas por venir</TableHead>
                           <TableHead className="text-right">% Ocupación</TableHead>
                         </TableRow>
                       </TableHeader>

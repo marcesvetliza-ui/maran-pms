@@ -1,4 +1,5 @@
 import { voidReservationPaymentWithLedger } from "./reservationPaymentVoid";
+import { lodgingOccupancy } from '@shared/lodgingOccupancy';
 import { guardGroupGuestReplacement, lockGroupAssignmentFinancialWriter } from './groupGuestReplacement';
 import {hospitalityNotificationVisibility,applyHospitalityNotificationStatus,requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from './hospitalityNotifications';
 import { normalizeToSpanishPaymentMethod } from "./payment-method";
@@ -7283,12 +7284,13 @@ export class DatabaseStorage implements IStorage {
     const extrasRevenue = periodCharges.filter(c=>(c.status??'active')==='active'&&['restaurant','spa','minibar'].includes(c.category??'')).reduce((sum,c)=>sum+parseFloat(c.amount||'0'),0);
     const totalRevenue = accommodationRevenue+extrasRevenue;
     const occupiedRooms = roomsByStatus.occupied||0,availableRooms=roomsByStatus.available||0;
-    const occupancyRate = lodging.summary.occupancy,adr=lodging.summary.adr,revpar=lodging.summary.revpar;
+    const occupancySummary = lodgingOccupancy(lodging.asOf, lodging.daily).summary;
+    const occupancyRate = occupancySummary.occupancy,adr=lodging.summary.adr,revpar=lodging.summary.revpar;
     const byChannel = lodgingChannels(lodging).map(row=>({...row,percentage:accommodationRevenue?row.revenue/accommodationRevenue*100:0}));
     const prevCharges = await db.select().from(charges).where(and(gte(charges.date,prevFrom),lte(charges.date,prevTo)));
     const prevExtrasRevenue = prevCharges.filter(c=>(c.status??'active')==='active'&&['restaurant','spa','minibar'].includes(c.category??'')).reduce((sum,c)=>sum+parseFloat(c.amount||'0'),0);
     const prevTotalRevenue = previous.summary.revenue+prevExtrasRevenue;
-    const prevAdr = previous.summary.adr,prevOccupancyRate=previous.summary.occupancy,prevRevpar=previous.summary.revpar;
+    const prevAdr = previous.summary.adr,prevOccupancyRate=lodgingOccupancy(previous.asOf, previous.daily).summary.occupancy,prevRevpar=previous.summary.revpar;
 
     const today = getArgentinaToday();
     const todayReservations = await db.select().from(reservations)
@@ -7301,7 +7303,7 @@ export class DatabaseStorage implements IStorage {
 
     return {
       alojamiento: {resumen:lodging.summary,proyeccion:lodging.forecast,advertencias:lodging.warnings,criterio:lodging.methodology},
-      occupancyRate, occupiedRooms, availableRooms, totalRooms,
+      occupancyRate, occupancySummary, occupiedRooms, availableRooms, totalRooms,
       totalRevenue: Math.round(totalRevenue*100)/100, accommodationRevenue, extrasRevenue: Math.round(extrasRevenue*100)/100,
       adr, revpar, byChannel,
       previousYear: { occupancyRate: prevOccupancyRate, totalRevenue: Math.round(prevTotalRevenue*100)/100, adr: prevAdr, revpar: prevRevpar },
@@ -7312,7 +7314,7 @@ export class DatabaseStorage implements IStorage {
 
   async getReportOccupancy(from: string, to: string): Promise<any[]> {
     const lodging=await loadLodging(from,to);
-    return lodging.daily.map(day=>({date:day.date,available:day.capacity-day.actualNights,occupied:day.actualNights,occupancy:day.capacity?day.actualNights/day.capacity*100:0,totalRooms:day.capacity,forecast:day.forecastNights,lodgingWarnings:lodging.warnings}));
+    return lodgingOccupancy(lodging.asOf, lodging.daily).daily.map(day=>({date:day.date,available:day.freeRooms,occupied:day.actualNights,occupancy:day.occupancy,totalRooms:day.capacity,forecast:day.forecastNights,counted:day.countedNights,basis:day.basis,lodgingWarnings:lodging.warnings}));
   }
 
   async getReportRevenueByRoomType(from: string, to: string): Promise<any[]> {
