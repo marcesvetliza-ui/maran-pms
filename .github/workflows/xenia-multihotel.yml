@@ -1,0 +1,57 @@
+name: Fundamentos multihotel de Xenia
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "server/xenia-control/**"
+      - "script/*xenia-control*"
+      - "Dockerfile.xenia-control"
+      - "railway.xenia-control.json"
+      - "tsconfig.xenia-control.json"
+      - "package*.json"
+      - ".github/workflows/xenia-multihotel.yml"
+permissions:
+  contents: read
+jobs:
+  isolated-control:
+    # Keep the OS within the existing Playwright version's supported platforms.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Instalar dependencias existentes
+        run: npm ci --no-audit --no-fund
+      - name: Disponer de PostgreSQL para el clúster descartable
+        run: |
+          if ! command -v pg_config >/dev/null || [ ! -x "$(pg_config --bindir)/initdb" ]; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+      - name: Verificar tipos y compilación del panel
+        run: |
+          npm run xenia:check
+          npm run xenia:build
+          node --check server/xenia-control/public/app.js
+          node -e 'JSON.parse(require("node:fs").readFileSync("railway.xenia-control.json", "utf8"))'
+      - name: Probar aislamiento, sesiones y permisos sobre bases independientes
+        # The fixture creates a new Unix-socket-only cluster. No operational URL or secret is configured.
+        run: npm run xenia:test
+      - name: Preparar navegador de pruebas
+        run: npx playwright install --with-deps chromium
+      - name: Probar aislamiento y cambios de cuenta entre pestañas
+        env:
+          XENIA_SCREENSHOT_DIR: artifacts/xenia-multihotel
+        run: npm run xenia:test:browser
+      - name: Compilar la imagen independiente del panel
+        run: docker build -f Dockerfile.xenia-control -t xenia-control:review .
+      - name: Conservar las capturas de revisión
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xenia-multihotel-capturas
+          path: artifacts/xenia-multihotel
+          if-no-files-found: ignore
