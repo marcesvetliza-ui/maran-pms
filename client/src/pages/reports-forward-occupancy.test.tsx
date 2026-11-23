@@ -32,6 +32,6 @@ it('el CSV conserva las reservas por venir y el mismo porcentaje de la tabla',as
 it('Ejecutivo presenta ocupación reservada y las noches del rango, además del estado actual de habitaciones',async()=>{
   show(<DashboardExecutive/>);futureDates();await userEvent.click(screen.getByTestId('btn-apply-custom'));
   await waitFor(()=>expect(screen.getByTestId('kpi-occupancy')).toHaveTextContent('87.9%'));
-  expect(screen.getByTestId('kpi-occupancy')).toHaveTextContent('Ocupación reservada');expect(screen.getByTestId('kpi-occupancy')).toHaveTextContent('174 habitaciones-noche reservadas');expect(screen.getByTestId('kpi-occupancy')).toHaveTextContent('20 de 66 habitaciones ocupadas');
+  expect(screen.getByTestId('kpi-occupancy')).toHaveTextContent('Ocupación reservada');expect(screen.getByTestId('kpi-occupancy')).toHaveTextContent('174 habitaciones-noche reservadas sobre 198 disponibles');expect(screen.getByTestId('kpi-occupancy')).not.toHaveTextContent('20 de 66');
   expect(fetch).toHaveBeenCalledWith('/api/executive/stats?from=2026-11-24&to=2026-11-26',expect.any(Object));
 });

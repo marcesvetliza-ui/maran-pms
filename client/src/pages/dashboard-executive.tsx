@@ -321,7 +321,7 @@ export default function DashboardExecutive() {
                   {stats.occupancyRate?.toFixed(1)}%
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {stats.occupancySummary?.roomNights ?? stats.alojamiento?.resumen.roomNights ?? 0} habitaciones-noche {stats.occupancySummary?.basis === 'reserved' ? 'reservadas' : stats.occupancySummary?.basis === 'mixed' ? 'realizadas y reservadas' : 'realizadas'} del período. Ahora: {stats.occupiedRooms} de {stats.totalRooms} habitaciones ocupadas.
+                  {stats.occupancySummary?.roomNights ?? stats.alojamiento?.resumen.roomNights ?? 0} habitaciones-noche {stats.occupancySummary?.basis === 'reserved' ? 'reservadas' : stats.occupancySummary?.basis === 'mixed' ? 'realizadas y reservadas' : 'realizadas'}{stats.occupancySummary ? ` sobre ${stats.occupancySummary.capacityNights} disponibles` : ''} en el período.
                 </p>
                 <TrendIndicator
                   current={stats.occupancyRate}
