@@ -859,7 +859,7 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Reserva no encontrada" });
       }
       const [currentGuest] = await db.select().from(guestsTable).where(eq(guestsTable.id, currentRes.guestId)).limit(1);
-      if (currentGuest?.codigo !== `GROUP-${groupId}` || !['confirmed','pending','tentative'].includes(currentRes.status)) {
+      if (!['confirmed','pending','tentative'].includes(currentRes.status) || (currentGuest?.codigo !== `GROUP-${groupId}` && guestId !== currentRes.guestId)) {
         return res.status(409).json({ error: 'Esta reserva ya tiene pasajero o inició su estadía. Usá Reemplazar huésped para revisar sus anticipos antes de cambiarlo.' });
       }
       const effectiveRoomTypeId = roomTypeId || currentRes.roomTypeId;

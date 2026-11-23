@@ -16,4 +16,8 @@ export async function guardGroupGuestReplacement(existing: { id: string; guestId
   if (!links.length) return;
   if (!['confirmed','pending','tentative'].includes(existing.status)) throw Object.assign(new Error('El pasajero del grupo solo puede reemplazarse antes del check-in.'), { statusCode: 409 });
   if (links.length !== 1 || (links[0].codigo !== `GROUP-${links[0].group_id}` && reviewed.getStore() !== existing.id)) throw Object.assign(new Error('Usá Reemplazar huésped desde Grupos para revisar los anticipos antes de cambiar al pasajero.'), { statusCode: 409 });
+  if (reviewed.getStore() !== existing.id) {
+    const personal = await db.execute(sql`SELECT id FROM payments WHERE reservation_id=${existing.id} AND group_payment_id IS NULL AND status<>'anulado' LIMIT 1`);
+    if (personal.rows.length) throw Object.assign(new Error('Este cupo tiene un anticipo personal. Usá Asignar huésped desde Grupos para confirmar expresamente su destino.'), { statusCode: 409 });
+  }
 }

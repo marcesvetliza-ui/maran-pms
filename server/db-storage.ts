@@ -1318,7 +1318,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateReservation(id: string, reservation: Partial<InsertReservation>): Promise<Reservation | undefined> {
-    if (mayChangePricing(reservation) || reservation.guestId) {
+    if (mayChangePricing(reservation)) {
       return withReservationFinancialLock(id, () => this.updateReservationPricingLocked(id, reservation));
     }
     return this.updateReservationPricingLocked(id, reservation);

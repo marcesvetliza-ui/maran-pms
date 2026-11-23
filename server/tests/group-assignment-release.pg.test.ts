@@ -238,6 +238,6 @@ suite('Liberar una asignación de grupo sin reducir contrato ni duplicar cobros'
   });
   it('rechaza roles ajenos a Grupos y no permite usar la vía de placeholders para saltar la confirmación',async()=>{
     const f=await fixture();role='waiter';expect((await request(path(f)+'assignment-preview')).status).toBe(403);role='reception';
-    const response=await request(`/api/groups/${f.id}/placeholder-reservations/${f.res}`,{guestId:f.id},'PATCH');expect(response.status).toBe(409);
+    const response=await request(`/api/groups/${f.id}/placeholder-reservations/${f.res}`,{guestId:'unreviewed-guest'},'PATCH');expect(response.status).toBe(409);
   });
 });
