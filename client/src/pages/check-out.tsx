@@ -370,11 +370,11 @@ export default function CheckOutPage() {
           </Card>
 
           {isLoading ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-48" />)}
             </div>
           ) : filteredReservations && filteredReservations.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {filteredReservations
                 .slice()
                 .sort((a, b) => parseInt(a.room?.roomNumber || "0") - parseInt(b.room?.roomNumber || "0"))
