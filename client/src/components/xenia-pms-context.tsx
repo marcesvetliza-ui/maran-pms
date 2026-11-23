@@ -8,6 +8,7 @@ type Installation = {
   propertyId: string;
   controlOrigin: string;
   startPath: string;
+  operationsEnabled: boolean;
 };
 export function useXeniaInstallation() {
   return useQuery<Installation>({
@@ -38,9 +39,10 @@ export function XeniaPmsLogin() {
           establecimiento.
         </p>
         <p className="text-sm text-muted-foreground">
-          Prueba de Alojamiento: planning, habitaciones, huéspedes y reservas
-          con datos ficticios. Consumos, pagos, facturación e integraciones
-          pendientes de habilitación.
+          {installation.data?.operationsEnabled
+            ? "Prueba de estadías: reservas, ingreso, consumos, cobros y Caja de recepción con datos ficticios."
+            : "Prueba de Alojamiento: planning, habitaciones, huéspedes y reservas con datos ficticios."}
+          {" "}Facturación e integraciones externas pendientes de habilitación.
         </p>
         {installation.isError ? (
           <div role="alert" className="space-y-3">
@@ -69,11 +71,12 @@ export function XeniaPmsBanner() {
       className="shrink-0 border-b border-teal-200 bg-teal-50 text-teal-950 px-4 py-2 text-sm flex flex-wrap items-center justify-between gap-2"
     >
       <div>
-        <strong>{data?.name ?? "Xenia"}</strong> · Alojamiento · Pruebas con
+        <strong>{data?.name ?? "Xenia"}</strong> · {data?.operationsEnabled ? "Estadías y Caja" : "Alojamiento"} · Pruebas con
         datos ficticios
         <p className="text-xs mt-1">
-          Consumos, pagos y facturación pendientes de habilitación en esta
-          prueba.
+          {data?.operationsEnabled
+            ? "Cobros de prueba sin emisión fiscal. Integraciones externas desactivadas."
+            : "Consumos, pagos y facturación pendientes de habilitación en esta prueba."}
         </p>
       </div>
       {data && (

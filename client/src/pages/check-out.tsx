@@ -35,6 +35,8 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails } from "@shared/schema";
 import { PrefacturaDialog } from "@/components/PrefacturaDialog";
+import { isXeniaPmsQa } from "@/components/xenia-pms-context";
+import { XeniaQaCheckout } from "@/components/xenia-qa-checkout";
 
 type CheckoutReservation = ReservationWithDetails & { folioBalance?: number | null };
 
@@ -690,7 +692,7 @@ export default function CheckOutPage() {
       </Dialog>
 
       {/* PrefacturaDialog para checkout normal */}
-      {selectedReservation && (
+      {selectedReservation && !isXeniaPmsQa && (
         <PrefacturaDialog
           open={prefacturaOpen}
           onClose={() => { setPrefacturaOpen(false); setSelectedReservation(null); void queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] }); }}
@@ -704,6 +706,9 @@ export default function CheckOutPage() {
       )}
 
       {/* ══════════ DIALOGS NO SHOWS ══════════ */}
+      {selectedReservation && isXeniaPmsQa && <XeniaQaCheckout open={prefacturaOpen}
+        reservationId={selectedReservation.id} onClose={() => { setPrefacturaOpen(false); setSelectedReservation(null); }}
+        onComplete={() => { setPrefacturaOpen(false); setSelectedReservation(null); }} />}
 
       {/* Cerrar con cobro → PrefacturaDialog en modo billing */}
       {selectedNoShow && noShowWithChargeOpen && (

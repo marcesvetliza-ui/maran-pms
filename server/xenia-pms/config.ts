@@ -9,6 +9,7 @@ export type XeniaPmsConfig = {
   template: "aurora" | "brisa";
   propertyName: string;
   production: boolean;
+  operationsEnabled: boolean;
 };
 
 const uuid =
@@ -43,6 +44,9 @@ export function readXeniaPmsConfig(
   if (env.XENIA_PMS_MODE !== "qa")
     throw new Error("XENIA_PMS_MODE: esta entrega sólo admite qa.");
   const invalid: string[] = [];
+  if (env.XENIA_PMS_OPERATIONS_ENABLED !== undefined &&
+      !["true", "false"].includes(env.XENIA_PMS_OPERATIONS_ENABLED))
+    invalid.push("XENIA_PMS_OPERATIONS_ENABLED: requiere true o false.");
   const databaseUrl = env.DATABASE_URL ?? "";
   try {
     const parsed = new URL(databaseUrl);
@@ -132,5 +136,6 @@ export function readXeniaPmsConfig(
     template: template as "aurora" | "brisa",
     propertyName: template === "aurora" ? "Hotel Aurora" : "Apart Brisa",
     production,
+    operationsEnabled: env.XENIA_PMS_OPERATIONS_ENABLED === "true",
   };
 }

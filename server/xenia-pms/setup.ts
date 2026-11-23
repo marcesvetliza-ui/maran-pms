@@ -7,9 +7,12 @@ import { readXeniaPmsConfig, type XeniaPmsConfig } from "./config";
 import {
   XENIA_QA_READ_RESOURCES,
   XENIA_QA_WRITE_RESOURCES,
+  XENIA_QA_OPERATIONS_RESOURCES,
+  XENIA_QA_OPERATE_STAY,
 } from "../../shared/xeniaPms";
 import { assertXeniaPmsBinding } from "./binding";
 import { ACCOMMODATION_PERMISSION } from "../../shared/accommodationPermission";
+import { prepareQaOperationsSchema } from "./operations-schema";
 
 // Upgrade bound QA installations once. Later local revocations stay revoked.
 async function seedAccommodationPermission(connection: pg.PoolClient) {
@@ -25,6 +28,26 @@ async function seedAccommodationPermission(connection: pg.PoolClient) {
        ON CONFLICT DO NOTHING`,
       [ACCOMMODATION_PERMISSION],
     );
+}
+
+async function seedQaOperations(connection: pg.PoolClient, config: XeniaPmsConfig) {
+  if (!config.operationsEnabled) return;
+  const marker = await connection.query(
+    "INSERT INTO resource_permission_seeds(resource_key) VALUES('xenia-qa:operations:v1') ON CONFLICT DO NOTHING RETURNING resource_key",
+  );
+  if (!marker.rows.length) return;
+  for (const role of ["admin", "manager", "reception", "xenia_viewer"])
+    for (const resource of [...XENIA_QA_OPERATIONS_RESOURCES,
+      ...(role === "xenia_viewer" ? [] : [XENIA_QA_OPERATE_STAY])])
+      await connection.query(
+        `INSERT INTO role_permissions(role,resource_key)
+         SELECT $1,$2 WHERE EXISTS (SELECT 1 FROM role_permissions WHERE role=$1 AND resource_key='sidebar:/planning')
+         ON CONFLICT DO NOTHING`, [role, resource],
+      );
+  await connection.query(`INSERT INTO cash_register_configs(id,area,area_label,shifts_per_day,is_active)
+    VALUES('xenia-qa-reception','reception','Recepción de prueba',1,true) ON CONFLICT DO NOTHING`);
+  await connection.query(`INSERT INTO charge_types(id,label,description,default_amount,category,active,allow_price_edit,allow_recurring)
+    VALUES('xenia-qa-water','Agua de prueba','Agua de prueba',1000,'minibar',true,true,false) ON CONFLICT DO NOTHING`);
 }
 
 export const schemaDigest = (schema: string) =>
@@ -60,6 +83,8 @@ export async function setupXeniaPms(config: XeniaPmsConfig, schema: string) {
           "La versión del esquema cambió; prepará una migración explícita antes de actualizar esta base.",
         );
       await seedAccommodationPermission(connection);
+      if (config.operationsEnabled) await prepareQaOperationsSchema(connection);
+      await seedQaOperations(connection, config);
       await connection.query("COMMIT");
       return { alreadyInitialized: true };
     }
@@ -137,6 +162,8 @@ export async function setupXeniaPms(config: XeniaPmsConfig, schema: string) {
           [role, resource],
         );
     await seedAccommodationPermission(connection);
+    if (config.operationsEnabled) await prepareQaOperationsSchema(connection);
+    await seedQaOperations(connection, config);
     await connection.query(
       "INSERT INTO bed_types(id,code,name,is_active,display_order) VALUES('xenia-qa-bed','matrimonial','Matrimonial de prueba',true,1)",
     );

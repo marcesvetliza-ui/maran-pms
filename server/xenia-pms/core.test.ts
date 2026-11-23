@@ -13,6 +13,7 @@ import { PmsBroker, opaqueHash, pkceChallenge } from "../xenia-control/pms";
 import { readXeniaPmsConfig, type XeniaPmsConfig } from "./config";
 import { setupXeniaPms } from "./setup";
 import { assertXeniaPmsBinding } from "./binding";
+import { assertQaOperationsSchema } from "./operations-schema";
 
 let fixture: ReturnType<typeof createDisposableXeniaPostgres>;
 let store: ControlStore,
@@ -62,6 +63,7 @@ after(async () => {
 });
 
 test("the QA profile is opt-in and validates fields without exposing credentials", () => {
+  assert.equal(qa.operationsEnabled, false);
   assert.equal(
     readXeniaPmsConfig({
       DATABASE_URL: "postgresql://private-password@wrong.invalid/hotel",
@@ -84,6 +86,7 @@ test("the QA profile is opt-in and validates fields without exposing credentials
     ["DATABASE_URL", "postgresql://secret-password@${{unresolved}}/hotel"],
     ["XENIA_PMS_PROPERTY_ID", "bad-id"],
     ["XENIA_PMS_CLIENT_SECRET", "bad-secret"],
+    ["XENIA_PMS_OPERATIONS_ENABLED", "enabled"],
     ["RESEND_API_KEY", "private-sending-key"],
     ["XENIA_PMS_ORIGIN", qa.controlOrigin],
   ]) {
@@ -568,4 +571,47 @@ test("expired codes are refused and rotating an installation secret revokes old 
     () => broker.introspect(installation.clientId, access.leaseToken),
     /revocada/,
   );
+});
+
+test("operations upgrade is opt-in, preserves existing stays and later permission revocations", async () => {
+  const pool = new pg.Pool({ connectionString: qa.databaseUrl });
+  try {
+    const before = (await pool.query("SELECT id,total_room_amount,status FROM reservations ORDER BY id")).rows;
+    const enabled = { ...qa, operationsEnabled: true };
+    await setupXeniaPms(enabled, schema);
+    await assertQaOperationsSchema(pool);
+    assert.deepEqual((await pool.query("SELECT id,total_room_amount,status FROM reservations ORDER BY id")).rows, before);
+    assert.equal((await pool.query("SELECT area FROM cash_register_configs")).rows[0].area, "reception");
+    assert.equal((await pool.query("SELECT count(*) FROM cash_shifts")).rows[0].count, "0");
+    assert.deepEqual((await pool.query("SELECT role FROM role_permissions WHERE resource_key='api:xenia-qa:operate-stay' ORDER BY role")).rows.map(r => r.role), ["admin", "manager", "reception"]);
+    assert.equal((await pool.query("SELECT count(*) FROM role_permissions WHERE role='xenia_viewer' AND resource_key='api:xenia-qa:operate-stay'")).rows[0].count, "0");
+    await pool.query("DELETE FROM role_permissions WHERE role='reception' AND resource_key='api:xenia-qa:operate-stay'");
+    await pool.query("UPDATE charge_types SET default_amount=1234 WHERE id='xenia-qa-water'");
+    await pool.query("SELECT setval('folio_seq_reservation',100,true)");
+    await setupXeniaPms(enabled, schema);
+    assert.equal(Number((await pool.query("SELECT nextval('folio_seq_reservation') AS value")).rows[0].value), 101);
+    assert.equal((await pool.query("SELECT count(*) FROM role_permissions WHERE role='reception' AND resource_key='api:xenia-qa:operate-stay'")).rows[0].count, "0");
+    assert.equal(Number((await pool.query("SELECT default_amount FROM charge_types WHERE id='xenia-qa-water'")).rows[0].default_amount), 1234);
+    await assertXeniaPmsBinding(pool, enabled);
+  } finally { await pool.end(); }
+});
+
+test("QA financial preparation refuses duplicate historical folios without repairing their rows", async () => {
+  await store.central.query("CREATE DATABASE xenia_qa_duplicate_folios_test");
+  const url = new URL(qa.databaseUrl);
+  url.pathname = "/xenia_qa_duplicate_folios_test";
+  const existing = { ...qa, databaseUrl: url.toString(), operationsEnabled: false };
+  await setupXeniaPms(existing, schema);
+  const pool = new pg.Pool({ connectionString: existing.databaseUrl });
+  try {
+    await pool.query(`INSERT INTO folios(id,codigo,entity_type,entity_id) VALUES
+      ('f1','RS-000010','reservation','xenia-qa-reservation-1'),('f2','RS-000011','reservation','xenia-qa-reservation-1');
+      INSERT INTO folio_movements(id,folio_id,type,amount,description) VALUES('m1','f2','charge',100,'Synthetic historical link')`);
+    const before = (await pool.query("SELECT id,codigo,entity_id FROM folios ORDER BY id")).rows;
+    await assert.rejects(() => setupXeniaPms({ ...existing, operationsEnabled: true }, schema), (error: any) => error.code === "23505");
+    assert.deepEqual((await pool.query("SELECT id,codigo,entity_id FROM folios ORDER BY id")).rows, before);
+    assert.equal((await pool.query("SELECT folio_id FROM folio_movements WHERE id='m1'")).rows[0].folio_id, "f2");
+    assert.equal((await pool.query("SELECT to_regclass('xenia_pms.operations_schema') AS prepared")).rows[0].prepared, null);
+    await assertXeniaPmsBinding(pool, existing);
+  } finally { await pool.end(); }
 });

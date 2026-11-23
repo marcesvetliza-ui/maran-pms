@@ -9,6 +9,9 @@ import {
   type XeniaPmsIdentity,
 } from "../../shared/xeniaPms";
 import { BUILD_REVISION } from "../buildRevision";
+import { qaOperationReadPath, qaOperationWritePath, validateQaOperation } from "./operations";
+import type {} from "./request-context";
+import { assertQaOperationsSchema } from "./operations-schema";
 
 type PmsSession = {
   identity: XeniaPmsIdentity;
@@ -229,6 +232,7 @@ export function registerXeniaPmsRuntime(
   };
   app.get("/healthz", (_req, res) => {
     void assertXeniaPmsBinding(pool, config)
+      .then(async () => { if (config.operationsEnabled) await assertQaOperationsSchema(pool); })
       .then(() =>
         res.json({
           status: "ok",
@@ -236,6 +240,7 @@ export function registerXeniaPmsRuntime(
           revision: BUILD_REVISION,
           propertyId: config.propertyId,
           clientId: config.clientId,
+          operationsEnabled: config.operationsEnabled,
         }),
       )
       .catch(() => res.status(503).json({ status: "unavailable" }));
@@ -247,6 +252,7 @@ export function registerXeniaPmsRuntime(
       name: config.propertyName,
       controlOrigin: config.controlOrigin,
       startPath: "/xenia/start",
+      operationsEnabled: config.operationsEnabled,
     }),
   );
   app.get("/descargar-colobig-pdf", (_req, res) =>
@@ -405,6 +411,12 @@ export function registerXeniaPmsRuntime(
           "La identidad o los permisos cambiaron. Ingresá desde Xenia.",
         );
       const read = ["GET", "HEAD"].includes(req.method);
+      req.xeniaPmsAccess = {
+        principalId: checked.identity.principalId,
+        propertyId: checked.identity.propertyId,
+        role: checked.identity.role,
+        operationsEnabled: config.operationsEnabled,
+      };
       if (!read) {
         if (req.get("Origin") !== config.origin)
           throw new PmsAccessError(403, "La solicitud no pudo validarse.");
@@ -417,17 +429,30 @@ export function registerXeniaPmsRuntime(
           !["POST", "PATCH", "DELETE"].includes(req.method) ||
           !(
             writePath.test(req.path) ||
-            (req.method === "POST" && nightlyWritePath.test(req.path))
+            (req.method === "POST" && nightlyWritePath.test(req.path)) ||
+            (config.operationsEnabled && qaOperationWritePath(req.method, req.path))
           )
         )
           throw new PmsAccessError(
             403,
             "Esta operación todavía no está habilitada en la prueba de Alojamiento.",
           );
+        if (/^\/api\/reservations(?:\/[^/]+)?$/.test(req.path) &&
+            req.body?.status !== undefined && !["confirmed", "pending", "tentative"].includes(req.body.status))
+          throw new PmsAccessError(403, "Usá la acción de ingreso, salida o anulación para cambiar el estado de la estadía.");
+        if (config.operationsEnabled && qaOperationWritePath(req.method, req.path)) {
+          try { await validateQaOperation(req, pool); }
+          catch (error: any) {
+            if (error instanceof z.ZodError)
+              throw new PmsAccessError(400, "Revisá los datos de la operación de prueba. No se aplicó el cambio.");
+            if ([403, 404, 409].includes(error?.status)) throw new PmsAccessError(error.status, error.message);
+            throw error;
+          }
+        }
       } else if (
         !readPaths.some(
           (path) => req.path === path || req.path.startsWith(path + "/"),
-        )
+        ) && !(config.operationsEnabled && qaOperationReadPath(req.path))
       )
         throw new PmsAccessError(
           403,

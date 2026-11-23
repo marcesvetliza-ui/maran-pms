@@ -4,6 +4,8 @@ import {groupPersonalExtrasFactsQuery} from "../groupPersonalExtrasFacts";
 import { accommodationNights } from '@shared/accommodationNights';
 import { withReservationFinancialLock } from "../nightlyPricingGuard";
 import { addPostCheckoutCharge } from "../postCheckoutCharges";
+import { createQaStayCharge } from "../xenia-pms/stay-charge";
+import type {} from "../xenia-pms/request-context";
 import { checkoutReversalEligibility, reverseCheckout } from "../checkoutReversal";
 import { isPostCheckoutCharge } from "@shared/postCheckout";
 import { hasPermission } from "../permissions";
@@ -1951,6 +1953,10 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/charges", async (req, res) => {
     try {
+      if (req.xeniaPmsAccess?.operationsEnabled) {
+        const result = await createQaStayCharge(req.body, req.user!);
+        return res.status(result.replayed ? 200 : 201).json(result.charge);
+      }
       if (isPostCheckoutCharge(req.body.id)) return res.status(400).json({ error: "Los consumos posteriores se registran desde Cuenta y facturación." });
       if (req.body.reservationId) {
         const reservation = await storage.getReservation(req.body.reservationId);
@@ -1972,8 +1978,13 @@ export function registerReservationsRoutes(app: Express) {
         );
       }
       res.status(201).json(charge);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating charge" });
+    } catch (error: any) {
+      if (req.xeniaPmsAccess?.operationsEnabled && !error.statusCode)
+        console.error("[xenia-qa-charge]", { code: error.cause?.code || error.code,
+          message: error.cause?.message || error.message });
+      res.status(error.statusCode || 500).json({ error: req.xeniaPmsAccess?.operationsEnabled
+        ? (error.statusCode ? error.message : "No se pudo registrar el consumo. Actualizá el folio antes de reintentar.")
+        : "Error creating charge" });
     }
   });
 
@@ -2886,6 +2897,9 @@ export function registerReservationsRoutes(app: Express) {
       const reservationForPayment = req.body.reservationId
         ? await storage.getReservation(req.body.reservationId)
         : null;
+      if (req.xeniaPmsAccess?.operationsEnabled && (!reservationForPayment ||
+          !["confirmed", "pending", "checked_in"].includes(reservationForPayment.status) || reservationForPayment.groupId))
+        return res.status(409).json({ error: "Este ensayo admite cobros en estadías individuales activas." });
       let groupPersonalExtras = false;
       let groupIndividualFolio = false;
       if (reservationForPayment) {

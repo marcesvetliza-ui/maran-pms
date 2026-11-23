@@ -19,8 +19,13 @@ const excluded = new Set([
 export function canViewCash(username?: string | null): boolean {
   return !!username && !excluded.has(username);
 }
-export function canOperateCash(username: string | null | undefined, area: string): boolean {
+export type QaCashAccess = { xeniaQa: true; role: string };
+export function canOperateCash(username: string | null | undefined, area: string, qa?: QaCashAccess): boolean {
   const canonical = ({ recepcion: "reception", restaurante: "restaurant" } as Record<string, string>)[area] || area;
+  // Explicit context is supplied by the verified QA lease on the server.
+  // Ordinary hotel accounts retain the approved username roster above.
+  if (qa?.xeniaQa) return !!username && username.startsWith("xenia.") &&
+    canonical === "reception" && ["admin", "manager", "reception"].includes(qa.role);
   return canViewCash(username) && Object.hasOwn(operators, canonical)
     && (globalOperators.has(username!) || operators[canonical].has(username!));
 }
