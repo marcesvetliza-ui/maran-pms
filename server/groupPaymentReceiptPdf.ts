@@ -62,7 +62,7 @@ export async function generateGroupPaymentReceiptPdf(data: GroupPaymentReceiptDa
     const conceptTotal = concepts.reduce((sum: number, concept: any) => sum + (Number(concept?.amount) || 0), 0);
     const documentTotal = Number(storedBreakdown.documentTotal)
       || (Object.keys(invoice).length ? conceptTotal : Number(data.payment.amount) || 0);
-    const newCollection = Number(storedBreakdown.newCollection) || Number(data.payment.amount) || 0;
+    const newCollection = Number(storedBreakdown.newCollection ?? data.payment.amount) || 0;
     const appliedAdvances = Number(storedBreakdown.appliedAdvances)
       || Math.max(0, documentTotal - newCollection);
 

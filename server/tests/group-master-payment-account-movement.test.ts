@@ -89,8 +89,8 @@ function makeTransaction() {
       }
 
       if (transactionExecuteCount === 1) return { rows: [{ id: GROUP_ID }] };
-      if (transactionExecuteCount === 2 || transactionExecuteCount === 3) return { rows: [] };
-      if (transactionExecuteCount === 4) {
+      if (transactionExecuteCount === 2) return { rows: [] };
+      if (transactionExecuteCount === 3) {
         // The reversal locks its CC cargos after group/advisory/fiscal locks.
         await acquireCargoLock();
         ownsCargoLock = true;
@@ -203,6 +203,8 @@ vi.mock("../db", () => ({
   db: fakeDb,
   pool: { query: vi.fn() },
 }));
+
+vi.mock("../nightlyPricingGuard", () => ({ withFinancialScopeLock: async (_key: string, run: () => Promise<any>) => run() }));
 
 vi.mock("../db-storage", async () => {
   const actual = await vi.importActual<typeof import("../db-storage")>("../db-storage");

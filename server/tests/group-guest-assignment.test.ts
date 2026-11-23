@@ -148,11 +148,13 @@ describe("group guest assignment", () => {
       [{ groupId: GROUP_ID, reservationId: PLACEHOLDER_RESERVATION_ID }],
       [{
         id: PLACEHOLDER_RESERVATION_ID,
+        guestId: 'placeholder-guest', status: 'confirmed',
         roomId: "room-101",
         roomTypeId: "rt1",
         checkInDate: "2026-09-01",
         checkOutDate: "2026-09-03",
       }],
+      [{id: 'placeholder-guest', codigo: `GROUP-${GROUP_ID}`}],
       [selectedGuest],
     ];
     mockDbInsert.mockImplementation(() => ({
@@ -202,11 +204,13 @@ describe("group guest assignment", () => {
       [{ groupId: GROUP_ID, reservationId: PLACEHOLDER_RESERVATION_ID }],
       [{
         id: PLACEHOLDER_RESERVATION_ID,
+        guestId: 'placeholder-guest', status: 'confirmed',
         roomId: "room-702",
         roomTypeId: "rt1",
         checkInDate: "2026-09-24",
         checkOutDate: "2026-09-25",
       }],
+      [{id: 'placeholder-guest', codigo: `GROUP-${GROUP_ID}`}],
       [selectedGuest],
     ];
     mockStorage.evaluateReservationInventory.mockResolvedValueOnce({

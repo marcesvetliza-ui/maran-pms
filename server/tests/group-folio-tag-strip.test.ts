@@ -22,6 +22,7 @@ import * as http from "node:http";
 // ─── Module mocks (must be declared before dynamic imports) ──────────────────
 
 vi.mock("../db", () => ({
+  withReadOnlyDatabaseTransaction: async (run: () => Promise<any>) => run(),
   db: {
     execute: vi.fn().mockResolvedValue({ rows: [] }),
     select: () => ({

@@ -17,6 +17,9 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from '@/components/ui/checkbox';
+import { useGroupAssignmentPreview } from './group-assignment-release-dialog';
+import { fmtMoney } from '@/lib/utils';
 
 export function GroupOccupantDialog({
   groupId,
@@ -32,6 +35,11 @@ export function GroupOccupantDialog({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Guest | null>(null);
   const [creating, setCreating] = useState(false);
+  const [confirmPersonalAdvances, setConfirmPersonalAdvances] = useState(false);
+  const preview = useGroupAssignmentPreview(groupId, reservation.id);
+  const replacing = !!reservation.guestId && !reservation.guest?.codigo?.startsWith('GROUP-');
+  const actionLabel = replacing ? 'Reemplazar huésped' : 'Asignar huésped';
+  const ready = preview.data?.canReplace && !preview.isFetching && (!preview.data.personalAdvance || confirmPersonalAdvances);
   const term = search.trim();
   const endpoint = `/api/groups/${groupId}/reservations/${reservation.id}/occupant`;
   const results = useQuery<Guest[]>({
@@ -51,7 +59,8 @@ export function GroupOccupantDialog({
       (g) => g.active && !g.codigo?.toUpperCase().startsWith("GROUP-"),
     ) || [];
   async function assign(body: object) {
-    const response = await apiRequest("PATCH", endpoint, body);
+    if (!ready || !preview.data) throw new Error('Verificá la reserva y sus anticipos antes de cambiar al huésped.');
+    const response = await apiRequest("PATCH", endpoint, { ...body, expectedGuestId: reservation.guestId, fingerprint: preview.data.fingerprint, confirmPersonalAdvances });
     const result = await response.json();
     queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
     return result;
@@ -82,17 +91,21 @@ export function GroupOccupantDialog({
     >
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Asignar huésped</DialogTitle>
+          <DialogTitle>{actionLabel}</DialogTitle>
           <DialogDescription>
             Hab. {reservation.room?.roomNumber} · {reservation.reservationCode}.
             Elegí una ficha existente o registrá un huésped nuevo.
           </DialogDescription>
         </DialogHeader>
+        {preview.isFetching && <p role="status">Verificando reserva y anticipos…</p>}
+        {preview.isError && <div role="alert"><p>{parseApiError(preview.error)}</p><Button variant="outline" onClick={() => preview.refetch()}>Reintentar verificación</Button></div>}
+        {!!preview.data?.replacementBlockers.length && <div role="alert" className="text-sm space-y-1">{preview.data.replacementBlockers.map(message => <p key={message}>{message}</p>)}</div>}
+        {preview.data?.canReplace && preview.data.personalAdvance > 0 && <label className="flex gap-2 text-sm"><Checkbox checked={confirmPersonalAdvances} onCheckedChange={v => setConfirmPersonalAdvances(v === true)} /><span>Confirmo que el anticipo personal de ${fmtMoney(preview.data.personalAdvance)} se conserva en esta reserva para el nuevo pasajero.</span></label>}
         <div className="flex gap-2">
           <Button variant="secondary">Buscar existente</Button>
           <Button
             variant="outline"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !ready}
             onClick={() => setCreating(true)}
           >
             Nuevo huésped
@@ -165,10 +178,10 @@ export function GroupOccupantDialog({
             Cancelar
           </Button>
           <Button
-            disabled={!selected || mutation.isPending}
+            disabled={!selected || mutation.isPending || !ready}
             onClick={() => selected && mutation.mutate(selected.id)}
           >
-            {mutation.isPending ? "Asignando..." : "Asignar huésped"}
+            {mutation.isPending ? "Guardando..." : actionLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

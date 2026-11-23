@@ -1,4 +1,5 @@
 import {GROUP_PAYMENT_REQUEST_SCHEMA_SQL} from './groupPaymentRequest';
+import { GROUP_ASSIGNMENT_SCHEMA_SQL } from './groupAssignmentSchema';
 import { RATE_PLAN_MISSING_CURRENCY_SQL } from "./ratePlanCurrencyMigration";
 import { BILLING_OPERATION_SCHEMA_SQL } from "./billing/operationJournal";
 import { CASH_CARD_RECTIFICATIONS_SQL } from './billing/cashCardRectifications';
@@ -1256,6 +1257,8 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "void_reason",
     ],
     group_account_operations: ["id","fingerprint","group_id","group_payment_id","created_at"],
+    group_assignment_releases: ["operation_id","fingerprint","group_id","reservation_id","replacement_id","result","created_at"],
+    group_personal_advance_origins: ["group_payment_id","payment_id","group_id","reservation_id","operation_id","status","created_at"],
     group_payments: [
       "id",
       "group_id",
@@ -1300,6 +1303,8 @@ export const FINANCIAL_SCHEMA_REQUIREMENTS = {
       "idx_account_movement_allocations_pago",
     ],
     group_payments: ["group_payments_group_id_idx", "group_payments_receipt_number_unique"],
+    group_assignment_releases: ["group_assignment_releases_pkey", "group_assignment_releases_reservation_id_key", "group_assignment_releases_replacement_id_key"],
+    group_personal_advance_origins: ["group_personal_advance_origins_pkey", "group_personal_advance_origins_payment_id_key"],
     payments: ["payments_group_payment_id_idx"],
     invoice_counters: ["invoice_counters_tipo_comprobante_punto_venta_unique"],
     purchase_invoice_lines: ["purchase_invoice_lines_invoice_position_unique"],
@@ -1641,7 +1646,7 @@ export async function runMigrations() {
     addColumnWithoutRerunNotice("reservations", "nightly_pricing", "jsonb"),
   ].join(";\n"))));
   await withTimeout("payments.request_identity", T, () =>
-    pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL + GROUP_PAYMENT_REQUEST_SCHEMA_SQL)
+    pool.query(RESERVATION_PAYMENT_REQUEST_SCHEMA_SQL + GROUP_PAYMENT_REQUEST_SCHEMA_SQL + GROUP_ASSIGNMENT_SCHEMA_SQL)
   );
   await withTimeout("lost_found_items.shipping_details", T, () =>
     db.execute(sql.raw(addColumnWithoutRerunNotice("lost_found_items", "shipping_details", "jsonb")))

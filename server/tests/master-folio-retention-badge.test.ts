@@ -106,6 +106,7 @@ const fakeDb = {
 };
 
 vi.mock("../db", () => ({
+  withReadOnlyDatabaseTransaction: async (run: () => Promise<any>) => run(),
   db: fakeDb,
   pool: { query: vi.fn() },
 }));
