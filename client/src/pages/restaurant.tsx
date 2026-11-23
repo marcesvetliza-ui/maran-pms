@@ -1,6 +1,7 @@
 import { isSelectableGuest } from "@shared/guest-selection";
 import { RestaurantAreaSettings } from '@/components/restaurant-area-settings';
 import {useRestaurantLayout} from '@/hooks/use-restaurant-layout';
+import { restaurantTablePlacement } from '@shared/restaurant-layout';
 import {RestaurantItemQuantityPicker} from "@/components/restaurant-item-quantity-picker";
 import {restaurantPortionCents} from "@shared/restaurant-item-quantities";
 import { RestaurantMoveDestination } from "@/components/restaurant-move-destination";
@@ -115,8 +116,8 @@ type RestaurantTable = {
   capacity: number;
   shape: "square" | "round" | "rectangular";
   status: "available" | "occupied" | "reserved" | "preloaded";
-  positionX: number;
-  positionY: number;
+  positionX: number | null;
+  positionY: number | null;
   hasWindow: string | null;
   isActive: string;
   area?: RestaurantArea;
@@ -1905,6 +1906,7 @@ export default function RestaurantPage() {
       setNewTableWindow(false);
       toast({ title: "Mesa creada" });
     },
+    onError: (error: Error) => toast({ title: "No se pudo crear la mesa", description: parseApiError(error), variant: "destructive" }),
   });
 
   const deleteTableMutation = useMutation({
@@ -2042,7 +2044,7 @@ export default function RestaurantPage() {
     },
   });
 
-  const layout = useRestaurantLayout(tables,toast);
+  const layout = useRestaurantLayout(tables,toast,areas);
   const isEditMode = layout.editing;
   const filteredTables = selectedArea === "all"
     ? layout.tables
@@ -2861,8 +2863,8 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                 }
 
                 const areaTables = filteredTables.filter((t) => t.areaId === area.id);
-                const gridCols = area.areaType === "event" ? 5 : 8;
-                const gridRows = area.areaType === "event" ? 3 : 6;
+                const placement = restaurantTablePlacement(areaTables, area.areaType);
+                const { columns: gridCols, rows: gridRows } = placement;
 
                 return (
                   <Card key={area.id}>
@@ -2915,7 +2917,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                         {Array.from({ length: gridCols * gridRows }).map((_, idx) => {
                           const x = idx % gridCols;
                           const y = Math.floor(idx / gridCols);
-                          const table = areaTables.find(t => t.positionX === x && t.positionY === y);
+                          const table = placement.byCell.get(`${x}:${y}`);
 
                           if (table) {
                             const todayISO = getArgentinaToday();
@@ -3033,6 +3035,31 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                           );
                         })}
                       </div>
+                      {placement.unplaced.length > 0 && (
+                        <section className="mt-3 rounded-lg border border-amber-400 p-3 space-y-2" aria-label={`Mesas sin ubicación de ${area.name}`}>
+                          <h4 className="text-sm font-medium">Mesas sin ubicación en el plano</h4>
+                          <p className="text-sm text-muted-foreground">
+                            {isEditMode ? "Seleccioná una mesa y luego un espacio libre del sector. Después presioná Guardar Layout." : "Podés usar estas mesas desde acá."}
+                            {!isEditMode && canEditLayout && " Para ubicarlas en el plano, usá Editar Layout."}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {placement.unplaced.map(table => (
+                              <button
+                                key={table.id}
+                                data-testid={`table-${table.tableNumber}`}
+                                draggable={isEditMode && !layout.saving}
+                                onDragStart={() => handleDragStart(table)}
+                                onDragEnd={() => setDraggedTable(null)}
+                                onClick={() => isEditMode ? setDraggedTable(table) : handleTableClick(table)}
+                                aria-pressed={isEditMode ? draggedTable?.id === table.id : undefined}
+                                className={`rounded-md border-2 px-4 py-2 text-sm ${tableStatusColors[table.status]} ${draggedTable?.id === table.id ? "ring-2 ring-primary" : ""}`}
+                              >
+                                Mesa {table.tableNumber} · {table.capacity} personas
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
                       {isEditMode && areaTables.length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {areaTables.map(t => (
@@ -8118,24 +8145,12 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             <Button
               onClick={() => {
                 if (!newTableNumber || !newTableArea) return;
-                const areaTbls = tables.filter(t => t.areaId === newTableArea);
-                let px = 0, py = 0;
-                if (areaTbls.length > 0) {
-                  const maxX = Math.max(...areaTbls.map(t => t.positionX));
-                  px = maxX + 1;
-                  if (px >= 8) {
-                    px = 0;
-                    py = Math.max(...areaTbls.map(t => t.positionY)) + 1;
-                  }
-                }
                 createTableMutation.mutate({
                   tableNumber: newTableNumber,
                   areaId: newTableArea,
                   capacity: newTableCapacity,
                   shape: newTableShape,
                   hasWindow: newTableWindow ? "true" : "false",
-                  positionX: px,
-                  positionY: py,
                 });
               }}
               disabled={createTableMutation.isPending}

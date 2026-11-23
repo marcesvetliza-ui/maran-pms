@@ -1,8 +1,8 @@
 import { useRef,useState } from 'react';
 import { useMutation,useQueryClient } from '@tanstack/react-query';
 import { apiRequest,parseApiError } from '@/lib/queryClient';
-import { layoutChanges,moveLayoutTable,type LayoutTable } from '@shared/restaurant-layout';
-export function useRestaurantLayout<T extends LayoutTable>(tables:T[],notify:(value:{title:string;description?:string;variant?:'destructive'})=>void){
+import { layoutChanges,moveLayoutTable,restaurantTablePlacement,type LayoutTable } from '@shared/restaurant-layout';
+export function useRestaurantLayout<T extends LayoutTable>(tables:T[],notify:(value:{title:string;description?:string;variant?:'destructive'})=>void,areas:readonly {id:string;areaType:string}[]=[]){
  const queryClient=useQueryClient();
  const [editing,setEditing]=useState(false),[draft,setDraft]=useState<Record<string,{positionX:number;positionY:number}>>({}),[error,setError]=useState('');
  const baseline=useRef<LayoutTable[]>([]);
@@ -16,6 +16,8 @@ export function useRestaurantLayout<T extends LayoutTable>(tables:T[],notify:(va
   toggle:()=>{if(save.isPending)return;if(editing){save.mutate();}else{baseline.current=tables.map(t=>({...t}));setDraft({});setError('');setEditing(true);}},
   discard:()=>{if(!save.isPending){setDraft({});setEditing(false);setError('');}},
   move:(id:string,x:number,y:number,areaId:string)=>{if(!editing||save.isPending)return;const source=shown.find(t=>t.id===id);if(!source||source.areaId!==areaId){notify({title:'Elegí una posición dentro del mismo sector'});return;}
+   const placement=restaurantTablePlacement(shown.filter(t=>t.areaId===areaId),areas.find(a=>a.id===areaId)?.areaType??'indoor');
+   if(placement.unplaced.some(t=>t.id===id)&&placement.byCell.has(`${x}:${y}`)){notify({title:'Elegí un espacio libre para ubicar esta mesa'});return;}
    for(const table of shown)if(!baseline.current.some(t=>t.id===table.id))baseline.current.push({...table});
    const next=moveLayoutTable(shown,id,x,y,areaId);setDraft(previous=>{
     const result={...previous};

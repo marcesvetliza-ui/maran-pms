@@ -42,4 +42,11 @@ suite('Restaurant layout persistence and concurrency with real PostgreSQL',()=>{
   await pool.query(`CREATE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='${two}' THEN RAISE EXCEPTION 'synthetic layout failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER ${name} BEFORE UPDATE OF position_x ON restaurant_tables FOR EACH ROW EXECUTE FUNCTION ${name}()`);
   try{expect((await post([patch(one,2,1,0,0),patch(two,3,1,1,0)])).status).toBe(500);expect((await pool.query('SELECT position_x FROM restaurant_tables WHERE id=$1',[one])).rows[0].position_x).toBe(0);}finally{await pool.query(`DROP TRIGGER ${name} ON restaurant_tables; DROP FUNCTION ${name}()`);}
  });
+ it('recovers outside and null legacy positions without changing their operating state or capacity',async()=>{
+  const outside=area+'-outside',missing=area+'-null';
+  await pool.query("INSERT INTO restaurant_tables(id,table_number,area_id,capacity,status,position_x,position_y)VALUES($1,'12BIS',$3,4,'occupied',0,6),($2,'13BIS',$3,6,'reserved',null,null)",[outside,missing,area]);
+  const rows=[patch(outside,4,1,0,6),{id:missing,areaId:area,positionX:5,positionY:1,expectedPositionX:null,expectedPositionY:null}];
+  expect((await post(rows)).status).toBe(200);expect((await post(rows)).body).toMatchObject({saved:true,updated:0});
+  expect((await pool.query('SELECT table_number,position_x,position_y,status,capacity FROM restaurant_tables WHERE id IN($1,$2) ORDER BY table_number',[outside,missing])).rows).toEqual([{table_number:'12BIS',position_x:4,position_y:1,status:'occupied',capacity:4},{table_number:'13BIS',position_x:5,position_y:1,status:'reserved',capacity:6}]);
+ });
 });

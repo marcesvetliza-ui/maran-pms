@@ -26,4 +26,17 @@ describe('explicit restaurant layout save',()=>{
   const {result}=renderHook(()=>useRestaurantLayout(tables,vi.fn()),{wrapper:({children}:any)=><QueryClientProvider client={client}>{children}</QueryClientProvider>});
   act(()=>result.current.toggle());act(()=>result.current.move('one',4,2,'a'));act(()=>result.current.discard());expect(result.current.tables).toEqual(tables);expect(fetcher).not.toHaveBeenCalled();
  });
+ it('recovers an unplaced event table only into a free cell, keeping the existing occupied table in place',()=>{
+  const rows=[{...tables[0]},{id:'bis',areaId:'a',positionX:0,positionY:3,status:'available'}],notify=vi.fn();
+  const {result}=renderHook(()=>useRestaurantLayout(rows,notify,[{id:'a',areaType:'event'}]),{wrapper:({children}:any)=><QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>});
+  act(()=>result.current.toggle());act(()=>result.current.move('bis',0,0,'a'));expect(result.current.changes).toBe(0);expect(notify).toHaveBeenLastCalledWith({title:'Elegí un espacio libre para ubicar esta mesa'});
+  act(()=>result.current.move('bis',1,0,'a'));expect(result.current.tables[0]).toEqual(rows[0]);expect(result.current.tables[1]).toMatchObject({positionX:1,positionY:0,status:'available'});expect(result.current.changes).toBe(1);
+ });
+ it('saves the position of a table created during layout editing without losing earlier draft moves',async()=>{
+  const requests:any[]=[];vi.stubGlobal('fetch',vi.fn(async(_url:any,options:any)=>{requests.push(JSON.parse(options.body));return new Response(JSON.stringify({saved:true}),{headers:{'Content-Type':'application/json'}});}));
+  const client=new QueryClient(),newTable={id:'bis',areaId:'a',positionX:2,positionY:0,status:'available'};
+  const {result,rerender}=renderHook(rows=>useRestaurantLayout(rows,vi.fn()),{initialProps:tables,wrapper:({children}:any)=><QueryClientProvider client={client}>{children}</QueryClientProvider>});
+  act(()=>result.current.toggle());act(()=>result.current.move('one',3,2,'a'));rerender([...tables,newTable]);act(()=>result.current.move('bis',4,2,'a'));expect(result.current.changes).toBe(2);
+  act(()=>result.current.toggle());await waitFor(()=>expect(result.current.editing).toBe(false));expect(requests[0].tables).toEqual(expect.arrayContaining([{id:'bis',areaId:'a',positionX:4,positionY:2,expectedPositionX:2,expectedPositionY:0}]));expect(requests[0].tables).toHaveLength(2);
+ });
 });
