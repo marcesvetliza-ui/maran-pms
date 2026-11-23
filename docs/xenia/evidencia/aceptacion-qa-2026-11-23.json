@@ -1,0 +1,52 @@
+{
+  "date_local": "2026-11-23",
+  "timezone": "America/Argentina/Cordoba",
+  "evidence_type": "owner_reported_manual_tests_and_product_decision",
+  "reported_by": "Marcelo",
+  "independent_remote_verification_by_agent": false,
+  "candidate_pms_revision_in_instructions": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+  "new_served_revision_response_supplied": false,
+  "new_deployment_ids_supplied": false,
+  "events": [
+    {
+      "order": 1,
+      "kind": "owner_observation",
+      "statement": "Listo, en Aurora todo ok, pasemo a brisa",
+      "scope": "Aurora publication and full stay/Caja walkthrough following the supplied instructions",
+      "result": "owner_confirmed"
+    },
+    {
+      "order": 2,
+      "kind": "owner_observation",
+      "statement": "Todo perfecto",
+      "scope": "Brisa publication and full walkthrough, including visual reservation separation, after the Brisa instructions",
+      "result": "owner_confirmed"
+    },
+    {
+      "order": 3,
+      "kind": "owner_observation",
+      "statement": "Todo chequeado",
+      "scope": "reception Aurora, viewer Brisa, blocked writes, access removal and reassignment after the 12-step permissions guide",
+      "result": "owner_confirmed"
+    },
+    {
+      "order": 4,
+      "kind": "user_clarification",
+      "statement_excerpt": "Cuando yo hablaba de multihotel, me refería a un sistema que pueda manejar muchos hoteles. No especificamente a varios hoteles de un solo dueño",
+      "result": "product_for_independent_customers"
+    },
+    {
+      "order": 5,
+      "kind": "user_decision",
+      "statement_excerpt": "Si si si esa es la idea. Fiajte como seguimos y como dejamos ordenado lo que ya hicimos y como nos queda todo armado",
+      "result": "organize_state_and_next_delivery_for_independent_customers"
+    }
+  ],
+  "limits": [
+    "Confirmations apply to the described QA walkthroughs, not every module or permission combination.",
+    "No new HTTP traces, financial snapshots, live health JSON or deployment IDs were provided with these replies.",
+    "Per-hotel isolation is not yet end-to-end acceptance of delegated administration across two independent customer organizations."
+  ],
+  "next_delivery_state": "specified; customer administration and generic onboarding not implemented by this documentation",
+  "authorization_scope_this_update": "organize documentation, traceable evidence and next implementation scope; no new production deployment, data repair or paid model evaluation performed"
+}
