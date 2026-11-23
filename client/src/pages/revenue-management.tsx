@@ -227,7 +227,10 @@ function BoardTab({ from, to }: { from: string; to: string }) {
       </Card>
 
       <Dialog open={detailDate !== null} onOpenChange={open => !open && setDetailDate(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent
+          className="flex max-h-[calc(100vh-2rem)] w-[calc(100%_-_2rem)] min-w-0 max-w-2xl flex-col overflow-hidden supports-[height:100dvh]:max-h-[calc(100dvh-2rem)]"
+          data-testid="revenue-day-detail-dialog"
+        >
           {detailDate && <DayDetailContent date={detailDate} />}
         </DialogContent>
       </Dialog>
@@ -243,9 +246,10 @@ function DayDetailContent({ date }: { date: string }) {
 
   return (
     <>
-      <DialogHeader>
+      <DialogHeader className="shrink-0 pr-6">
         <DialogTitle>Detalle del {formatDisplayDate(date)}</DialogTitle>
       </DialogHeader>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-testid="revenue-day-detail-scroll">
       {isLoading || !data ? <Skeleton className="h-40" /> : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2 text-sm">
@@ -312,6 +316,7 @@ function DayDetailContent({ date }: { date: string }) {
           )}
         </div>
       )}
+      </div>
     </>
   );
 }
