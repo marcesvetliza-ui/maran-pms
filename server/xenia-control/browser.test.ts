@@ -169,6 +169,7 @@ test(
       await page.reload();
       await page.locator("#admin-tab").click();
       await page.locator("#property-client").selectOption({ index: 1 });
+      await page.locator("#property-storage").selectOption("demo");
       await page
         .getByLabel("Nombre del establecimiento", { exact: true })
         .fill("Posada de prueba");
@@ -176,6 +177,9 @@ test(
       await expect(page.locator("#property-name")).toHaveText(
         "Posada de prueba",
       );
+      // The title changes before the post-create refresh finishes. Wait for the
+      // submit to settle before choosing the next section, as a person would.
+      await expect(page.locator("#property-form .primary")).toBeEnabled();
       await page.locator("#admin-tab").click();
       await page
         .getByLabel("Nombre y apellido", { exact: true })

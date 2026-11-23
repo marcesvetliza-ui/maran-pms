@@ -9,6 +9,7 @@ const names = {
 };
 const roles = {
   owner: "Administración general",
+  customer_admin: "Administración del cliente",
   manager: "Responsable",
   reception: "Recepción",
   viewer: "Sólo consulta",
@@ -22,6 +23,10 @@ const state = {
   organizations: [],
   users: [],
   pmsLinks: [],
+  customerOrganizations: [],
+  teamOrganizationId: "",
+  teamGeneration: 0,
+  teamProperties: [],
 };
 let dirty = false,
   generation = 0,
@@ -69,11 +74,22 @@ function clearAccount() {
   state.organizations = [];
   state.users = [];
   state.pmsLinks = [];
+  state.customerOrganizations = [];
+  state.teamOrganizationId = "";
+  state.teamProperties = [];
+  state.teamGeneration++;
+  $("#team-view").hidden = true;
+  $("#team-tab").hidden = true;
   clearPmsCredentials();
   $("#pms-workspace").hidden = true;
   $("#open-pms").removeAttribute("href");
   dirty = false;
   for (const id of [
+    "team-list",
+    "team-organization",
+    "team-property-options",
+    "customer-admin-list",
+    "customer-admin-organization",
     "reservation-list",
     "membership-list",
     "organization-list",
@@ -85,6 +101,8 @@ function clearAccount() {
   ])
     $("#" + id).replaceChildren();
   for (const id of [
+    "team-user-form",
+    "customer-admin-form",
     "reservation-form",
     "user-form",
     "property-form",
@@ -156,12 +174,15 @@ function safeStorageSet(key, value) {
 }
 function showSection(section) {
   if (section === "administration" && !state.user?.platformAdmin) return;
+  if (section === "team" && !state.customerOrganizations.length) return;
   state.section = section;
   $("#operations-view").hidden = section !== "operations";
   $("#administration-view").hidden = section !== "administration";
+  $("#team-view").hidden = section !== "team";
   for (const [id, value] of [
     ["#operations-tab", "operations"],
     ["#admin-tab", "administration"],
+    ["#team-tab", "team"],
   ]) {
     if (section === value) $(id).setAttribute("aria-current", "page");
     else $(id).removeAttribute("aria-current");
@@ -193,6 +214,8 @@ async function enterWorkspace() {
     : "Mi espacio de trabajo";
   showSection("operations");
   await refreshProperties();
+  await refreshCustomerOrganizations();
+  if (!state.user) return;
   if (state.user.platformAdmin) await refreshAdministration();
 }
 async function refreshProperties(preferred) {
@@ -229,9 +252,9 @@ async function selectProperty(property) {
   state.selected = property;
   clearPmsCredentials();
   const pms = state.pmsLinks.find((link) => link.propertyId === property?.id);
-  $("#pms-workspace").hidden = !pms;
+  $("#pms-workspace").hidden = !pms || property?.status !== "active";
   $("#open-pms").removeAttribute("href");
-  if (pms) {
+  if (pms && property.status === "active") {
     $("#pms-title").textContent = property.name;
     $("#open-pms").href = new URL("/xenia/start", pms.origin).href;
   }
@@ -242,7 +265,7 @@ async function selectProperty(property) {
   $("#pms-origin").value = pms?.origin || "";
   const pmsUnavailable = !property
     ? ""
-    : property.status !== "active"
+    : property.status !== "active" && property.storageKind !== "pms"
       ? "El establecimiento debe estar activo para conectar su PMS de pruebas."
       : !property.modules.includes("lodging")
         ? "Habilitá el módulo Alojamiento para conectar su PMS de pruebas."
@@ -251,6 +274,7 @@ async function selectProperty(property) {
   $("#pms-unavailable").hidden = !pmsUnavailable;
   $("#pms-unavailable").textContent = pmsUnavailable;
   const template =
+    pms?.template || (property?.storageKind === "pms" ? "custom" : "") ||
     pms?.origin?.match(/^https:\/\/(aurora|brisa)\.qa\.xeniapms\.com$/)?.[1] ||
     (property?.name.toLowerCase().includes("brisa")
       ? "brisa"
@@ -258,7 +282,7 @@ async function selectProperty(property) {
         ? "aurora"
         : "");
   $("#pms-template").value = template;
-  $("#pms-origin").placeholder = template
+  $("#pms-origin").placeholder = template === "custom" ? "https://hotel-nuevo.qa.xeniapms.com" : template
     ? `https://${template}.qa.xeniapms.com`
     : "https://brisa.qa.xeniapms.com";
   dirty = false;
@@ -281,6 +305,14 @@ async function selectProperty(property) {
     $("#modules").append(node("span", "", names[module] || module));
   if (property.status !== "active") {
     $("#property-pending").hidden = false;
+    $("#property-pending p").textContent = property.storageKind === "pms"
+      ? "Generá la ficha y prepará el PMS en su base exclusiva. La instalación confirmará su identidad con Xenia al iniciar."
+      : "Podés reintentar su preparación conservando el alta anterior.";
+    $("#retry-activation").textContent = property.storageKind === "pms" ? "Actualizar estado del PMS" : "Reintentar preparación";
+    return;
+  }
+  if (property.storageKind === "pms") {
+    if (state.user.platformAdmin && version === generation) await refreshMemberships();
     return;
   }
   if (!property.modules.includes("lodging"))
@@ -372,6 +404,12 @@ async function refreshAdministration() {
   ]);
   if (state.user?.id !== principalId) return;
   state.organizations = organizations;
+  const adminSelector = $("#customer-admin-organization");
+  const selectedAdminOrganization = adminSelector.value;
+  adminSelector.replaceChildren(new Option("Elegí un cliente", ""));
+  for (const organization of organizations) adminSelector.add(new Option(organization.name, organization.id));
+  adminSelector.value = organizations.some(value => value.id === selectedAdminOrganization) ? selectedAdminOrganization : "";
+  await refreshCustomerAdministrators();
   state.users = users;
   $("#organization-list").replaceChildren(
     ...organizations.map((value) => node("div", "compact-row", value.name)),
@@ -558,6 +596,7 @@ $("#property-selector").addEventListener("change", async (event) => {
 });
 $("#operations-tab").addEventListener("click", () => showSection("operations"));
 $("#admin-tab").addEventListener("click", () => showSection("administration"));
+$("#team-tab").addEventListener("click", () => { showSection("team"); void refreshTeam().catch(error => notice(error.message, true)); });
 $("#reservation-form").addEventListener("input", () => {
   dirty = true;
 });
@@ -609,15 +648,23 @@ $("#property-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   void submit(form, async (data) => {
+    const body = { name: data.get("name"), slug: data.get("slug"), organizationId: data.get("organizationId"),
+      modules: data.getAll("module"), storageKind: data.get("storageKind") };
+    const key = `xenia-property-create:${state.user.id}:${body.organizationId}`;
+    const profile = JSON.stringify({ ...body, modules: [...body.modules].sort() });
+    let pending;
+    const raw = sessionStorage.getItem(key);
+    if (raw) {
+      try { pending = JSON.parse(raw); } catch { throw Error("Revisá el catálogo: la solicitud pendiente no se pudo recuperar."); }
+    }
+    if (!pending || pending.profile !== profile) {
+      pending = { id: crypto.randomUUID(), profile }; sessionStorage.setItem(key, JSON.stringify(pending));
+    }
     const property = await api("/admin/properties", {
       method: "POST",
-      body: {
-        name: data.get("name"),
-        slug: data.get("slug"),
-        organizationId: data.get("organizationId"),
-        modules: data.getAll("module"),
-      },
+      body: { ...body, requestId: pending.id },
     });
+    sessionStorage.removeItem(key);
     form.reset();
     delete $("#property-slug").dataset.edited;
     await refreshProperties(property.id);
@@ -693,7 +740,7 @@ function clearPmsCredentials() {
 $("#pms-hide-credentials").addEventListener("click", clearPmsCredentials);
 $("#pms-template").addEventListener("change", (event) => {
   const template = event.currentTarget.value;
-  $("#pms-origin").placeholder = template
+  $("#pms-origin").placeholder = template === "custom" ? "https://hotel-nuevo.qa.xeniapms.com" : template
     ? `https://${template}.qa.xeniapms.com`
     : "https://brisa.qa.xeniapms.com";
 });
@@ -731,6 +778,8 @@ $("#pms-form").addEventListener("submit", (event) => {
           byte.toString(16).padStart(2, "0"),
         ).join(""),
       "XENIA_PMS_TEMPLATE=" + result.template,
+      ...(result.template === "custom" ? ["XENIA_PMS_PROPERTY_NAME=" + JSON.stringify(result.propertyName)] : []),
+      "XENIA_PMS_OPERATIONS_ENABLED=true",
       "XENIA_CONTROL_ORIGIN=" + window.location.origin,
       "XENIA_PMS_ORIGIN=" + result.origin,
       "XENIA_PMS_PROPERTY_ID=" + result.propertyId,
@@ -743,6 +792,166 @@ $("#pms-form").addEventListener("submit", (event) => {
     );
   });
 });
+async function refreshCustomerOrganizations() {
+  const actorId = state.user?.id;
+  const organizations = await api("/organizations");
+  if (!actorId || state.user?.id !== actorId) return;
+  state.customerOrganizations = organizations;
+  $("#team-tab").hidden = !organizations.length;
+  const previous = state.teamOrganizationId;
+  state.teamOrganizationId = organizations.some(value => value.id === previous) ? previous : organizations[0]?.id || "";
+  const selector = $("#team-organization");
+  selector.replaceChildren(...organizations.map(value => new Option(value.name, value.id)));
+  selector.value = state.teamOrganizationId;
+  if (!organizations.length) {
+    state.teamGeneration++;
+    $("#team-list").replaceChildren();
+    $("#team-property-options").replaceChildren();
+    $("#team-user-form").hidden = true;
+    if (state.section === "team") showSection("operations");
+  }
+}
+function sameTeam(actorId, organizationId) {
+  return state.user?.id === actorId && state.teamOrganizationId === organizationId;
+}
+async function refreshTeam() {
+  const actorId = state.user?.id, organizationId = state.teamOrganizationId, version = ++state.teamGeneration;
+  $("#team-list").replaceChildren();
+  if (!actorId || !organizationId) return;
+  try {
+    const [properties, users] = await Promise.all([
+      api(`/organizations/${organizationId}/properties`), api(`/organizations/${organizationId}/users`),
+    ]);
+    if (!sameTeam(actorId, organizationId) || version !== state.teamGeneration) return;
+    state.teamProperties = properties;
+    $("#team-title").textContent = "Equipo de " + state.customerOrganizations.find(value => value.id === organizationId).name;
+    const selected = new Set([...$("#team-property-options").querySelectorAll("input:checked")].map(input => input.value));
+    $("#team-property-options").replaceChildren();
+    for (const property of properties.filter(value => value.status === "active")) {
+      const label = node("label"), input = node("input");
+      input.type = "checkbox"; input.name = "propertyId"; input.value = property.id; input.checked = selected.has(property.id);
+      label.append(input, document.createTextNode(property.name)); $("#team-property-options").append(label);
+    }
+    const hasHotels = properties.some(value => value.status === "active");
+    $("#team-empty").hidden = hasHotels; $("#team-user-form").hidden = !hasHotels;
+    const list = $("#team-list");
+    for (const user of users) {
+      const card = node("section", "card"); card.dataset.principalId = user.id;
+      card.append(node("h3", "", user.name), node("p", "muted", user.username));
+      if (user.isAdministrator) {
+        card.append(node("p", "muted", "Administrador del cliente. Este permiso lo gestiona Xenia.")); list.append(card); continue;
+      }
+      card.append(node("p", "muted", user.active ? "Habilitado en este cliente" : "Suspendido en este cliente"));
+      for (const property of properties.filter(value => value.status === "active")) {
+        const row = node("div", "compact-row"), selector = node("select");
+        selector.setAttribute("aria-label", `Permiso de ${user.name} en ${property.name}`);
+        selector.add(new Option("Sin acceso", ""));
+        for (const role of ["reception", "manager", "viewer"]) selector.add(new Option(roles[role], role));
+        selector.value = user.properties.find(value => value.propertyId === property.id)?.role || "";
+        selector.disabled = !user.active;
+        const save = node("button", "quiet", "Guardar permiso"); save.type = "button"; save.disabled = !user.active;
+        save.dataset.propertyId = property.id;
+        save.addEventListener("click", () => teamAction(save, () => api(`/organizations/${organizationId}/users/${user.id}/properties/${property.id}`,
+          selector.value ? { method: "PUT", body: { role: selector.value } } : { method: "DELETE" })));
+        row.append(node("span", "", property.name), selector, save); card.append(row);
+      }
+      const toggle = node("button", user.active ? "danger" : "quiet", user.active ? "Suspender en este cliente" : "Habilitar en este cliente");
+      toggle.type = "button";
+      toggle.addEventListener("click", () => {
+        if (user.active && !confirm(`¿Suspender a ${user.name} en este cliente y retirar sus accesos a sus hoteles?`)) return;
+        void teamAction(toggle, () => api(`/organizations/${organizationId}/users/${user.id}`, { method: "PATCH", body: { active: !user.active } }));
+      });
+      card.append(toggle); list.append(card);
+    }
+    if (!users.length) list.append(node("p", "muted", "Todavía no hay colaboradores de este cliente."));
+  } catch (error) {
+    if (sameTeam(actorId, organizationId) && version === state.teamGeneration) {
+      state.teamProperties = []; $("#team-user-form").hidden = true; $("#team-property-options").replaceChildren();
+    }
+    throw error;
+  }
+}
+async function teamAction(button, operation) {
+  const actorId = state.user?.id, organizationId = state.teamOrganizationId;
+  button.disabled = true;
+  try {
+    await operation();
+    if (sameTeam(actorId, organizationId)) { await refreshTeam(); notice("Permisos de este cliente actualizados."); }
+  } catch (error) { if (sameTeam(actorId, organizationId)) notice(error.message, true); }
+  finally { button.disabled = false; }
+}
+function pendingAccountRequest(kind, organizationId, body) {
+  // Keep only the public profile and operation ID. Never persist a password or
+  // a password-derived browser digest. The server compares a keyed fingerprint.
+  const key = `xenia-customer-create:${state.user.id}:${organizationId}:${kind}`;
+  const profile = JSON.stringify({ username: body.username, name: body.name, role: body.role || null,
+    propertyIds: [...(body.propertyIds || [])].sort() });
+  const raw = sessionStorage.getItem(key);
+  if (raw) {
+    let previous;
+    try { previous = JSON.parse(raw); } catch { throw Error("Revisá el equipo: no se pudo recuperar la solicitud pendiente."); }
+    if (previous.profile === profile && /^[a-f0-9-]{36}$/i.test(previous.id)) return { id: previous.id, key };
+  }
+  const id = crypto.randomUUID(); sessionStorage.setItem(key, JSON.stringify({ id, profile }));
+  return { id, key };
+}
+async function refreshCustomerAdministrators() {
+  const actorId = state.user?.id, organizationId = $("#customer-admin-organization").value;
+  $("#customer-admin-list").replaceChildren();
+  if (!actorId || !state.user.platformAdmin || !organizationId) return;
+  const users = await api(`/admin/organizations/${organizationId}/administrators`);
+  if (state.user?.id !== actorId || !state.user.platformAdmin || $("#customer-admin-organization").value !== organizationId) return;
+  for (const user of users) {
+    const row = node("div", "compact-row"), revoke = node("button", "danger", "Retirar administración del cliente");
+    revoke.type = "button";
+    revoke.addEventListener("click", async () => {
+      if (!confirm(`¿Retirar a ${user.name} la administración de este cliente?`)) return;
+      revoke.disabled = true;
+      try {
+        await api(`/admin/organizations/${organizationId}/administrators/${user.id}`, { method: "DELETE" });
+        if (state.user?.id === actorId && $("#customer-admin-organization").value === organizationId) await refreshCustomerAdministrators();
+      } catch (error) { if (state.user?.id === actorId) notice(error.message, true); }
+      finally { revoke.disabled = false; }
+    });
+    row.append(node("span", "", user.name + " · " + user.username), revoke); $("#customer-admin-list").append(row);
+  }
+}
+$("#team-organization").addEventListener("change", async event => {
+  state.teamOrganizationId = event.target.value; state.teamGeneration++;
+  $("#team-user-form").reset(); $("#team-property-options").replaceChildren();
+  try { await refreshTeam(); } catch (error) { notice(error.message, true); }
+});
+$("#customer-admin-organization").addEventListener("change", () => { void refreshCustomerAdministrators().catch(error => notice(error.message, true)); });
+$("#team-user-form").addEventListener("submit", event => {
+  event.preventDefault(); const form = event.currentTarget, actorId = state.user?.id, organizationId = state.teamOrganizationId;
+  void submit(form, async data => {
+    if (!actorId || !organizationId) return;
+    const body = { name: String(data.get("name") || "").trim(), username: String(data.get("username") || "").trim().toLowerCase(), password: data.get("password"),
+      role: data.get("role"), propertyIds: data.getAll("propertyId") };
+    if (!body.propertyIds.length) throw Error("Elegí al menos un hotel de este cliente.");
+    const pending = pendingAccountRequest("staff", organizationId, body);
+    const result = await api(`/organizations/${organizationId}/users`, { method: "POST", body: { ...body, requestId: pending.id } });
+    sessionStorage.removeItem(pending.key);
+    if (sameTeam(actorId, organizationId)) {
+      form.reset(); await refreshTeam(); notice(result.replayed ? "La cuenta ya estaba creada; se recuperó el resultado." : "Colaborador creado con sus accesos.");
+    }
+  });
+});
+$("#customer-admin-form").addEventListener("submit", event => {
+  event.preventDefault(); const form = event.currentTarget, actorId = state.user?.id;
+  void submit(form, async data => {
+    if (!state.user?.platformAdmin) return;
+    const organizationId = data.get("organizationId");
+    const body = { name: String(data.get("name") || "").trim(), username: String(data.get("username") || "").trim().toLowerCase(), password: data.get("password") };
+    const pending = pendingAccountRequest("administrator", organizationId, body);
+    const result = await api(`/admin/organizations/${organizationId}/administrators`, { method: "POST", body: { ...body, requestId: pending.id } });
+    sessionStorage.removeItem(pending.key);
+    if (state.user?.id !== actorId || !state.user.platformAdmin) return;
+    form.reset(); $("#customer-admin-organization").value = organizationId; await refreshCustomerAdministrators();
+    notice(result.replayed ? "La cuenta ya estaba creada; se recuperó el resultado." : "Administrador creado para este cliente.");
+  });
+});
+
 void session().catch((error) => {
   clearAccount();
   notice(error.message, true);

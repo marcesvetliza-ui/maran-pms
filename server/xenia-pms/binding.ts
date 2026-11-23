@@ -26,4 +26,8 @@ export async function assertXeniaPmsBinding(
     throw new Error(
       "La identidad de esta base no corresponde a la instalación configurada.",
     );
+  if (config.template === "custom") {
+    const instance = (await pool.query("SELECT database_instance_id FROM xenia_pms.installation WHERE singleton=true")).rows[0];
+    if (!instance?.database_instance_id) throw new Error("Falta la identidad propia de la base de este PMS independiente.");
+  }
 }

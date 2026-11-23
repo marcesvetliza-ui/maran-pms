@@ -30,7 +30,10 @@
     "xenia:pms:build": "node script/build-xenia-pms.mjs",
     "xenia:pms:setup": "node --import tsx server/xenia-pms/setup.ts",
     "xenia:pms:setup:production": "NODE_ENV=production node dist/xenia-pms/setup.js",
-    "xenia:pms:test": "node --import tsx --test server/xenia-pms/core.test.ts server/xenia-pms/integration.test.ts"
+    "xenia:pms:test": "node --import tsx --test server/xenia-pms/core.test.ts server/xenia-pms/integration.test.ts",
+    "xenia:customers:test": "node --import tsx --test server/xenia-control/customer-management.test.ts server/xenia-control/onboarding.test.ts",
+    "xenia:customers:browser": "node --import tsx --test server/xenia-control/customer-browser.test.ts",
+    "xenia:pms:customer:test": "node --import tsx --test server/xenia-pms/customer.integration.test.ts"
   },
   "dependencies": {
     "saxes": "^5.0.1",

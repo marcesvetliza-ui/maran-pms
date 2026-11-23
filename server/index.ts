@@ -10,7 +10,7 @@ import {createApiLimiter} from "./apiRateLimit";
 import { logger } from "./logger";
 import { initSentry, Sentry } from "./sentry";
 import { readXeniaPmsConfig } from "./xenia-pms/config";
-import { registerXeniaPmsRuntime } from "./xenia-pms/runtime";
+import { registerXeniaPmsRuntime, announceXeniaPmsReady } from "./xenia-pms/runtime";
 import { assertXeniaPmsBinding } from "./xenia-pms/binding";
 import { assertQaOperationsSchema } from "./xenia-pms/operations-schema";
 import { pool as xeniaPmsPool } from "./db";
@@ -201,6 +201,7 @@ app.use((req, res, next) => {
     const {loadRolePermissionsCache}=await import("./permissions");
     await loadRolePermissionsCache();
     startupReady=true;
+    announceXeniaPmsReady(pool, xeniaPms);
     log(`PMS de Xenia listo con ${xeniaPms.operationsEnabled ? "Estadías y Caja" : "Alojamiento"} y datos ficticios; integraciones externas desactivadas.`,"xenia-pms");
     return;
   }
