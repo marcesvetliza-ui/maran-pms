@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -97,51 +97,54 @@ export async function setupXeniaPms(config: XeniaPmsConfig, schema: string) {
       );
     await connection.query(schema);
     await connection.query(`CREATE SCHEMA xenia_pms;
-      CREATE TABLE xenia_pms.installation(singleton boolean PRIMARY KEY CHECK(singleton),property_id uuid NOT NULL,client_id uuid NOT NULL,template text NOT NULL,schema_digest text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE xenia_pms.installation(singleton boolean PRIMARY KEY CHECK(singleton),property_id uuid NOT NULL,client_id uuid NOT NULL,template text NOT NULL,schema_digest text NOT NULL,database_instance_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
       CREATE TABLE xenia_pms.principal_links(principal_id uuid PRIMARY KEY,user_id varchar UNIQUE NOT NULL REFERENCES public.system_users(id));
       CREATE TABLE xenia_pms.login_requests(state_hash text PRIMARY KEY,flow_hash text NOT NULL,verifier text NOT NULL,expires_at timestamptz NOT NULL);
       CREATE TABLE public.sessions(sid varchar PRIMARY KEY,sess json NOT NULL,expire timestamp(6) NOT NULL);
       CREATE INDEX sessions_expire_idx ON public.sessions(expire);`);
     await connection.query(
-      "INSERT INTO xenia_pms.installation(singleton,property_id,client_id,template,schema_digest) VALUES(true,$1,$2,$3,$4)",
+      "INSERT INTO xenia_pms.installation(singleton,property_id,client_id,template,schema_digest,database_instance_id) VALUES(true,$1,$2,$3,$4,$5)",
       [
         config.propertyId,
         config.clientId,
         config.template,
         schemaDigest(schema),
+        randomUUID(),
       ],
     );
-    await connection.query(
-      "INSERT INTO room_types(id,code,name,description,base_occupancy,max_occupancy) VALUES('xenia-qa-type','QA','Doble de prueba','Datos ficticios de '||$1,2,2)",
-      [config.propertyName],
-    );
-    for (const number of ["101", "102", "103"])
+    if (config.template !== "custom") {
       await connection.query(
-        "INSERT INTO rooms(id,room_number,room_type_id,floor,status,max_occupancy) VALUES($1,$2,'xenia-qa-type',1,'available',2)",
-        ["xenia-qa-room-" + number, number],
+        "INSERT INTO room_types(id,code,name,description,base_occupancy,max_occupancy) VALUES('xenia-qa-type','QA','Doble de prueba','Datos ficticios de '||$1,2,2)",
+        [config.propertyName],
       );
-    await connection.query(
-      "INSERT INTO rate_plans(id,name,room_type_id,base_rate,rate_1pax,rate_2pax,currency) VALUES('xenia-qa-rate','Tarifa de prueba','xenia-qa-type',50000,50000,50000,'ARS')",
-    );
-    await connection.query(
-      "INSERT INTO guests(id,first_name,last_name,nationality,active) VALUES('xenia-qa-guest-1',$1,'Prueba','Argentina',true)",
-      [config.template === "aurora" ? "Aurora" : "Brisa"],
-    );
-    const today = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Argentina/Buenos_Aires",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-    const plus = (days: number) =>
-      new Date(new Date(today + "T12:00:00Z").getTime() + days * 86400000)
-        .toISOString()
-        .slice(0, 10);
-    await connection.query(
-      `INSERT INTO reservations(id,reservation_code,guest_id,room_type_id,room_id,rate_plan_id,check_in_date,check_out_date,nights,base_rate_per_night,final_rate_per_night,total_room_amount,status,number_of_guests,created_at)
-      VALUES('xenia-qa-reservation-1','QA-001','xenia-qa-guest-1','xenia-qa-type','xenia-qa-room-101','xenia-qa-rate',$1,$2,2,50000,50000,100000,'confirmed',2,now())`,
-      [plus(1), plus(3)],
-    );
+      for (const number of ["101", "102", "103"])
+        await connection.query(
+          "INSERT INTO rooms(id,room_number,room_type_id,floor,status,max_occupancy) VALUES($1,$2,'xenia-qa-type',1,'available',2)",
+          ["xenia-qa-room-" + number, number],
+        );
+      await connection.query(
+        "INSERT INTO rate_plans(id,name,room_type_id,base_rate,rate_1pax,rate_2pax,currency) VALUES('xenia-qa-rate','Tarifa de prueba','xenia-qa-type',50000,50000,50000,'ARS')",
+      );
+      await connection.query(
+        "INSERT INTO guests(id,first_name,last_name,nationality,active) VALUES('xenia-qa-guest-1',$1,'Prueba','Argentina',true)",
+        [config.template === "aurora" ? "Aurora" : "Brisa"],
+      );
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Argentina/Buenos_Aires",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      const plus = (days: number) =>
+        new Date(new Date(today + "T12:00:00Z").getTime() + days * 86400000)
+          .toISOString()
+          .slice(0, 10);
+      await connection.query(
+        `INSERT INTO reservations(id,reservation_code,guest_id,room_type_id,room_id,rate_plan_id,check_in_date,check_out_date,nights,base_rate_per_night,final_rate_per_night,total_room_amount,status,number_of_guests,created_at)
+        VALUES('xenia-qa-reservation-1','QA-001','xenia-qa-guest-1','xenia-qa-type','xenia-qa-room-101','xenia-qa-rate',$1,$2,2,50000,50000,100000,'confirmed',2,now())`,
+        [plus(1), plus(3)],
+      );
+    }
     for (const [key, value] of Object.entries({
       hotel_name: config.propertyName,
       hotel_email: "pruebas@xenia.invalid",
@@ -165,7 +168,8 @@ export async function setupXeniaPms(config: XeniaPmsConfig, schema: string) {
     if (config.operationsEnabled) await prepareQaOperationsSchema(connection);
     await seedQaOperations(connection, config);
     await connection.query(
-      "INSERT INTO bed_types(id,code,name,is_active,display_order) VALUES('xenia-qa-bed','matrimonial','Matrimonial de prueba',true,1)",
+      "INSERT INTO bed_types(id,code,name,is_active,display_order) VALUES('xenia-qa-bed','matrimonial',$1,true,1)",
+      [config.template === "custom" ? "Matrimonial" : "Matrimonial de prueba"],
     );
     await connection.query("COMMIT");
     return { alreadyInitialized: false };

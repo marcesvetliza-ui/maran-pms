@@ -111,8 +111,29 @@
         </div>
         <nav class="section-tabs" aria-label="Secciones del panel">
           <button id="operations-tab" aria-current="page">Mi operación</button
-          ><button id="admin-tab" hidden>Administración</button>
+          ><button id="admin-tab" hidden>Administración</button><button id="team-tab" hidden>Mi equipo</button>
         </nav>
+        <section id="team-view" hidden>
+          <div class="card">
+            <span class="eyebrow">PERSONAL DEL CLIENTE</span>
+            <h2 id="team-title">Mi equipo</h2>
+            <div class="field"><label for="team-organization">Cliente que administrás</label><select id="team-organization"></select></div>
+            <p class="muted">Administrá el personal y los accesos de este cliente. Los cambios se aplican a sus hoteles.</p>
+            <p id="team-empty" class="muted" hidden>Primero debe quedar activo un hotel de este cliente.</p>
+          </div>
+          <section class="card">
+            <h2>Crear colaborador</h2>
+            <form id="team-user-form">
+              <div class="field"><label for="team-name">Nombre del colaborador</label><input id="team-name" name="name" required minlength="2" maxlength="100" /></div>
+              <div class="field"><label for="team-username">Usuario del colaborador</label><input id="team-username" name="username" required pattern="[a-z0-9][a-z0-9._-]{2,59}" maxlength="60" autocomplete="off" /></div>
+              <div class="field"><label for="team-password">Contraseña inicial del colaborador</label><input id="team-password" name="password" type="password" required minlength="12" maxlength="72" autocomplete="new-password" /><small>Al menos 12 caracteres. Xenia no conserva esta contraseña en el almacenamiento del navegador.</small></div>
+              <div class="field"><label for="team-role">Permiso inicial</label><select id="team-role" name="role"><option value="reception">Recepción</option><option value="manager">Responsable</option><option value="viewer">Sólo consulta</option></select></div>
+              <fieldset><legend>Hoteles autorizados para el colaborador</legend><div id="team-property-options" class="checkbox-grid"></div></fieldset>
+              <button class="primary">Crear colaborador</button>
+            </form>
+          </section>
+          <div id="team-list" class="compact-list" aria-live="polite"></div>
+        </section>
         <div id="operations-view">
           <div class="context-banner">
             <span class="context-dot"></span>
@@ -220,7 +241,8 @@
               <div class="field">
                 <label for="pms-template">Plantilla de pruebas</label>
                 <select id="pms-template" name="template" required>
-                  <option value="">Elegí Aurora o Brisa</option>
+                  <option value="">Elegí el tipo de PMS</option>
+                  <option value="custom">PMS independiente</option>
                   <option value="aurora">Aurora</option>
                   <option value="brisa">Brisa</option>
                 </select>
@@ -264,6 +286,18 @@
               </button>
             </div>
           </section>
+          <section class="card">
+            <span class="eyebrow">ADMINISTRACIÓN DE CADA CLIENTE</span>
+            <h2>Administrador del cliente</h2>
+            <form id="customer-admin-form">
+              <div class="field"><label for="customer-admin-organization">Cliente del administrador</label><select id="customer-admin-organization" name="organizationId" required></select></div>
+              <div class="field"><label for="customer-admin-name">Nombre del administrador</label><input id="customer-admin-name" name="name" required minlength="2" maxlength="100" /></div>
+              <div class="field"><label for="customer-admin-username">Usuario del administrador</label><input id="customer-admin-username" name="username" required pattern="[a-z0-9][a-z0-9._-]{2,59}" maxlength="60" autocomplete="off" /></div>
+              <div class="field"><label for="customer-admin-password">Contraseña inicial del administrador</label><input id="customer-admin-password" name="password" type="password" required minlength="12" maxlength="72" autocomplete="new-password" /></div>
+              <button class="primary">Crear administrador del cliente</button>
+            </form>
+            <div id="customer-admin-list" class="compact-list" aria-live="polite"></div>
+          </section>
           <div class="admin-grid">
             <section class="card">
               <span class="eyebrow">CLIENTES Y CADENAS</span>
@@ -288,6 +322,7 @@
               <span class="eyebrow">ESTABLECIMIENTOS</span>
               <h2>Dar de alta</h2>
               <form id="property-form">
+                <div class="field"><label for="property-storage">Tipo de instalación</label><select id="property-storage" name="storageKind"><option value="pms">PMS independiente</option><option value="demo">Demostración del panel anterior</option></select></div>
                 <div class="field">
                   <label for="property-client">Cliente o cadena</label
                   ><select

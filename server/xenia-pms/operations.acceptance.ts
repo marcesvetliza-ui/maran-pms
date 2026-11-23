@@ -8,6 +8,7 @@ import { expect, type Page } from "@playwright/test";
 /** Invoked only by the disposable-cluster, compiled-PMS acceptance test. */
 export async function exerciseQaOperations(page: Page, installation: {
   origin: string; databaseUrl: string; template: string;
+  fixtureIds?: { guestId: string; roomId: string; roomTypeId: string; ratePlanId: string };
 }, screenshotDir?: string) {
   const url = new URL(installation.databaseUrl);
   assert.equal(url.hostname, "localhost");
@@ -17,6 +18,7 @@ export async function exerciseQaOperations(page: Page, installation: {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(new Date());
   const tomorrow = new Date(new Date(today + "T12:00:00Z").getTime() + 86400000).toISOString().slice(0, 10);
   const checks: string[] = [];
+  const ids = installation.fixtureIds ?? { guestId: "xenia-qa-guest-1", roomId: "xenia-qa-room-102", roomTypeId: "xenia-qa-type", ratePlanId: "xenia-qa-rate" };
   const cashPayment = installation.template === "aurora";
   const mark = (message: string) => { checks.push(message); console.info("[QA operations]", installation.template, message); };
   const boundedJson = async (response: { json: () => Promise<any> }) => {
@@ -49,7 +51,7 @@ export async function exerciseQaOperations(page: Page, installation: {
     mark("native reception shift opening with the verified Xenia identity");
 
     const created = await request.post(origin + "/api/reservations", { timeout: 12000, headers, data: {
-      guestId: "xenia-qa-guest-1", roomId: "xenia-qa-room-102", roomTypeId: "xenia-qa-type", ratePlanId: "xenia-qa-rate",
+      ...ids,
       checkInDate: today, checkOutDate: tomorrow, nights: 1, numberOfGuests: 1,
       baseRatePerNight: "50000", finalRatePerNight: "50000", totalRoomAmount: "50000", status: "confirmed",
       notes: "Circuito individual de prueba, datos ficticios",

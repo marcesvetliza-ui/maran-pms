@@ -7,6 +7,7 @@ on:
         feat/xenia-multihotel-foundation-20261117,
         feat/xenia-pms-integration-20261118,
         fix/xenia-pms-reservation-edit-20261119,
+        feat/xenia-pms-operations-qa-20261123,
       ]
     paths:
       - "server/xenia-control/**"
@@ -53,10 +54,13 @@ jobs:
           XENIA_SCREENSHOT_DIR: artifacts/xenia-pms
         run: |
           npm run xenia:test
+          npm run xenia:customers:test
           npm run xenia:pms:test
+          npm run xenia:pms:customer:test
           npx vitest run client/src/lib/xenia-qa-operation.test.ts client/src/components/xenia-qa-checkout.test.tsx
           npx vitest run --config vitest.server.config.ts server/tests/cash-user-access.test.ts server/tests/cash-user-access-middleware.test.ts
           npm run xenia:test:browser
+          npm run xenia:customers:browser
       - name: Compilar las imágenes independientes
         run: |
           docker build -f Dockerfile.xenia-control -t xenia-control:review .

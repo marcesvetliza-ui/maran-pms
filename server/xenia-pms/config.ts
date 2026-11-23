@@ -6,7 +6,7 @@ export type XeniaPmsConfig = {
   propertyId: string;
   clientId: string;
   clientSecret: string;
-  template: "aurora" | "brisa";
+  template: "aurora" | "brisa" | "custom";
   propertyName: string;
   production: boolean;
   operationsEnabled: boolean;
@@ -86,8 +86,11 @@ export function readXeniaPmsConfig(
       "XENIA_PMS_CLIENT_ID: requiere el identificador de instalación.",
     );
   const template = env.XENIA_PMS_TEMPLATE;
-  if (template !== "aurora" && template !== "brisa")
-    invalid.push("XENIA_PMS_TEMPLATE: elegí aurora o brisa.");
+  if (template !== "aurora" && template !== "brisa" && template !== "custom")
+    invalid.push("XENIA_PMS_TEMPLATE: elegí aurora, brisa o custom.");
+  const propertyName = env.XENIA_PMS_PROPERTY_NAME?.trim();
+  if (template === "custom" && (!propertyName || propertyName.length < 2 || propertyName.length > 100 || /[\r\n\0]/.test(propertyName)))
+    invalid.push("XENIA_PMS_PROPERTY_NAME: el alta independiente requiere el nombre del hotel.");
   const production = env.NODE_ENV === "production";
   let origin = "",
     controlOrigin = "";
@@ -133,8 +136,8 @@ export function readXeniaPmsConfig(
     propertyId: propertyId.toLowerCase(),
     clientId: clientId.toLowerCase(),
     clientSecret,
-    template: template as "aurora" | "brisa",
-    propertyName: template === "aurora" ? "Hotel Aurora" : "Apart Brisa",
+    template: template as "aurora" | "brisa" | "custom",
+    propertyName: template === "custom" ? propertyName! : template === "aurora" ? "Hotel Aurora" : "Apart Brisa",
     production,
     operationsEnabled: env.XENIA_PMS_OPERATIONS_ENABLED === "true",
   };

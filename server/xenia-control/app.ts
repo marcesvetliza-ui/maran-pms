@@ -14,6 +14,8 @@ import { z, ZodError } from "zod";
 import type { ControlConfig } from "./config";
 import { ControlStore, ControlError, type Principal } from "./store";
 import { PmsBroker } from "./pms";
+import { CustomerManagement } from "./customer-management";
+import { assertCustomerSchema } from "./customer-schema";
 
 declare module "express-session" {
   interface SessionData {
@@ -24,7 +26,7 @@ declare module "express-session" {
   }
 }
 
-const name = z.string().trim().min(2).max(100);
+const name = z.string().trim().min(2).max(100).refine(value => !/[\r\n\0]/.test(value));
 const uuid = z.string().uuid();
 const modules = z
   .array(z.enum(["lodging", "restaurant", "spa", "events", "groups"]))
@@ -87,11 +89,13 @@ const actor = (res: express.Response): Principal => res.locals.xeniaPrincipal;
 export async function createControlApp(config: ControlConfig) {
   const store = new ControlStore(config);
   const pms = new PmsBroker(store);
+  const customers = new CustomerManagement(store);
   // Startup checks presence only. All schema/provisioning changes belong to the explicit setup command.
   try {
     await store.central.query(
       "SELECT id FROM xenia_control.principals LIMIT 1",
     );
+    await assertCustomerSchema(store.central);
   } catch (error) {
     await store.close();
     throw error;
@@ -143,9 +147,15 @@ export async function createControlApp(config: ControlConfig) {
       if (req.get("Origin") && req.get("Origin") !== installation.origin)
         throw new ControlError(403, "Origen del PMS inválido.");
       res.locals.pmsClientId = installation.clientId;
+      res.locals.pmsCredentialVersion = installation.credentialVersion;
       next();
     })().catch(next);
   };
+  app.post("/api/pms/ready", pmsLimit, pmsClient, route(async (req, res) => {
+    const input = z.object({ databaseId: uuid, propertyId: uuid, revision: z.string().regex(/^[a-f0-9]{40}$/),
+      template: z.literal("custom"), mode: z.literal("qa"), operationsEnabled: z.boolean() }).strict().parse(req.body);
+    res.json(await pms.ready(res.locals.pmsClientId, res.locals.pmsCredentialVersion, input));
+  }));
   const opaqueToken = z.string().regex(/^[a-zA-Z0-9_-]{43}$/);
   app.post(
     "/api/pms/exchange",
@@ -458,7 +468,7 @@ export async function createControlApp(config: ControlConfig) {
       const input = z
         .object({
           origin: z.string().max(250),
-          template: z.enum(["aurora", "brisa"]).optional(),
+          template: z.enum(["aurora", "brisa", "custom"]).optional(),
         })
         .strict()
         .parse(req.body);
@@ -474,6 +484,33 @@ export async function createControlApp(config: ControlConfig) {
         );
     }),
   );
+  const accountInput = userInput.omit({ propertyIds: true, role: true }).extend({ requestId: uuid }).strict();
+  const staffInput = userInput.extend({ requestId: uuid }).strict();
+  app.get("/api/organizations", authorize, route(async (_req, res) => res.json(await customers.organizations(actor(res)))));
+  app.get("/api/admin/organizations/:organizationId/administrators", authorize, route(async (req, res) =>
+    res.json(await customers.administrators(actor(res), uuid.parse(req.params.organizationId)))));
+  app.post("/api/admin/organizations/:organizationId/administrators", authorize, route(async (req, res) => {
+    const result = await customers.createAdministrator(actor(res), uuid.parse(req.params.organizationId), accountInput.parse(req.body));
+    res.status(result.replayed ? 200 : 201).json(result);
+  }));
+  app.delete("/api/admin/organizations/:organizationId/administrators/:principalId", authorize, route(async (req, res) =>
+    res.json(await customers.revokeAdministrator(actor(res), uuid.parse(req.params.organizationId), uuid.parse(req.params.principalId)))));
+  app.get("/api/organizations/:organizationId/properties", authorize, route(async (req, res) =>
+    res.json(await customers.properties(actor(res), uuid.parse(req.params.organizationId)))));
+  app.get("/api/organizations/:organizationId/users", authorize, route(async (req, res) =>
+    res.json(await customers.users(actor(res), uuid.parse(req.params.organizationId)))));
+  app.post("/api/organizations/:organizationId/users", authorize, route(async (req, res) => {
+    const result = await customers.createStaff(actor(res), uuid.parse(req.params.organizationId), staffInput.parse(req.body));
+    res.status(result.replayed ? 200 : 201).json(result);
+  }));
+  app.patch("/api/organizations/:organizationId/users/:principalId", authorize, route(async (req, res) =>
+    res.json(await customers.setActive(actor(res), uuid.parse(req.params.organizationId), uuid.parse(req.params.principalId),
+      z.object({ active: z.boolean() }).strict().parse(req.body).active))));
+  app.put("/api/organizations/:organizationId/users/:principalId/properties/:propertyId", authorize, route(async (req, res) =>
+    res.json(await customers.assign(actor(res), uuid.parse(req.params.organizationId), uuid.parse(req.params.principalId),
+      uuid.parse(req.params.propertyId), z.object({ role: propertyRole }).strict().parse(req.body).role))));
+  app.delete("/api/organizations/:organizationId/users/:principalId/properties/:propertyId", authorize, route(async (req, res) =>
+    res.json(await customers.revoke(actor(res), uuid.parse(req.params.organizationId), uuid.parse(req.params.principalId), uuid.parse(req.params.propertyId)))));
   app.get(
     "/api/admin/organizations",
     authorize,
@@ -511,10 +548,14 @@ export async function createControlApp(config: ControlConfig) {
             .max(60),
           organizationId: uuid,
           modules,
+          storageKind: z.enum(["demo", "pms"]).optional(),
+          requestId: uuid.optional(),
         })
         .strict()
+        .refine(value => value.storageKind !== "pms" || (!!value.requestId && value.modules.includes("lodging")), "El PMS requiere Alojamiento y el identificador de alta.")
         .parse(req.body);
-      res.status(201).json(await store.createProperty(actor(res), input));
+      const property = await store.createProperty(actor(res), input);
+      res.status("replayed" in property && property.replayed ? 200 : 201).json(property);
     }),
   );
   app.post(
@@ -667,6 +708,7 @@ export async function createControlApp(config: ControlConfig) {
     app,
     store,
     pms,
+    customers,
     close: async () => {
       await sessionStore.close();
       await store.close();

@@ -33,7 +33,7 @@ const identitySchema = z
     propertyId: z.string().uuid(),
     propertyName: z.string().max(100),
     clientId: z.string().uuid(),
-    role: z.enum(["owner", "manager", "reception", "viewer"]),
+    role: z.enum(["owner", "customer_admin", "manager", "reception", "viewer"]),
   })
   .strict();
 const accessSchema = z.object({
@@ -241,6 +241,8 @@ export function registerXeniaPmsRuntime(
           propertyId: config.propertyId,
           clientId: config.clientId,
           operationsEnabled: config.operationsEnabled,
+          template: config.template,
+          propertyName: config.propertyName,
         }),
       )
       .catch(() => res.status(503).json({ status: "unavailable" }));
@@ -461,4 +463,23 @@ export function registerXeniaPmsRuntime(
       next();
     })().catch((error) => reject(error, res));
   });
+}
+
+/** A newly prepared custom PMS confirms its own identity after startup. This
+ * authenticated back-channel never accepts a browser's readiness assertion. */
+export function announceXeniaPmsReady(pool: pg.Pool, config: XeniaPmsConfig) {
+  if (config.template !== "custom") return;
+  const attempt = async () => {
+    try {
+      await assertXeniaPmsBinding(pool, config);
+      if (config.operationsEnabled) await assertQaOperationsSchema(pool);
+      const instance = (await pool.query("SELECT database_instance_id FROM xenia_pms.installation WHERE singleton=true")).rows[0];
+      await controlRequest(config, "/api/pms/ready", { databaseId: instance.database_instance_id, propertyId: config.propertyId, revision: BUILD_REVISION,
+        template: "custom", mode: "qa", operationsEnabled: config.operationsEnabled });
+    } catch {
+      console.warn("[xenia-pms] Falta confirmar la preparación con Xenia; se reintentará sin modificar datos operativos.");
+      setTimeout(() => { void attempt(); }, 15000).unref();
+    }
+  };
+  void attempt();
 }

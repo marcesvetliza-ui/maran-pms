@@ -1,6 +1,6 @@
 import { ACCOMMODATION_PERMISSION } from "./accommodationPermission";
 
-export type XeniaPmsRole = "owner" | "manager" | "reception" | "viewer";
+export type XeniaPmsRole = "owner" | "customer_admin" | "manager" | "reception" | "viewer";
 export type XeniaPmsIdentity = {
   principalId: string;
   username: string;
@@ -37,5 +37,5 @@ export const XENIA_QA_OPERATE_STAY = "api:xenia-qa:operate-stay";
 // This map is restricted to the QA installation. It does not alter the role
 // catalogue or permissions of an operational hotel.
 export function xeniaPmsLocalRole(role: XeniaPmsRole): string {
-  return role === "owner" ? "admin" : role === "viewer" ? "xenia_viewer" : role;
+  return role === "owner" || role === "customer_admin" ? "admin" : role === "viewer" ? "xenia_viewer" : role;
 }

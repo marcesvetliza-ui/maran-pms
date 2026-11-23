@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg from "pg";
 import bcrypt from "bcryptjs";
+import { prepareCustomerSchema } from "./customer-schema";
 import type { ControlConfig } from "./config";
 
 export class ControlError extends Error {
@@ -27,14 +28,15 @@ export type Property = {
   slug: string;
   modules: string[];
   status: string;
+  storageKind: "demo" | "pms";
   role: string;
 };
-type PrivateProperty = Property & { databaseKey: string };
+export type PrivateProperty = Property & { databaseKey: string | null };
 
 const principalColumns =
   'id, username, name, platform_admin AS "platformAdmin", active, session_version AS "sessionVersion"';
 const propertyColumns =
-  'p.id, p.organization_id AS "organizationId", p.name, p.slug, p.modules, p.status';
+  'p.id, p.organization_id AS "organizationId", p.name, p.slug, p.modules, p.status,p.storage_kind AS "storageKind"';
 
 async function requireDedicatedDatabase(
   pool: pg.Pool | pg.PoolClient,
@@ -116,6 +118,7 @@ export class ControlStore {
         principal_id uuid NOT NULL REFERENCES xenia_control.principals(id),principal_version integer NOT NULL,role text NOT NULL,expires_at timestamptz NOT NULL);
       CREATE INDEX IF NOT EXISTS pms_grants_expires ON xenia_control.pms_grants(expires_at);
       CREATE INDEX IF NOT EXISTS pms_leases_expires ON xenia_control.pms_leases(expires_at);`);
+      await prepareCustomerSchema(connection);
       await connection.query("COMMIT");
     } catch (error) {
       await connection.query("ROLLBACK");
@@ -172,8 +175,11 @@ export class ControlStore {
       await this.central.query(
         actor.platformAdmin
           ? `SELECT ${propertyColumns}, 'owner' AS role FROM xenia_control.properties p ORDER BY p.name`
-          : `SELECT ${propertyColumns},m.role FROM xenia_control.properties p JOIN xenia_control.memberships m ON m.property_id=p.id
-         WHERE m.principal_id=$1 AND p.status='active' ORDER BY p.name`,
+          : `SELECT ${propertyColumns},CASE WHEN a.principal_id IS NOT NULL THEN 'customer_admin' ELSE m.role END AS role
+         FROM xenia_control.properties p
+         LEFT JOIN xenia_control.memberships m ON m.property_id=p.id AND m.principal_id=$1
+         LEFT JOIN xenia_control.organization_administrators a ON a.organization_id=p.organization_id AND a.principal_id=$1
+         WHERE (m.principal_id IS NOT NULL OR a.principal_id IS NOT NULL) AND p.status='active' ORDER BY p.name`,
         actor.platformAdmin ? [] : [actor.id],
       )
     ).rows;
@@ -186,8 +192,10 @@ export class ControlStore {
   ): Promise<PrivateProperty> {
     const property = (
       await this.central.query(
-        `SELECT ${propertyColumns},p.database_key AS "databaseKey",m.role FROM xenia_control.properties p
-      LEFT JOIN xenia_control.memberships m ON m.property_id=p.id AND m.principal_id=$2 WHERE p.id=$1`,
+        `SELECT ${propertyColumns},p.database_key AS "databaseKey",CASE WHEN a.principal_id IS NOT NULL THEN 'customer_admin' ELSE m.role END AS role
+      FROM xenia_control.properties p
+      LEFT JOIN xenia_control.memberships m ON m.property_id=p.id AND m.principal_id=$2
+      LEFT JOIN xenia_control.organization_administrators a ON a.organization_id=p.organization_id AND a.principal_id=$2 WHERE p.id=$1`,
         [propertyId, actor.id],
       )
     ).rows[0];
@@ -214,11 +222,16 @@ export class ControlStore {
       slug: string;
       organizationId: string;
       modules: string[];
+      storageKind?: "demo" | "pms";
+      requestId?: string;
     },
   ) {
     this.requireAdmin(actor);
     const connection = await this.central.connect();
     let propertyId = "";
+    const storageKind = input.storageKind ?? "demo";
+    if (storageKind === "pms" && (!input.requestId || !input.modules.includes("lodging"))) throw new ControlError(400, "El alta requiere su identificador de solicitud.");
+    const digest = createHash("sha256").update(JSON.stringify({ organizationId: input.organizationId, name: input.name, slug: input.slug, modules: input.modules.slice().sort(), storageKind })).digest("hex");
     try {
       await connection.query("BEGIN");
       await connection.query("SELECT pg_advisory_xact_lock(87934211)");
@@ -228,6 +241,15 @@ export class ControlStore {
       );
       if (!organization.rowCount)
         throw new ControlError(400, "Elegí un cliente válido.");
+      if (input.requestId) {
+        const previous = (await connection.query("SELECT id,creation_digest FROM xenia_control.properties WHERE creation_request=$1", [input.requestId])).rows[0];
+        if (previous) {
+          if (previous.creation_digest !== digest) throw new ControlError(409, "Esta solicitud de alta ya se usó con otros datos.");
+          await connection.query("COMMIT");
+          const { databaseKey: _key, ...property } = await this.catalogProperty(actor, previous.id);
+          return { ...property, replayed: true };
+        }
+      }
       const allocated = new Set(
         (
           await connection.query(
@@ -235,18 +257,18 @@ export class ControlStore {
           )
         ).rows.map((row) => row.database_key),
       );
-      const databaseKey = Object.keys(this.config.propertyUrls).find(
+      const databaseKey = storageKind === "pms" ? null : Object.keys(this.config.propertyUrls).find(
         (key) => !allocated.has(key),
       );
-      if (!databaseKey)
+      if (storageKind === "demo" && !databaseKey)
         throw new ControlError(
           409,
           "No hay una instalación disponible para un nuevo establecimiento. Contactá a Administración.",
         );
       propertyId = randomUUID();
       await connection.query(
-        `INSERT INTO xenia_control.properties(id,organization_id,name,slug,modules,database_key,status)
-        VALUES($1,$2,$3,$4,$5,$6,'provisioning')`,
+        `INSERT INTO xenia_control.properties(id,organization_id,name,slug,modules,database_key,status,storage_kind,creation_request,creation_digest)
+        VALUES($1,$2,$3,$4,$5,$6,'provisioning',$7,$8,$9)`,
         [
           propertyId,
           input.organizationId,
@@ -254,6 +276,7 @@ export class ControlStore {
           input.slug,
           input.modules,
           databaseKey,
+          storageKind, input.requestId ?? null, digest,
         ],
       );
       await connection.query(
@@ -268,7 +291,19 @@ export class ControlStore {
       connection.release();
     }
     // Provisioning is resumable. Failed slots stay bound to their property; never recycle another hotel's database.
+    if (storageKind === "pms") {
+      const { databaseKey: _key, ...property } = await this.catalogProperty(actor, propertyId);
+      return { ...property, replayed: false };
+    }
     return this.activateProperty(actor, propertyId);
+  }
+
+  async catalogProperty(actor: Principal, propertyId: string): Promise<PrivateProperty> {
+    this.requireAdmin(actor);
+    const row = (await this.central.query(`SELECT ${propertyColumns},p.database_key AS "databaseKey",'owner' AS role
+      FROM xenia_control.properties p WHERE p.id=$1`, [propertyId])).rows[0];
+    if (!row) throw new ControlError(404, "Establecimiento no disponible.");
+    return row;
   }
 
   async activateProperty(actor: Principal, propertyId: string) {
@@ -281,8 +316,14 @@ export class ControlStore {
     ).rows[0];
     if (!property)
       throw new ControlError(404, "Establecimiento no disponible.");
+    if (property.storageKind === "pms") {
+      const ready = await this.central.query("SELECT 1 FROM xenia_control.pms_installations WHERE property_id=$1 AND enabled AND verified_revision IS NOT NULL", [propertyId]);
+      if (!ready.rowCount) throw new ControlError(409, "El PMS todavía no confirmó su preparación. Publicalo con su ficha y volvé a consultar.");
+      await this.central.query("UPDATE xenia_control.properties SET status='active' WHERE id=$1", [propertyId]);
+      return (await this.properties(actor)).find(property => property.id === propertyId)!;
+    }
     try {
-      const pool = this.propertyPool(property.databaseKey);
+      const pool = this.propertyPool(property.databaseKey!);
       await requireDedicatedDatabase(pool, "xenia_property");
       await pool.query(`CREATE SCHEMA IF NOT EXISTS xenia_property;
         CREATE TABLE IF NOT EXISTS xenia_property.identity (singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton), property_id uuid NOT NULL UNIQUE);
@@ -325,7 +366,7 @@ export class ControlStore {
     return this.propertyPools.get(key)!;
   }
   private async boundPool(property: PrivateProperty) {
-    const pool = this.propertyPool(property.databaseKey);
+    const pool = this.propertyPool(property.databaseKey!);
     const identity = (
       await pool.query(
         "SELECT property_id FROM xenia_property.identity WHERE singleton=true",
@@ -340,6 +381,7 @@ export class ControlStore {
   }
   private async operational(actor: Principal, id: string, write = false) {
     const property = await this.authorize(actor, id, write);
+    if (property.storageKind === "pms") throw new ControlError(409, "Abrí el PMS del establecimiento para consultar su operación.");
     if (!property.modules.includes("lodging"))
       throw new ControlError(
         403,
