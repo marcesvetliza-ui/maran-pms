@@ -1,146 +1,90 @@
-# Estado de ejecución de Xenia y continuidad de Maran
+# Estado de Xenia al 23 de noviembre de 2026
 
-Actualización: 20 de noviembre de 2026. Prioridad activa: **asistente piloto de soporte en Xenia antes del 30/11, con objetivo 29/11; continuidad de Maran**. Los ensayos adicionales del multihotel quedan pausados. Se conserva la evidencia de Alojamiento y recuperación ya obtenida.
+Corte documental: **2026-11-23, Argentina**. Esta actualización reúne la aceptación de los PMS QA, los permisos comprobados por Marcelo y la aclaración del objetivo comercial. Las referencias se consultaron en GitHub; las acciones remotas de Railway relatadas fueron realizadas por Marcelo.
 
-## Primer hito: panel multihotel probado
+## Decisión que ordena el producto
 
-Marcelo confirmó el ingreso remoto a `app.xeniapms.com`, dos establecimientos activos y las pruebas de reservas y perfiles. Aurora y Brisa conservan reservas distintas después de recargar. Responsable opera ambos; recepción sólo Aurora; consulta sólo Brisa sin escritura. Los tres perfiles de prueba no acceden a la administración central.
+Marcelo aclaró que necesita un sistema ofrecido a muchos hoteles de distintos dueños. El acceso de una persona a varios hoteles del mismo cliente es una posibilidad, no el objetivo que define todo el producto. El siguiente bloque pasa de una vista gerencial consolidada a **alta y administración de un cliente independiente**.
 
-El panel usa un servicio independiente y tres bases nuevas en `observant-possibility`. La [PR 119](https://github.com/marcesvetliza-ui/maran-pms/pull/119) conserva el código de esta entrega, sus 24 pruebas PostgreSQL/HTTP y las verificaciones de navegador y Docker. Sigue en borrador, sin integrarse en Maran. El [acta](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-multihotel-foundation-20261117/docs/xenia/evidencia/multihotel-aceptacion-2026-11-17.json) identifica lo probado por el propietario y lo pendiente.
+Se aprovechan catálogo, bases separadas, enlace de identidad y permisos por hotel. Sigue pendiente que un administrador de cliente gestione su personal dentro de su organización. El código actual reserva la creación de usuarios y asignación de accesos a la administración global de Xenia.
 
-La web comercial ya está pública en `xeniapms.com`; Marcelo confirmó las redirecciones de `.store` y `.online` y la recepción y respuesta de `contacto@xeniapms.com`. El registro de `.com.ar` seguía pendiente en el último estado comunicado. La comprobación externa de salud, la revisión exacta servida y la recuperación remota no están cerradas.
+## Mapa de instalaciones y evidencia
 
-## Paso 2 implementado en revisión
+| Componente | Destino conocido | Estado al corte |
+| --- | --- | --- |
+| Web comercial | `xeniapms.com` | Publicación y correo confirmados por Marcelo en los antecedentes. Sin nueva comprobación de disponibilidad en este trabajo. |
+| Panel | `app.xeniapms.com`, servicio `Xenia-Control` | Funcionamiento y gestión de accesos confirmados por Marcelo. SHA servido actual no aportado al acta del 23/11. |
+| PMS Aurora | `aurora.qa.xeniapms.com`, servicio `xenia-aurora-pms` | Marcelo confirmó el despliegue y el recorrido completo siguiendo la guía de la revisión `4a1f71ba`. No se recibió un JSON nuevo de salud ni un ID de deployment para verificarlo independientemente. |
+| PMS Brisa | `brisa.qa.xeniapms.com`, servicio `xenia-brisa-pms` | Mismo alcance de aceptación manual; revisión candidata indicada `4a1f71ba`, SHA servido sin captura o respuesta aportada al acta nueva. |
+| PMS del asistente piloto | `demo.maranpms.com.ar`, servicio `maran-pms` según guía y conversación | Chat y respuestas visibles en capturas de Marcelo. La revisión remota efectiva de PMS y asistente se debe registrar por separado. |
+| Asistente normal | Servicio `charismatic-wonder`, base `assistant-db` según guía y conversación | Rama de soporte identificada; no se volvió a consultar su configuración remota. |
+| Evaluador | Servicio `support-codex-evaluation` según antecedentes | Ejecutor distinto del asistente; no se inició inferencia ni una evaluación en este trabajo. |
+| Maran en uso | `maranpms.com.ar` | Fuera de las modificaciones de esta entrega documental. `main` no acredita por sí mismo su versión instalada. |
 
-La [PR 130](https://github.com/marcesvetliza-ui/maran-pms/pull/130), en la rama `feat/xenia-pms-integration-20261118`, conecta los PMS ficticios de Aurora y Brisa con el panel. Conserva la primera entrega y las correcciones de `main` hasta `8a6e98cb`, sin fusionar ni publicar en Maran. Marcelo informó que el panel tiene buena salud; la revisión remota exacta sigue pendiente de registrar.
+Los servicios de prueba se sitúan en `observant-possibility` / `production`: ese nombre de entorno de Railway no convierte a los PMS en instalaciones operativas comerciales. Su modo es QA según la configuración y las pruebas aceptadas.
 
-El paquete agrega preparación limpia de bases operativas nuevas, ingreso central con códigos de un uso y sesiones locales, permisos comprobados por el servidor, ficha privada de variables y marca/contexto visibles. Se verificaron localmente dos PMS compilados por HTTPS, planning, creación desde el formulario real, edición, consulta sin escritura, revocación y cierre central. GitHub aprobó las cinco verificaciones del código `73f85093`: PMS aislado, fundamentos multihotel, suite general con PostgreSQL, fechas y workflows. Incluyen la construcción de ambas imágenes. La [evidencia de la entrega](evidencia/pms-qa-2026-11-18.json) registra los resultados y sus límites.
+## Qué quedó aceptado por Marcelo
 
-La [ficha con el paso a paso de Railway y Donweb](https://github.com/marcesvetliza-ui/maran-pms/blob/feat/xenia-pms-integration-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) contiene los nombres, comandos, puerto, variables y dominios reales previstos. El orden de publicación es: actualizar sólo Xenia-Control; generar la ficha de Aurora; crear su base operativa y servicio nuevos; conectar su dominio; aceptar Aurora; repetir con Brisa.
+- Aurora y Brisa: reserva individual, check-in, consumo, cobro ficticio, checkout con saldo de cobro cero y conciliación de Caja.
+- Separación visual de reservas entre ambos hoteles.
+- Recepción de Aurora: acceso sólo a ese hotel y persistencia de una reserva y su edición.
+- Consulta de Brisa: lectura y rechazo de las operaciones ensayadas.
+- Retirada del acceso de la cuenta de consulta, bloqueo al recargar y posterior reasignación siguiendo la guía.
 
-## Corrección de la ficha de Railway, 18 de noviembre
+La [aceptación manual](evidencia/aceptacion-qa-2026-11-23.json) cita las confirmaciones de la conversación. Es aceptación del operador sobre los recorridos indicados; no incluye trazas HTTP, capturas nuevas ni una auditoría exhaustiva de todos los permisos. La validación entre organizaciones distintas y la administración delegada todavía no se ejecutaron.
 
-La captura de Settings aportada por Marcelo informa la retirada de Config as Code el 1 de diciembre y la imposibilidad de activarlo en servicios que no lo usaban. La guía de publicación versión 2 utiliza ajustes manuales: `RAILWAY_DOCKERFILE_PATH` en Variables y los comandos de preparación, arranque y salud en Settings → Deploy. Se deja Railway Config File sin ruta personalizada. Esto corrige los puntos 2.5 y 5 de la guía; no cambia el código probado ni administra servicios desde esta conversación.
+## Código y comprobaciones identificados
 
-## Edición de reservas: corrección preparada el 19 de noviembre
+| Línea | Referencia comprobada en GitHub | Consecuencia |
+| --- | --- | --- |
+| PMS QA actual de referencia | `feat/xenia-pms-operations-qa-20261123` → `4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f`, PR 168 abierta en borrador | Referencia funcional aceptada por el operador; despliegue reportado desde la rama, sin fusionar la PR. |
+| PMS QA anterior | `fix/xenia-pms-reservation-edit-20261119` → `f5005dc7d2a702198cb953b59df99b1d92cbbe53`, PR 146 abierta | Antecedente de edición de fechas y tarifas; no sustituye la etapa nueva de Caja. |
+| Primera base del panel | `feat/xenia-multihotel-foundation-20261117` → `eeb7d0c3ec1a4ce4294ef3a1d7f915c40f9ffd28`, PR 119 abierta | Antecedente; la rama por sí sola no identifica el código del panel actualmente servido. |
+| Asistente | `feature/xenia-support-approval-foundation` → `bc8e06b5a9042fdda3cf4fda2664527cb59c7e38` | PR 158 fusionada en esta rama; no se fusionó en la línea del PMS QA como parte de este trabajo. |
+| Maran / producto principal | `main` → `111a89d4d6ce9f46097e6fd80968fb12aee3bcce` | Incluye la PR 167 de mesas. No prueba despliegue en Maran ni incorporación en los PMS QA o en el código leído por el asistente. |
+| Plan previo | `plan/xenia-product-multihotel-20261116` → `f75721ef7e70b67c754a3286ee22e36d3e8bb55f` | Base de esta organización documental; conserva la prioridad del piloto y los antecedentes. |
 
-Marcelo confirmó que pudo crear una reserva en Aurora y moverla de habitación. Informó que no pudo editar fechas, tarifas ni consumos. La revisión del código encontró dos omisiones de QA: faltaba el permiso de edición de alojamiento y el filtro bloqueaba su consulta y las rutas de revisión y confirmación de precios por noche. Los consumos continúan fuera del alcance habilitado de esta entrega.
+La [evidencia de operaciones](evidencia/operaciones-qa-2026-11-23.json) registra **121 pruebas locales** y **83 de CI**, con solapamiento. No se suman como casos diferentes. CI de Node 22 aprobó ambos servicios y sus dos imágenes; el árbol del merge virtual coincide con el candidato. Los ensayos usan PostgreSQL sintético.
 
-La [PR 146](https://github.com/marcesvetliza-ui/maran-pms/pull/146), revisión `f5005dc7`, corrige la edición en las instalaciones existentes y añade un aviso sobre los circuitos pendientes. Se probaron actualización sin borrar datos, conservación de revocaciones, edición desde el navegador de fechas, tarifas y observaciones, persistencia al recargar, consulta sin escritura e aislamiento. Las cuatro verificaciones de GitHub y ambas imágenes de despliegue aprobaron. La publicación en los servicios **xenia-aurora-pms** y **xenia-brisa-pms** y su aceptación con la reserva existente siguen pendientes. Se conserva la ficha de cada instalación; el comando de preparación incorpora el permiso una sola vez. El [acta de esta corrección](evidencia/pms-edicion-2026-11-19.json) distingue el código probado del servicio publicado.
+El asistente conserva una validación histórica separada del 20/11: 398 pruebas en las suites enumeradas por su acta, navegador con backend simulado y cero llamadas reales de esa validación. Las capturas posteriores de conversación real son otra evidencia; no convierten ese acta en una evaluación formal de calidad de un modelo real.
 
-## Alojamiento aceptado por el propietario y recuperación preparada
+## Bases, copias y recuperación
 
-Después de la corrección de edición, Marcelo confirmó «Perfecto todo». Luego respondió «Si anda bien» a la prueba de reservas separadas entre Aurora y Brisa, recepción exclusiva de Aurora y consulta de Brisa sin escritura. La [acta de aceptación funcional](evidencia/pms-aceptacion-funcional-2026-11-19.json) registra esas confirmaciones. Se avanza al respaldo y recuperación de Xenia. Permanecen pendientes las revisiones exactas instaladas, la comprobación específica de revocación y cierre central remotos y los demás circuitos operativos.
+Se conservan la base central `xenia-control-db`, las bases de demostración `xenia-aurora-db` y `xenia-brisa-db`, y las operativas de prueba `xenia-aurora-pms-db` y `xenia-brisa-pms-db`. Las dos clases de base tienen funciones distintas; las bases de demostración no son una segunda base obligatoria de cada cliente futuro.
 
-La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md) distingue la base central, las dos de demostración del panel y las dos operativas de los PMS de prueba. Conserva el registro de las cinco copias y el ensayo en una base nueva. El apartado del 20 de noviembre distingue la restauración de volumen de la recuperación PITR efectivamente realizada por el propietario.
+Marcelo confirmó las cinco copias el 20/11. La referencia, retención y configuración recuperable completas siguen pendientes en su [acta](evidencia/respaldos-reportados-2026-11-20.json). Existe una recuperación PITR de Aurora en `xenia-aurora-restore-db`, con comprobación manual de una reserva y sus referencias. Marcelo confirmó que el PMS mantiene la base original.
 
-Se ejecutó un [ensayo lógico local](evidencia/recuperacion-local-2026-11-19.json) de exportación y restauración de un PMS ficticio con PostgreSQL 17: igualdad de todas las filas y secuencias, relaciones de reserva, fechas, precios, observaciones, identidad y conservación de un cambio posterior del origen. Es evidencia local; no cierra la recuperación remota ni el arranque de una aplicación restaurada.
+La recuperación integral con aplicación, datos completos, identidad y retorno probado permanece pausada y pendiente. No se repite la creación de las cinco copias como condición de cada avance documental ni se eliminan copias o servicios durante esta organización.
 
-## Antecedente de publicación del 19 de noviembre
+## Asistente: qué funciona y qué falta
 
-Marcelo confirmó el ingreso al PMS de Aurora y comunicó que Brisa continúa validando su DNS. La [evidencia del 19 de noviembre](evidencia/pms-publicacion-2026-11-19.json) registra el ingreso como prueba manual del propietario; las consultas DNS/HTTPS desde este entorno no pudieron resolver los tres dominios y no permiten concluir que estén caídos. El SHA servido por cada servicio sigue sin registrar.
+Marcelo mostró conversación, diagnóstico con citas, respuesta cuando el código ya contempla un arreglo y rechazo de pedidos de operaciones directas. También mostró invalidación de una propuesta tras nueva información y corte por cupo. Son resultados concretos de uso del piloto.
 
-La [PR 139](https://github.com/marcesvetliza-ui/maran-pms/pull/139), revisión `e6551f02`, corrige la ficha para **Hotel brisa** sin depender de su identificador textual. Las cuatro verificaciones de GitHub aprobaron las pruebas y las imágenes. La [guía corregida](https://github.com/marcesvetliza-ui/maran-pms/blob/fix/xenia-brisa-pms-connection-20261118/docs/xenia/PASO_2_PUBLICAR_PMS_AURORA.md) conserva los ajustes manuales de Railway y la selección de la plantilla Brisa.
+La última captura del 23/11 mostraba US$1 diario compartido, US$0,20 consumidos, US$0,80 disponibles, 3/20 respuestas y 2/2 investigaciones. Es una observación fechada, no una consulta actual de la base ni permiso para ampliar los límites. El modelo efectivamente informado por el proveedor, sus tokens por caso y la correspondencia de las versiones publicadas no se acreditan con esa captura.
 
-## Cinco respaldos y recuperación PITR de Aurora, 20 de noviembre
+La evaluación pequeña de US$0,15 sigue **preparada, no ejecutada ni asignada por esta entrega**. `evaluation_revision_not_selected / inferenceEnabled:false` pertenece al job de evaluación; el asistente normal debe evaluarse por separado. Se conserva el guard de revisión. El texto del chat no concede permisos a herramientas ni convierte una propuesta en código aplicado.
 
-Marcelo confirmó «Sí, las cinco están terminadas» para las bases central, Aurora y Brisa del panel y Aurora y Brisa de los PMS completos. Se registra como confirmación del propietario; los IDs, horarios con zona confirmada, retención y despliegues asociados todavía no fueron aportados al acta. La [evidencia del reporte](evidencia/respaldos-reportados-2026-11-20.json) conserva esos campos pendientes y distingue la creación del destino de la validación de sus datos.
+El caso real de mesas BIS queda como seguimiento del piloto, con las incertidumbres y la revisión investigada conservadas. La presencia de una corrección en `main` exige comprobar versión y alcance antes de proponer otra; no prueba qué datos reales originaron la incidencia ni autoriza repararlos.
 
-Se contrastó la documentación oficial de Railway: [restaurar una copia de volumen](https://docs.railway.com/volumes/backups) vuelve a montar la copia en el servicio existente; [PITR](https://docs.railway.com/volumes/point-in-time-recovery) recupera el punto elegido en un servicio nuevo. La primera captura de Aurora muestra una copia manual del 20 de noviembre a las 08:32, de 872 MB, PITR desactivado y ninguna programación de copias de volumen visible.
+## Próximo trabajo y límites del estado
 
-Marcelo activó PITR en Aurora de pruebas. Una captura intermedia mostró la espera del primer respaldo y los archivos de cambios. Después realizó la recuperación: la captura con reloj 10:22 muestra **xenia-aurora-restore-db Online**, **xenia-aurora-pms-db Online** y **xenia-aurora-pms Online**, con el enlace del PMS a la base original visible. Se registra la recuperación PITR en un servicio independiente; el punto elegido y la validación integral de los datos del destino siguen pendientes. Este resultado no acredita la restauración de las cinco copias manuales ni un flujo operativo desde una aplicación recuperada.
+La [próxima entrega](PROXIMA_ENTREGA_HOTEL_INDEPENDIENTE.md) define administrador de cliente, gestión de personal acotada y alta genérica de otro hotel. Conserva las instalaciones QA aceptadas y exige pruebas entre dos clientes distintos. El [modelo](MODELO_CLIENTES_INDEPENDIENTES.md) diferencia decisión de producto, diseño propuesto y código existente.
 
-Las cinco capturas posteriores de la tabla **reservations** muestran la reserva **RES-1795097940326-24** del 20 al 24 de noviembre, cuatro noches y total **300.000**. El detalle contiene tres noches de 50.000 y una de 150.000, sin descuento; la suma y el promedio de 75.000 coinciden con los importes almacenados. Se observan el identificador de huésped y **room_id xenia-qa-room-103**, pero todavía no se consultaron esas filas relacionadas ni las observaciones. La captura posterior del Folio en el PMS original de Aurora muestra el mismo código, ingreso, egreso, cuatro noches, detalle de tarifas, total **ARS 300.000** y estado confirmado. También muestra **Habitación 103** y **Huesped Prueba**. Marcelo confirmó después «si perfecto» a la comprobación de habitación 103, huésped Huesped Prueba y observaciones en la copia. Queda aceptada la muestra manual de esa reserva; siguen pendientes el punto exacto de PITR, la identidad de instalación, el conjunto completo de datos y la prueba de operación de una aplicación sobre el destino.
+Continúan pendientes la continuidad ante caída del panel, integración revisada de las líneas de código, perfil operativo para clientes reales, recuperación completa, fiscalidad e integraciones de cada hotel y medición de costos. La etapa QA todavía verifica el acceso central en cada API; una caída central bloquea temporalmente esas operaciones.
 
-La [guía del paso 3](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md), versión 4, conserva la comprobación de la muestra e indica cómo abrir la base recuperada en modo lectura y comprobar reservas, habitación, huésped, precios, observaciones e identidad. Las acciones remotas de Railway fueron realizadas por Marcelo. El asistente no modificó servicios, volúmenes, conexiones o datos remotos. Maran continúa fuera del ensayo.
+La prioridad del asistente antes del 30/11 permanece. La organización actual prepara el frente multicliente sin presentar su implementación como terminada ni convertir el objetivo del piloto en una fecha de entrega de toda la plataforma.
 
-## Ensayo operativo sobre la copia de Aurora preparado
+## Cronología resumida
 
-Se preparó el [paso 3.1](PASO_3_1_PROBAR_PMS_SOBRE_COPIA_AURORA.md): registrar salud, revisión e identidad actuales; conectar temporalmente **xenia-aurora-pms** a **xenia-aurora-restore-db**; comprobar ingreso, una reserva de prueba y permisos; y volver a **xenia-aurora-pms-db**. Usa el mismo servicio y origen QA, sin una segunda aplicación pública con la identidad de Aurora. La preparación valida identidad y esquema; /healthz consulta la identidad de la base conectada.
+| Fecha | Hecho o decisión y naturaleza |
+| --- | --- |
+| 16/11 | Plan inicial, inventario y diferencias de ramas. Hechos de relevamiento; no acreditan despliegues. |
+| 17/11 | Marcelo acepta web/correo y panel con dos hoteles y perfiles. Confirmación manual. |
+| 18–19/11 | Enlace a PMS QA, corrección de Brisa y edición de fechas/tarifas; PR 130, 139 y 146. Código y pruebas identificados; aceptación manual posterior. |
+| 20/11 | Cinco copias y destino PITR reportados; muestra recuperada revisada. Ensayo de aplicación pausado para priorizar el asistente. |
+| 21/11 | PR 158 fusionada en la rama del asistente. Hecho de GitHub; las capturas posteriores muestran uso real del chat. |
+| 22–23/11 | Conversación, presupuesto y caso real de mesas mostrados por Marcelo. No constituyen una reparación ejecutada. |
+| 23/11 | PR 168 y validación automatizada de estadías/Caja; Marcelo acepta ambos PMS y después roles y retirada de acceso. |
+| 23/11 | Marcelo aclara y confirma el producto para clientes independientes. Se reemplaza la propuesta inmediata de consolidación gerencial por alta y administración delegada. |
 
-El procedimiento es una preparación y todavía no se ejecutó el cambio de conexión. Conserva la revisión, ficha, dominio, configuración central y demás servicios. El acceso de salud no fue consultable mediante la herramienta web. Marcelo pegó la respuesta de Aurora: **status ok**, **mode qa**, revisión **f5005dc7d2a702198cb953b59df99b1d92cbbe53**, propertyId **b6cb1d1d-fda6-479b-aff9-83484758993d** y clientId **8a2f6959-32dc-4916-a1e4-3341a17423ee**. Coincide con la revisión probada; queda registrada la identidad previa. La conexión temporal y su regreso aún no se ejecutaron. Siguen pendientes los IDs de despliegue y las revisiones de panel y Brisa.
-
-## Cambio de prioridad: asistente piloto antes del 30/11
-
-Marcelo pidió detener el avance de los ensayos de multihotel y priorizar el asistente piloto. Confirmó **«No, sigue con la base original»**: no cambió la conexión de Aurora a la copia recuperada. El paso 3.1 queda pausado y conserva sus instrucciones para una continuación posterior.
-
-Se preparó el [sprint con objetivo 29/11](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md) y se actualizó el plan maestro a versión 1.8. Las tareas I01–I05 pasan a prioridad P0 con objetivos fechados; I01 está en curso. El tablero conserva sus 56 tareas.
-
-La consulta de GitHub confirmó el piloto **advance/assistant-pilot-20261114 → 63b34fcc** y la integración **feature/xenia-support-approval-foundation → bc8e64f0** del 15/11. Se revisaron reglas, guía de activación, servicio de chat, presupuesto y configuración de arranque. Hay implementación de conversación con capturas, reserva y conciliación de gasto, avisos y revisión. Esto acredita código disponible, no la configuración efectivamente publicada ni calidad del modelo real. Se pidió el estado del chat visible en Xenia.
-
-El piloto inicial lee código y documentación de su ambiente y el contexto aportado por el usuario. No accede a operaciones reales ni ARCA. Se conserva el máximo acordado de US$1 diario; la configuración persistida y el perfil de precios deben verificarse antes de nuevas llamadas. La lectura operativa ampliada, contabilidad, vigilancia normativa y ejecución de correcciones quedan para etapas posteriores.
-
-## Próximos hitos
-
-1. Confirmar el estado del chat en el Xenia existente y las revisiones efectivas del PMS y su asistente.
-2. Fijar candidato compatible y completar lo que falte de conversación, capturas, historial, permisos y límite monetario, con objetivo 24/11.
-3. Aceptar cinco casos anonimizados con Marcelo y comprobar avisos; objetivo 27/11.
-4. Habilitar y observar el piloto acotado de Xenia el 28–29/11, dentro del presupuesto y conservando el funcionamiento del PMS.
-5. Retomar después la recuperación integral, referencias pendientes, revocación/cierre central remotos, actualización independiente y continuidad antes de incorporar un hotel en uso.
-
-El modo QA verifica el acceso central en cada API y bloquea temporalmente las operaciones si el panel no responde. Caja, fiscalidad, correo, OTAs, IA, check-in y checkout no están habilitados en este ensayo. Las reservas de demostración del panel se conservan separadas de las del PMS; no hay una migración de esos datos.
-
-## Completado en esta etapa
-
-- Se creó el checkout aislado `plan/xenia-product-multihotel-20261116` y se actualizó por avance rápido a `494a59cd39ea84ba0d6fcad56f3d30d8d0c43315`, que incorpora la PR 112.
-- Se consultaron las referencias remotas de Maran, Xenia y el piloto; se guardaron revisiones, ancestro común y estadísticas en `evidencia/inventario-2026-11-16.json`.
-- La comparación Maran/Xenia muestra 116 y 190 commits exclusivos, respectivamente, y diferencias en 530 archivos. Son métricas de historial, no un diagnóstico de integridad funcional.
-- Se revisaron inicialmente conexión de base, esquema, identificadores del navegador, identidad visual y automatizaciones de publicación.
-- Se elaboró el plan maestro con arquitectura, apertura de Maran, dominio y web, integración, multihotel, recuperación, piloto y 53 tareas.
-- Se preparó una matriz automática de diferencias por área como insumo del análisis funcional. **No acredita que una corrección esté completa o falte.**
-
-## Lecturas que quedaron limitadas
-
-Las consultas públicas a `maranpms.com.ar` y `demo.maranpms.com.ar` fallaron en la resolución DNS desde este entorno, incluso después de solicitar acceso de red en la ejecución. Se registró `gaierror`. Esto no demuestra una caída pública: falta contraste desde otra conexión o herramienta autorizada.
-
-Hay presencia de `RAILWAY_TOKEN`; no hay presencia de `RAILWAY_XENIA_TOKEN` en este entorno. No se leyeron ni guardaron valores de secretos. El acceso de otro chat no se da por compartido automáticamente.
-
-Las direcciones observadas en workflows no prueban por sí solas la rama realmente vinculada, la revisión servida ni la separación de bases y servicios. Esas verificaciones pertenecen a A04 y A05.
-
-## Paquete previsto en el corte inicial del 16 de noviembre
-
-1. Revisar con Marcelo la home comercial privada y completar el contacto real y el destino de acceso al PMS.
-2. Preparar la conexión de `xeniapms.com` y las redirecciones de sus tres dominios alternativos desde Donweb, con valores reales del alojamiento.
-3. Completar el inventario y la matriz del producto común conservando los arreglos recientes de Maran.
-4. Continuar la aceptación operativa, la cobertura y la recuperación de Maran en paralelo.
-5. Retomar el asistente después de esta primera base de marca y web.
-
-## Continuación de soporte y control con IA
-
-Marcelo confirmó que hoy concentra los roles de dirección, técnica, infraestructura, revisión fiscal y contable y soporte. La versión 1.1 del plan incorpora esta organización, la IA como primera línea una vez validada y tres tareas adicionales para lectura operativa, control contable y vigilancia normativa: el tablero pasa de 53 a 56 tareas.
-
-Se realizó la primera revisión de código del piloto en `63b34fcc`. Hay chat con capturas, presupuesto persistido, avisos y revisión de propuestas. El alcance actual excluye movimientos reales del hotel y ARCA; las nuevas capacidades requieren herramientas de lectura y seguimiento específicas. El presupuesto predeterminado no demuestra el presupuesto efectivo de una base ya inicializada.
-
-La nueva consulta de referencias remotas encontró `main` en `1aa45fb9`, con PR 113 y PR 114. Se conserva ese corte en una evidencia separada del inventario inicial. Las consultas públicas siguieron fallando por resolución DNS local. El estado del entorno confirmó únicamente un secreto del proyecto Maran; sigue pendiente el acceso de Railway de Xenia.
-
-Se preparó un catálogo de fuentes oficiales y cinco casos anonimizados para aceptar el soporte. El catálogo es documentación de preparación: no se activó vigilancia periódica, acceso a datos reales ni gasto de IA. Los controles automáticos y el chat compartirán el techo de US$1 diario cuando se implementen.
-
-Se verificaron 18 pruebas existentes de chat, límites y avisos con proveedores simulados. Pasaron las 18, sin llamadas pagas ni envíos reales. Las verificaciones del servicio publicado, persistencia y entrega real siguen pendientes.
-
-## Continuación de marca y home
-
-Marcelo priorizó la marca y la home antes del asistente. Confirmó la compra de `xeniapms.com`, `xeniapms.com.ar`, `xeniapms.store` y `xeniapms.online` en Donweb. El plan pasa a versión 1.2; se conserva el tablero de 56 tareas y se actualizan registro y primera entrega web.
-
-Se confirmó el acceso al código de Xenia por GitHub y se encontraron sus tres logos originales. Se preparó y publicó una home privada en https://xenia-pms-home.chalky-yak-9675.chatgpt.site, con datos ficticios y contacto propuesto pendiente de activar. No fue necesario acceso de Railway para este trabajo.
-
-Se verificaron controles y disposición responsive en cinco anchos de pantalla. El código quedó preparado para una rama separada de GitHub, sin fusionar a `main`. La publicación privada fue confirmada por el alojamiento. No se modificaron los DNS de los dominios comprados ni la aplicación de Maran.
-
-## Preparación de la conexión en Donweb
-
-Marcelo aceptó la propuesta de diseño. Se dieron de alta los nombres `xeniapms.com` y `www.xeniapms.com` en la configuración del alojamiento de la home. Se guardaron los dos destinos A, el CNAME y cuatro TXT de validación devueltos por el proveedor, con evidencia de estado pendiente.
-
-Se preparó el anexo operativo con los valores exactos y el recorrido de gestión de Donweb contrastado con su documentación. Falta la carga en la zona DNS de la cuenta de Marcelo, la validación externa y el certificado. El correo sigue siendo provisional. No se cambió el acceso privado de la home, no se configuraron redirecciones en Donweb y no se contrataron servicios de correo.
-
-## Alcance de los cambios de planificación
-
-La rama de planificación cambia archivos de `docs/xenia/`: documentación, evidencias y una herramienta de lectura. La home y el panel tienen ramas separadas. La home pasó a publicación pública con autorización de Marcelo y éste cargó los registros DNS y configuró el servicio del panel desde sus cuentas. Durante estas entregas no se modificaron código operativo, datos, numeradores, cobros ni configuración de producción de Maran. Las ramas de planificación y multihotel no se fusionan con `main` como parte de esta actualización.
-
-## Cómo actualizar la evidencia
-
-Desde el checkout elegido, actualizar primero las referencias remotas por el procedimiento habitual y ejecutar:
-
-```bash
-python docs/xenia/relevar_entorno.py --output docs/xenia/evidencia/inventario-AAAA-MM-DD.json
-```
-
-El script lee referencias locales y salud pública. No consulta tablas de huéspedes ni administra servicios. La ejecución guarda la fecha exacta y debe conservarse como nueva evidencia cuando cambie el día o el hito.
+El [estado anterior completo](https://github.com/marcesvetliza-ui/maran-pms/blob/f75721ef7e70b67c754a3286ee22e36d3e8bb55f/docs/xenia/ESTADO_EJECUCION.md) permanece en Git. Las evidencias fechadas anteriores se conservan sin reescribir sus resultados.

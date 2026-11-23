@@ -1,27 +1,48 @@
-# Plan de Xenia y continuidad de Maran
+# Xenia para hoteles de clientes independientes
 
-Documento principal: [PLAN_MAESTRO_XENIA_MARAN.md](PLAN_MAESTRO_XENIA_MARAN.md).
+Estado ordenado al **23 de noviembre de 2026**. Responsable del producto: Marcelo. Este índice es la entrada actual a la documentación; las guías anteriores conservan su fecha y alcance.
 
-Seguimiento: [ESTADO_EJECUCION.md](ESTADO_EJECUCION.md), tablero CSV y matriz de diferencias.
+**Objetivo confirmado:** ofrecer un mismo PMS a muchos hoteles de distintos dueños. Cada cliente administra su información, configuración y personal. Un cliente puede tener uno o varios hoteles; la consolidación de una cadena es una función opcional dentro de sus permisos.
 
-Procedimiento para Marcelo: [GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con responsables, recorridos de Railway y Donweb, comprobaciones y condiciones para cada etapa.
+## Por dónde seguir
 
-El inventario inicial conserva el corte del 16 de noviembre de 2026. El plan está actualizado al 17 de noviembre: web pública, correo probado y panel multihotel con aceptación manual del propietario. El objetivo es conectar ahora una instalación completa del PMS de pruebas, conservando la operación de Maran.
+1. [Estado actual y cronología](ESTADO_EJECUCION.md): qué está comprobado, qué informó Marcelo y qué sigue pendiente.
+2. [Modelo de clientes independientes](MODELO_CLIENTES_INDEPENDIENTES.md): separación entre administración de Xenia, administración del cliente y operación del hotel.
+3. [Próxima entrega: un cliente independiente](PROXIMA_ENTREGA_HOTEL_INDEPENDIENTE.md): alcance de implementación, dependencias y aceptación propuesta.
+4. [Tablero de tareas](TABLERO_TAREAS.csv): conserva las 56 tareas anteriores y agrega seis tareas C01–C06 vinculadas a este objetivo.
+5. [Plan maestro](PLAN_MAESTRO_XENIA_MARAN.md): visión completa y antecedentes; la aclaración del 23/11 guía su interpretación.
 
-## Contenido
+## Qué tenemos hoy
 
-- `PLAN_MAESTRO_XENIA_MARAN.md`: fuente editable de la versión 1.3.
-- `ESTADO_EJECUCION.md`: trabajos realizados, límites del relevamiento y próximo paquete.
-- `TABLERO_TAREAS.csv`: 56 tareas del plan, con Marcelo como responsable actual y campos para fechas y evidencia.
-- `MATRIZ_DIFERENCIAS.md`: comparación inicial de rutas por área; falta validación funcional por módulo.
-- `evidencia/inventario-2026-11-16.json`: referencias y observaciones fechadas.
-- `evidencia/diferencias-por-area.json`: rutas comparadas y clasificación inicial.
-- `relevar_entorno.py`: consulta local Git y endpoints de salud públicos, sin operaciones de administración.
-- `AUDITORIA_PILOTO_IA_2026-11-16.md`: estado del código del piloto, límites de acceso y primer hito de soporte.
-- `FUENTES_FISCALES_ARCA.json`: catálogo preparatorio de fuentes oficiales; no activa una tarea programada.
-- `evidencia/inventario-arranque-ia-2026-11-16.json`: referencias actualizadas en la continuación de soporte e IA.
-- `DOMINIOS_Y_HOME_XENIA_2026-11-16.md`: cuatro dominios comprados en Donweb, logos originales, primera home privada y próximos pasos de publicación.
-- `DNS_XENIA_DONWEB_2026-11-16.md`: anexo operativo con los siete registros reales para conectar el dominio principal y www, y los pasos de correo y redirecciones.
-- `evidencia/dns-sites-2026-11-16.json`: nombres pendientes de validación en el alojamiento; no implica que los registros se hayan cargado en Donweb.
+| Parte | Estado y límite |
+| --- | --- |
+| Web y correo de Xenia | Publicación y uso confirmados por Marcelo en los antecedentes; no se volvieron a comprobar en esta organización. |
+| Xenia-Control | Catálogo, ingreso, selector y permisos por establecimiento probados. La administración de cuentas sigue siendo global. |
+| Aurora y Brisa | PMS QA con datos separados. Marcelo aceptó estadías, consumos, cobros ficticios, salida y Caja, y después las pruebas de recepción, consulta y revocación. |
+| Asistente piloto | Chat y respuestas mostrados por Marcelo; línea de código y servicios separados del PMS QA. La evaluación formal y la incorporación multicliente conservan pendientes propios. |
+| Cliente independiente con administración delegada | Es la próxima entrega. La separación entre dos hoteles del ensayo no acredita todavía este circuito completo. |
 
-Los Word y PDF se entregan como archivos del plan. No es necesario publicar ni reiniciar el hotel para consultarlos. Los secretos se mantienen fuera de estos documentos.
+La [aceptación del 23/11](evidencia/aceptacion-qa-2026-11-23.json) conserva las confirmaciones del operador. La [validación automatizada](evidencia/operaciones-qa-2026-11-23.json) y el [inventario fechado](evidencia/inventario-plataforma-2026-11-23.json) se registran por separado.
+
+## Cómo queda organizado el trabajo
+
+- **Producto:** una evolución común, con versiones instaladas identificables. Hoy hay líneas de código distintas que requieren integración revisada.
+- **Clientes y hoteles:** catálogo y autorización centrales; una base operativa por hotel como criterio inicial.
+- **Pruebas:** Aurora y Brisa continúan con sus identidades y conexiones actuales. Las futuras pruebas entre clientes usan un alta nueva y datos sintéticos.
+- **Soporte:** el objetivo del piloto antes del 30/11 continúa en su [sprint](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md). Esta organización no ejecuta una tanda de modelos ni amplía su presupuesto.
+- **Versiones:** las ramas de documentación no se seleccionan como fuente de un PMS. Cada publicación funcional identifica código, esquema, configuración, destino y resultados.
+
+## Guías que siguen disponibles
+
+- [Estadías y Caja de los PMS QA](OPERACION_ESTADIAS_Y_CAJA_QA.md).
+- [Guía inicial del multihotel](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md): procedimiento histórico de las primeras entregas.
+- [Respaldos y restauración](PASO_3_RESPALDOS_Y_RESTAURACION_XENIA.md).
+- [Prueba preparada del PMS sobre la copia de Aurora](PASO_3_1_PROBAR_PMS_SOBRE_COPIA_AURORA.md): pausada por decisión de Marcelo; el PMS mantiene la base original según su confirmación.
+- [Matriz de diferencias](MATRIZ_DIFERENCIAS.md): inventario inicial, no equivalencia funcional aprobada.
+- [Auditoría inicial del piloto](AUDITORIA_PILOTO_IA_2026-11-16.md), [dominios y home](DOMINIOS_Y_HOME_XENIA_2026-11-16.md) y [DNS en Donweb](DNS_XENIA_DONWEB_2026-11-16.md): antecedentes con su corte original.
+
+## Cómo interpretar el estado
+
+**Comprobado en código o CI**, **confirmado por Marcelo**, **propuesto** y **pendiente** son categorías diferentes. Un SHA de GitHub no prueba qué contenedor está sirviendo, una propuesta no es un parche aplicado y una prueba local no es una operación remota ejecutada.
+
+Esta actualización organiza documentación y evidencia. Las funciones de administración delegada y alta genérica descritas como próximas todavía requieren código, migraciones, pruebas y publicación identificada.

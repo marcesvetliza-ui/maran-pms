@@ -1,0 +1,128 @@
+{
+  "date": "2026-11-23",
+  "kind": "existing_automated_synthetic_validation",
+  "revision": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+  "tree": "05b0da223348c90a628c83d539c84d564dc42a3c",
+  "source_receipt_sha256": "831bab2e45edecc24bfb9345ea9e9badf3a108e8b122e47e8653cf0735eaa68d",
+  "source_receipt_original_state": "prepared before the owner deployment; subsequent manual acceptance is a separate receipt",
+  "source_receipt_local_path": "/workspace/entregas/xenia-operacion-qa-20261123/ENTREGA.json",
+  "source_bundle_local_path": "/workspace/entregas/xenia-operacion-qa-20261123.zip",
+  "local_tests": [
+    {
+      "name": "PMS: core + navegador etapa apagada/encendida",
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "log": "verificacion-local/pms-16.log"
+    },
+    {
+      "name": "Xenia-Control",
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "log": "verificacion-local/control-25.log"
+    },
+    {
+      "name": "Regresión UI, incluidas 5 pruebas nuevas",
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "files": 8,
+      "log": "verificacion-local/ui-44.log"
+    },
+    {
+      "name": "Autorización Caja",
+      "passed": 36,
+      "failed": 0,
+      "skipped": 0,
+      "files": 2,
+      "log": "verificacion-local/autorizacion-caja-36.log"
+    }
+  ],
+  "local_passed_total": 121,
+  "CI": {
+    "status": "success",
+    "passed": 83,
+    "node": "Node 22",
+    "run": 45211688174,
+    "url": "https://github.com/marcesvetliza-ui/maran-pms/actions/runs/45211688174",
+    "compiled_images": [
+      "Dockerfile.xenia-control",
+      "Dockerfile.xenia-pms"
+    ],
+    "virtual_merge": {
+      "sha": "6e492aafb6da16c9bfee3289175c05421e8c1a05",
+      "tree": "05b0da223348c90a628c83d539c84d564dc42a3c",
+      "parents": [
+        "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+        "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f"
+      ]
+    },
+    "source_tree_matches_candidate": true,
+    "overlaps_with_local_tests": true
+  },
+  "synthetic_hotel_receipts": {
+    "aurora": {
+      "status": "passed",
+      "environment": "owned synthetic PostgreSQL; compiled PMS over local HTTPS; native Chromium UI",
+      "template": "aurora",
+      "revision": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+      "checks": [
+        "native reception shift opening with the verified Xenia identity",
+        "native check-in and durable room/stay state",
+        "native consumption, identical replay and conflicting replay without duplicate ledger entries",
+        "transaction rollback after a synthetic ledger failure and safe retry",
+        "pending balance blocks checkout and direct status/forced-departure bypasses",
+        "lost payment response, reload and native retry preserve the operation identity and a single payment/Caja entry",
+        "native checkout at zero balance without issuing fiscal documents",
+        "native cash count and shift closing reconcile exactly with the durable payment",
+        "fiscal, integration, manual-Caja and administration writers remain blocked"
+      ],
+      "roomTotal": 50000,
+      "consumptions": 1250,
+      "paid": 51250,
+      "paymentMethod": "cash",
+      "countedCash": 51250,
+      "finalBalance": 0,
+      "cashDifference": 0,
+      "paymentCount": 1,
+      "fiscalDocuments": 0,
+      "actualHotelOperations": 0,
+      "providerCalls": 0,
+      "at": "2026-11-23T15:58:36.569Z"
+    },
+    "brisa": {
+      "status": "passed",
+      "environment": "owned synthetic PostgreSQL; compiled PMS over local HTTPS; native Chromium UI",
+      "template": "brisa",
+      "revision": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+      "checks": [
+        "native reception shift opening with the verified Xenia identity",
+        "native check-in and durable room/stay state",
+        "native consumption, identical replay and conflicting replay without duplicate ledger entries",
+        "transaction rollback after a synthetic ledger failure and safe retry",
+        "pending balance blocks checkout and direct status/forced-departure bypasses",
+        "lost payment response, reload and native retry preserve the operation identity and a single payment/Caja entry",
+        "native checkout at zero balance without issuing fiscal documents",
+        "native cash count and shift closing reconcile exactly with the durable payment",
+        "fiscal, integration, manual-Caja and administration writers remain blocked"
+      ],
+      "roomTotal": 50000,
+      "consumptions": 1250,
+      "paid": 51250,
+      "paymentMethod": "transfer",
+      "countedCash": 0,
+      "finalBalance": 0,
+      "cashDifference": 0,
+      "paymentCount": 1,
+      "fiscalDocuments": 0,
+      "actualHotelOperations": 0,
+      "providerCalls": 0,
+      "at": "2026-11-23T15:58:50.013Z"
+    }
+  },
+  "new_execution_in_documentation_update": false,
+  "manual_acceptance_receipt": "aceptacion-qa-2026-11-23.json",
+  "actual_hotel_operations_in_automated_tests": 0,
+  "paid_model_calls_in_automated_tests": 0
+}

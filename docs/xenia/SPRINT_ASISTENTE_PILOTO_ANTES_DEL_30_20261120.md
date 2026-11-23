@@ -1,5 +1,9 @@
 # Asistente piloto de Xenia: objetivo 29 de noviembre de 2026
 
+> Actualización del 23/11: Marcelo mostró chat y respuestas reales, presupuesto, límites y seguimiento de casos. La PR 158 está fusionada en `feature/xenia-support-approval-foundation`, revisión `bc8e06b5a9042fdda3cf4fda2664527cb59c7e38`. Las referencias y pendientes de este sprint conservan su fecha original cuando no se indica otra. El [estado actual](ESTADO_EJECUCION.md) separa pruebas locales, uso informado y evaluación formal pendiente.
+>
+> El objetivo antes del 30/11 permanece. El producto se ordena para clientes independientes y las pruebas QA de estadías/Caja y roles quedaron aceptadas por Marcelo; no se vuelve a exigir repetir esos recorridos sin cambios o fallos nuevos. Este documento no habilita consumo adicional ni presenta el evaluador como el asistente normal.
+
 Actualización: 20 de noviembre de 2026. Responsable del producto y aceptación: Marcelo. Prioridad: **piloto usable en Xenia antes del 30/11**, con objetivo de entrega el **29/11**. Es una meta de trabajo con criterios de aceptación, no una publicación ya realizada.
 
 ## Decisión y punto de partida

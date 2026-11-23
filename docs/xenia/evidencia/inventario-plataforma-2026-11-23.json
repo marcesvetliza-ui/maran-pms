@@ -1,0 +1,306 @@
+{
+  "date_local": "2026-11-23",
+  "timezone": "America/Argentina/Cordoba",
+  "captured_at_utc": "2026-11-23 21:44:58 UTC",
+  "kind": "repository_and_documentation_inventory",
+  "repository": "marcesvetliza-ui/maran-pms",
+  "documentation_base_commit": "f75721ef7e70b67c754a3286ee22e36d3e8bb55f",
+  "documentation_branch": "docs/xenia-clientes-independientes-20261123",
+  "branches": [
+    {
+      "name": "main",
+      "sha": "111a89d4d6ce9f46097e6fd80968fb12aee3bcce",
+      "tree": "d8d79db33e4e2f04995296db6b328d3065a71b01",
+      "subject": "Restaurant: ubicar mesas nuevas y recuperar mesas fuera del plano (#167)",
+      "committedAt": "2026-11-23T15:13:25Z"
+    },
+    {
+      "name": "plan/xenia-product-multihotel-20261116",
+      "sha": "f75721ef7e70b67c754a3286ee22e36d3e8bb55f",
+      "tree": "5417e86356e7a0a9ab84499dac755d8d63adb193",
+      "subject": "docs(xenia): priorizar asistente piloto para 29/11 y pausar ensayos adicionales del multihotel",
+      "committedAt": "2026-11-20T14:10:57Z"
+    },
+    {
+      "name": "feature/xenia-support-approval-foundation",
+      "sha": "bc8e06b5a9042fdda3cf4fda2664527cb59c7e38",
+      "tree": "34655ffffae30ec5d472e5c81d01f1c778d5e38c",
+      "subject": "Integrate reviewed support chat chronology and bounded evaluation in Xenia (#158)",
+      "committedAt": "2026-11-21T12:47:48Z"
+    },
+    {
+      "name": "feat/xenia-multihotel-foundation-20261117",
+      "sha": "eeb7d0c3ec1a4ce4294ef3a1d7f915c40f9ffd28",
+      "tree": "965d904b88979bbad30cdae6e1df1e48129268bd",
+      "subject": "docs(xenia): record multihotel acceptance and define isolated PMS integration",
+      "committedAt": "2026-11-18T01:41:52Z"
+    },
+    {
+      "name": "feat/xenia-pms-operations-qa-20261123",
+      "sha": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+      "tree": "05b0da223348c90a628c83d539c84d564dc42a3c",
+      "subject": "feat(xenia): enable QA stays, collections and reception cash reconciliation",
+      "committedAt": "2026-11-23T15:53:41Z"
+    }
+  ],
+  "pull_requests": [
+    {
+      "number": 119,
+      "title": "Xenia: primera base multihotel con establecimientos, permisos y datos aislados",
+      "state": "open",
+      "merged": false,
+      "draft": true,
+      "base": "main",
+      "baseSha": "2301ffb6f905bdca9876347667446a060c756f25",
+      "head": "feat/xenia-multihotel-foundation-20261117",
+      "headSha": "eeb7d0c3ec1a4ce4294ef3a1d7f915c40f9ffd28",
+      "mergeSha": "a8d2cb5760e52cd727b4003e3ba315bd082330b3",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/pull/119",
+      "updatedAt": "2026-11-18T01:43:02Z"
+    },
+    {
+      "number": 146,
+      "title": "Xenia: permitir editar fechas y tarifas en los PMS de pruebas existentes",
+      "state": "open",
+      "merged": false,
+      "draft": true,
+      "base": "feat/xenia-pms-integration-20261118",
+      "baseSha": "9b4e903d1da3826661ebbd30f706fb4e8a87d020",
+      "head": "fix/xenia-pms-reservation-edit-20261119",
+      "headSha": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+      "mergeSha": "d389714634364e3a44d7c6ee322b9aecb658124f",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/pull/146",
+      "updatedAt": "2026-11-19T14:45:55Z"
+    },
+    {
+      "number": 158,
+      "title": "Conservar procedencia del chat de Xenia y preparar una evaluación acotada",
+      "state": "closed",
+      "merged": true,
+      "draft": false,
+      "base": "feature/xenia-support-approval-foundation",
+      "baseSha": "bc8e64f080711bba9b36b83cc955c2afde935fec",
+      "head": "feat/xenia-assistant-handoff-20261120",
+      "headSha": "1e074200681567ae8d73e67e90e70d6dc6570dd8",
+      "mergeSha": "bc8e06b5a9042fdda3cf4fda2664527cb59c7e38",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/pull/158",
+      "updatedAt": "2026-11-21T12:52:57Z"
+    },
+    {
+      "number": 168,
+      "title": "Xenia QA: estadías, cobros de prueba y cierre de Caja",
+      "state": "open",
+      "merged": false,
+      "draft": true,
+      "base": "fix/xenia-pms-reservation-edit-20261119",
+      "baseSha": "f5005dc7d2a702198cb953b59df99b1d92cbbe53",
+      "head": "feat/xenia-pms-operations-qa-20261123",
+      "headSha": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+      "mergeSha": "6e492aafb6da16c9bfee3289175c05421e8c1a05",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/pull/168",
+      "updatedAt": "2026-11-23T16:08:49Z"
+    },
+    {
+      "number": 130,
+      "title": "Xenia: abrir PMS de pruebas aislados desde el panel multihotel",
+      "state": "open",
+      "merged": false,
+      "draft": true,
+      "base": "main",
+      "baseSha": "242dfb6784a8738f7d932029f859f1bdf2d4ca38",
+      "head": "feat/xenia-pms-integration-20261118",
+      "headSha": "9b4e903d1da3826661ebbd30f706fb4e8a87d020",
+      "mergeSha": null,
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/pull/130",
+      "updatedAt": "2026-11-18T12:47:28Z"
+    },
+    {
+      "number": 139,
+      "title": "Xenia: habilitar la conexión del PMS para Hotel Brisa existente",
+      "state": "open",
+      "merged": false,
+      "draft": true,
+      "base": "feat/xenia-pms-integration-20261118",
+      "baseSha": "9b4e903d1da3826661ebbd30f706fb4e8a87d020",
+      "head": "fix/xenia-brisa-pms-connection-20261118",
+      "headSha": "e6551f026f22f56c58f595343bdbc259282b62a5",
+      "mergeSha": "a5f1b997ce31e0b63ff4c58a171d15f4a0aac6f7",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/pull/139",
+      "updatedAt": "2026-11-18T23:53:49Z"
+    }
+  ],
+  "sources": {
+    "refs": "GitHub connector branch endpoints on the capture date",
+    "pull_request_states": "GitHub PR metadata; baseSha is a PR snapshot, not an assertion about the current branch tip",
+    "manual": "aceptacion-qa-2026-11-23.json",
+    "automated": "operaciones-qa-2026-11-23.json",
+    "historical_backups": "respaldos-reportados-2026-11-20.json",
+    "historical_assistant_validation": "https://github.com/marcesvetliza-ui/maran-pms/blob/1e074200681567ae8d73e67e90e70d6dc6570dd8/docs/validation/assistant-pilot-20261120.json",
+    "historical_assistant_handoff": "https://github.com/marcesvetliza-ui/maran-pms/blob/1e074200681567ae8d73e67e90e70d6dc6570dd8/docs/assistant-pilot-handoff-20261120.md"
+  },
+  "installations": [
+    {
+      "component": "control",
+      "service": "Xenia-Control",
+      "origin": "https://app.xeniapms.com",
+      "database": "xenia-control-db",
+      "status": "owner_reported_working",
+      "current_deployment_id": null,
+      "current_served_sha": null
+    },
+    {
+      "component": "aurora_pms",
+      "service": "xenia-aurora-pms",
+      "origin": "https://aurora.qa.xeniapms.com",
+      "database": "xenia-aurora-pms-db",
+      "mode": "qa",
+      "operations_enabled_by_owner_report": true,
+      "reported_branch": "feat/xenia-pms-operations-qa-20261123",
+      "candidate_sha_in_instructions": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+      "current_served_sha_independently_verified": null,
+      "current_deployment_id": null,
+      "status": "full_QA_walkthrough_accepted_by_owner"
+    },
+    {
+      "component": "brisa_pms",
+      "service": "xenia-brisa-pms",
+      "origin": "https://brisa.qa.xeniapms.com",
+      "database": "xenia-brisa-pms-db",
+      "mode": "qa",
+      "operations_enabled_by_owner_report": true,
+      "reported_branch": "feat/xenia-pms-operations-qa-20261123",
+      "candidate_sha_in_instructions": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+      "current_served_sha_independently_verified": null,
+      "current_deployment_id": null,
+      "status": "full_QA_walkthrough_accepted_by_owner"
+    },
+    {
+      "component": "support_pilot_pms",
+      "service": "maran-pms",
+      "origin": "https://demo.maranpms.com.ar",
+      "configuration_source": "existing guide and owner conversation",
+      "current_served_sha": null,
+      "status": "chat_and_responses_observed_in_owner_screenshots"
+    },
+    {
+      "component": "support_assistant",
+      "service": "charismatic-wonder",
+      "database": "assistant-db",
+      "configuration_source": "existing guide and owner conversation",
+      "current_served_sha": null,
+      "status": "normal_assistant_separate_from_evaluator"
+    },
+    {
+      "component": "support_evaluator",
+      "service": "support-codex-evaluation",
+      "status": "formal_evaluation_not_executed_in_this_update",
+      "known_failure": "evaluation_revision_not_selected / inferenceEnabled:false",
+      "guard_disabled": false
+    }
+  ],
+  "data_layout": {
+    "central": "xenia-control-db",
+    "legacy_panel_demo_databases": [
+      "xenia-aurora-db",
+      "xenia-brisa-db"
+    ],
+    "QA_PMS_operational_databases": [
+      "xenia-aurora-pms-db",
+      "xenia-brisa-pms-db"
+    ],
+    "restored_Aurora_database": "xenia-aurora-restore-db",
+    "application_switched_to_restored_database": false,
+    "connection_state_source": "explicit owner reply: No, sigue con la base original",
+    "legacy_demo_database_required_for_every_new_customer": "target design: no; current catalog/provisioning compatibility requires implementation"
+  },
+  "customer_boundary": {
+    "confirmed_product_goal": "many independent hotel customers; a chain is an optional customer configuration",
+    "current_code": "organizations and per-property memberships; global-only account administration; separate PMS databases and installation identity",
+    "delegated_customer_admin_implemented": false,
+    "generic_PMS_onboarding_implemented": false,
+    "distinct_customer_end_to_end_acceptance": false,
+    "customer_admin_role_name": "customer_admin is proposed, not present in the reviewed current code"
+  },
+  "support_pilot": {
+    "code_branch": "feature/xenia-support-approval-foundation",
+    "repository_tip": "bc8e06b5a9042fdda3cf4fda2664527cb59c7e38",
+    "last_owner_budget_snapshot_date": "2026-11-23",
+    "last_owner_snapshot": {
+      "shared_daily_usd": 1,
+      "spent_usd": 0.2,
+      "remaining_usd": 0.8,
+      "requested_responses": 3,
+      "response_limit": 20,
+      "research_attempts": 2,
+      "research_limit": 2
+    },
+    "snapshot_is_current_database_query": false,
+    "current_requested_model_verified": null,
+    "current_provider_reported_model_verified": null,
+    "historical_model_profile": "gpt-5.3-codex in the 20/11 handoff; not evidence of the currently served model",
+    "formal_small_evaluation": {
+      "proposed_usd": 0.15,
+      "prepared": true,
+      "executed_in_this_update": false,
+      "budget_allocated_by_this_update": false
+    },
+    "target_before": "2026-11-30",
+    "target_delivery_from_existing_plan": "2026-11-29",
+    "assistant_enabled_for_Aurora_and_Brisa_QA": false,
+    "automatic_patch_executor_implemented_by_this_update": false,
+    "normal_chat_and_evaluator_distinguished": true
+  },
+  "deferred": [
+    "customer-scoped administration and generic onboarding",
+    "cross-organization end-to-end acceptance",
+    "reviewed consolidation of PMS, assistant and main feature lines",
+    "central-outage continuity",
+    "full recovered-application acceptance",
+    "operational profile, fiscal setup and integrations for real customers",
+    "release promotion, capacity and cost measurement",
+    "formal paid model evaluation and independent technical/usefulness review"
+  ],
+  "this_update": {
+    "scope": "documentation, owner-reported acceptance, inventory and next-delivery specification",
+    "runtime_code_changed": false,
+    "deployed_services_changed": false,
+    "DNS_changed": false,
+    "remote_database_mutations": 0,
+    "paid_model_calls": 0,
+    "hotel_operations": 0,
+    "new_evaluation_budget_authorization": false
+  },
+  "verification_limits": [
+    "No live service health or Railway deployment inspection was repeated in this documentary update.",
+    "Only a Maran-scoped Railway credential is configured in the environment; no Xenia credential was used or inferred.",
+    "GitHub branch tips identify code references, not running revisions.",
+    "Existing tests are cited with provenance and are not claimed as newly executed."
+  ],
+  "code_reference_revision": "4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f",
+  "code_files": [
+    {
+      "path": "server/xenia-control/store.ts",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/blob/4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f/server/xenia-control/store.ts"
+    },
+    {
+      "path": "server/xenia-control/pms.ts",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/blob/4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f/server/xenia-control/pms.ts"
+    },
+    {
+      "path": "server/xenia-pms/binding.ts",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/blob/4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f/server/xenia-pms/binding.ts"
+    },
+    {
+      "path": "server/xenia-pms/runtime.ts",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/blob/4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f/server/xenia-pms/runtime.ts"
+    },
+    {
+      "path": "server/xenia-pms/config.ts",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/blob/4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f/server/xenia-pms/config.ts"
+    },
+    {
+      "path": "shared/xeniaPms.ts",
+      "url": "https://github.com/marcesvetliza-ui/maran-pms/blob/4a1f71ba4085ba1cff4d89c99bcb2de0a2e5d61f/shared/xeniaPms.ts"
+    }
+  ]
+}

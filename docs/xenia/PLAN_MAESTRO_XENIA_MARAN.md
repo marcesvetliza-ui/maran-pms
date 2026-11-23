@@ -2,13 +2,13 @@
 title: "Plan maestro de Xenia y continuidad operativa de Maran"
 subtitle: "Producto común, crecimiento multihotel y puesta en marcha segura"
 author: "Preparado para Marcelo Svetliza"
-date: "20 de noviembre de 2026 · Versión 1.8"
+date: "23 de noviembre de 2026 · Versión 1.9"
 lang: es-AR
 ---
 
-**Estado:** plan en ejecución. Web, correo, panel y Alojamiento QA tienen aceptación manual. Se confirmó la muestra de una reserva recuperada de Aurora y su revisión f5005dc7; el ensayo operativo sobre la copia queda pausado. Aurora sigue con su base original según Marcelo. La recuperación integral y los demás circuitos conservan sus controles pendientes.
+**Estado al 23/11:** PMS QA de Aurora y Brisa y pruebas de recepción, consulta y retirada de acceso aceptados por Marcelo. Se conserva la validación automatizada de la revisión `4a1f71ba`. El objetivo confirmado es ofrecer Xenia a hoteles de clientes independientes; la administración delegada y el alta genérica siguen pendientes. [Estado actual y evidencia](ESTADO_EJECUCION.md).
 
-**Prioridad actual:** asistente piloto de soporte en Xenia antes del **30/11/2026**, con objetivo de entrega el **29/11**. Se aprovecha el chat existente y se priorizan utilidad, permisos, historial, límites y aceptación con casos concretos. Los ensayos adicionales del multihotel quedan pausados; Maran conserva su operación y dominio actuales. [Sprint del asistente](SPRINT_ASISTENTE_PILOTO_ANTES_DEL_30_20261120.md).
+**Prioridad actual:** mantener el objetivo del asistente piloto antes del **30/11/2026**, con objetivo de entrega del **29/11**, y ordenar el siguiente bloque del producto: [alta y administración de un cliente independiente](PROXIMA_ENTREGA_HOTEL_INDEPENDIENTE.md). Las pruebas QA ya aceptadas se conservan; la restauración integral de aplicación permanece pausada. El objetivo del piloto no fija una fecha de entrega comercial de toda la plataforma.
 
 **Procedimiento para ejecutar el plan:** [Guía paso a paso del multihotel de Xenia](GUIA_PASO_A_PASO_MULTIHOTEL_XENIA.md), con las acciones de Marcelo, el desarrollo técnico y el momento de cada publicación.
 
@@ -18,9 +18,9 @@ lang: es-AR
 
 # 1. Qué vamos a construir
 
-**XENIA será la marca y el producto principal. Maran será su primera instalación oficial.** Los futuros hoteles usarán el mismo producto, con sus propios datos, configuración, usuarios, integraciones y versión instalada.
+**XENIA será la marca y el producto principal, ofrecido a hoteles de muchos clientes independientes.** Cada cliente tendrá sus propios datos, configuración, personal e instalaciones autorizadas. Puede tener un hotel o varios; una cadena no es el único caso del producto. Maran continúa como instalación operativa de referencia y su incorporación a una versión común requiere aceptación identificada.
 
-Inicialmente conviene mantener **una base de datos independiente por hotel**, acompañada de instalaciones separadas cuando simplifique el aislamiento. El acceso multihotel se construirá por encima de esas instalaciones: una persona autorizada podrá elegir entre sus hoteles y consultar información consolidada dentro de sus permisos. No hace falta concentrar todas las operaciones en una sola base para ofrecer esa experiencia.
+Inicialmente conviene mantener **una base de datos independiente por hotel**, acompañada de instalaciones separadas cuando simplifique el aislamiento. La administración central se construirá por encima de esas instalaciones, separando clientes. Una persona con autorización explícita podrá elegir entre sus hoteles; una vista consolidada será opcional dentro de ese ámbito. No hace falta concentrar todas las operaciones en una sola base para ofrecer esa experiencia.
 
 La evolución seguirá este recorrido:
 
@@ -65,7 +65,7 @@ La consulta de salud, si se completa después, se registra con su hora en el act
 
 ## 2.2 Hallazgo principal: las ramas se separaron
 
-La comparación actual encontró **116 commits exclusivos de `main` y 190 exclusivos de la rama de Xenia**. Entre ambas referencias hay diferencias en 530 archivos. Frente a la rama del asistente, `main` tiene 116 commits exclusivos y el asistente 254. Son conteos de historial, no cantidades de funcionalidades ni medidas de calidad.
+La comparación del 16 de noviembre encontró **116 commits exclusivos de `main` y 190 exclusivos de la rama de Xenia**. Entre ambas referencias hay diferencias en 530 archivos. Frente a la rama del asistente, `main` tiene 116 commits exclusivos y el asistente 254. Son conteos de historial, no cantidades de funcionalidades ni medidas de calidad.
 
 **No corresponde reemplazar Maran por la rama de Xenia ni fusionarlas completas sin revisión.** Primero hay que armar una matriz por módulo, identificar las correcciones de cada lado, sus dependencias y las pruebas necesarias. El nombre comercial Xenia no convierte automáticamente a una rama técnica en la base más completa.
 
@@ -153,7 +153,9 @@ Una caída del panel central o del proveedor de inteligencia artificial no deber
 
 ## 4.2 Modelo de clientes y hoteles
 
-El modelo debe distinguir **cliente o cadena**, **hotel**, **usuario**, **membresía y rol**, **entidad fiscal**, **instalación** y **versión**. Un dueño puede acceder a tres hoteles; una recepcionista puede quedar limitada a uno. Una entidad fiscal puede operar varios hoteles y un hotel puede requerir circuitos fiscales particulares.
+El modelo debe distinguir **cliente independiente u organización**, **hotel**, **usuario**, **membresía y rol**, **entidad fiscal**, **instalación** y **versión**. Un cliente puede tener un hotel o una cadena; cada uno conserva su ámbito frente a otros clientes. Una entidad fiscal no se deduce automáticamente de esa relación. El `clientId` actual del enlace PMS identifica una instalación autenticada y no al cliente comercial.
+
+**Estado del código al 23/11:** existen organizaciones, hoteles, membresías por hotel y bases separadas. Crear usuarios y asignar accesos sigue reservado a la administración global. Se debe implementar un administrador del cliente limitado a su organización; la prueba de dos hoteles no cierra por sí sola ese circuito. El [modelo de clientes independientes](MODELO_CLIENTES_INDEPENDIENTES.md) registra alcance y diferencias sin presentar el diseño pendiente como función terminada.
 
 El servidor resolverá el hotel autorizado desde la sesión, el dominio y la membresía. No aceptará que un parámetro enviado por el navegador habilite otra base o el acceso a un hotel ajeno. El selector mostrará claramente el hotel activo; al cambiarlo deberán reiniciarse o separarse cachés, formularios, punto de venta, Caja y operaciones pendientes del contexto anterior.
 
@@ -494,6 +496,8 @@ La baja incluirá exportación de datos acordada, retiro de dominios y credencia
 
 # 14. Tablero inicial de tareas
 
+Este apartado conserva el corte inicial del plan. El estado vigente está en [TABLERO_TAREAS.csv](TABLERO_TAREAS.csv), actualizado al 23/11 con 62 tareas: las 56 anteriores y C01–C06. Los estados históricos de las tablas siguientes no reemplazan la evidencia actual.
+
 Las fechas se asignan al confirmar responsables. **P0** protege la operación y la apertura; **P1** habilita la base común y comercial; **P2** amplía el producto. “Hecha” corresponde a la evidencia de esta sesión, no a una validación integral del sistema.
 
 ## 14.1 Relevamiento y continuidad
@@ -590,7 +594,7 @@ Las fechas se asignan al confirmar responsables. **P0** protege la operación y 
 | Versión y fecha de apertura | Aceptación de circuitos, incidentes y contingencia. | Marcelo y referentes. |
 | Alcance y precios comerciales | Módulos reales, costos medidos, soporte y condiciones legales. | Marcelo. |
 
-## 15.2 Primer paquete de ejecución
+## 15.2 Primer paquete del plan inicial (16/11)
 
 **Ya realizado:** relevamiento inicial, revisión del piloto, compra de cuatro dominios, home comercial pública, buzón de contacto probado y primera entrega del panel multihotel con aceptación manual. Las evidencias y sus límites están resumidos en la sección 2.4.
 
