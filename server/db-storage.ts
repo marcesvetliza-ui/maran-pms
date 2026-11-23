@@ -1,4 +1,5 @@
 import { voidReservationPaymentWithLedger } from "./reservationPaymentVoid";
+import { guardGroupGuestReplacement, lockGroupAssignmentFinancialWriter } from './groupGuestReplacement';
 import {hospitalityNotificationVisibility,applyHospitalityNotificationStatus,requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from './hospitalityNotifications';
 import { normalizeToSpanishPaymentMethod } from "./payment-method";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, parseGroupCreditAdvanceConfirmation, supportsGroupCreditAdvance, groupCreditAdvanceSummary } from "@shared/groupCreditAdvance";
@@ -64,7 +65,7 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 }
 
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
-import { db, pool, withDatabaseTransaction } from "./db";
+import { db, pool, withDatabaseTransaction, withReadOnlyDatabaseTransaction } from "./db";
 import { initializeNightlyPricing, guardPricingUpdate, mayChangePricing, withReservationFinancialLock } from "./nightlyPricingGuard";
 import { archiveCancelledReservationFolio } from "./reservation-folio-lifecycle";
 import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
@@ -1328,6 +1329,11 @@ export class DatabaseStorage implements IStorage {
       await db.execute(sql`SELECT id FROM reservations WHERE id=${id} FOR UPDATE`);
       const existing = await this.getReservation(id);
       if (!existing) return undefined;
+      if (existing.status === 'cancelled' && reservation.status && reservation.status !== 'cancelled') {
+        const released = await db.execute(sql`SELECT replacement_id FROM group_assignment_releases WHERE reservation_id=${id}`);
+        if (released.rows.length) throw Object.assign(new Error('Esta asignación ya fue liberada y tiene un cupo de reemplazo en el grupo. Asigná el pasajero en ese cupo; el historial cancelado se conserva.'), { statusCode: 409 });
+      }
+      await guardGroupGuestReplacement(existing, reservation.guestId);
       await guardPricingUpdate(existing, reservation);
       if (reservation.guestId && reservation.guestId !== existing.guestId) {
         reservation = { ...reservation, stayDetails: null };
@@ -1529,8 +1535,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createCharge(charge: InsertCharge): Promise<Charge> {
-    const [created] = await db.insert(charges).values(charge as any).returning();
-    return created;
+    return withDatabaseTransaction(async () => {
+      await lockGroupAssignmentFinancialWriter(charge.reservationId);
+      const [created] = await db.insert(charges).values(charge as any).returning();
+      return created;
+    });
   }
 
   async updateCharge(id: string, charge: Partial<InsertCharge>): Promise<Charge | undefined> {
@@ -1625,8 +1634,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPayment(payment: InsertPayment): Promise<Payment> {
-    const [created] = await db.insert(payments).values(payment as any).returning();
-    return created;
+    return withDatabaseTransaction(async () => {
+      await lockGroupAssignmentFinancialWriter(payment.reservationId);
+      const [created] = await db.insert(payments).values(payment as any).returning();
+      return created;
+    });
   }
 
   async getReservationPaymentRequest(request: ReservationPaymentRequest): Promise<Payment | undefined> {
@@ -4113,6 +4125,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getGroupFolio(groupId: string): Promise<GroupFolioData> {
+    return withReadOnlyDatabaseTransaction(async () => {
     const group = await this.getGroup(groupId);
     if (!group) throw new Error("Grupo no encontrado");
 
@@ -4220,6 +4233,7 @@ export class DatabaseStorage implements IStorage {
       },
       billing,
     };
+    });
   }
 
   async distributeGroupPayment(

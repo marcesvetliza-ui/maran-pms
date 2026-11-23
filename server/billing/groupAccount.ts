@@ -4,7 +4,7 @@ import { parseReservationPaymentRequest, assertPaymentRequestMatches } from '../
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { Express } from 'express';
-import { db } from '../db';
+import { db, withReadOnlyDatabaseTransaction } from '../db';
 import { requireAuth, requirePermission } from '../auth';
 import { storage } from '../db-storage';
 import { getGroupInvoiceSnapshot, parseGroupInvoiceSourceAmounts } from './groupInvoiceScope';
@@ -21,6 +21,7 @@ catch {
     return null;
 } };
 export async function groupAccountSnapshot(reservationId: string) {
+    return withReadOnlyDatabaseTransaction(async () => {
     const reservation = await storage.getReservation(reservationId);
     if (!reservation)
         throw fail('Reserva no encontrada.', 404);
@@ -74,6 +75,7 @@ export async function groupAccountSnapshot(reservationId: string) {
         collectibleInvoices:(invoices.rows as any[]).filter(invoice=>invoice.reserva_id===reservationId&&isUncollectedRoomInvoice(invoice)).map(invoice=>({id:invoice.id,type:invoice.tipo_comprobante,pointOfSale:invoice.punto_venta,number:invoice.numero,amount:Number(invoice.monto_total)})),
         unassigned:advances.reduce((n,p)=>n+Math.round(p.available*100),0)/100,
     };
+    });
 }
 export function registerGroupAccountRoutes(app: Express) {
     app.post('/api/reservations/:id/invoices/:invoiceId/collect', requireAuth, requirePermission('sidebar:/reservations'), async(req,res)=>{
@@ -103,11 +105,14 @@ export function registerGroupAccountRoutes(app: Express) {
     });
     app.get('/api/groups/:id/advance-availability', requireAuth, requirePermission('sidebar:/reservations'), async (req, res) => {
         try {
+            const data = await withReadOnlyDatabaseTransaction(async () => {
             const rooms = await storage.getGroupReservationLedger(req.params.id);
             if (!rooms.length)
-                return res.json({ advances: [], rooms: [] });
+                return { advances: [], rooms: [] };
             const account = await groupAccountSnapshot(rooms[0].reservationId);
-            res.json({ advances: account.advances, rooms: rooms.map(r => ({ id: r.reservationId, number: r.roomNumber, name: r.guestName, balance: Math.max(0, Math.round(r.accommodationTotal*100)+Math.round(r.extrasTotal*100)-Math.round(r.paymentsTotal*100))/100 })) });
+            return { advances: account.advances, rooms: rooms.map(r => ({ id: r.reservationId, number: r.roomNumber, name: r.guestName, balance: Math.max(0, Math.round(r.accommodationTotal*100)+Math.round(r.extrasTotal*100)-Math.round(r.paymentsTotal*100))/100 })) };
+            });
+            res.json(data);
         }
         catch (e: any) {
             res.status(e.statusCode || 500).json({ error: e.message });

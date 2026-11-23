@@ -1,4 +1,5 @@
 import { generateReservationConfirmationPdf } from "../reservationConfirmationPdf";
+import { assertPersonalAdvanceNotTransferred } from '../groupPersonalAdvance';
 import {requestHospitalityNotificationRefresh} from '../hospitalityNotifications';
 import {registerGroupAccountRoutes,groupAccountSnapshot} from '../billing/groupAccount';
 import {assertIndividualGroupPayment} from '../billing/individualGroupFolio';
@@ -3078,6 +3079,7 @@ export function registerReservationsRoutes(app: Express) {
       const payResult = await db.execute(sql`SELECT * FROM payments WHERE id = ${req.params.id}`);
       const pay = payResult.rows?.[0] as any;
       if (!pay) return res.status(404).json({ error: "Pago no encontrado" });
+      await assertPersonalAdvanceNotTransferred(db, req.params.id);
       if (pay.status === "anulado") return res.status(400).json({ error: "El pago ya está anulado" });
       creditLockClient = await pool.connect();
       creditLockKey = `folio-invoice:${pay.reservation_id}`;

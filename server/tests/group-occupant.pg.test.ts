@@ -17,7 +17,7 @@ async function request(body: object, group = prefix) {
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ expectedGuestId: (await pool.query("SELECT guest_id FROM reservations WHERE id=$1", [reservationId])).rows[0]?.guest_id, ...body }),
     },
   );
   return { status: res.status, body: await res.json() };

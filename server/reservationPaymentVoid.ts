@@ -29,6 +29,8 @@ export async function voidReservationPaymentWithLedger(
   const payment = paymentResult.rows[0] as any;
   if (!payment)
     throw Object.assign(new Error("Pago no encontrado"), { statusCode: 404 });
+  const transfer = await tx.execute(sql`SELECT group_payment_id FROM group_personal_advance_origins WHERE payment_id=${paymentId} AND status='active'`);
+  if (transfer.rows.length) throw Object.assign(new Error('Este anticipo fue transferido al grupo. Anulá el recibo desde Grupos para conservar sus aplicaciones y su cobro original.'), { statusCode: 409 });
   const classification = classifyReservationPaymentMethod(payment.method);
   const linked = await tx.execute(sql`
         SELECT * FROM cash_movements WHERE payment_id = ${paymentId} FOR UPDATE

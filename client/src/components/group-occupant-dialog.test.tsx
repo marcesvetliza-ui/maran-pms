@@ -29,6 +29,8 @@ vi.mock("@/pages/guests", () => ({
 }));
 const reservation = {
   id: "res",
+  guestId: "original",
+  guest: {codigo: "GROUP-group"},
   reservationCode: "GRP-1",
   room: { roomNumber: "201" },
 } as any;
@@ -68,9 +70,9 @@ beforeEach(() => {
         ],
       }),
   );
-  apiRequest.mockResolvedValue({
-    json: async () => ({ guest: { id: "created" } }),
-  });
+  apiRequest.mockImplementation(async (method) => ({
+    json: async () => method === 'GET' ? { fingerprint: 'checked', canReplace: true, replacementBlockers: [], personalAdvance: 0 } : { guest: {id: 'created'} },
+  }));
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("Selector de ocupante de grupo", () => {
@@ -89,10 +91,10 @@ describe("Selector de ocupante de grupo", () => {
     expect(screen.getByText(/123456/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Asignar huésped" }));
     await waitFor(() => expect(onAssigned).toHaveBeenCalledOnce());
-    expect(apiRequest).toHaveBeenCalledExactlyOnceWith(
+    expect(apiRequest).toHaveBeenCalledWith(
       "PATCH",
       "/api/groups/group/reservations/res/occupant",
-      { guestId: "existing" },
+      { guestId: "existing", expectedGuestId: "original", fingerprint: "checked", confirmPersonalAdvances: false },
     );
   });
   it("usa el alta completa y envía ficha y asignación en una operación", async () => {
@@ -102,10 +104,11 @@ describe("Selector de ocupante de grupo", () => {
       screen.getByRole("button", { name: "Guardar ficha completa" }),
     );
     await waitFor(() => expect(onAssigned).toHaveBeenCalledOnce());
-    expect(apiRequest).toHaveBeenCalledExactlyOnceWith(
+    expect(apiRequest).toHaveBeenCalledWith(
       "PATCH",
       "/api/groups/group/reservations/res/occupant",
       {
+        expectedGuestId: "original", fingerprint: "checked", confirmPersonalAdvances: false,
         newGuest: {
           firstName: "Nueva",
           lastName: "Persona",
@@ -116,9 +119,10 @@ describe("Selector de ocupante de grupo", () => {
     );
   });
   it("conserva el selector y muestra el error cuando la asignación falla", async () => {
-    apiRequest.mockRejectedValue(
-      new Error('409: {"error":"No se pudo asignar"}'),
-    );
+    apiRequest.mockImplementation(async method => {
+      if (method === 'PATCH') throw new Error('409: {"error":"No se pudo asignar"}');
+      return {json: async () => ({fingerprint:'checked',canReplace:true,replacementBlockers:[],personalAdvance:0})};
+    });
     const { user, onAssigned } = setup();
     await user.type(
       screen.getByRole("textbox", { name: "Buscar huésped" }),

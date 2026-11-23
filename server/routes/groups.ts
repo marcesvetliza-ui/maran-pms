@@ -4,14 +4,17 @@ import {parseReservationPaymentRequest} from '../reservationPaymentRequest';
 import {getGroupPaymentRequest,replayGroupPayment} from '../groupPaymentRequest';
 import {allocateGroupMoney} from '@shared/groupAccount';
 import { registerGroupOccupantRoutes } from "./group-occupant";
+import { registerGroupAssignmentReleaseRoutes } from "./group-assignment-release";
+import { reverseTransferredPersonalAdvance } from '../groupPersonalAdvance';
+import { withFinancialScopeLock } from '../nightlyPricingGuard';
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
-import { db, pool, withDatabaseTransaction } from "../db";
+import { db, pool, withDatabaseTransaction, withReadOnlyDatabaseTransaction } from "../db";
 import { withLodgingInventoryMutationLock } from "../inventoryMutationLock";
 import { reservationChangelog, housekeepingTasks, groupReservationLinks, rooms as roomsTable, reservations as reservationsTable, guests as guestsTable, groupRoomBlocks, groupCharges as groupChargesTable, groupPayments as groupPaymentsTable, payments as paymentsTable, groupInvoices as groupInvoicesTable, salesInvoices as salesInvoicesTable, accountMovements as accountMovementsTable, accountMovementAllocations, cashMovements as cashMovementsTable } from "@shared/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
-import { requireAuth } from "../auth";
+import { requireAuth, requirePermission } from "../auth";
 import { audit } from "../audit";
 import PDFDocument from "pdfkit";
 import { generateGroupPaymentReceiptPdf } from "../groupPaymentReceiptPdf";
@@ -354,6 +357,7 @@ async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
 
 export function registerGroupsRoutes(app: Express) {
   registerGroupOccupantRoutes(app);
+  registerGroupAssignmentReleaseRoutes(app);
   // Groups
   app.get("/api/groups", async (req, res) => {
     try {
@@ -814,7 +818,7 @@ export function registerGroupsRoutes(app: Express) {
   });
 
   // Assign real guest to a pre-blocked (placeholder) reservation, optionally changing room
-  app.patch("/api/groups/:groupId/placeholder-reservations/:reservationId", async (req, res) => {
+  app.patch("/api/groups/:groupId/placeholder-reservations/:reservationId", requireAuth, requirePermission('sidebar:/groups'), async (req, res) => {
     try {
       const { guestId, guestFirstName, guestLastName, roomId, roomTypeId } = req.body;
       const { groupId, reservationId } = req.params;
@@ -853,6 +857,10 @@ export function registerGroupsRoutes(app: Express) {
         .limit(1);
       if (!currentRes) {
         return res.status(404).json({ error: "Reserva no encontrada" });
+      }
+      const [currentGuest] = await db.select().from(guestsTable).where(eq(guestsTable.id, currentRes.guestId)).limit(1);
+      if (!['confirmed','pending','tentative'].includes(currentRes.status) || (currentGuest?.codigo !== `GROUP-${groupId}` && guestId !== currentRes.guestId)) {
+        return res.status(409).json({ error: 'Esta reserva ya tiene pasajero o inició su estadía. Usá Reemplazar huésped para revisar sus anticipos antes de cambiarlo.' });
       }
       const effectiveRoomTypeId = roomTypeId || currentRes.roomTypeId;
       const changesInventoryType = effectiveRoomTypeId !== currentRes.roomTypeId;
@@ -2024,23 +2032,19 @@ export function registerGroupsRoutes(app: Express) {
   // GET master folio data — breakdown for the organizer's folio
   app.get("/api/groups/:groupId/master-folio", requireAuth, async (req, res) => {
     try {
+      const data = await withReadOnlyDatabaseTransaction(async () => {
       const group = await storage.getGroup(req.params.groupId);
-      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+      if (!group) throw Object.assign(new Error('Grupo no encontrado'), {statusCode:404});
 
       const config = (group as any).masterFolioConfig || "accommodation";
       const gCharges = await storage.getGroupCharges(req.params.groupId);
       const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
-      // Only master-folio receipts reduce and appear on this folio. Group
-      // payments distributed directly to rooms are a different destination.
+      // List master-destined receipts here. The consolidated balance below
+      // counts all parent receipts once, including released/unassigned money.
       const gPayments = allGroupPayments.filter((payment: any) =>
         payment.destination === "master_folio" || payment.distribution === "master_folio"
       );
-      const allParentPaymentIds = new Set(allGroupPayments.map((payment: any) => payment.id));
-      const distributedParentAllocations = parentAllocationsByReservation(
-        allGroupPayments.filter((payment: any) =>
-          payment.destination !== "master_folio" && payment.distribution !== "master_folio"
-        ),
-      );
+
 
       // Same batched, filtered per-reservation facts used by the group folio
       // (/folio) and the group invoice summary (/invoice), so the three views
@@ -2053,24 +2057,16 @@ export function registerGroupsRoutes(app: Express) {
       let masterAccommodation = 0;
       let masterExtras = 0;
       let masterTransferred = 0;
-       let directAllPaid = 0;
 
       for (const line of ledgerLines) {
         const accommodation = line.accommodationTotal;
         const activeCharges = line.charges;
         const extras = line.extrasTotal;
         const paid = line.paymentsTotal;
-        const directPaid = line.payments
-          .filter((p: any) => !p.groupPaymentId || !allParentPaymentIds.has(p.groupPaymentId))
-          .reduce((s: number, p: any) => s + parseFloat(p.amount), 0)
-          + (distributedParentAllocations.get(line.reservationId) || 0);
+
 
         masterAccommodation += accommodation;
         masterExtras += extras;
-         directAllPaid += directPaid;
-         // Direct room receipts have an explicit extras-first scope. This
-         // keeps a payment for extras from reducing an accommodation-only
-         // master folio while still preventing duplicate room collection.
 
         const roomSourcePrefix = `reservation:${line.reservationId}:`;
         const roomSources = billing.sources.filter((source) => source.id.startsWith(roomSourcePrefix));
@@ -2119,11 +2115,12 @@ export function registerGroupsRoutes(app: Express) {
       // Total master folio charges
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal + masterTransferred;
 
-      const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
-      const masterPaid = masterParentPaid + directAllPaid;
+      // A distributed receipt still belongs to the group when an application
+      // is released. Count the parent once, including its unassigned portion.
+      const masterPaid = computeGroupOperationalLedger(ledgerLines, gCharges, allGroupPayments).payments;
       const masterBalance = masterTotal - masterPaid;
 
-      res.json({
+      return {
         config,
         masterTotal,
         masterAccommodation,
@@ -2135,10 +2132,12 @@ export function registerGroupsRoutes(app: Express) {
         groupPayments: gPayments,
         rooms,
         billing,
+      };
       });
+      res.json(data);
     } catch (error: any) {
       console.error("master-folio error:", error);
-      res.status(500).json({ error: "Error al obtener folio maestro" });
+      res.status(error?.statusCode || 500).json({ error: error?.statusCode ? error.message : "Error al obtener folio maestro" });
     }
   });
 
@@ -2190,13 +2189,7 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(400).json({ error: "Sólo se pueden cerrar habitaciones activas de este grupo." });
       }
       const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
-      const masterPaymentIds = new Set(allGroupPayments
-        .filter((payment: any) => payment.destination === "master_folio" || payment.distribution === "master_folio")
-        .map((payment: any) => payment.id));
       const allParentPaymentIds = new Set(allGroupPayments.map((payment: any) => payment.id));
-      const distributedParentAllocations = parentAllocationsByReservation(
-        allGroupPayments.filter((payment: any) => !masterPaymentIds.has(payment.id)),
-      );
       const allParentAllocations = parentAllocationsByReservation(allGroupPayments);
 
       // Use the same filtered room facts as /folio, /invoice and the GET
@@ -2217,7 +2210,6 @@ export function registerGroupsRoutes(app: Express) {
       const roomAmounts = new Map<string, number>();
       let masterAccommodation = 0;
       let masterExtras = 0;
-      let directAllPaid = 0;
       for (const line of ledgerLines) {
         const accommodation = line.accommodationTotal;
         masterAccommodation += accommodation;
@@ -2228,18 +2220,13 @@ export function registerGroupsRoutes(app: Express) {
           .filter((payment: any) => !payment.groupPaymentId || !allParentPaymentIds.has(payment.groupPaymentId))
           .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
         const alreadyApplied = unparentedPaid + (allParentAllocations.get(line.reservationId) || 0);
-        const directPaid = unparentedPaid + (distributedParentAllocations.get(line.reservationId) || 0);
-        directAllPaid += directPaid;
         // Use the actual remaining room saldo for a new master distribution.
         roomAmounts.set(line.reservationId, Math.max(0, roomAmount - alreadyApplied));
       }
       const groupChargesTotal = (await storage.getGroupCharges(req.params.groupId))
         .reduce((sum, charge) => sum + parseFloat(charge.amount), 0);
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
-      const masterParentPaid = allGroupPayments
-        .filter((payment: any) => masterPaymentIds.has(payment.id))
-        .reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
-      const masterBalance = masterTotal - masterParentPaid - directAllPaid;
+      const masterBalance = masterTotal - computeGroupOperationalLedger(ledgerLines, [], allGroupPayments).payments;
       // The authenticated actor is supplied by the server, never from the body.
       // Storage checks current permissions and the confirmed balance under lock.
       const creditAdvanceAuthorization = req.body.creditAdvance == null ? undefined : {
@@ -2386,11 +2373,11 @@ export function registerGroupsRoutes(app: Express) {
   });
 
   // ─── DELETE NON-INVOICED MASTER FOLIO PAYMENT ────────────────────────────────
-  app.delete("/api/groups/:groupId/master-payments/:paymentId", requireAuth, async (req, res) => {
+  app.delete("/api/groups/:groupId/master-payments/:paymentId", requireAuth, requirePermission('sidebar:/groups'), async (req, res) => {
     try {
       assertFinancialSchemaReady();
       const { groupId, paymentId } = req.params;
-      const gp = await db.transaction(async (tx) => {
+      const gp = await withFinancialScopeLock(`group-invoice:${groupId}`, () => db.transaction(async (tx) => {
         // Serialize reversal with invoice emission/linking. The invoice route
         // uses this same group lock before validating and persisting fiscal
         // source amounts, closing the emit-before-PATCH(invoiceRef) window.
@@ -2400,7 +2387,8 @@ export function registerGroupsRoutes(app: Express) {
         if (!(groupLock.rows as any[])[0]) {
           throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
         }
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${"group-invoice:" + groupId}))`);
+        // The outer financial scope precedes the group row, matching emission
+        // and advance allocation. Do not reacquire it on another connection.
         const [payment] = await tx.select()
           .from(groupPaymentsTable)
           .where(and(eq(groupPaymentsTable.id, paymentId), eq(groupPaymentsTable.groupId, groupId)))
@@ -2446,6 +2434,7 @@ export function registerGroupsRoutes(app: Express) {
           }
           await tx.delete(accountMovementsTable).where(inArray(accountMovementsTable.id, cargoIds));
         }
+        await reverseTransferredPersonalAdvance(tx, groupId, paymentId, (req.user as any)?.username || 'Sistema');
         await tx.delete(paymentsTable).where(eq((paymentsTable as any).groupPaymentId, paymentId));
         await tx.delete(groupPaymentsTable).where(eq(groupPaymentsTable.id, paymentId));
 
@@ -2467,7 +2456,7 @@ export function registerGroupsRoutes(app: Express) {
           .where(and(eq(cashMovementsTable.paymentId, paymentId), eq(cashMovementsTable.anulado, false)));
 
         return payment;
-      });
+      }));
       await audit(req, "delete", "groups", `Pago maestro eliminado: $${(gp as any).amount} (${(gp as any).method})`, { entityType: "group", entityId: groupId });
       res.json({ success: true });
     } catch (error: any) {
@@ -2604,8 +2593,15 @@ export function registerGroupsRoutes(app: Express) {
   // ─── MASTER FOLIO PDF ────────────────────────────────────────────────────────
   app.get("/api/groups/:groupId/master-folio/pdf", requireAuth, async (req, res) => {
     try {
-      const group = await storage.getGroup(req.params.groupId);
-      if (!group) return res.status(404).json({ error: "Grupo no encontrado" });
+      const { group, gCharges, allGroupPayments, folioData, ledgerLines } = await withReadOnlyDatabaseTransaction(async () => {
+        const group = await storage.getGroup(req.params.groupId);
+        if (!group) throw Object.assign(new Error('Grupo no encontrado'), {statusCode:404});
+        const [gCharges, allGroupPayments, folioData, ledgerLines] = await Promise.all([
+          storage.getGroupCharges(req.params.groupId), storage.getGroupPayments(req.params.groupId),
+          storage.getGroupFolio(req.params.groupId), storage.getGroupReservationLedger(req.params.groupId),
+        ]);
+        return { group, gCharges, allGroupPayments, folioData, ledgerLines };
+      });
 
       const config = (group as any).masterFolioConfig || "accommodation";
 
@@ -2625,46 +2621,32 @@ export function registerGroupsRoutes(app: Express) {
         } catch { /* non-fatal */ }
       }
 
-      const gCharges = await storage.getGroupCharges(req.params.groupId);
-      const allGroupPayments = await storage.getGroupPayments(req.params.groupId);
       const gPayments = allGroupPayments.filter((payment: any) =>
         payment.destination === "master_folio" || payment.distribution === "master_folio"
       );
-      const allParentPaymentIds = new Set(allGroupPayments.map((payment: any) => payment.id));
-      const distributedParentAllocations = parentAllocationsByReservation(
-        allGroupPayments.filter((payment: any) =>
-          payment.destination !== "master_folio" && payment.distribution !== "master_folio"
-        ),
-      );
+
 
       // Fetch void movements via the group folio helper
-      const folioData = await storage.getGroupFolio(req.params.groupId);
       const voidMovements = folioData?.voidMovements ?? [];
       const voidMovementsTotal = folioData?.voidMovementsTotal ?? 0;
 
       // Same batched, filtered per-reservation facts used by /folio, /master-folio
       // and /invoice, so the printed PDF can never disagree with the on-screen
       // master folio or Resumen del Grupo.
-      const ledgerLines = await storage.getGroupReservationLedger(req.params.groupId);
 
       // Build per-room data
       let masterAccommodation = 0;
       let masterExtras = 0;
-      let directAllPaid = 0;
       const roomRows: any[] = [];
 
       for (const line of ledgerLines) {
         const accommodation = line.accommodationTotal;
         const extras = line.extrasTotal;
         const paid = line.paymentsTotal;
-        const directPaid = line.payments
-          .filter((p: any) => !p.groupPaymentId || !allParentPaymentIds.has(p.groupPaymentId))
-          .reduce((s: number, p: any) => s + parseFloat(p.amount), 0)
-          + (distributedParentAllocations.get(line.reservationId) || 0);
+
 
         masterAccommodation += accommodation;
         masterExtras += extras;
-        directAllPaid += directPaid;
 
         const individualPayments = line.payments.map((p: any) => ({
           amount: parseFloat(p.amount),
@@ -2689,11 +2671,10 @@ export function registerGroupsRoutes(app: Express) {
 
       const groupChargesTotal = gCharges.reduce((s: number, c: any) => s + parseFloat(c.amount), 0);
       const masterTotal = masterAccommodation + masterExtras + groupChargesTotal;
-      // Same formula as the on-screen master folio: master-destined group
-      // payments plus each room's direct payment, independently of the
-      // commercial agreement with the organizer.
-      const masterParentPaid = gPayments.reduce((sum: number, payment: any) => sum + parseFloat(payment.amount), 0);
-      const masterPaid = masterParentPaid + directAllPaid;
+      // Same consolidated receipt ledger as the on-screen master folio.
+      // A distributed receipt still belongs to the group when an application
+      // is released. Count the parent once, including its unassigned portion.
+      const masterPaid = computeGroupOperationalLedger(ledgerLines, gCharges, allGroupPayments).payments;
       const masterBalance = masterTotal - masterPaid;
       const roomRetentionsTotal = roomRows.reduce((sum: number, row: any) =>
         sum + row.individualPayments.reduce((s: number, p: any) => s + (p.retention?.monto || 0), 0), 0);

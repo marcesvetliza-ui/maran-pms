@@ -25,7 +25,7 @@ function makeTransaction() {
     execute: async () => {
       executeCount += 1;
       if (executeCount === 1) return { rows: [{ id: GROUP_ID }] };
-      if (executeCount === 3 && state.activeFiscalInvoice) return { rows: [{ id: 901 }] };
+      if (executeCount === 2 && state.activeFiscalInvoice) return { rows: [{ id: 901 }] };
       return { rows: [] }; // advisory/fiscal checks and no CC cargos
     },
     select: () => ({
@@ -69,6 +69,7 @@ const fakeDb = {
 
 vi.mock("../db", () => ({ db: fakeDb }));
 vi.mock("../migrate", () => ({ assertFinancialSchemaReady: vi.fn() }));
+vi.mock("../nightlyPricingGuard", () => ({ withFinancialScopeLock: async (_key: string, run: () => Promise<any>) => run() }));
 vi.mock("../auth", () => ({
   requirePermission: (_key: string) => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (req: any, _res: any, next: () => void) => {

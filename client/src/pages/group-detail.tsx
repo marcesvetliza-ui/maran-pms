@@ -5,6 +5,7 @@ import { GroupCommercialAgreement } from '@/components/group-commercial-agreemen
 import { groupCommercialAgreement } from '@shared/groupCommercialAgreement';
 import {GroupAdvanceAllocation} from '@/components/group-advance-allocation';
 import { ReservationNightlyPricing } from "@/components/reservation-nightly-pricing";
+import { GroupAssignmentReleaseDialog } from "@/components/group-assignment-release-dialog";
 import { GroupOccupantDialog } from "@/components/group-occupant-dialog";
 import { useState, useEffect, useRef } from "react";
 import { fmtMoney, getArgentinaToday } from "@/lib/utils";
@@ -1370,20 +1371,6 @@ export default function GroupDetailPage() {
     },
   });
 
-  const unassignMutation = useMutation({
-    mutationFn: (reservationId: string) => apiRequest("DELETE", `/api/groups/${groupId}/reservations/${reservationId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "master-folio"] });
-      toast({ title: "Habitación desasignada del grupo" });
-      setUnassignResId(null);
-    },
-    onError: (e: any) => {
-      toast({ title: "No se puede desasignar", description: parseApiError(e), variant: "destructive" });
-      setUnassignResId(null);
-    },
-  });
-
   const { data: changeRoomOptions = [] } = useQuery<RoomWithType[]>({
     queryKey: ["/api/rooms/available", changingReservation?.checkInDate, changingReservation?.checkOutDate],
     queryFn: async () => {
@@ -2510,12 +2497,12 @@ export default function GroupDetailPage() {
                             <span>
                               {res.guestId && res.guest?.firstName && !res.guest?.codigo?.startsWith("GROUP-")
                                 ? `${res.guest?.lastName || ""} ${res.guest?.firstName || ""}`.trim()
-                                : (res as any).guestName || <span className="text-muted-foreground italic">{group?.name || "Sin asignar"}</span>}
+                                : <span className="text-muted-foreground italic">{res.guest?.codigo?.startsWith('GROUP-') ? 'Cupo sin pasajero' : (res as any).guestName || 'Sin datos de huésped'}</span>}
                             </span>
-                            <button
+                            {['confirmed','pending','tentative'].includes(res.status) && <button
                               className="text-muted-foreground hover:text-foreground p-1"
-                              title="Asignar huésped"
-                              aria-label="Asignar huésped"
+                              title={res.guest?.codigo?.startsWith("GROUP-") ? "Asignar huésped" : "Reemplazar huésped"}
+                              aria-label={res.guest?.codigo?.startsWith("GROUP-") ? "Asignar huésped" : "Reemplazar huésped"}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditingPassengerRes(res);
@@ -2523,7 +2510,7 @@ export default function GroupDetailPage() {
                               data-testid={`button-edit-passenger-${res.id}`}
                             >
                               <Pencil className="h-3 w-3" />
-                            </button>
+                            </button>}
                           </div>
                         </TableCell>
                         <TableCell>{res.room?.roomNumber}</TableCell>
@@ -2614,14 +2601,14 @@ export default function GroupDetailPage() {
                                 Cargo
                               </Button>
                             )}
-                            {["confirmed", "pending", "tentative"].includes(res.status) && (
+                            {["confirmed", "pending", "tentative"].includes(res.status) && !res.guest?.codigo?.startsWith("GROUP-") && (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => setUnassignResId(res.id)}
-                                data-testid={`button-unassign-${res.id}`}
-                                title="Desasignar del grupo (cancela la reserva)"
+                                onClick={e => { e.stopPropagation(); setUnassignResId(res.id); }}
+                                data-testid={`button-release-assignment-${res.id}`}
+                                title="Liberar asignación conservando el cupo del grupo"
                               >
                                 <Unlink className="h-3 w-3" />
                               </Button>
@@ -5415,6 +5402,7 @@ export default function GroupDetailPage() {
             queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
             queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
             queryClient.invalidateQueries({ queryKey: ["/api/planning"] });
+            queryClient.invalidateQueries({ queryKey: ['group-advance-availability', groupId] });
             setEditingPassengerRes(null);
           }} />
       )}
@@ -5584,29 +5572,13 @@ export default function GroupDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!unassignResId} onOpenChange={(open) => { if (!open) setUnassignResId(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <Unlink className="h-5 w-5 text-destructive" />
-              Desasignar habitación del grupo
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta acción cancela la reserva de la habitación y la libera del bloque grupal. No se puede deshacer fácilmente. ¿Confirmar?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive hover:bg-destructive/90"
-              onClick={() => { if (unassignResId) unassignMutation.mutate(unassignResId); }}
-              data-testid="button-confirm-unassign"
-            >
-              {unassignMutation.isPending ? "Desasignando..." : "Confirmar, desasignar"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {unassignResId && group.reservations.find(r => r.id === unassignResId) && <GroupAssignmentReleaseDialog
+        key={unassignResId} groupId={groupId!} reservation={group.reservations.find(r => r.id === unassignResId)!}
+        onClose={() => setUnassignResId(null)} onReleased={() => {
+          setUnassignResId(null);
+          toast({ title: "Asignación liberada", description: "El cupo se conserva para el grupo. Los anticipos disponibles se aplican desde el Folio Grupal." });
+        }}
+      />}
 
       {/* ─── CAMBIAR HABITACIÓN ─── */}
       <Dialog open={!!changingReservation} onOpenChange={(open) => { if (!open) { setChangingReservation(null); setChangeRoomId(""); } }}>

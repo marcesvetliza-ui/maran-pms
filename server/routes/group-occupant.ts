@@ -1,12 +1,14 @@
 import type { Express } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { storage } from "../db-storage";
 import { db, withDatabaseTransaction } from "../db";
 import { requireAuth, requirePermission } from "../auth";
+import { inspectGroupAssignment, assignmentError } from '../groupAssignmentRelease';
+import { withReservationFinancialLock } from '../nightlyPricingGuard';
+import { withLodgingInventoryMutationLock } from '../inventoryMutationLock';
+import { withReviewedGroupGuestReplacement } from '../groupGuestReplacement';
 import {
   guests,
-  reservations,
-  groupReservationLinks,
   insertGuestSchema,
   reservationChangelog,
 } from "@shared/schema";
@@ -38,31 +40,13 @@ export function registerGroupOccupantRoutes(app: Express) {
               error:
                 "Revisá los datos del nuevo huésped: nombre y apellido son obligatorios.",
             });
-        const result = await withDatabaseTransaction(async () => {
-          // Guest-only assignment: no room, tariff, folio or inventory fields are updated.
-          const [reservation] = await db
-            .select()
-            .from(reservations)
-            .where(eq(reservations.id, req.params.reservationId))
-            .for("update");
-          const [link] = await db
-            .select()
-            .from(groupReservationLinks)
-            .where(
-              and(
-                eq(groupReservationLinks.groupId, req.params.groupId),
-                eq(
-                  groupReservationLinks.reservationId,
-                  req.params.reservationId,
-                ),
-              ),
-            )
-            .for("update");
-          if (!reservation || !link)
-            throw Object.assign(
-              new Error("La reserva no pertenece a este grupo."),
-              { statusCode: 404 },
-            );
+        const result = await withReservationFinancialLock(req.params.reservationId, () => withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
+          const state = await inspectGroupAssignment(req.params.groupId, req.params.reservationId, true);
+          const reservation = state.reservation;
+          if (state.replacementBlockers.length) throw assignmentError(state.replacementBlockers[0]);
+          if (req.body.expectedGuestId !== reservation.guestId) throw assignmentError('El ocupante cambió o la pantalla está desactualizada. Recargá la pantalla y volvé a abrir la asignación.');
+          if (req.body.fingerprint && req.body.fingerprint !== state.fingerprint) throw assignmentError('La reserva o sus anticipos cambiaron. Actualizá la vista previa.');
+          if (state.personal.length && req.body.confirmPersonalAdvances !== true) throw assignmentError('Confirmá expresamente que los anticipos personales se conservan para el reemplazo en esta reserva.');
           let guest;
           if (parsed?.success) {
             const data = parsed.data;
@@ -107,11 +91,7 @@ export function registerGroupOccupantRoutes(app: Express) {
                 { statusCode: 400 },
               );
           }
-          const [updated] = await db
-            .update(reservations)
-            .set({ guestId: guest.id })
-            .where(eq(reservations.id, reservation.id))
-            .returning();
+          const updated = await withReviewedGroupGuestReplacement(reservation.id, () => storage.updateReservation(reservation.id, { guestId: guest.id }));
           if (reservation.guestId !== guest.id)
             await db
               .insert(reservationChangelog)
@@ -119,10 +99,10 @@ export function registerGroupOccupantRoutes(app: Express) {
                 reservationId: reservation.id,
                 operador: req.user?.username || req.user?.id,
                 tipo: "guest_assignment",
-                descripcion: `Huésped asignado: ${guest.lastName} ${guest.firstName} (${guest.id}). Anterior: ${reservation.guestId}.`,
+                descripcion: `Huésped asignado: ${guest.lastName} ${guest.firstName} (${guest.id}). Anterior: ${state.guest?.lastName || ''} ${state.guest?.firstName || ''} (${reservation.guestId}). Se conservan habitación, fechas, tarifa y cupo.${state.personal.length ? ' Traspaso al reemplazo de anticipos personales expresamente confirmado.' : ''}`,
               });
           return { reservation: updated, guest };
-        });
+        })));
         res.json(result);
       } catch (error: any) {
         if (error.code === "23505")

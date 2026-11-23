@@ -45,7 +45,9 @@ async function assertNoPartialBlock(f: Awaited<ReturnType<typeof fixture>>) {
 describe.skipIf(!enabled)("atomic group block creation and accepted inventory warnings", () => {
   beforeAll(async () => {
     ({ pool } = await import("../db"));
+    await (await import('../permissions')).loadRolePermissionsCache();
     const app = express(); app.use(express.json());
+    app.use((req, _res, next) => { req.user = { id: prefix, username: 'Synthetic group block operator', role: 'admin' } as any; req.isAuthenticated = () => true; next(); });
     (await import("../routes/groups")).registerGroupsRoutes(app);
     server = app.listen(0, "127.0.0.1");
     await new Promise<void>(resolve => server.once("listening", resolve));
@@ -57,6 +59,7 @@ describe.skipIf(!enabled)("atomic group block creation and accepted inventory wa
     if (!pool) return;
     for (const f of fixtures) {
       await pool.query("DELETE FROM audit_logs WHERE entity_id IN(SELECT id FROM reservations WHERE room_type_id=$1)", [f.typeId]);
+      await pool.query("DELETE FROM audit_logs WHERE entity_id=ANY($1::text[])", [[f.groupId,f.competitorId]]);
       await pool.query("DELETE FROM reservation_changelog WHERE reservation_id IN(SELECT id FROM reservations WHERE room_type_id=$1)", [f.typeId]);
       await pool.query("DELETE FROM group_reservation_links WHERE group_id=ANY($1::text[])", [[f.groupId, f.competitorId]]);
       await pool.query("DELETE FROM reservations WHERE room_type_id=$1", [f.typeId]);
