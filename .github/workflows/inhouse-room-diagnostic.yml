@@ -22,4 +22,5 @@ jobs:
         env:
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
           VERIFY_HOLDER_CORRECTION: 'true'
+          INSPECT_COMMERCIAL_PERMISSIONS: 'true'
         run: node scripts/diagnose-room1001-holder.mjs

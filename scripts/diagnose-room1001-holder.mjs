@@ -10,7 +10,7 @@ const classify=message=>{
  if(/anticipo|recibo|conciliaci/i.test(message))return 'ADVANCE_REVIEW';
  return 'OTHER_REVIEW';
 };
-export async function diagnoseHolder({password,fetchImpl=globalThis.fetch,now=new Date(),verifyCorrection=false}){
+export async function diagnoseHolder({password,fetchImpl=globalThis.fetch,now=new Date(),verifyCorrection=false,inspectCommercialPermissions=false}){
  if(!password)throw Error('Falta acceso de comprobacion');let cookie='';
  try{
   const auth=await fetchImpl(base+'/api/auth/login',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password}),signal:AbortSignal.timeout(20000)});
@@ -38,10 +38,15 @@ export async function diagnoseHolder({password,fetchImpl=globalThis.fetch,now=ne
     report.reservations[index].holderCorrection={routeAvailable:true,guestMatches,reservationMatches,canCorrect:p.canCorrect,blockerCount:p.blockers.length,companionCount:p.companionCount,groupLinked:p.groupLinked};
    }
   }
+  if(inspectCommercialPermissions){
+   const permissions=await get('/api/admin/role-permissions');
+   if(!Array.isArray(permissions.grants))throw Error('Formato de permisos no valido');
+   report.holderCorrectionPermissions=['comercial','responsable_area','reception','jefe_recepcion'].map(role=>({role,reservationsEnabled:permissions.grants.some(p=>p.role===role&&p.resourceKey==='sidebar:/reservations'),guestsEnabled:permissions.grants.some(p=>p.role===role&&p.resourceKey==='sidebar:/guests')}));
+  }
   return report;
  }finally{if(cookie)await fetchImpl(base+'/api/auth/logout',{method:'POST',redirect:'manual',headers:{Cookie:cookie},signal:AbortSignal.timeout(10000)}).catch(()=>undefined);}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
- try{console.log(JSON.stringify(await diagnoseHolder({password:process.env.SMOKE_TEST_PASSWORD,verifyCorrection:process.env.VERIFY_HOLDER_CORRECTION==='true'})));}
+ try{console.log(JSON.stringify(await diagnoseHolder({password:process.env.SMOKE_TEST_PASSWORD,verifyCorrection:process.env.VERIFY_HOLDER_CORRECTION==='true',inspectCommercialPermissions:process.env.INSPECT_COMMERCIAL_PERMISSIONS==='true'})));}
  catch{console.error('No se pudo completar la consulta; no se imprimieron respuestas privadas.');process.exitCode=1;}
 }

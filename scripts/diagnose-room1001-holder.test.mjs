@@ -17,3 +17,16 @@ test('reads only the selected room and group preview, never leaks identity or mo
 test('does not read data if authentication fails',async()=>{
  const requests=[];await assert.rejects(diagnoseHolder({password:'private',fetchImpl:async(url)=>{requests.push(url);return {status:401};}}));assert.equal(requests.length,1);
 });
+
+test('permission inspection returns only targeted role flags and never changes grants',async()=>{
+ const requests=[];
+ const report=await diagnoseHolder({password:'private',inspectCommercialPermissions:true,fetchImpl:async(url,init)=>{
+  requests.push({url,method:init.method});
+  if(url.endsWith('/login'))return {status:200,headers:{getSetCookie:()=>['sid=private']},json:async()=>({role:'admin'})};
+  return {status:200,json:async()=>url.includes('/api/reservations?')?[]:url.endsWith('/role-permissions')?{grants:[{role:'comercial',resourceKey:'sidebar:/reservations'},{role:'admin',resourceKey:'private-resource'}]}:{}};
+ }});
+ assert.equal(report.holderCorrectionPermissions.find(p=>p.role==='comercial').reservationsEnabled,true);
+ assert.equal(JSON.stringify(report).includes('private'),false);
+ assert.equal(requests.filter(r=>r.method!=='GET').length,2);
+ assert.equal(requests.some(r=>r.url.includes('/grant')||r.url.includes('/revoke')),false);
+});
