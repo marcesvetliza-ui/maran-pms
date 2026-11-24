@@ -165,7 +165,7 @@ async function request(
           : JSON.stringify({
               guestId: f.next,
               expectedGuestId: f.old,
-              reason: "Se registró otro pasajero por error al ingresar.",
+              reason: " Error ",
               confirmed: true,
               ...patch,
             }),
@@ -324,7 +324,7 @@ suite("Corrección auditada del titular de una estadía iniciada", () => {
     });
     expect(history[0].descripcion).toContain("Original");
     expect(history[0].descripcion).toContain("Correcto");
-    expect(history[0].descripcion).toContain("por error");
+    expect(history[0].descripcion).toContain("Motivo: Error.");
     const audit = (
       await pool!.query("SELECT * FROM audit_logs WHERE entity_id=$1", [
         f.reservation,
@@ -341,7 +341,7 @@ suite("Corrección auditada del titular de una estadía iniciada", () => {
     const f = await fixture();
     for (const patch of [
       { reason: "" },
-      { reason: "corto" },
+      { reason: "cort" },
       { confirmed: false },
       { totalRoomAmount: 1 },
       { guestId: f.old },
