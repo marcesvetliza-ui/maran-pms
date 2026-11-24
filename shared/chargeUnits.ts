@@ -1,7 +1,7 @@
 /** The charge editor persists integer quantities as a terminal `(xN)` suffix. */
-export function chargeUnits<T extends { id: string; description: string; amount: string | number; category?: string }>(charge: T): T[] {
+export function chargeUnits<T extends { id: string; description: string; amount: string | number; category?: string; hospitalityUnits?: number | null }>(charge: T): T[] {
   const match = String(charge.description || '').match(/\s+\(x([1-9]\d*)\)$/);
-  const quantity = match ? Number(match[1]) : 1;
+  const quantity = charge.hospitalityUnits ?? (match ? Number(match[1]) : 1);
   const cents = Math.round(Number(charge.amount) * 100);
   const excluded = ['transfer_in', 'transfer_out', 'adjustment', 'payment'].includes(charge.category || '');
   if (quantity < 2 || quantity > 1000 || !Number.isSafeInteger(cents) || cents < quantity || excluded) return [charge];
@@ -9,7 +9,7 @@ export function chargeUnits<T extends { id: string; description: string; amount:
     ...charge,
     id: `charge-unit:${charge.id}:${index + 1}`,
     amount: (Math.floor(cents / quantity) + (index < cents % quantity ? 1 : 0)) / 100,
-    description: `${charge.description.slice(0, match!.index).trim()} · unidad ${index + 1} de ${quantity}`,
+    description: `${(match ? charge.description.slice(0, match.index) : charge.description).trim()} · unidad ${index + 1} de ${quantity}`,
   }));
 }
 

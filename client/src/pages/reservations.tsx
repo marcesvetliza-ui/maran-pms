@@ -1,3 +1,5 @@
+import type { ChargeType } from "@shared/schema";
+import { RoomChargeHospitalityPreview, useRoomChargeHospitality, roomChargeHospitalityFields } from "@/components/room-charge-hospitality";
 import { RestaurantConsumptionDetail, restaurantOrderNumberForCharge } from "@/components/restaurant-consumption-detail";
 import { isSelectableGuest } from "@shared/guest-selection";
 import {SurveyInvitation} from "@/components/survey-invitation";
@@ -280,14 +282,14 @@ export function ReservationFormDialog({
   });
 
   // Cargos adicionales al crear — cargados desde la BD
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean; allowRecurring: boolean }[]>({
+  const { data: chargeTypesData = [] } = useQuery<ChargeType[]>({
     queryKey: ["/api/charge-types"],
   });
   const newResChargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false, allowRecurring: ct.allowRecurring ?? false })),
-    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const, allowPriceEdit: true, allowRecurring: false },
+    ...chargeTypesData.map(ct => ({ id:ct.id,hospitalityRules:ct.hospitalityRules||[],label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false, allowRecurring: ct.allowRecurring ?? false })),
+    { id:"",hospitalityRules:[],label: "Cargo personalizado", description: "", amount: "", category: "otros" as const, allowPriceEdit: true, allowRecurring: false },
   ];
-  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
+  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number;hospitality?:Record<string,unknown> }>>([]);
   const [showResChargeForm, setShowResChargeForm] = useState(false);
   const [resChargePreset, setResChargePreset] = useState("");
   const [resChargeDesc, setResChargeDesc] = useState("");
@@ -848,6 +850,7 @@ export function ReservationFormDialog({
               category: charge.category,
               reservationId: created.id,
               date: todayStr,
+              ...charge.hospitality,
             });
           }
         } catch {
@@ -1833,6 +1836,7 @@ export function ReservationFormDialog({
                         </span>
                       </div>
                     )}
+                    <RoomChargeHospitalityPreview preset={newResChargePresets.find(p=>p.label===resChargePreset)} quantity={resChargeQty} recurring={resChargeRecurring}/>
                     <div className="flex justify-end gap-2">
                       <Button
                         type="button"
@@ -1854,7 +1858,7 @@ export function ReservationFormDialog({
                         size="sm"
                         onClick={() => {
                           if (!resChargeDesc || !resChargeAmount) return;
-                          setPendingCharges(prev => [...prev, { description: resChargeDesc, amount: resChargeAmount, category: resChargeCategory, quantity: resChargeQty }]);
+                          setPendingCharges(prev => [...prev, { description: resChargeDesc, amount: resChargeAmount, category: resChargeCategory, quantity: resChargeQty,hospitality:{...roomChargeHospitalityFields(newResChargePresets.find(p=>p.label===resChargePreset),resChargeQty,crypto.randomUUID()),...(resChargeRecurring&&newResChargePresets.find(p=>p.label===resChargePreset)?.hospitalityRules?.length?{isRecurring:true,unitAmount:resChargeAmount}:{})} }]);
                           setShowResChargeForm(false);
                           setResChargePreset("");
                           setResChargeDesc("");
@@ -2478,7 +2482,7 @@ export function ReservationDetailDialog({
     setShowFacturar(true);
   };
 
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean; allowRecurring: boolean }[]>({
+  const { data: chargeTypesData = [] } = useQuery<ChargeType[]>({
     queryKey: ["/api/charge-types"],
   });
 
@@ -2540,9 +2544,10 @@ export function ReservationDetailDialog({
     category: "otros" as "room" | "restaurant" | "spa" | "minibar" | "otros" | "adjustment",
   });
   const chargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false, allowRecurring: ct.allowRecurring ?? false })),
-    { label: "Cargo editable", description: "", amount: "", category: "otros" as const, allowPriceEdit: true, allowRecurring: false },
+    ...chargeTypesData.map(ct => ({ id:ct.id,hospitalityRules:ct.hospitalityRules||[],label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any, allowPriceEdit: ct.allowPriceEdit ?? false, allowRecurring: ct.allowRecurring ?? false })),
+    { id:"",hospitalityRules:[],label: "Cargo editable", description: "", amount: "", category: "otros" as const, allowPriceEdit: true, allowRecurring: false },
   ];
+  const chargeHospitality=useRoomChargeHospitality();
   const [chargeQty, setChargeQty] = useState(1);
   const [isRecurringCharge, setIsRecurringCharge] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<typeof chargePresets[0] | null>(null);
@@ -2825,15 +2830,18 @@ export function ReservationDetailDialog({
   );
 
   const addChargeMutation = useMutation({
-    mutationFn: async (chargeData: { description: string; amount: string; category: string; reservationId: string; date: string; isRecurring?: boolean; unitAmount?: string }) => {
+    mutationFn: async (chargeData: Record<string,unknown>) => {
       return apiRequest("POST", "/api/charges", chargeData);
     },
     onSuccess: () => {
       refetchCharges();
       setShowAddCharge(false);
       setNewCharge({ description: "", amount: "", category: "otros" });
+      setSelectedPreset(null); setChargeQty(1); setIsRecurringCharge(false); chargeHospitality.reset();
+      queryClient.invalidateQueries({predicate:q=>typeof q.queryKey[0]==='string'&&q.queryKey[0].startsWith('/api/hospitality/included-services')});
       toast({ title: "Cargo agregado", description: "El cargo ha sido registrado en el folio." });
     },
+    onError:(error)=>toast({title:"No se pudo registrar el cargo",description:parseApiError(error),variant:"destructive"}),
   });
 
   const deleteChargeMutation = useMutation({
@@ -3052,21 +3060,20 @@ export function ReservationDetailDialog({
     if (!newCharge.description || !newCharge.amount) return;
     const totalAmount = (parseFloat(newCharge.amount) * chargeQty).toFixed(2);
     const descWithQty = chargeQty > 1 ? `${newCharge.description} (x${chargeQty})` : newCharge.description;
-    addChargeMutation.mutate({
-      description: descWithQty,
-      amount: totalAmount,
-      category: newCharge.category,
-      reservationId: reservation.id,
-      date: getLocalToday(),
+    addChargeMutation.mutate(chargeHospitality.payload({
+      description: descWithQty, amount: totalAmount, category: newCharge.category,
+      reservationId: reservation.id, date: getLocalToday(),
       ...(isRecurringCharge && { isRecurring: true, unitAmount: newCharge.amount }),
-    });
-    setSelectedPreset(null);
-    setChargeQty(1);
-    setIsRecurringCharge(false);
+    },selectedPreset,chargeQty));
   };
 
   // Quickly add one more unit of an existing charge (for cochera, etc.)
   const handleRepeatCharge = (charge: typeof consumptionCharges[0]) => {
+    if(charge.chargeTypeId && charge.hospitalityRulesSnapshot?.length){
+      const preset=chargePresets.find(p=>p.id===charge.chargeTypeId);
+      if(!preset){toast({title:"El concepto ya no está habilitado",description:"Elegí un concepto actual para cargar otro servicio.",variant:"destructive"});return;}
+      setSelectedPreset(preset);setNewCharge({description:preset.description,amount:preset.amount,category:preset.category});setChargeQty(1);setIsRecurringCharge(false);setShowAddCharge(true);return;
+    }
     // Strip "(xN)" from description to get the base item name
     const baseDesc = charge.description.replace(/\s*\(x\d+\)$/, "").trim();
     // Find unit price from presets, fallback to stored amount
@@ -3982,11 +3989,13 @@ export function ReservationDetailDialog({
                     </div>
                   </div>
 
+                  <RoomChargeHospitalityPreview preset={selectedPreset} quantity={chargeQty} recurring={isRecurringCharge}/>
                   <div className="flex justify-end gap-2">
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={() => {
+                        chargeHospitality.reset();
                         setShowAddCharge(false);
                         setSelectedPreset(null);
                         setChargeQty(1);

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS hospitality_included_sources (
   rules_snapshot jsonb NOT NULL CHECK(jsonb_typeof(rules_snapshot)='array'),
   active boolean NOT NULL DEFAULT true, manually_cancelled boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now(), created_by text NOT NULL
 );
+ALTER TABLE hospitality_included_sources ADD COLUMN IF NOT EXISTS origin_charge_id varchar;
+CREATE UNIQUE INDEX IF NOT EXISTS hospitality_included_source_charge_idx ON hospitality_included_sources(origin_charge_id) WHERE origin_charge_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS hospitality_included_source_entity_idx ON hospitality_included_sources(kind,entity_id);
 ALTER TABLE hospitality_included_sources ADD COLUMN IF NOT EXISTS manually_cancelled boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS hospitality_included_services (
@@ -76,7 +78,7 @@ DECLARE source_key text; rules jsonb; source_title text; owner text; catalog var
 BEGIN
   IF TG_TABLE_NAME='reservations' THEN
     -- Suppress old package sources when the selected package changes. Supplements follow the stay.
-    FOR item IN SELECT * FROM hospitality_included_sources WHERE entity_id=NEW.id AND kind IN ('reservation','supplement') FOR UPDATE LOOP
+    FOR item IN SELECT * FROM hospitality_included_sources WHERE entity_id=NEW.id AND kind IN ('reservation','supplement') AND origin_charge_id IS NULL FOR UPDATE LOOP
       cancelled:=item.manually_cancelled OR NEW.status IN ('cancelled','no_show') OR (item.kind='reservation' AND item.catalog_id IS DISTINCT FROM NEW.hospitality_package_id);
       UPDATE hospitality_included_sources SET active=NOT cancelled WHERE id=item.id;
       PERFORM hospitality_reconcile_source(item.id,NEW.check_in_date,NEW.check_out_date,NEW.number_of_guests,1,cancelled);

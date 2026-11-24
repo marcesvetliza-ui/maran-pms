@@ -1,3 +1,6 @@
+import {repriceHospitalityCharge} from "../roomChargeHospitalityActions";
+import { createHospitalityRoomCharge } from "../roomChargeHospitality";
+import { chargeInclusionRulesSchema } from "@shared/roomChargeHospitality";
 import { generateReservationConfirmationPdf } from "../reservationConfirmationPdf";
 import { assertPersonalAdvanceNotTransferred } from '../groupPersonalAdvance';
 import {requestHospitalityNotificationRefresh} from '../hospitalityNotifications';
@@ -681,12 +684,13 @@ export function registerReservationsRoutes(app: Express) {
           await withReservationFinancialLock(req.params.id, async () => {
           // Unit identities already used by a document must retain their amount and count.
           const recurringRows = await db.execute(
-            sql`SELECT c.id, c.description, c.unit_amount FROM charges c WHERE c.reservation_id = ${req.params.id} AND c.is_recurring = true AND c.status = 'active' AND c.unit_amount IS NOT NULL
+            sql`SELECT c.id, c.description, c.unit_amount,c.hospitality_units FROM charges c WHERE c.reservation_id = ${req.params.id} AND c.is_recurring = true AND c.status = 'active' AND c.unit_amount IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM sales_invoices si WHERE si.reserva_id = c.reservation_id
                 AND (COALESCE(si.source_charge_ids::text,'') LIKE ('%charge-unit:' || c.id || ':%')
                   OR COALESCE(si.source_charge_amounts::text,'') LIKE ('%charge-unit:' || c.id || ':%')))`
           );
           for (const rc of recurringRows.rows as any[]) {
+            if(rc.hospitality_units!=null){await repriceHospitalityCharge(req.params.id,rc.id,newNights,{id:req.user?.id||'Sistema',name:req.user?.fullName||req.user?.username||'Sistema'});continue;}
             const newAmount = (parseFloat(rc.unit_amount) * newNights).toFixed(2);
             const baseDesc = (rc.description as string).replace(/\s*\(x\d+\)$/, "").trim();
             const newDesc = `${baseDesc} (x${newNights})`;
@@ -1898,6 +1902,12 @@ export function registerReservationsRoutes(app: Express) {
   app.post("/api/charges", async (req, res) => {
     try {
       if (isPostCheckoutCharge(req.body.id)) return res.status(400).json({ error: "Los consumos posteriores se registran desde Cuenta y facturación." });
+      if (req.body.chargeTypeId) {
+        if (!req.user || !hasPermission(req.user.role,"sidebar:/reservations")) return res.status(403).json({error:"No tenés permiso para registrar cargos con incluidos."});
+        const charge=await createHospitalityRoomCharge(req.body,{id:req.user.id,name:req.user.fullName||req.user.username});
+        return res.status(201).json(charge);
+      }
+      if (Object.keys(req.body).some(key=>key.startsWith('hospitality'))) return res.status(400).json({error:"Seleccioná el concepto del cargo para registrar incluidos."});
       if (req.body.reservationId) {
         const reservation = await storage.getReservation(req.body.reservationId);
         if (reservation && isReservationLocked(reservation)) {
@@ -1918,8 +1928,8 @@ export function registerReservationsRoutes(app: Express) {
         );
       }
       res.status(201).json(charge);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating charge" });
+    } catch (error: any) {
+      res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : "No se pudo registrar el cargo. Reintentá con los mismos datos." });
     }
   });
 
@@ -2032,9 +2042,12 @@ export function registerReservationsRoutes(app: Express) {
 
   app.post("/api/charge-types", requireAuth, async (req, res) => {
     try {
-      const { label, description, defaultAmount, category, sortOrder, allowPriceEdit, allowRecurring } = req.body;
+      const { label, description, defaultAmount, category, sortOrder, allowPriceEdit, allowRecurring, hospitalityRules } = req.body;
+      if (hospitalityRules !== undefined && !hasPermission(req.user!.role,"api:rooms:write")) return res.status(403).json({error:"No tenés permiso para configurar incluidos en cargos."});
+      const includedConfig = hospitalityRules === undefined ? undefined : chargeInclusionRulesSchema.safeParse(hospitalityRules);
+      if (includedConfig && !includedConfig.success) return res.status(400).json({error:"Revisá los servicios incluidos del concepto."});
       if (!label || !description || !defaultAmount) return res.status(400).json({ error: "label, description y defaultAmount son requeridos" });
-      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0, allowPriceEdit: allowPriceEdit ?? false, allowRecurring: allowRecurring ?? false });
+      const ct = await storage.createChargeType({ label, description, defaultAmount: String(defaultAmount), category: category || "otros", active: true, sortOrder: sortOrder ?? 0, allowPriceEdit: allowPriceEdit ?? false, allowRecurring: allowRecurring ?? false, hospitalityRules: includedConfig?.success ? includedConfig.data : [] });
       res.status(201).json(ct);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -2043,7 +2056,10 @@ export function registerReservationsRoutes(app: Express) {
 
   app.patch("/api/charge-types/:id", requireAuth, async (req, res) => {
     try {
-      const { label, description, defaultAmount, category, sortOrder, active, allowPriceEdit, allowRecurring } = req.body;
+      const { label, description, defaultAmount, category, sortOrder, active, allowPriceEdit, allowRecurring, hospitalityRules } = req.body;
+      if (hospitalityRules !== undefined && !hasPermission(req.user!.role,"api:rooms:write")) return res.status(403).json({error:"No tenés permiso para configurar incluidos en cargos."});
+      const includedConfig = hospitalityRules === undefined ? undefined : chargeInclusionRulesSchema.safeParse(hospitalityRules);
+      if (includedConfig && !includedConfig.success) return res.status(400).json({error:"Revisá los servicios incluidos del concepto."});
       const updated = await storage.updateChargeType(req.params.id, {
         ...(label !== undefined && { label }),
         ...(description !== undefined && { description }),
@@ -2053,6 +2069,7 @@ export function registerReservationsRoutes(app: Express) {
         ...(active !== undefined && { active }),
         ...(allowPriceEdit !== undefined && { allowPriceEdit }),
         ...(allowRecurring !== undefined && { allowRecurring }),
+        ...(includedConfig?.success && { hospitalityRules: includedConfig.data }),
       });
       if (!updated) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
       res.json(updated);
@@ -2069,7 +2086,7 @@ export function registerReservationsRoutes(app: Express) {
       if (!ct) return res.status(404).json({ error: "Tipo de cargo no encontrado" });
 
       const usageCheck = await db.execute(
-        sql`SELECT COUNT(*) FROM charges WHERE LOWER(description) = LOWER(${ct.label}) OR LOWER(description) = LOWER(${ct.description})`
+        sql`SELECT COUNT(*) FROM charges WHERE charge_type_id=${ct.id} OR LOWER(description) = LOWER(${ct.label}) OR LOWER(description) = LOWER(${ct.description})`
       );
       const usageCount = parseInt((usageCheck.rows[0] as any)?.count ?? "0");
       if (usageCount > 0) {

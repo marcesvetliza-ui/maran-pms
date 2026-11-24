@@ -1,3 +1,4 @@
+import {hospitalityChargeFacts,hospitalityChargeUnitPrice} from "../roomChargeHospitalityActions";
 import { randomUUID } from "node:crypto";
 import { invoiceSourceConflict } from "../billing/chargeFiscalHistory";
 import type { Express } from "express";
@@ -168,7 +169,8 @@ async function inspectManualSource(
   charge: ChargeRow,
   operation: "edit" | "void" = "edit",
 ): Promise<{ eligible: boolean; reason?: string; movementId?: string; movementSnapshot?: Record<string, unknown>; supplement?: "early_checkin" | "late_checkout"; legacySupplement?: boolean }> {
-  if (!MANUAL_CHARGE_CATEGORIES.has(charge.category) || (operation === "edit" && (charge.is_recurring || charge.unit_amount != null))) {
+  const hospitality=await hospitalityChargeFacts(client,charge.id);
+  if (!MANUAL_CHARGE_CATEGORIES.has(charge.category) || (operation === "edit" && (charge.is_recurring || charge.unit_amount != null) && !hospitality)) {
     return { eligible: false, reason: "El origen del cargo no corresponde a un extra manual editable." };
   }
   if (!charge.description.trim() || !cents(charge.amount)) {
@@ -430,15 +432,16 @@ async function mutateManualCharge(
       let result: ChargeRow;
       let afterMovement: unknown;
       if (operation === "edit") {
+        const hospitalityUnitPrice=await hospitalityChargeUnitPrice(client,chargeId,nextAmount!,actor);
         const updateCharge = await client.query(
           `UPDATE charges
-              SET description = $1, amount = $2
+              SET description = $1, amount = $2, unit_amount=coalesce($7::numeric,unit_amount)
             WHERE id = $3 AND reservation_id = $4
               AND description = $5 AND amount::numeric = $6::numeric
               AND status = 'active'
           RETURNING id, reservation_id, description, amount::text, date::text, category, status,
                     created_by, is_recurring, unit_amount::text, anulado_por, motivo_anulacion, anulado_at`,
-          [nextDescription, money(nextAmount!), chargeId, reservationId, expected.description, money(expected.amount)],
+          [nextDescription, money(nextAmount!), chargeId, reservationId, expected.description, money(expected.amount),hospitalityUnitPrice],
         );
         if (!updateCharge.rows[0]) {
           throw actionError(409, "El extra cambió desde que se abrió. Actualizá la pantalla e intentá nuevamente.", "stale_snapshot");

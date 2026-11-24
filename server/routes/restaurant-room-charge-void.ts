@@ -1,3 +1,4 @@
+import {hospitalityChargeFacts,hospitalityChargeUnitPrice} from "../roomChargeHospitalityActions";
 import { roomChargeActionSupport as support } from "./manual-charge-actions";
 
 type Actor = { id: string; name: string; ipAddress: string; role?: string };
@@ -41,7 +42,7 @@ export async function anularRestaurantRoomCharge(
       if (charge.description !== expected.description || support.cents(charge.amount) !== expected.amount) {
         throw support.actionError(409, "El cargo cambió desde que se abrió. Actualizá la pantalla.", "stale_snapshot");
       }
-      if (charge.category !== "restaurant" || charge.is_recurring || charge.unit_amount != null) {
+      if (charge.category !== "restaurant" || ((charge.is_recurring || charge.unit_amount != null) && !await hospitalityChargeFacts(client,chargeId))) {
         throw support.actionError(409, "Esta acción solo anula la imputación de un cargo de Restaurante.", "source_conflict");
       }
       if (charge.status === "anulado") {
@@ -101,7 +102,7 @@ export async function anularRestaurantRoomCharge(
 
 /** Verifies the room imputation without touching the Restaurant sale. */
 export async function inspectRestaurantRoomCharge(client: import('pg').PoolClient, reservationId: string, charge: NonNullable<Awaited<ReturnType<typeof support.getCharge>>>, allowReversed = false) {
-  if (charge.category !== 'restaurant' || charge.status !== 'active' || charge.is_recurring || charge.unit_amount != null || !support.cents(charge.amount)) throw support.actionError(409,'Solo se pueden corregir cargos activos de Restaurante sin cálculo recurrente.');
+  if (charge.category !== 'restaurant' || charge.status !== 'active' || ((charge.is_recurring || charge.unit_amount != null) && !await hospitalityChargeFacts(client,charge.id)) || !support.cents(charge.amount)) throw support.actionError(409,'Solo se pueden corregir cargos activos de Restaurante sin cálculo recurrente.');
   const chargeId = charge.id, expected = {amount:support.cents(charge.amount)!};
       const group = await client.query(
         'SELECT gl.group_id,g.status FROM group_reservation_links gl LEFT JOIN groups g ON g.id=gl.group_id WHERE gl.reservation_id=$1',
@@ -183,8 +184,9 @@ export async function editRestaurantRoomCharge(reservationId:string, chargeId:st
       if(!charge)throw support.actionError(404,'Cargo no encontrado en esta reserva.');
       if(charge.description!==expected.description || support.cents(charge.amount)!==expected.amount)throw support.actionError(409,'El cargo cambió desde que se abrió. Actualizá la pantalla.','stale_snapshot');
       const movement=await inspectRestaurantRoomCharge(client,reservationId,charge,true);
-      const updated=(await client.query(`UPDATE charges SET description=$1,amount=$2 WHERE id=$3 AND reservation_id=$4
-        RETURNING id,reservation_id,description,amount::text,date::text,category,status,created_by,is_recurring,unit_amount::text,anulado_por,motivo_anulacion,anulado_at`,[description,support.money(amount),chargeId,reservationId])).rows[0];
+      const hospitalityUnitPrice=await hospitalityChargeUnitPrice(client,chargeId,amount,actor);
+      const updated=(await client.query(`UPDATE charges SET description=$1,amount=$2,unit_amount=coalesce($5::numeric,unit_amount) WHERE id=$3 AND reservation_id=$4
+        RETURNING id,reservation_id,description,amount::text,date::text,category,status,created_by,is_recurring,unit_amount::text,anulado_por,motivo_anulacion,anulado_at`,[description,support.money(amount),chargeId,reservationId,hospitalityUnitPrice])).rows[0];
       let afterMovement=null;
       if(movement){
         afterMovement=(await client.query('UPDATE folio_movements SET description=$1,amount=$2 WHERE id=$3 RETURNING *',[description,support.money(amount),movement.id])).rows[0];

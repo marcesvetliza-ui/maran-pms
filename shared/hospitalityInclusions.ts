@@ -83,6 +83,7 @@ export type IncludedService = {
   note: string;
   sourceKind: "reservation" | "spa_appointment" | "spa_sale" | "supplement";
   sourceTitle: string;
+  originChargeId?: string | null;
   person: string;
   room: string | null;
   reservationId: string | null;

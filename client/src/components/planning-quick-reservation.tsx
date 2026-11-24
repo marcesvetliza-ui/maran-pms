@@ -1,3 +1,5 @@
+import { RoomChargeHospitalityPreview, roomChargeHospitalityFields } from "@/components/room-charge-hospitality";
+import type { ChargeType } from "@shared/schema";
 import { StaySelectionEditor, useStayDraft } from "@/components/guest-stay-profile";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -128,14 +130,14 @@ export function QuickReservationDialog({
   const [packageId, setPackageId] = useState("");
   const [specialRateReason, setSpecialRateReason] = useState("");
 
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+  const { data: chargeTypesData = [] } = useQuery<ChargeType[]>({
     queryKey: ["/api/charge-types"],
   });
   const quickChargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any })),
-    { label: "Cargo personalizado", description: "", amount: "", category: "otros" as const },
+    ...chargeTypesData.map(ct => ({ id:ct.id,hospitalityRules:ct.hospitalityRules||[],label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category as any })),
+    { id:"",hospitalityRules:[],label: "Cargo personalizado", description: "", amount: "", category: "otros" as const },
   ];
-  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number }>>([]);
+  const [pendingCharges, setPendingCharges] = useState<Array<{ description: string; amount: string; category: string; quantity: number;hospitality?:Record<string,unknown> }>>([]);
   const [showChargeForm, setShowChargeForm] = useState(false);
   const [chargePresetLabel, setChargePresetLabel] = useState("");
   const [chargeDesc, setChargeDesc] = useState("");
@@ -283,7 +285,7 @@ export function QuickReservationDialog({
         try {
           for (const charge of pendingCharges) {
             const totalAmt = (parseFloat(charge.amount) * charge.quantity).toFixed(2);
-            await apiRequest("POST", "/api/charges", { description: charge.description, amount: totalAmt, category: charge.category, reservationId: createdRes.id, date: todayStr });
+            await apiRequest("POST", "/api/charges", { description: charge.description, amount: totalAmt, category: charge.category, reservationId: createdRes.id, date: todayStr,...charge.hospitality });
           }
         } catch {
           toast({
@@ -547,11 +549,12 @@ export function QuickReservationDialog({
                     <Input type="number" min={1} value={chargeQty} onChange={(e) => setChargeQty(Math.max(1, parseInt(e.target.value) || 1))} className="h-8 text-sm" data-testid="input-quick-charge-qty" />
                   </div>
                 </div>
+                <RoomChargeHospitalityPreview preset={quickChargePresets.find(p=>p.label===chargePresetLabel)} quantity={chargeQty}/>
                 <div className="flex justify-end gap-1">
                   <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setShowChargeForm(false); setChargePresetLabel(""); setChargeDesc(""); setChargeAmount(""); setChargeQty(1); }}>Cancelar</Button>
                   <Button type="button" size="sm" className="h-7 text-xs" onClick={() => {
                     if (!chargeDesc || !chargeAmount) return;
-                    setPendingCharges(prev => [...prev, { description: chargeDesc, amount: chargeAmount, category: chargeCategory, quantity: chargeQty }]);
+                    setPendingCharges(prev => [...prev, { description: chargeDesc, amount: chargeAmount, category: chargeCategory, quantity: chargeQty,hospitality:roomChargeHospitalityFields(quickChargePresets.find(p=>p.label===chargePresetLabel),chargeQty,crypto.randomUUID()) }]);
                     setShowChargeForm(false); setChargePresetLabel(""); setChargeDesc(""); setChargeAmount(""); setChargeQty(1);
                   }} data-testid="button-confirm-quick-charge">Agregar cargo</Button>
                 </div>

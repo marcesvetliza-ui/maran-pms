@@ -86,3 +86,37 @@ incluidos dentro de la transacción del origen, incluidos los escritores que usa
 SQL directo. El SQL se incluye en el artefacto de producción y la migración se
 comprueba dos veces sobre PostgreSQL descartable. No cambiar el proyecto, bases,
 secretos ni las variables del asistente para desplegar este cambio.
+
+## Avisos al vender cargos en habitaciones
+
+En Habitaciones → Cargos en habitaciones, crear o editar un concepto y marcar
+**Genera aviso en Hospitalidad**. Elegir el área, servicio, cantidad por unidad,
+condiciones y momento de disponibilidad. Guardar el concepto. La configuración
+solo se aplica a cargos nuevos; no se detectan servicios por el nombre del cargo
+ni por pertenecer a la categoría Restaurant.
+
+Ejemplo: Media pensión → Restaurant → Cena de media pensión → 1 por unidad.
+Al vender 4 unidades, el folio registra el precio por 4 y Hospitalidad habilita
+4 cenas. Para un cargo por noche, cada noche efectivamente cobrada es una unidad;
+si esa unidad cubre a dos personas, configurar 2 prestaciones por unidad. La
+vista previa informa el total antes de guardar. No se multiplica nuevamente por
+los pasajeros de la habitación.
+
+Se conserva la configuración vendida y la identidad del concepto, aunque luego
+se cambie su nombre. Cambiar la plantilla afecta ventas futuras. Un reintento
+con la misma identidad de operación devuelve el cargo ya creado; cargo, espejo
+del folio, incluidos e historial se registran en la misma transacción.
+
+Las pantallas de estadía, reserva nueva, carga rápida de Planning, prefactura y
+cargos individuales de grupos usan esta vinculación al elegir el concepto.
+Repetir un cargo con incluidos abre su propuesta para revisar la venta nueva.
+Los consumos ya realizados de Restaurant y SPA no generan otra prestación salvo
+que se elija expresamente un concepto configurado.
+
+Corregir el importe conserva las cantidades vendidas. Las cantidades efectivas
+y las fechas ajustan los pendientes sin borrar atenciones. Anular el cargo
+retira pendientes y conserva las prestaciones usadas y su historial. Esos
+incluidos se corrigen desde el cargo; la acción independiente Retirar incluidos
+sigue disponible para suplementos manuales. Transferir una deuda a otro pagador
+no traslada el beneficiario del servicio. Se conservan las restricciones fiscales
+y los comprobantes; no se altera ningún pago, recibo ni movimiento de Caja.

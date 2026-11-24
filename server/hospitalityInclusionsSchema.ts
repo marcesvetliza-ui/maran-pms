@@ -14,6 +14,8 @@ export async function ensureHospitalityInclusionsSchema() {
         ? "dist/hospitality-inclusions.sql"
         : "migrations/20261124_hospitality_inclusions.sql";
     await client.query(readFileSync(resolve(path), "utf8"));
+    const chargePath = process.env.NODE_ENV === "production" ? "dist/room-charge-hospitality.sql" : "migrations/20261124_room_charge_hospitality.sql";
+    await client.query(readFileSync(resolve(chargePath), "utf8"));
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

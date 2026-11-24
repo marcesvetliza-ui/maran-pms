@@ -458,6 +458,11 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
         created_by varchar,
         is_recurring boolean NOT NULL DEFAULT false,
         unit_amount numeric(10,2),
+        charge_type_id varchar,
+        hospitality_units integer,
+        hospitality_rules_snapshot jsonb,
+        hospitality_request_id varchar,
+        hospitality_creation_snapshot jsonb,
         anulado_por text,
         motivo_anulacion text,
         anulado_at timestamp

@@ -74,7 +74,7 @@ const contextJoins = sql`
 const fields = sql`b.id,b.source_id AS "sourceId",b.area,b.service,b.conditions,b.ready_when AS "readyWhen",
   b.service_date::text AS "serviceDate",spa_context.next_date::text AS "forecastDate",spa_context.appointments AS "linkedAppointments",b.valid_until::text AS "validUntil",b.quantity,b.used,b.quantity-b.used AS remaining,b.version,b.cancelled,
   b.needs_review AS "needsReview",b.scheduled_at AS "scheduledAt",b.acknowledged_at AS "acknowledgedAt",b.note,
-  s.kind AS "sourceKind",s.title AS "sourceTitle",r.id AS "reservationId",room.room_number AS room,
+  s.kind AS "sourceKind",s.origin_charge_id AS "originChargeId",s.title AS "sourceTitle",r.id AS "reservationId",room.room_number AS room,
   CASE WHEN r.id IS NOT NULL THEN concat_ws(' ',g.last_name,g.first_name) WHEN a.id IS NOT NULL THEN concat_ws(' ',a.guest_last_name,a.guest_name) ELSE sale.buyer_name END AS person,
   coalesce(r.status,a.status,sale.status) AS "sourceStatus",
   coalesce(r.status='checked_in',a.status IN ('in_progress','completed'),EXISTS(SELECT 1 FROM spa_appointments p WHERE p.sold_treatment_sale_id=sale.id AND p.status IN ('in_progress','completed'))) AS present,
@@ -313,6 +313,7 @@ export function registerHospitalityInclusions(app: Express) {
           sql`SELECT * FROM hospitality_included_sources WHERE id=${req.params.sourceId} AND kind='supplement' FOR UPDATE`,
         );
         if (!source) fail("Propuesta no encontrada.", 404);
+        if (source.origin_charge_id) fail("Estos incluidos pertenecen a un cargo. Corregí o anulá el cargo desde el folio.");
         const [prior] = await rows(
           sql`SELECT source_id,request_payload FROM hospitality_included_events WHERE request_id=${body.requestId}::uuid`,
         );

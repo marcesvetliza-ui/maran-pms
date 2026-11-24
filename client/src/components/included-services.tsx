@@ -145,7 +145,7 @@ function ServiceAction({
                           ? "Pendientes retirados"
                           : e.action === "create"
                             ? "Propuesta registrada"
-                            : "Aviso visto"}
+                            : e.action === "charge_created" ? "Cargo e incluidos registrados" : e.action === "charge_voided" ? "Cargo anulado; pendientes retirados" : e.action === "charge_updated" ? "Incluidos del cargo actualizados" : "Aviso visto"}
                   </strong>
                   {e.scheduledAt && (
                     <p>
@@ -696,7 +696,7 @@ export function IncludedServicesPanel({
                 Historial
               </Button>
               {!s.cancelled &&
-                s.sourceKind === "supplement" &&
+                s.sourceKind === "supplement" && !s.originChargeId &&
                 data.data?.canCoordinate && (
                   <Button
                     variant="ghost"
