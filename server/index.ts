@@ -210,6 +210,10 @@ app.use((req, res, next) => {
     }
     startupReady = true;
     try {
+      const {startRestaurantInvoiceReconciliation}=await import('./billing/restaurantInvoiceReconciliation');
+      httpServer.once('close',startRestaurantInvoiceReconciliation());
+    } catch { logger.warn('[Restaurant] No se pudo iniciar la conciliación administrativa automática; las operaciones continúan disponibles.'); }
+    try {
       const {ensureReviewsSchema}=await import('./reviews/schema');await ensureReviewsSchema();
       await (await import('./permissions')).loadRolePermissionsCache();
       const {backfillSurveyReviews}=await import('./reviews/service');await backfillSurveyReviews();
