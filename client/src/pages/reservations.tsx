@@ -1,3 +1,4 @@
+import {ReubicarAction} from "@/components/reubicar-dialog";
 import { IncludedServicesButton, ReservationIncludedServices } from "@/components/included-services";
 import { GroupRoomAdvanceInvoice } from '@/components/group-room-advance-invoice';
 import {GroupRoomAccount} from '@/components/group-room-account';
@@ -4940,6 +4941,7 @@ export function ReservationDetailDialog({
 
         <DialogFooter className="wf-footer shrink-0 gap-2 sm:justify-between">
           <div className="wf-footer-actions">
+            {!isLocked && reservation.status!=="no_show" && <ReubicarAction reservationId={reservation.id}/>}
             {typeof operationalActions === "function"
               ? operationalActions({ onCheckout: requestCheckout })
               : operationalActions}

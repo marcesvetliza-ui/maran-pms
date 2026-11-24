@@ -322,11 +322,20 @@ export const reservations = pgTable("reservations", {
   isUpgrade: boolean("is_upgrade").default(false),
   originalRoomTypeId: varchar("original_room_type_id"),
   movedFromRoomNumber: text("moved_from_room_number"),
+  roomHistory: jsonb("room_history").$type<import("./roomAssignments").RoomAssignment[]>(),
   color: text("color"),
   createdAt: timestamp("created_at").notNull(),
   lastModifiedBy: varchar("last_modified_by"),
   checkedOutAt: timestamp("checked_out_at"),
   specialRateReason: text("special_rate_reason"),
+});
+
+export const reservationRelocations = pgTable("reservation_relocations", {
+  operationId: varchar("operation_id").primaryKey(),
+  reservationId: varchar("reservation_id").notNull(),
+  requestHash: text("request_hash").notNull(),
+  result: jsonb("result").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 export const insertReservationSchema = createInsertSchema(reservations).omit({ id: true });
