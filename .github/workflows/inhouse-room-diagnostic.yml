@@ -21,4 +21,5 @@ jobs:
       - name: Consultar únicamente estados, fechas y cantidades de las habitaciones indicadas
         env:
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+          VERIFY_INHOUSE_CONSISTENCY: 'true'
         run: node scripts/diagnose-inhouse-rooms.mjs

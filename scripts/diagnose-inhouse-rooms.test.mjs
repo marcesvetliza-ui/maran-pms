@@ -15,6 +15,7 @@ test('uses only bounded read endpoints, sanitizes output and closes its own sess
  const report=await diagnoseInHouse({password:'private-password',fetchImpl,now:new Date('2026-11-24T12:00:00Z')});
  assert.equal(report.rooms[0].reservations[0].listed,false);
  assert.equal(report.checkedInPeopleRows,2);
+ assert.equal(report.verification.currentCheckedInsIncluded,false);
  for(const secret of [...Object.values(privateData),'private-id','private-session','private-password'])assert.equal(JSON.stringify(report).includes(String(secret)),false);
  assert.equal(requests.at(-1).url,'https://maranpms.com.ar/api/auth/logout');
  assert.equal(requests.filter(r=>r.method!=='GET').length,2);

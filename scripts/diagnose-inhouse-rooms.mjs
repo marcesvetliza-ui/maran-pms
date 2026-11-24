@@ -38,12 +38,19 @@ export async function diagnoseInHouse({password,fetchImpl=globalThis.fetch,now=n
      inHouseEndpoint:!!inHouse,registeredCompanions:inHouse?.companionsCount??null};
    })});
   }
+  const eligible=checkedIn.filter(r=>r.checkIn<=date);
+  const listedPax=listed.reduce((s,r)=>s+Math.max(Number(r.numberOfGuests)||1,1+(r.companions?.length||0)),0);
+  report.verification={currentCheckedInsIncluded:eligible.every(r=>listedIds.has(r.reservationId)),paxMatchesList:stats.inHouseGuests===listedPax};
   return report;
  }finally{
   if(cookie)await fetchImpl(base+'/api/auth/logout',{method:'POST',redirect:'manual',headers:{Cookie:cookie},signal:AbortSignal.timeout(10000)}).catch(()=>undefined);
  }
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
- try{console.log(JSON.stringify(await diagnoseInHouse({password:process.env.SMOKE_TEST_PASSWORD})));}
+ try{
+  const report=await diagnoseInHouse({password:process.env.SMOKE_TEST_PASSWORD});
+  console.log(JSON.stringify(report));
+  if(process.env.VERIFY_INHOUSE_CONSISTENCY==='true'&&Object.values(report.verification).some(value=>value!==true))throw new DiagnosticError('El contador o el listado requieren revisión.');
+ }
  catch(error){console.error(error instanceof DiagnosticError?error.message:'No se pudo completar la consulta; no se imprimieron respuestas privadas.');process.exitCode=1;}
 }
