@@ -31,9 +31,10 @@ export async function diagnoseGroupHolder({password,fetchImpl=globalThis.fetch,n
   const get=async path=>{const r=await fetchImpl(base+path,{method:'GET',redirect:'manual',headers:{Cookie:cookie},signal:AbortSignal.timeout(30000)});if(r.status!==200)throw Error('No se pudo consultar el estado');return r.json();};
   const date=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
   const found=await get('/api/reservations?dateMode=all&search=802&limit=200');if(!Array.isArray(found))throw Error('Formato no valido');
-  const report={date,room:'802',reservations:[]};
-  for(const r of found.filter(r=>String(r.room?.roomNumber)==='802'&&r.groupId&&!['cancelled','no_show','checked_out'].includes(r.status)&&r.checkInDate<=date&&r.checkOutDate>=date)){
-   const group=await get(`/api/groups/${encodeURIComponent(r.groupId)}`);if(!String(group.name||'').toUpperCase().includes('FICER'))continue;
+  const roomRows=found.filter(r=>String(r.room?.roomNumber)==='802');
+  const report={date,room:'802',candidates:roomRows.map(r=>({status:r.status,checkIn:r.checkInDate,checkOut:r.checkOutDate,groupLinked:!!r.groupId,groupCodePresent:!!r.reservationCode?.startsWith('GGRP-')})),reservations:[]};
+  for(const r of roomRows.filter(r=>r.groupId&&!['cancelled','no_show','checked_out'].includes(r.status))){
+   const group=await get(`/api/groups/${encodeURIComponent(r.groupId)}`);const matches=String(group.name||'').toUpperCase().includes('FICER');report.candidates[roomRows.indexOf(r)].groupMatchesRequest=matches;if(!matches)continue;
    const path=`/api/groups/${encodeURIComponent(r.groupId)}/reservations/${encodeURIComponent(r.id)}`;
    const preview=await get(path+'/assignment-preview');
    const holder=await get(`/api/reservations/${encodeURIComponent(r.id)}/holder-correction`);
