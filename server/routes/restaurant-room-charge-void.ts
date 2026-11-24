@@ -1,4 +1,4 @@
-import {hospitalityChargeFacts,hospitalityChargeUnitPrice} from "../roomChargeHospitalityActions";
+import {hospitalityChargeFacts,hospitalityChargeUnitPrice,hospitalityChargeEditUnits} from "../roomChargeHospitalityActions";
 import { roomChargeActionSupport as support } from "./manual-charge-actions";
 
 type Actor = { id: string; name: string; ipAddress: string; role?: string };
@@ -42,12 +42,14 @@ export async function anularRestaurantRoomCharge(
       if (charge.description !== expected.description || support.cents(charge.amount) !== expected.amount) {
         throw support.actionError(409, "El cargo cambió desde que se abrió. Actualizá la pantalla.", "stale_snapshot");
       }
-      if (charge.category !== "restaurant" || ((charge.is_recurring || charge.unit_amount != null) && !await hospitalityChargeFacts(client,chargeId))) {
+      const hospitality=await hospitalityChargeFacts(client,chargeId);
+      if(hospitality)await client.query("SELECT set_config('hospitality.actor_id',$1,true),set_config('hospitality.actor_name',$2,true)",[actor.id,actor.name]);
+      if (charge.category !== "restaurant" || ((charge.is_recurring || charge.unit_amount != null) && !hospitality)) {
         throw support.actionError(409, "Esta acción solo anula la imputación de un cargo de Restaurante.", "source_conflict");
       }
       if (charge.status === "anulado") {
         await client.query("COMMIT");
-        return { ...support.publicCharge(charge), roomOnly: true, alreadyAnulado: true };
+        return { ...support.publicCharge(charge), roomOnly: true, alreadyAnulado: true,...(hospitality?{hospitalityCancelled:true}:{}) };
       }
       if (charge.status !== "active") {
         throw support.actionError(409, "Solo se pueden anular cargos activos.");
@@ -61,7 +63,7 @@ export async function anularRestaurantRoomCharge(
           WHERE id = $3 AND reservation_id = $4 AND status = 'active'
             AND description = $5 AND amount = $6::numeric
           RETURNING id, reservation_id, description, amount::text, date::text, category,
-                    status, created_by, is_recurring, unit_amount::text,
+                    status, created_by, is_recurring, unit_amount::text,hospitality_units,
                     anulado_por, motivo_anulacion, anulado_at`,
         [actor.name, motivo, chargeId, reservationId, expected.description, support.money(expected.amount)],
       );
@@ -86,13 +88,13 @@ export async function anularRestaurantRoomCharge(
       await support.writeAudit(client, {
         actorId: actor.id, actorName: actor.name, ipAddress: actor.ipAddress,
         action: "delete", reservationId, chargeId, entityType: "reservation_room_charge",
-        description: "Anulación de cargo en habitación; consumo de Restaurante conservado",
+        description: hospitality?"Anulación de cargo con incluidos; atenciones conservadas":"Anulación de cargo en habitación; consumo de Restaurante conservado",
         before: { charge: support.publicCharge(charge), folioMovement: movement ?? null },
         after: { charge: result, reversal, scope: "room_only", restaurantConsumptionPreserved: true },
         motivo,
       });
       await client.query("COMMIT");
-      return { ...result, roomOnly: true };
+      return { ...result, roomOnly: true,...(hospitality?{hospitalityCancelled:true}:{}) };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
@@ -185,8 +187,9 @@ export async function editRestaurantRoomCharge(reservationId:string, chargeId:st
       if(charge.description!==expected.description || support.cents(charge.amount)!==expected.amount)throw support.actionError(409,'El cargo cambió desde que se abrió. Actualizá la pantalla.','stale_snapshot');
       const movement=await inspectRestaurantRoomCharge(client,reservationId,charge,true);
       const hospitalityUnitPrice=await hospitalityChargeUnitPrice(client,chargeId,amount,actor);
-      const updated=(await client.query(`UPDATE charges SET description=$1,amount=$2,unit_amount=coalesce($5::numeric,unit_amount) WHERE id=$3 AND reservation_id=$4
-        RETURNING id,reservation_id,description,amount::text,date::text,category,status,created_by,is_recurring,unit_amount::text,anulado_por,motivo_anulacion,anulado_at`,[description,support.money(amount),chargeId,reservationId,hospitalityUnitPrice])).rows[0];
+      const hospitalityUnits=await hospitalityChargeEditUnits(client,chargeId,body);
+      const updated=(await client.query(`UPDATE charges SET description=$1,amount=$2,unit_amount=coalesce($5::numeric,unit_amount),hospitality_units=coalesce($6::integer,hospitality_units) WHERE id=$3 AND reservation_id=$4
+        RETURNING id,reservation_id,description,amount::text,date::text,category,status,created_by,is_recurring,unit_amount::text,hospitality_units,anulado_por,motivo_anulacion,anulado_at`,[description,support.money(amount),chargeId,reservationId,hospitalityUnitPrice,hospitalityUnits])).rows[0];
       let afterMovement=null;
       if(movement){
         afterMovement=(await client.query('UPDATE folio_movements SET description=$1,amount=$2 WHERE id=$3 RETURNING *',[description,support.money(amount),movement.id])).rows[0];

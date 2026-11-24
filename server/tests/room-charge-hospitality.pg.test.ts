@@ -437,10 +437,20 @@ suite(
           })
         ).status,
       ).toBe(200);
-      await pool.query(
-        "UPDATE charges SET hospitality_units=2 WHERE id=$1::text",
-        [created.body.id],
+      const correction = await request(
+        `/api/reservations/${f.id}/manual-charges/${created.body.id}`,
+        {
+          description: created.body.description,
+          amount: "40.00",
+          motivo: "Se corrige la cantidad vendida",
+          expectedDescription: created.body.description,
+          expectedAmount: "40.00",
+          quantity: 2,
+          expectedQuantity: 4,
+        },
+        "PATCH",
       );
+      expect(correction.status, JSON.stringify(correction.body)).toBe(200);
       [b] = await benefits(f.id);
       expect(b).toMatchObject({ quantity: 3, used: 3, needs_review: true });
       expect(
@@ -546,6 +556,59 @@ suite(
         ).status,
       ).toBe(409);
       expect(await benefits(f.id)).toEqual(before);
+    });
+    it("un concepto SPA elegido manualmente puede corregirse y anularse sin modificar turnos", async () => {
+      const f = await fixture();
+      await pool.query(
+        "UPDATE charge_types SET category='spa' WHERE id=$1::text",
+        [f.id],
+      );
+      const created = await request("/api/charges", {
+        ...f.body,
+        category: "spa",
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const editBody = {
+        description: created.body.description,
+        amount: "20.00",
+        motivo: "Se corrige la cantidad vendida",
+        expectedDescription: created.body.description,
+        expectedAmount: "40.00",
+        quantity: 2,
+        expectedQuantity: 4,
+      };
+      const edit = await request(
+        `/api/reservations/${f.id}/manual-charges/${created.body.id}`,
+        editBody,
+        "PATCH",
+      );
+      expect(edit.status, JSON.stringify(edit.body)).toBe(200);
+      expect((await benefits(f.id))[0].quantity).toBe(2);
+      const stale = await request(
+        `/api/reservations/${f.id}/manual-charges/${created.body.id}`,
+        { ...editBody, amount: "20.00", expectedAmount: "20.00" },
+        "PATCH",
+      );
+      expect(stale.status).toBe(409);
+      const out = await request(
+        `/api/charges/${created.body.id}/anular`,
+        {
+          motivoAnulacion: "Se retira la propuesta de prueba",
+          expectedDescription: created.body.description,
+          expectedAmount: "20.00",
+        },
+        "PATCH",
+      );
+      expect(out.status, JSON.stringify(out.body)).toBe(200);
+      expect((await benefits(f.id))[0].cancelled).toBe(true);
+      expect(
+        (
+          await pool.query(
+            "SELECT * FROM spa_appointments WHERE reservation_id=$1::text",
+            [f.id],
+          )
+        ).rows,
+      ).toHaveLength(0);
     });
     it("guarda configuración normalizada y evita borrar un concepto ya usado aunque cambie su nombre", async () => {
       const f = await fixture();

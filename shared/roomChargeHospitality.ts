@@ -27,7 +27,7 @@ export const roomChargeSaleSchema = z
     chargeTypeId: z.string().min(1).max(100),
     description: z.string().trim().min(1).max(500),
     amount: z.string().regex(/^\d{1,8}(?:\.\d{1,2})?$/),
-    category: z.string().min(1).max(30),
+    category: z.enum(["restaurant","spa","minibar","otros","room"]),
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     quantity: z.number().int().min(1).max(10000),
     isRecurring: z.boolean().optional(),

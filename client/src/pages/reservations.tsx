@@ -2865,20 +2865,23 @@ export function ReservationDetailDialog({
       });
       return response.json();
     },
-    onSuccess: async (result: { roomOnly?: boolean }) => {
+    onSuccess: async (result: { roomOnly?: boolean;hospitalityCancelled?:boolean;hospitalityUnits?:number|null }) => {
       queryClient.invalidateQueries({ queryKey: ["spa-account-folio"] });
       queryClient.invalidateQueries({ queryKey: ["spa-prefactura-account"] });
       setAnularTarget(null);
       setMotivoAnulacion("");
       toast({
         title: "Cargo anulado",
-        description: result.roomOnly
+        description: result.hospitalityCancelled||result.hospitalityUnits!=null
+          ? "Cargo anulado; pendientes de Hospitalidad retirados y atenciones conservadas."
+          : result.roomOnly
           ? "Anulado solo en la habitación. El consumo de Restaurante permanece sin cambios."
           : "El cargo ha sido anulado del folio.",
       });
       try {
         await Promise.all([
           refetchCharges(),
+          queryClient.invalidateQueries({predicate:q=>typeof q.queryKey[0]==='string'&&q.queryKey[0].startsWith('/api/hospitality/included-services')}),
           queryClient.invalidateQueries({ queryKey: ["/api/reservations", reservation.id] }),
           queryClient.invalidateQueries({ queryKey: ["/api/reservations"] }),
           queryClient.invalidateQueries({ queryKey: ["/api/folios", "reservation", reservation.id] }),

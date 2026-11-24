@@ -1,3 +1,4 @@
+import { roomChargeInclusions } from "@shared/roomChargeHospitality";
 import type { PoolClient } from "pg";
 export async function hospitalityChargeFacts(client: PoolClient, id: string) {
   const installed = await client.query(
@@ -161,4 +162,51 @@ export async function repriceHospitalityCharge(
   } finally {
     client.release();
   }
+}
+
+/** Quantity corrections are explicit and compare the quantity seen by the operator. */
+export async function hospitalityChargeEditUnits(
+  client: PoolClient,
+  id: string,
+  body: any,
+) {
+  if (body.quantity === undefined && body.expectedQuantity === undefined)
+    return null;
+  const facts = await hospitalityChargeFacts(client, id);
+  if (!facts || facts.recurring)
+    throw Object.assign(
+      new Error(
+        "La cantidad se edita solo en cargos con incluidos por unidad. Las noches se ajustan desde la estadía.",
+      ),
+      { statusCode: 400 },
+    );
+  if (
+    !Number.isInteger(body.quantity) ||
+    body.quantity < 1 ||
+    body.quantity > 10000 ||
+    !Number.isInteger(body.expectedQuantity)
+  )
+    throw Object.assign(
+      new Error("Revisá la cantidad y la vista previa del cargo."),
+      { statusCode: 400 },
+    );
+  if (body.expectedQuantity !== facts.units)
+    throw Object.assign(
+      new Error("La cantidad del cargo cambió. Actualizá la pantalla."),
+      { statusCode: 409 },
+    );
+  const charge = (
+    await client.query(
+      "SELECT hospitality_rules_snapshot FROM charges WHERE id=$1",
+      [id],
+    )
+  ).rows[0];
+  try {
+    roomChargeInclusions(charge.hospitality_rules_snapshot, body.quantity);
+  } catch {
+    throw Object.assign(new Error("La cantidad de servicios no es válida."), {
+      statusCode: 400,
+    });
+  }
+  return body.quantity as number;
 }

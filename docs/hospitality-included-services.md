@@ -113,8 +113,11 @@ Repetir un cargo con incluidos abre su propuesta para revisar la venta nueva.
 Los consumos ya realizados de Restaurant y SPA no generan otra prestación salvo
 que se elija expresamente un concepto configurado.
 
-Corregir el importe conserva las cantidades vendidas. Las cantidades efectivas
-y las fechas ajustan los pendientes sin borrar atenciones. Anular el cargo
+Corregir solo el importe conserva las cantidades vendidas. En Editar cargo,
+los conceptos por unidad también permiten corregir Cantidad vendida, con
+motivo y comparación de la cantidad vista al abrir. Las noches se ajustan desde
+la estadía. Los pendientes cambian sin borrar atenciones; si lo atendido supera
+la cantidad corregida, queda señalado para revisión. Anular el cargo
 retira pendientes y conserva las prestaciones usadas y su historial. Esos
 incluidos se corrigen desde el cargo; la acción independiente Retirar incluidos
 sigue disponible para suplementos manuales. Transferir una deuda a otro pagador
