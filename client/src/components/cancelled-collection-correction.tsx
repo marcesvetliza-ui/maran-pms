@@ -150,7 +150,7 @@ export function CancelledCollectionCorrection({
             </Button>
             <Button
               type="button"
-              disabled={mutation.isPending || reason.trim().length < 10}
+              disabled={mutation.isPending || reason.trim().length < 5}
               onClick={() => mutation.mutate()}
             >
               {mutation.isPending ? "Anulando…" : "Confirmar anulación"}

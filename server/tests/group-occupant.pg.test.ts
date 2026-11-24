@@ -18,7 +18,7 @@ async function request(body: object, group = prefix) {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        reason: "No viaja el pasajero original",
+        reason: " Error ",
         confirmPreserveStay: true,
         fingerprint: (
           await (
@@ -113,7 +113,7 @@ suite("Asignación de huésped del grupo", () => {
       ])
     ).rows[0].guest_id;
     for (const missing of [
-      { reason: "corto" },
+      { reason: "cort" },
       { reason: "   " },
       { reason: "x".repeat(1001) },
       { confirmPreserveStay: false },
@@ -152,7 +152,7 @@ suite("Asignación de huésped del grupo", () => {
     ).rows;
     expect(history).toHaveLength(1);
     expect(history[0].operador).toBe("Prueba");
-    expect(history[0].descripcion).toContain("No viaja el pasajero original");
+    expect(history[0].descripcion).toContain("Motivo: Error.");
     expect(history[0].descripcion).toContain(guestIds[0]);
     expect(history[0].descripcion).toContain(guestIds[1]);
     const after = (

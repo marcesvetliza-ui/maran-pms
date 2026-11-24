@@ -4,7 +4,7 @@ export const groupOccupantReplacementSchema = z.object({
   reason: z
     .string()
     .trim()
-    .min(10, "Ingresá un motivo de al menos 10 caracteres.")
+    .min(5, "Ingresá un motivo de al menos 5 caracteres.")
     .max(1000, "El motivo admite hasta 1000 caracteres."),
   confirmPreserveStay: z.literal(true, {
     errorMap: () => ({

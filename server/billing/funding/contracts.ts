@@ -18,7 +18,7 @@ export const correctionRequestSchema = z.object({
   scope: scopeSchema, receiptId: key,
   action: z.enum(["change_method", "void_nonexistent", "restore_coverage"]),
   newMethod: z.enum(moneyMethods).optional(),
-  reason: z.string().trim().min(10).max(2000),
+  reason: z.string().trim().min(5).max(2000),
   evidenceRef: z.string().trim().min(3).max(500),
   historical: z.boolean().default(false),
   restorations: z.array(z.object({ receiptId: key, documentId: key, amountCents: cents }).strict()).max(100).default([]),

@@ -6,7 +6,7 @@ import { FundingStore } from "../store";
 import { SqlFundingAdapter } from "../adapters";
 import { getAvailableReservationAdvancePayments,parseReservationInvoiceRef,reservationPaymentReleasedCents } from "@shared/reservationFolio";
 
-export const reservationCorrectionSchema=z.object({paymentId:z.string().min(1),action:z.enum(['change_method','void_nonexistent']),newMethod:z.enum(moneyMethods).optional(),reason:z.string().trim().min(10).max(1000),evidenceRef:z.string().trim().min(3).max(500),restorations:z.array(z.object({paymentId:z.string(),invoiceId:z.number().int().positive(),amountCents:z.number().int().positive()}).strict()).max(100).default([])}).strict();
+export const reservationCorrectionSchema=z.object({paymentId:z.string().min(1),action:z.enum(['change_method','void_nonexistent']),newMethod:z.enum(moneyMethods).optional(),reason:z.string().trim().min(5).max(1000),evidenceRef:z.string().trim().min(3).max(500),restorations:z.array(z.object({paymentId:z.string(),invoiceId:z.number().int().positive(),amountCents:z.number().int().positive()}).strict()).max(100).default([])}).strict();
 const cents=(v:unknown)=>Math.round(Number(v)*100);
 /** Reception's ledger stores discounts/transfers alongside payments. Preserve
  * that cache convention while the shared correction writer adjusts real money. */

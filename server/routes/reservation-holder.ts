@@ -106,7 +106,7 @@ export function registerReservationHolderRoutes(app: Express) {
       if (!parsed.success)
         return res.status(400).json({
           error:
-            "Elegí al huésped correcto, ingresá un motivo de al menos 10 caracteres y confirmá el aviso.",
+            "Elegí al huésped correcto, ingresá un motivo de al menos 5 caracteres y confirmá el aviso.",
         });
       try {
         const body = parsed.data;

@@ -200,7 +200,7 @@ export default function SpaFiscalReviewPage() {
             <Button
               className="w-full"
               variant={action.kind === "discard" ? "destructive" : "default"}
-              disabled={reason.trim().length < 10 || confirmation !== expected || resolveMutation.isPending}
+              disabled={reason.trim().length < 5 || confirmation !== expected || resolveMutation.isPending}
               onClick={() => resolveMutation.mutate(action)}
             >
               {resolveMutation.isPending ? "Procesando…" : action.kind === "keep" ? "Conservar sin contactar ARCA" : "Descartar definitivamente"}

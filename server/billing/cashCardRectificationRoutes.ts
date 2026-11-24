@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 import { requireAuth } from '../auth';
 import { db } from '../db';
 import { editLinkedReservationInvoicePayment } from './linkedReservationInvoicePaymentEdit';
-const request=z.object({method:z.enum(['tarjeta_credito','tarjeta_debito']),reason:z.string().trim().min(10).max(1000),evidenceRef:z.string().trim().min(3).max(500)}).strict();
+const request=z.object({method:z.enum(['tarjeta_credito','tarjeta_debito']),reason:z.string().trim().min(5).max(1000),evidenceRef:z.string().trim().min(3).max(500)}).strict();
 export function registerCashCardRectificationRoutes(app:Express){
  for(const mode of ['preview','apply'] as const)app.post(`/api/billing/invoices/:id/card-rectification${mode==='preview'?'/preview':''}`,requireAuth,async(req,res)=>{
    if(req.user?.role!=='admin')return res.status(403).json({error:'Sólo Administración puede rectificar un cierre de Caja.'});

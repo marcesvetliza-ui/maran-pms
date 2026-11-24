@@ -242,7 +242,7 @@ export function registerHospitalityInclusions(app: Express) {
         .object({
           reservationId: z.string().min(1).max(100),
           title: z.string().trim().min(3).max(160),
-          reason: z.string().trim().min(10).max(600),
+          reason: z.string().trim().min(5).max(600),
           rules: inclusionRulesSchema.refine((r) => r.length > 0),
           requestId: z.string().uuid(),
         })
@@ -299,13 +299,13 @@ export function registerHospitalityInclusions(app: Express) {
         fail("Solo coordinación puede retirar estos incluidos.", 403);
       const input = z
         .object({
-          reason: z.string().trim().min(10).max(600),
+          reason: z.string().trim().min(5).max(600),
           requestId: z.string().uuid(),
         })
         .strict()
         .safeParse(req.body);
       if (!input.success)
-        fail("Ingresá el motivo de al menos 10 caracteres.", 400);
+        fail("Ingresá el motivo de al menos 5 caracteres.", 400);
       const body = input.data,
         who = actor(req);
       await withDatabaseTransaction(async () => {

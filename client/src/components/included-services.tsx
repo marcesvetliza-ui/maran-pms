@@ -312,7 +312,7 @@ function CancelSupplement({
           </Button>
           <Button
             variant="destructive"
-            disabled={save.isPending || reason.trim().length < 10}
+            disabled={save.isPending || reason.trim().length < 5}
             onClick={() => save.mutate()}
           >
             Retirar pendientes
@@ -408,7 +408,7 @@ function AddSupplement({
             disabled={
               save.isPending ||
               title.trim().length < 3 ||
-              reason.trim().length < 10 ||
+              reason.trim().length < 5 ||
               !rules.length ||
               !inclusionRulesSchema.safeParse(rules).success
             }
