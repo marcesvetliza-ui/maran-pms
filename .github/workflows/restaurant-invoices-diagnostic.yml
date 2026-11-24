@@ -1,0 +1,23 @@
+name: Diagnóstico de conciliación de facturas Restaurant — solo lectura
+on:
+  push:
+    branches: [diag/restaurant-invoices-reconciliation-20261124]
+    paths: ['scripts/diagnose-restaurant-invoices*', '.github/workflows/restaurant-invoices-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/diag/restaurant-invoices-reconciliation-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verificar privacidad y alcance de consultas
+        run: node --test scripts/diagnose-restaurant-invoices.test.mjs
+      - name: Revisar las tres facturas y un caso de contraste sin cambiar operaciones
+        env:
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: node scripts/diagnose-restaurant-invoices.mjs
