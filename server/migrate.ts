@@ -5112,6 +5112,8 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
   await db.execute(sql`UPDATE rooms SET housekeeping_service_date=(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text
 WHERE status='limpia_ocupada' AND housekeeping_service_date IS NULL;`);
 
+  const { ensureHospitalityInclusionsSchema } = await import("./hospitalityInclusionsSchema");
+  await ensureHospitalityInclusionsSchema();
   const {specialDatesTables} = await import("./hospitalitySpecialDatesSchema");
   for (const table of specialDatesTables)
     await db.execute(sql.raw(createTableWithoutRerunNotice(table.name, table.ddl)));

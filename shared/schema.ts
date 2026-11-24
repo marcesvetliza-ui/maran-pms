@@ -283,6 +283,7 @@ export const reservations = pgTable("reservations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   housekeepingPreparation: jsonb("housekeeping_preparation").$type<HousekeepingPreparation>(),
   housekeepingBedPreparation: jsonb("housekeeping_bed_preparation").$type<import("./housekeepingPlanning").BedPreparation>(),
+  hospitalityPackageId: varchar("hospitality_package_id"),
   reservationCode: text("reservation_code").notNull(),
   guestId: varchar("guest_id").notNull(),
   companyId: varchar("company_id"),

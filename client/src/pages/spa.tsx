@@ -1,3 +1,5 @@
+import { InclusionTemplateEditor } from "@/components/inclusion-rules-editor";
+import { IncludedServicesButton } from "@/components/included-services";
 import { useSpaPlanningMove } from "@/components/spa/use-spa-planning-move";
 import {useLocation} from "wouter";
 import { SpaFundingGate } from "@/components/spa/spa-funding-gate";
@@ -1938,6 +1940,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <IncludedServicesButton area="spa"/>
           <InventoryPendingConsumptions area="spa" readOnly compact label="Consumos pendientes de stock"/>
         <div className="flex flex-wrap items-center gap-1 bg-muted rounded-lg p-1">
           <Button
@@ -4156,6 +4159,7 @@ ${buildCopy("COPIA ESTABLECIMIENTO — FIRMAR", true)}
           <DialogHeader>
             <DialogTitle>{editingTreatment ? "Editar Servicio SPA" : "Nuevo Servicio SPA"}</DialogTitle>
           </DialogHeader>
+          {editingTreatment?.id && <InclusionTemplateEditor key={editingTreatment.id} type="treatment" id={editingTreatment.id}/>}
           <form onSubmit={treatmentForm.handleSubmit((data) => createTreatmentMutation.mutate(data))} className="space-y-4">
             <div>
               <label className="text-sm font-medium">Nombre *</label>

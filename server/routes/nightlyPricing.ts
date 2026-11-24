@@ -132,6 +132,7 @@ export function registerNightlyPricingRoutes(app: Express) {
         if (proposal.packageProposal) Object.assign(patch, {
           ratePlanId:null, specialRateReason:proposal.packageProposal.packageTotalCents === 0 ? input.reason!.trim() : null,
           notes:packageNotes(proposal.reservation.notes,proposal.packageProposal.packageName),
+          hospitalityPackageId:proposal.packageProposal.packageId,
         });
         if (input.edit.kind === "stay") Object.assign(patch, {
           checkInDate: proposal.checkIn, checkOutDate: proposal.checkOut, nights: proposal.after.length,
