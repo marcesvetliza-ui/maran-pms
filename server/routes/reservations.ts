@@ -13,6 +13,7 @@ import { hasPermission } from "../permissions";
 import { formatDisplayDate } from "../../shared/date-display";
 import {preparationMoveWarning} from "../housekeepingPreparation";
 import { registerGuestStayRoutes, saveStayDetails, staySelectionRequestSchema } from "../guestStayDetails";
+import { registerReservationHolderRoutes } from "./reservation-holder";
 import { guestCountAfterCompanionChange } from "@shared/reservationGuestCount";
 import type { Express } from "express";
 import { registerNightlyPricingRoutes } from "./nightlyPricing";
@@ -125,6 +126,7 @@ export function registerReservationsRoutes(app: Express) {
 
   registerNightlyPricingRoutes(app);
   registerGuestStayRoutes(app);
+  registerReservationHolderRoutes(app);
   registerManualChargeActionRoutes(app);
 
   // ── PDF confirmation download ───────────────────────────────────────────────
