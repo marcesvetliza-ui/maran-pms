@@ -52,6 +52,7 @@ import { requireAuth, requireRole, requirePermission } from "../auth";
 import { hasPermission } from "../permissions";
 import { normalizeToSpanishPaymentMethod } from "../payment-method";
 import { registerArcaCredentialDiagnosticRoutes } from "./credentialDiagnosticRoutes";
+import { registerHomologationProbeRoutes } from "./homologationProbeRoutes";
 import { audit } from "../audit";
 import { storage, getArgentinaToday } from "../db-storage";
 import { isEventCashArea } from "../cashArea";
@@ -630,6 +631,7 @@ export function registerBillingRoutes(app: Express) {
   app.post('/api/billing/credit-notes/:id/reconcile', requireAuth, requirePermission(NC_RECONCILIATION_RESOURCE_KEY), requireActiveInvoice);
   registerGroupFiscalCashRecoveryRoutes(app);
   registerArcaCredentialDiagnosticRoutes(app);
+  registerHomologationProbeRoutes(app);
 
   // GET /api/billing/config
   app.get("/api/billing/config", requireAuth, async (req, res) => {
