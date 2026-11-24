@@ -140,6 +140,37 @@ describe("recoverable reservation credit-note emission", () => {
     global.fetch = originalFetch;
     vi.restoreAllMocks();
   });
+  it.each(['ficticio','homologacion','produccion'])('rejects negative or invalid fiscal amounts before numbering in %s', async environment => {
+    state.billingConfig.arcaAmbiente = environment;
+    const callsBefore = vi.mocked(feCAESolicitar).mock.calls.length;
+    const line = (subtotal: number, alicuotaIva: '21' | 'exento' = '21') => ({
+      descripcion: 'Consumo o descuento', cantidad: 1, precioUnitario: subtotal,
+      subtotalNeto: subtotal, subtotal, alicuotaIva,
+    });
+    for (const items of [
+      [line(4700), line(-5000)],
+      [line(-1), line(100, 'exento')], // Positive overall total, negative taxable bucket.
+      [line(Number.NaN)],
+    ]) {
+      await expect(emitirFactura({ tipoComprobante: 'FB', cliente: { razonSocial: 'Prueba', condicionIva: 'Consumidor Final' }, items }))
+        .rejects.toMatchObject({ code: 'BILLING_PREFLIGHT_REJECTED', statusCode: 400, authorizationRequested: false });
+    }
+    expect(state.events).toEqual([]);
+    expect(state.insertValues).toHaveLength(0);
+    expect(state.schemaChecks).toBe(0);
+    expect(vi.mocked(feCAESolicitar).mock.calls.length).toBe(callsBefore);
+  });
+
+  it('allows discount lines when the resulting fiscal amounts stay positive', async () => {
+    const invoice = await emitirFactura({ tipoComprobante: 'FB', cliente: { razonSocial: 'Prueba', condicionIva: 'Consumidor Final' }, items: [
+      { descripcion: 'Consumo', cantidad: 1, precioUnitario: 100, subtotalNeto: 100, subtotal: 121, alicuotaIva: '21' },
+      { descripcion: 'Descuento', cantidad: 1, precioUnitario: -10, subtotalNeto: -10, subtotal: -12.1, alicuotaIva: '21' },
+    ] });
+    expect(Number(invoice.montoTotal)).toBe(108.9);
+    expect(Number(invoice.montoNeto)).toBe(90);
+    expect(Number(invoice.montoIva21)).toBe(18.9);
+  });
+
   it.each(['ficticio','homologacion','produccion'])('blocks an internal original before counters, drafts or ARCA in %s',async environment=>{
     state.billingConfig.arcaAmbiente=environment;
     const callsBefore=vi.mocked(feCAESolicitar).mock.calls.length;
