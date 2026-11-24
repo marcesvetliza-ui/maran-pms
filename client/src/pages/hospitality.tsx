@@ -1,3 +1,5 @@
+import { IncludedServicesPanel } from "@/components/included-services";
+import { allowedInclusionAreas } from "@shared/hospitalityInclusions";
 import {HospitalitySpecialDates} from "@/components/hospitality-special-dates";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
@@ -1251,7 +1253,8 @@ function HistoryTab() {
 
 // ========== MAIN PAGE ==========
 export default function HospitalityPage() {
-  const {hasPermission}=useAuth();
+  const {hasPermission,user}=useAuth();
+  const canInclusions=!!user&&allowedInclusionAreas(user.role).length>0;
   const canCampaign=hasPermission("api:hospitality:campaigns");
   return (
     <div className="hospitality-page p-4 sm:p-6 space-y-6">
@@ -1265,6 +1268,7 @@ export default function HospitalityPage() {
 
       <Tabs defaultValue="dashboard">
         <TabsList className="flex h-auto flex-wrap justify-start gap-1" data-testid="hospitality-tabs">
+          {canInclusions&&<TabsTrigger value="included-services">Servicios incluidos</TabsTrigger>}
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="preferences" data-testid="tab-preferences">Preferencias</TabsTrigger>
           <TabsTrigger value="stay-notes" data-testid="tab-stay-notes">Notas de Estadía</TabsTrigger>
@@ -1272,6 +1276,7 @@ export default function HospitalityPage() {
           {canCampaign&&<TabsTrigger value="special-dates" data-testid="tab-special-dates">Fechas especiales</TabsTrigger>}
         </TabsList>
 
+        {canInclusions&&<TabsContent value="included-services" className="mt-6"><IncludedServicesPanel/></TabsContent>}
         {canCampaign&&<TabsContent value="special-dates" className="mt-6"><HospitalitySpecialDates/></TabsContent>}
         <TabsContent value="dashboard" className="mt-6">
           <DashboardTab />

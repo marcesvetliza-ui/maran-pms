@@ -1,3 +1,4 @@
+import { registerHospitalityInclusions } from "../hospitalityInclusions";
 import {registerHospitalitySpecialDates} from "../hospitalitySpecialDates";
 import type { Express } from "express";
 import { storage } from "../db-storage";
@@ -48,6 +49,7 @@ async function enrichAlerts(alerts: any[]) {
 }
 
 export function registerHospitalityRoutes(app: Express) {
+  registerHospitalityInclusions(app);
   registerHospitalitySpecialDates(app);
   app.get("/api/reservations/:id/stay-notes", async (req, res) => {
     try {
