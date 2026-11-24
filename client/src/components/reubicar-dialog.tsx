@@ -243,7 +243,7 @@ export function ReubicarDialog({
             servicios contratados se conservan.
           </DialogDescription>
         </DialogHeader>
-        <div className="overflow-y-auto min-h-0 flex-1 p-4 sm:p-5 space-y-4 overscroll-contain">
+        <div className="overflow-y-auto min-h-0 flex-1 p-4 sm:p-5 space-y-4 overscroll-contain scroll-pt-36">
           {!id ? (
             <>
               <Label htmlFor="reubicar-buscar">Reserva a reubicar</Label>
@@ -301,35 +301,53 @@ export function ReubicarDialog({
               {r && (
                 <>
                   <div className="sticky top-0 z-10 rounded-xl border bg-background p-3 space-y-1 shadow-sm">
-                    <div className="flex justify-between gap-3 flex-wrap">
-                      <strong>
-                        {r.guest} · Hab. {r.room}
+                    <div className="flex justify-between items-center gap-2">
+                      <strong
+                        className="min-w-0 truncate text-sm"
+                        title={r.guest}
+                      >
+                        {selected
+                          ? `Hab. ${r.room} → ${selected.roomNumber} · ${r.guest}`
+                          : `${r.guest} · Hab. ${r.room}`}
                       </strong>
                       <Button
                         variant="ghost"
                         size="sm"
+                        aria-label="Actualizar opciones"
                         onClick={() => {
                           choose("");
                           preview.refetch();
                         }}
                         disabled={preview.isFetching || submit.isPending}
                       >
-                        <RefreshCw className="h-3 w-3 mr-1" />
-                        Actualizar opciones
+                        <RefreshCw className="h-3 w-3 sm:mr-1" />
+                        <span className="hidden sm:inline">
+                          Actualizar opciones
+                        </span>
                       </Button>
                     </div>
-                    <p className="text-sm">
-                      {r.category} · {r.guests} persona(s) · {r.code}
+                    <p
+                      className="text-sm truncate"
+                      title={`${r.category} · ${r.guests} persona(s) · ${r.code}`}
+                    >
+                      {selected
+                        ? `${r.category} → ${selected.category}`
+                        : `${r.category} · ${r.guests} persona(s) · ${r.code}`}
                     </p>
                     <p className="text-sm font-medium">
                       Desde {formatDisplayDate(r.from)} hasta{" "}
                       {formatDisplayDate(r.to)}
                     </p>
-                    <p className="text-sm text-muted-foreground">
+                    <p
+                      className="text-sm text-muted-foreground truncate"
+                      title={[r.requestedBed, r.bedNotes]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    >
                       Camaje solicitado: {r.requestedBed}
                       {r.bedNotes ? ` · ${r.bedNotes}` : ""}
                     </p>
-                    {r.status === "checked_in" && (
+                    {r.status === "checked_in" && !selected && (
                       <p className="text-xs text-muted-foreground">
                         Traslado desde hoy. Las noches anteriores conservan su
                         habitación original.
