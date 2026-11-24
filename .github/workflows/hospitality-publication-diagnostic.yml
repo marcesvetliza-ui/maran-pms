@@ -1,0 +1,27 @@
+name: Hospitalidad publicada — comprobación de solo lectura
+on:
+  push:
+    branches: [diag/hospitality-publication-20261124]
+    paths: ['scripts/diagnose-hospitality-publication*', '.github/workflows/hospitality-publication-diagnostic.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/diag/hospitality-publication-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_REVISION: 313633b9389d70c3da6d4fd36c6195dc843cf7a0
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verificar privacidad y alcance
+        run: node --test scripts/diagnose-hospitality-publication.test.mjs
+      - name: Esperar la revisión publicada
+        run: node scripts/wait-for-revision.js https://maranpms.com.ar "$EXPECTED_REVISION"
+      - name: Consultar bandejas de las tres áreas sin cambiar registros
+        env:
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: node scripts/diagnose-hospitality-publication.mjs
