@@ -1,6 +1,8 @@
 # Reemplazar o liberar un pasajero de un grupo
 
-En Grupos → Reservas, el lápiz ofrece **Reemplazar huésped** (o **Asignar huésped** si el cupo todavía no tiene pasajero). Conserva habitación, fechas, precio y cupo. El cambio de identidad se registra con el pasajero anterior y el nuevo. Los anticipos personales requieren confirmación explícita para beneficiar al reemplazo.
+En Grupos → Reservas, el lápiz ofrece **Reemplazar huésped** (o **Asignar huésped** si el cupo todavía no tiene pasajero). Conserva habitación, fechas, precio y cupo. Reemplazar un pasajero exige un motivo de 10 a 1000 caracteres y confirmar que la estadía y sus pagos se conservan. El historial registra el operador, el pasajero anterior, el nuevo y el motivo. La asignación inicial de un cupo sin pasajero no exige un motivo de reemplazo. Los anticipos personales requieren confirmación explícita para beneficiar al reemplazo.
+
+Reemplazar conserva íntegra la distribución actual de los recibos, incluso si tienen aplicaciones a otras habitaciones y cargos del grupo. Se valida la distribución vigente; la simulación de liberar anticipos corresponde únicamente a Liberar asignación.
 
 **Liberar asignación** ofrece una vista previa y exige un motivo. La reserva anterior se cancela y conserva su vínculo al grupo y su historial. Se crea un cupo sin pasajero en la misma habitación, con exactamente las fechas, categoría, condiciones de upgrade y precios persistidos de la reserva anterior. El bloque no se reduce y la habitación sigue comprometida para el grupo. Se puede asignar al nuevo pasajero con el lápiz o desde Asignar del bloque. No se recalcula la tarifa.
 

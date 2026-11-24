@@ -198,13 +198,59 @@ suite('Liberar una asignación de grupo sin reducir contrato ni duplicar cobros'
     const target=f.id+'target';await pool.query("INSERT INTO guests(id,first_name,last_name) VALUES($1,'Replacement','Synthetic')",[target]);
     try {
       const preview=(await request(path(f)+'assignment-preview')).body;
-      const body={guestId:target,expectedGuestId:f.id,fingerprint:preview.fingerprint};
+      const body={guestId:target,expectedGuestId:f.id,fingerprint:preview.fingerprint,reason:'No viaja el pasajero original',confirmPreserveStay:true};
       expect((await request(path(f)+'occupant',body,'PATCH')).status).toBe(409);
       expect((await request(path(f)+'occupant',{...body,confirmPersonalAdvances:true},'PATCH')).status).toBe(200);
       const r=(await pool.query('SELECT * FROM reservations WHERE id=$1',[f.res])).rows[0];expect(r.guest_id).toBe(target);expect(Number(r.total_room_amount)).toBe(100);expect(r.status).toBe('confirmed');
       expect((await pool.query("SELECT * FROM payments WHERE reservation_id=$1 AND status='active'",[f.res])).rows).toHaveLength(1);
       expect((await request(path(f)+'occupant',{...body,confirmPersonalAdvances:true},'PATCH')).status).toBe(409);
     } finally { await pool.query('DELETE FROM guests WHERE id=$1',[target]); }
+  });
+  it('reemplaza con recibo aplicado a habitaciones y cargos del grupo sin mover fondos; liberar sigue bloqueado', async () => {
+    const f = await fixture(), gp = await groupReceipt(f, 40, 30);
+    await pool.query("UPDATE group_payments SET amount=100,distribution_detail=$2::jsonb,payment_method_detail=$3::jsonb WHERE id=$1", [gp, JSON.stringify({[f.res]:40,[f.second]:30,__group_charges__:30}), JSON.stringify([{method:'transferencia',amount:100}])]);
+    await pool.query("UPDATE cash_movements SET amount=100 WHERE id=$1", [gp]);
+    await pool.query("INSERT INTO folios(id,codigo,entity_type,entity_id,status,total_charges,total_payments,balance) VALUES($1::text,$1::text,'reservation',$2,'open',100,40,60)",[f.res+'folio',f.res]);
+    await pool.query("INSERT INTO folio_movements(folio_id,type,amount,description,source_type,source_id) VALUES($1,'payment',40,'Aplicación original','payment',$2)",[f.res+'folio',f.res+'payment']);
+    const { previewGroupAssignment } = await import('../groupAssignmentRelease');
+    async function financialSnapshot() {
+      const queries = [
+        ['SELECT * FROM group_payments WHERE group_id=$1 ORDER BY id', f.id],
+        ['SELECT * FROM payments WHERE group_payment_id=$1 ORDER BY id', gp],
+        ['SELECT * FROM cash_movements WHERE shift_id=$1 ORDER BY id', f.id],
+        ["SELECT * FROM folios WHERE entity_id IN ($1,$2) ORDER BY id", f.res, f.id],
+        ["SELECT fm.* FROM folio_movements fm JOIN folios f ON f.id=fm.folio_id WHERE f.entity_id IN ($1,$2) ORDER BY fm.id", f.res, f.id],
+        ['SELECT * FROM sales_invoices WHERE group_id=$1 ORDER BY id', f.id],
+        ['SELECT * FROM account_movements WHERE reservation_id=$1 ORDER BY id', f.res],
+      ];
+      return Promise.all(queries.map(async ([query,...args]) => (await pool.query(query, args)).rows));
+    }
+    const original = (await pool.query('SELECT * FROM reservations WHERE id=$1',[f.res])).rows[0];
+    const funds = await financialSnapshot();
+    const preview = await previewGroupAssignment(f.id, f.res);
+    expect(preview).toMatchObject({canReplace:true,replacementBlockers:[],canRelease:false,groupAdvance:40});
+    expect(preview.blockers.join(' ')).toContain('Liberar este anticipo');
+    expect((await release(f, {}, preview)).status).toBe(409);
+    const target=f.id+'new';
+    await pool.query("INSERT INTO guests(id,first_name,last_name) VALUES($1,'Nuevo','Pasajero')",[target]);
+    try {
+      const result=await request(path(f)+'occupant',{guestId:target,expectedGuestId:f.id,fingerprint:preview.fingerprint,reason:'No viaja el pasajero original',confirmPreserveStay:true},'PATCH');
+      expect(result.status,JSON.stringify(result.body)).toBe(200);
+      expect((await pool.query('SELECT * FROM reservations WHERE id=$1',[f.res])).rows[0]).toEqual({...original,guest_id:target});
+      expect(await financialSnapshot()).toEqual(funds);
+      const current = await previewGroupAssignment(f.id,f.res);
+      expect(current.canReplace).toBe(true);expect(current.canRelease).toBe(false);
+      expect((await release(f,{},current)).status).toBe(409);
+      expect(await financialSnapshot()).toEqual(funds);
+      // A real mismatch in the CURRENT receipt still blocks replacement.
+      await pool.query("UPDATE group_payments SET amount=101 WHERE id=$1",[gp]);
+      const invalid=await previewGroupAssignment(f.id,f.res);
+      expect(invalid.canReplace).toBe(false);
+      expect((await request(path(f)+'occupant',{guestId:f.id,expectedGuestId:target,fingerprint:invalid.fingerprint,reason:'Prueba de inconsistencia actual',confirmPreserveStay:true},'PATCH')).status).toBe(409);
+    } finally {
+      await pool.query('UPDATE reservations SET guest_id=$2 WHERE id=$1',[f.res,f.id]);
+      await pool.query('DELETE FROM guests WHERE id=$1',[target]);
+    }
   });
   it('impide reabrir la asignación anterior o cargarle cargos y cobros tardíos',async()=>{
     const f=await fixture(),result=await release(f);expect(result.status).toBe(200);

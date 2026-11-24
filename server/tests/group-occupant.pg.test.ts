@@ -17,7 +17,21 @@ async function request(body: object, group = prefix) {
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expectedGuestId: (await pool.query("SELECT guest_id FROM reservations WHERE id=$1", [reservationId])).rows[0]?.guest_id, ...body }),
+      body: JSON.stringify({
+        reason: "No viaja el pasajero original",
+        confirmPreserveStay: true,
+        fingerprint: (
+          await (
+            await import("../groupAssignmentRelease")
+          ).previewGroupAssignment(prefix, reservationId)
+        ).fingerprint,
+        expectedGuestId: (
+          await pool.query("SELECT guest_id FROM reservations WHERE id=$1", [
+            reservationId,
+          ])
+        ).rows[0]?.guest_id,
+        ...body,
+      }),
     },
   );
   return { status: res.status, body: await res.json() };
@@ -92,6 +106,32 @@ suite("Asignación de huésped del grupo", () => {
     const { pool: appPool } = await import("../db");
     await appPool.end();
   });
+  it("exige motivo y confirmación, sin cambiar el huésped si faltan", async () => {
+    const original = (
+      await pool.query("SELECT guest_id FROM reservations WHERE id=$1", [
+        reservationId,
+      ])
+    ).rows[0].guest_id;
+    for (const missing of [
+      { reason: "corto" },
+      { reason: "   " },
+      { reason: "x".repeat(1001) },
+      { confirmPreserveStay: false },
+      { fingerprint: null },
+      { fingerprint: "" },
+    ]) {
+      expect((await request({ guestId: guestIds[1], ...missing })).status).toBe(
+        400,
+      );
+      expect(
+        (
+          await pool.query("SELECT guest_id FROM reservations WHERE id=$1", [
+            reservationId,
+          ])
+        ).rows[0].guest_id,
+      ).toBe(original);
+    }
+  });
   it("reasigna una ficha existente conservando todos los demás campos", async () => {
     const before = (
       await pool.query("SELECT * FROM reservations WHERE id=$1", [
@@ -104,6 +144,17 @@ suite("Asignación de huésped del grupo", () => {
     role = "reception";
     expect((await request({ guestId: guestIds[1] })).status).toBe(200);
     role = "admin";
+    const history = (
+      await pool.query(
+        "SELECT * FROM reservation_changelog WHERE reservation_id=$1 AND tipo='guest_assignment'",
+        [reservationId],
+      )
+    ).rows;
+    expect(history).toHaveLength(1);
+    expect(history[0].operador).toBe("Prueba");
+    expect(history[0].descripcion).toContain("No viaja el pasajero original");
+    expect(history[0].descripcion).toContain(guestIds[0]);
+    expect(history[0].descripcion).toContain(guestIds[1]);
     const after = (
       await pool.query("SELECT * FROM reservations WHERE id=$1", [
         reservationId,

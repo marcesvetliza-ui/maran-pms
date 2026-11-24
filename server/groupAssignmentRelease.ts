@@ -79,7 +79,10 @@ export async function inspectGroupAssignment(groupId: string, reservationId: str
     const releasedCents = own.reduce((n, p) => n + groupMoneyCents(p.amount), 0);
     const detail = { ...facts.detail, [reservationId]: 0, __unassigned__: (groupMoneyCents(facts.available) + releasedCents) / 100 };
     const after = groupAdvanceReceipt({ ...parent, distribution_detail: detail }, children.filter(p => p.reservation_id !== reservationId));
-    if (facts.requiresReview || after.requiresReview) blockers.push('La distribución o los medios de un recibo requieren conciliación. Cuenta Corriente y retenciones no se convierten en anticipos disponibles.');
+    if (facts.requiresReview) blockers.push('La distribución actual del recibo requiere conciliación. Revisá sus aplicaciones antes de continuar.');
+    // Replacing the occupant preserves every application. Only releasing the
+    // assignment needs to prove that its advance can become unassigned money.
+    if (after.requiresReview) releaseOnly.push('Liberar este anticipo requiere conciliar la distribución o los medios del recibo. Cuenta Corriente y retenciones no se convierten en anticipos disponibles.');
     if (parent.invoice_ref || parent.invoice_id || own.some(p => p.invoice_ref || p.invoice_link_failed)) fiscal.push('Un anticipo de esta reserva está vinculado a un comprobante. Revisá su aplicación fiscal antes de liberar.');
     parents.push({ parent, children, own, detail, releasedCents });
   }
