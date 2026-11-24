@@ -1268,12 +1268,12 @@ export default function HospitalityPage() {
 
       <Tabs defaultValue="dashboard">
         <TabsList className="flex h-auto flex-wrap justify-start gap-1" data-testid="hospitality-tabs">
-          {canInclusions&&<TabsTrigger value="included-services">Servicios incluidos</TabsTrigger>}
           <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="preferences" data-testid="tab-preferences">Preferencias</TabsTrigger>
           <TabsTrigger value="stay-notes" data-testid="tab-stay-notes">Notas de Estadía</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">Historial</TabsTrigger>
           {canCampaign&&<TabsTrigger value="special-dates" data-testid="tab-special-dates">Fechas especiales</TabsTrigger>}
+          {canInclusions&&<TabsTrigger value="included-services">Servicios incluidos</TabsTrigger>}
         </TabsList>
 
         {canInclusions&&<TabsContent value="included-services" className="mt-6"><IncludedServicesPanel/></TabsContent>}
