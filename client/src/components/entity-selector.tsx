@@ -80,6 +80,11 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
   const [searchQuery, setSearchQuery] = useState("");
   const [mode, setMode] = useState<"search" | "create">("search");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [companyOpen, setCompanyOpen] = useState(false);
+  const [companySearch, setCompanySearch] = useState("");
+  const { data: companies = [], isPending: companiesLoading, isError: companiesFailed, refetch: reloadCompanies } = useQuery<Company[]>({
+    queryKey: ["/api/companies"], enabled: mode === "create",
+  });
 
   const [newGuest, setNewGuest] = useState({
     stayProfile: emptyStayProfile(),
@@ -111,6 +116,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
     condicionVentaPredeterminada: "contado",
     esEmpresaGrande: false,
     montoBaseFce: "",
+    companyId: initialCreateGuest?.companyId || null,
   });
 
   const isJuridicaGuest = newGuest.tipoPersona === "juridica";
@@ -171,7 +177,7 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
       condicionVentaPredeterminada: newGuest.condicionVentaPredeterminada || "contado",
       esEmpresaGrande: (newGuest as any).esEmpresaGrande || false,
       montoBaseFce: (newGuest as any).montoBaseFce || null,
-      companyId: null,
+      companyId: newGuest.companyId || null,
     } as any);
     setNewGuest({
       stayProfile: emptyStayProfile(),
@@ -187,7 +193,10 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
       condicionVentaPredeterminada: "contado",
       esEmpresaGrande: false,
       montoBaseFce: "",
+      companyId: null,
     });
+    setCompanyOpen(false);
+    setCompanySearch("");
     setMode("search");
   };
 
@@ -582,8 +591,36 @@ export function GuestSelector({ onSelect, onCreateNew, selectedGuest, onClear, c
                   </div>
                 )}
               </div>
-              <GuestStayProfileEditor value={newGuest.stayProfile} onChange={stayProfile => setNewGuest(prev => ({ ...prev, stayProfile }))} />
             </>)}
+
+            <div className="space-y-2">
+              <Label htmlFor="guest-profile-company">Empresa asociada</Label>
+              <Popover open={companyOpen} onOpenChange={setCompanyOpen}>
+                <PopoverTrigger asChild>
+                  <Button id="guest-profile-company" type="button" variant="outline" role="combobox" aria-expanded={companyOpen} aria-label="Empresa asociada al huésped" className="w-full justify-between font-normal" data-testid="select-guest-company">
+                    <span className="truncate">{companies.find(company => company.id === newGuest.companyId)?.nombreFantasia || companies.find(company => company.id === newGuest.companyId)?.razonSocial || "Sin empresa"}</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[min(24rem,calc(100vw-2rem))] p-0 z-[100] pointer-events-auto" align="start">
+                  <Command>
+                    <CommandInput placeholder="Buscar empresa..." value={companySearch} onValueChange={setCompanySearch} />
+                    <CommandList>
+                      <CommandEmpty>{companiesLoading ? "Cargando empresas…" : "Sin resultados."}</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem value="__none__" onMouseDown={event => event.preventDefault()} onSelect={() => { setNewGuest(previous => ({ ...previous, companyId: null })); setCompanyOpen(false); setCompanySearch(""); }}>Sin empresa</CommandItem>
+                        {companies.map(company => <CommandItem key={company.id} value={`${company.razonSocial} ${company.nombreFantasia || ""}`} onMouseDown={event => event.preventDefault()} onSelect={() => { setNewGuest(previous => ({ ...previous, companyId: company.id })); setCompanyOpen(false); setCompanySearch(""); }}>
+                          <Check className={`mr-2 h-4 w-4 ${newGuest.companyId === company.id ? "opacity-100" : "opacity-0"}`} />{company.nombreFantasia || company.razonSocial}
+                        </CommandItem>)}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                  {companiesFailed && <div className="p-2 text-sm" role="alert">No se pudieron cargar las empresas. <Button type="button" variant="ghost" size="sm" onClick={() => void reloadCompanies()}>Reintentar</Button></div>}
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-muted-foreground">Se guarda en la ficha del huésped y se propone para sus próximas reservas. La empresa de cada reserva se puede cambiar.</p>
+            </div>
+            {!isJuridicaGuest && <GuestStayProfileEditor value={newGuest.stayProfile} onChange={stayProfile => setNewGuest(prev => ({ ...prev, stayProfile }))} />}
 
             <Button
               type="button"

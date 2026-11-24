@@ -489,7 +489,10 @@ export function ReservationFormDialog({
     onSuccess: (newGuest: Guest) => {
       queryClient.invalidateQueries({ queryKey: ["/api/guests"] });
       setSelectedGuest(newGuest);
-      setFormData((prev) => ({ ...prev, guestId: newGuest.id }));
+      setFormData((prev) => ({ ...prev, guestId: newGuest.id, companyId: prev.companyId || newGuest.companyId || "" }));
+      if (!formData.companyId && newGuest.companyId) {
+        setSelectedCompany(companiesForAutofill.find(company => company.id === newGuest.companyId) || null);
+      }
       toast({
         title: "Huesped creado",
         description: `${newGuest.lastName} ${newGuest.firstName} ha sido registrado.`,
