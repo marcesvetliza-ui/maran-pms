@@ -35,6 +35,7 @@ export function ReservationChargeEdit({ reservationId, chargeId, onSaved, onEdit
         queryClient.invalidateQueries({ queryKey: ['/api/planning'] }),
         ...['/api/rooms/in-house','/api/rooms/arriving-today','/api/dashboard/departures'].map(key=>queryClient.invalidateQueries({queryKey:[key]})),
         queryClient.invalidateQueries({ queryKey: ['/api/folios'] }),
+        queryClient.invalidateQueries({ queryKey: ['group-room-account'] }),
         queryClient.invalidateQueries({ predicate: query => typeof query.queryKey[0] === 'string' && query.queryKey[0].startsWith('/api/groups') }),
       ]);
       onSaved?.();

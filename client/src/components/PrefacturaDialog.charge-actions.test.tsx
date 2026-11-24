@@ -31,6 +31,8 @@ async function open(){
  const user=userEvent.setup();await user.click(await screen.findByRole('button',{name:/Cargos de la habitación/}));return user;
 }
 it('allows cancelling a restaurant room imputation from checkout with a required reason and refreshes the invoice selection',async()=>{
+ const groupKeys=[['/api/groups','group','folio'],['/api/groups/group/master-folio'],['group-room-account','checkout-actions']];
+ for(const key of groupKeys)queryClient.setQueryData(key,{balance:2500});
  const invalidate=vi.spyOn(queryClient,'invalidateQueries'),user=await open();
  await user.click(await screen.findByTestId('button-void-prefactura-charge-restaurant-charge'));
  expect(screen.getByRole('button',{name:'Confirmar anulación'})).toBeDisabled();
@@ -42,6 +44,7 @@ it('allows cancelling a restaurant room imputation from checkout with a required
  const requests=(fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([url,init])=>String(url).endsWith('/anular')&&init?.method==='PATCH');
  expect(requests).toHaveLength(1);expect(JSON.parse(String(requests[0][1]?.body))).toEqual({motivoAnulacion:'Cargo en habitación equivocada',expectedDescription:charge.description,expectedAmount:'2500.00'});
  for(const key of ['/api/dashboard/departures','/api/rooms/in-house','/api/planning'])expect(invalidate).toHaveBeenCalledWith({queryKey:[key]});
+ for(const key of groupKeys)expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
 });
 it('retains the reason and balance when the server rejects cancellation',async()=>{
  fail=true;const user=await open();await user.click(await screen.findByTestId('button-void-prefactura-charge-restaurant-charge'));

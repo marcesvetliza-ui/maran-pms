@@ -35,12 +35,15 @@ async function open(view:'folio'|'checkout'){
  await user.click(screen.getByTestId('button-edit-charge-parking'));return user;
 }
 it.each(['folio','checkout'] as const)('persists description/amount and refreshes totals from %s',async(view)=>{
+ const groupKeys=[['/api/groups','group','folio'],['/api/groups/group/master-folio'],['group-room-account',reservation.id]];
+ for(const key of groupKeys)queryClient.setQueryData(key,{balance:2500});
  const user=await open(view);
  const description=screen.getByLabelText('Descripción'),amount=screen.getByLabelText('Importe total');
  await user.clear(description);await user.type(description,'Cochera acordada');await user.clear(amount);await user.type(amount,'2000,50');
  expect(screen.getByRole('button',{name:'Guardar cargo'})).toBeDisabled();
  await user.type(screen.getByLabelText('Motivo del cambio'),'Corrección de importe');await user.click(screen.getByRole('button',{name:'Guardar cargo'}));
  await waitFor(()=>expect(toast).toHaveBeenCalledWith(expect.objectContaining({title:'Cargo actualizado'})));
+ for(const key of groupKeys)expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
  expect(screen.queryByRole('heading',{name:'Editar cargo'})).not.toBeInTheDocument();
  const patch=(fetch as ReturnType<typeof vi.fn>).mock.calls.find(([url,init])=>String(url).endsWith('/manual-charges/parking')&&init?.method==='PATCH');
  expect(JSON.parse(String(patch?.[1]?.body))).toEqual({description:'Cochera acordada',amount:'2000.50',motivo:'Corrección de importe',expectedDescription:'Cochera',expectedAmount:'2500.00'});
