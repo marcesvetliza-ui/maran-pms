@@ -606,16 +606,40 @@ export function IncludedServicesPanel({
                     dateStyle: "short",
                     timeStyle: "short",
                   }).format(new Date(s.scheduledAt))
-                : displayDate(s.serviceDate)}
+                : displayDate(s.serviceDate || s.forecastDate || "")}
               {s.validUntil && s.validUntil !== s.serviceDate
                 ? ` · Hasta ${displayDate(s.validUntil)}`
                 : ""}
             </p>
             {s.sourceKind === "spa_sale" && (
-              <p className="text-xs text-muted-foreground">
-                A nombre del comprador. Coordiná beneficiarios y horarios de la
-                venta; agendar un turno no agrega otro incluido.
-              </p>
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <p>
+                  Venta a nombre del comprador. El horario de la prestación
+                  incluida se coordina con el área; agendar SPA no duplica el
+                  cupo.
+                </p>
+                {!!s.linkedAppointments?.length && (
+                  <div className="rounded-md border p-2 space-y-1">
+                    <p className="font-medium">
+                      Personas y turnos SPA previstos
+                    </p>
+                    {s.linkedAppointments.map((appointment, index) => (
+                      <p key={index} className="break-words">
+                        {appointment.person} · {displayDate(appointment.date)} ·{" "}
+                        {appointment.time}
+                        {appointment.status === "completed"
+                          ? " · SPA completado"
+                          : appointment.status === "in_progress"
+                            ? " · En SPA"
+                            : ""}
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {!s.linkedAppointments?.length && (
+                  <p>Beneficiarios y fecha a coordinar.</p>
+                )}
+              </div>
             )}
             {s.needsReview && (
               <p

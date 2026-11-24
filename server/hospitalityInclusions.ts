@@ -62,9 +62,17 @@ const contextJoins = sql`
   LEFT JOIN reservations r ON s.kind IN ('reservation','supplement') AND r.id=s.entity_id
   LEFT JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms room ON room.id=r.room_id
   LEFT JOIN spa_appointments a ON s.kind='spa_appointment' AND a.id=s.entity_id
-  LEFT JOIN spa_treatment_sales sale ON s.kind='spa_sale' AND sale.id=s.entity_id`;
+  LEFT JOIN spa_treatment_sales sale ON s.kind='spa_sale' AND sale.id=s.entity_id
+  LEFT JOIN LATERAL (
+    SELECT min(p.appointment_date) AS next_date,
+      coalesce(jsonb_agg(jsonb_build_object('person',concat_ws(' ',p.guest_last_name,p.guest_name),'date',p.appointment_date::text,'time',p.start_time,'status',p.status) ORDER BY p.appointment_date,p.start_time),'[]'::jsonb) AS appointments
+    FROM (SELECT guest_name,guest_last_name,appointment_date,start_time,status FROM spa_appointments
+      WHERE sold_treatment_sale_id=sale.id AND status NOT IN ('cancelled','no_show')
+        AND appointment_date>=(CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+      ORDER BY appointment_date,start_time,id LIMIT 20) p
+  ) spa_context ON true`;
 const fields = sql`b.id,b.source_id AS "sourceId",b.area,b.service,b.conditions,b.ready_when AS "readyWhen",
-  b.service_date::text AS "serviceDate",b.valid_until::text AS "validUntil",b.quantity,b.used,b.quantity-b.used AS remaining,b.version,b.cancelled,
+  b.service_date::text AS "serviceDate",spa_context.next_date::text AS "forecastDate",spa_context.appointments AS "linkedAppointments",b.valid_until::text AS "validUntil",b.quantity,b.used,b.quantity-b.used AS remaining,b.version,b.cancelled,
   b.needs_review AS "needsReview",b.scheduled_at AS "scheduledAt",b.acknowledged_at AS "acknowledgedAt",b.note,
   s.kind AS "sourceKind",s.title AS "sourceTitle",r.id AS "reservationId",room.room_number AS room,
   CASE WHEN r.id IS NOT NULL THEN concat_ws(' ',g.last_name,g.first_name) WHEN a.id IS NOT NULL THEN concat_ws(' ',a.guest_last_name,a.guest_name) ELSE sale.buyer_name END AS person,
@@ -106,7 +114,7 @@ export function registerHospitalityInclusions(app: Express) {
       if (q.reservationId) clauses.push(sql`r.id=${q.reservationId}`);
       if (q.view !== "history")
         clauses.push(sql`s.active AND NOT b.cancelled AND b.used<b.quantity`);
-      const effectiveDate = sql`coalesce((b.scheduled_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,b.service_date)`;
+      const effectiveDate = sql`coalesce((b.scheduled_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,b.service_date,spa_context.next_date)`;
       if (q.view === "today")
         clauses.push(
           sql`${effectiveDate}<=${today()}::date AND coalesce(b.valid_until,${effectiveDate})>=${today()}::date`,

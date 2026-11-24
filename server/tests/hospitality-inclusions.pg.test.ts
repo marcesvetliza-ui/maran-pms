@@ -412,6 +412,23 @@ describe.skipIf(!enabled)(
             b.area === "restaurant",
         ).ready,
       ).toBe(true);
+      const todayList = await api("GET", "?view=today&area=restaurant");
+      const spaNotice = todayList.body.items.find(
+        (b: any) =>
+          b.sourceKind === "spa_sale" && b.sourceTitle === "Circuito ficticio",
+      );
+      expect(spaNotice).toBeTruthy();
+      expect(spaNotice.forecastDate).toBe(today());
+      expect(spaNotice.linkedAppointments).toEqual([
+        {
+          person: "Visitante ficticio",
+          date: today(),
+          time: "12:00",
+          status: "completed",
+        },
+      ]);
+      expect(spaNotice.quantity).toBe(2);
+      expect(spaNotice.used).toBe(0);
       expect(
         (
           await pool!.query(

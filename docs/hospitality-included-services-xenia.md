@@ -37,8 +37,11 @@ ni cambia Maran. El pase a Maran queda sujeto a la revisión del propietario.
    cantidad 2. Una noche incluida se informa a Recepción para coordinar fechas y
    disponibilidad. No se asigna una habitación automáticamente.
 8. La venta anticipada de SPA genera un único cupo, inicialmente a coordinar y a
-   nombre del comprador. Los turnos que reclaman esa venta no duplican el cupo.
-   El área registra beneficiario/referencia en la coordinación y la atención.
+   nombre del comprador. Al agendar se muestran también las personas, fechas y
+   horarios SPA; esas fechas alimentan la previsión de Hoy y Próximos mientras
+   el área coordina el horario de su propia prestación. Los turnos que reclaman
+   esa venta no duplican el cupo. El área registra beneficiario/referencia en
+   la coordinación y la atención.
    Al completar SPA, el área ve que hay una atención SPA completada; ese aviso
    no significa que todos los beneficiarios de una venta múltiple terminaron.
 

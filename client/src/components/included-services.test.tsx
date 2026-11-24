@@ -106,6 +106,34 @@ it("visto no manda cantidades ni consume el beneficio", async () => {
   expect(writes[0].body.quantity).toBeUndefined();
   expect(service.used).toBe(0);
 });
+it("una venta anticipada informa los beneficiarios agendados sin duplicar el cupo", async () => {
+  service = {
+    ...service,
+    sourceKind: "spa_sale",
+    person: "Comprador de ejemplo",
+    room: null,
+    serviceDate: null,
+    validUntil: null,
+    forecastDate: "2026-11-24",
+    linkedAppointments: [
+      {
+        person: "Beneficiaria de ejemplo",
+        date: "2026-11-24",
+        time: "13:00",
+        status: "completed",
+      },
+    ],
+  };
+  renderUI(<IncludedServicesPanel area="restaurant" />);
+  expect(
+    await screen.findByText(
+      /Beneficiaria de ejemplo · 24\/11\/2026 · 13:00 · SPA completado/,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Comprador de ejemplo")).toBeInTheDocument();
+  expect(service.quantity).toBe(2);
+  expect(writes).toHaveLength(0);
+});
 it("la atención parcial requiere detalle y envía cantidad, revisión e identificador", async () => {
   renderUI(<IncludedServicesPanel area="restaurant" />);
   fireEvent.click(

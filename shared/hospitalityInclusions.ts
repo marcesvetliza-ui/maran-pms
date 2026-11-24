@@ -90,6 +90,13 @@ export type IncludedService = {
   ready: boolean;
   sourceStatus: string;
   upcoming: boolean;
+  forecastDate?: string | null;
+  linkedAppointments?: {
+    person: string;
+    date: string;
+    time: string;
+    status: string;
+  }[];
 };
 export function allowedInclusionAreas(role: string) {
   if (

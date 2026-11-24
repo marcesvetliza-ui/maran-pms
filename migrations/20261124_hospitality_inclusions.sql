@@ -1,6 +1,7 @@
 -- Operational entitlements only: these tables/triggers never write charges,
 -- stock, payments, invoices or room/cabin reservations. No historical backfill.
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS hospitality_package_id varchar;
+CREATE INDEX IF NOT EXISTS hospitality_spa_sale_appointments_idx ON spa_appointments(sold_treatment_sale_id,appointment_date) WHERE sold_treatment_sale_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS hospitality_inclusion_templates (
   owner_type text NOT NULL CHECK(owner_type IN ('package','treatment')),
   owner_id varchar NOT NULL, rules jsonb NOT NULL CHECK(jsonb_typeof(rules)='array'),
