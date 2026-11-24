@@ -16,6 +16,7 @@ import { createReservationPaymentSubmission } from "@/lib/reservation-payment-su
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useAuth } from "@/App";
+import { ReservationHolderCorrection } from "@/components/reservation-holder-correction";
 import { getLocalToday, formatDateAR, formatFolioDateAR, folioDateSortValue, toArgentinaDateStr, fmtMoney, getArgentinaToday } from "@/lib/utils";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 import { RevertCheckout } from "@/components/revert-checkout";
@@ -2363,6 +2364,9 @@ export function ReservationDetailDialog({
   const { toast } = useToast();
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const isLocked = reservation.status === "checked_out" || reservation.status === "cancelled";
+  const detailAuth = useAuth();
+  const [showHolderCorrection, setShowHolderCorrection] = useState(false);
+  const canCorrectHolder = reservation.status === "checked_in" && detailAuth.hasPermission?.("sidebar:/reservations");
   const isGroupReservation = Boolean((reservation as any).groupId || (reservation as any).isGroup);
   // Bug T: only admin/manager/jefe_recepcion can void payments
   // If role is not passed (undefined), we allow by default for backwards compat
@@ -3322,9 +3326,10 @@ export function ReservationDetailDialog({
                       data-testid="button-edit-titular"
                     >
                       <Pencil className="h-3 w-3" />
-                      Editar titular
+                      Editar datos
                     </Button>
                   )}
+                  {canCorrectHolder && <Button variant="outline" size="sm" className="h-7 text-xs" onClick={()=>setShowHolderCorrection(true)} data-testid="button-correct-holder">Cambiar titular</Button>}
                 </div>
               </div>
             ) : (
@@ -3764,6 +3769,7 @@ export function ReservationDetailDialog({
             </StaySection>
 
             <ReservationStayDetails reservationId={reservation.id} guestId={reservation.guestId} />
+            {showHolderCorrection && <ReservationHolderCorrection key={reservation.id} reservationId={reservation.id} onClose={()=>setShowHolderCorrection(false)}/>}
             {(reservation.contactName || reservation.contactPhone) && (
               <div className="rounded-lg border border-dashed p-3 space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contacto de la Reserva</p>
