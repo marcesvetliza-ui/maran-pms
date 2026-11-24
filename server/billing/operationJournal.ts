@@ -25,7 +25,7 @@ export type BillingOperation = { operation_id: string; owner_type: string; owner
 export const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object"
   ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined && typeof value[key] !== "function").map(key => [key, canonical(value[key])])) : value;
 export const payloadHash = (value: unknown) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
-const snapshotKeys = ["acknowledgeUnassignedAdvance", "reservationBillingAction", "groupDocumentationOnly","correctionOriginalInvoiceId","tipoComprobante", "cliente", "items", "reservaId", "paymentId", "groupId", "groupPaymentId", "groupPaymentIntent", "spaAccountId", "folioId", "puntoVenta", "puntoVentaOverride", "cashArea", "cashFormaPago", "cashFormaPagoDetalle", "ccEntityType", "ccEntityId", "sourceChargeIds", "sourceChargeAmounts", "observaciones", "folioContext", "creditReapplications", "ordinaryAdvanceApplications", "creditOperationId", "reservationSettlementMethod", "checkoutDiscount", "recipientMode", "recipientEntity", "recipientConsumerFinal", "prefacturaRecovery"];
+const snapshotKeys = ["acknowledgeUnassignedAdvance", "reservationBillingAction", "groupDocumentationOnly","correctionOriginalInvoiceId","tipoComprobante", "cliente", "items", "reservaId", "paymentId", "groupId", "groupPaymentId", "groupPaymentIntent", "spaAccountId", "restaurantOrderId", "folioId", "puntoVenta", "puntoVentaOverride", "cashArea", "cashFormaPago", "cashFormaPagoDetalle", "ccEntityType", "ccEntityId", "sourceChargeIds", "sourceChargeAmounts", "observaciones", "folioContext", "creditReapplications", "ordinaryAdvanceApplications", "creditOperationId", "reservationSettlementMethod", "checkoutDiscount", "recipientMode", "recipientEntity", "recipientConsumerFinal", "prefacturaRecovery"];
 export function operationSnapshot(input: Record<string, any>) {
   return JSON.parse(JSON.stringify(Object.fromEntries(snapshotKeys.filter(key => input[key] !== undefined).map(key => [key, input[key]]))));
 }
@@ -46,7 +46,14 @@ export async function beginBillingOperation(database: Executor, data: any, ident
   `);
   const operation = (await database.execute(sql`SELECT * FROM billing_operations WHERE operation_id=${operationId}`)).rows[0] as BillingOperation;
   if (!operation || operation.owner_type !== owner.type || operation.owner_id !== owner.id) throw Object.assign(new Error("La operación no pertenece a esta cuenta."), { statusCode: 409, code: "BILLING_OPERATION_MISMATCH" });
-  if (!data.recoveryInvoiceId && operation.payload_hash !== hash) throw Object.assign(new Error("La operación pendiente conserva otros datos. Recuperá el intento original antes de preparar uno nuevo."), { statusCode: 409, code: "BILLING_OPERATION_MISMATCH" });
+  // Legacy restaurant journals omitted restaurantOrderId from the snapshot.
+  // Its immutable owner already proves that exact order; every other field
+  // must still match the old hash. Never rewrite the original request/hash.
+  const { restaurantOrderId: snapshotOrder, ...legacySnapshot } = snapshot;
+  const matchesLegacyRestaurant = data.restaurantOrderId && operation.owner_type === 'direct'
+    && operation.owner_id === String(data.restaurantOrderId) && snapshotOrder === data.restaurantOrderId
+    && operation.request_snapshot?.restaurantOrderId === undefined && payloadHash(legacySnapshot) === operation.payload_hash;
+  if (!data.recoveryInvoiceId && operation.payload_hash !== hash && !matchesLegacyRestaurant) throw Object.assign(new Error("La operación pendiente conserva otros datos. Recuperá el intento original antes de preparar uno nuevo."), { statusCode: 409, code: "BILLING_OPERATION_MISMATCH" });
   if (payloadHash(operation.fiscal_identity) !== payloadHash(identity)) throw Object.assign(new Error("La configuración fiscal cambió desde este intento. No se reenviará con otro ambiente, emisor o punto de venta."), { statusCode: 409, code: "BILLING_IDENTITY_CHANGED" });
   // A numbering conflict happened BEFORE this operation had a draft or sent
   // anything. Retry only its immutable request, never a rejected/uncertain send.

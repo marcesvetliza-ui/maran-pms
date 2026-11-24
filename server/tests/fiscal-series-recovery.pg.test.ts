@@ -15,19 +15,27 @@ const originalFetch = global.fetch;
 const authorization = { cae: "71234567890123", caeFechaVto: new Date("2026-11-23T15:00:00Z") };
 let emit: typeof import("../billing/invoiceService").emitirFactura;
 
-async function fixture(run: (f: any) => Promise<void>, reservation = false) {
+async function fixture(run: (f: any) => Promise<void>, reservation: boolean | 'restaurant' | 'spa' | 'group' = false) {
   mocks.point = 10000 + Math.floor(Math.random() * 70000);
   const point = mocks.point, oldOperation = randomUUID(), newOperation = randomUUID(), reservationId = randomUUID();
+  if (reservation === 'restaurant') await pool!.query("INSERT INTO restaurant_orders(id,order_number,status,total,opened_at) VALUES($1::text,$1::text,'closed','146400',now())",[reservationId]);
+  if (reservation === 'spa') await pool!.query("INSERT INTO spa_accounts(id,appointment_id,guest_name,status,total,opened_at) VALUES($1,$1,'Prueba','open','146400',now())",[reservationId]);
+  if (reservation === 'group') await pool!.query("INSERT INTO groups(id,group_code,name,check_in_date,check_out_date,created_at) VALUES($1::text,$1::text,'Prueba','2026-11-23','2026-11-24',now())",[reservationId]);
   const request = { tipoComprobante: "FB", cliente: { razonSocial: "Receptor sintético", cuit: "30717698130", condicionIva: "Consumidor Final" },
     items: [{ descripcion: "Venta sintética", cantidad: 1, precioUnitario: 146400, alicuotaIva: "21", subtotalNeto: 120991.74, subtotal: 146400 }],
-    puntoVentaOverride: point, ...(reservation ? { reservaId: reservationId, prefacturaRecovery: { version: 2, payments: [], checkoutRequested: false } } : { recipientMode: "centro_comprobantes", cashArea: "recepcion" }),
+    puntoVentaOverride: point, ...(reservation === true ? { reservaId: reservationId, prefacturaRecovery: { version: 2, payments: [], checkoutRequested: false } }
+      : reservation === 'restaurant' ? { restaurantOrderId: reservationId }
+      : reservation === 'spa' ? { spaAccountId: reservationId }
+      : reservation === 'group' ? { groupId: reservationId }
+      : { recipientMode: "centro_comprobantes", cashArea: "recepcion" }),
     cashFormaPago: "efectivo", cashFormaPagoDetalle: [{ method: "efectivo", amount: 146400 }] };
   const data = { ...request, ...(!reservation ? { centerSettlementArea: "recepcion" } : {}), operationId: oldOperation, requestSnapshot: request } as any;
   mocks.authorize.mockRejectedValueOnce(Object.assign(new Error("ARCA 10015: receptor no registrado"), { code: "ARCA_AUTHORIZATION_REJECTED", statusCode: 400 }));
   try {
     await expect(emit(data)).rejects.toMatchObject({ code: "ARCA_AUTHORIZATION_REJECTED" });
     const invoice = (await pool!.query("SELECT * FROM sales_invoices WHERE punto_venta=$1", [point])).rows[0];
-    const nextRequest = { ...request, reservaId: randomUUID(), cliente: { ...request.cliente, razonSocial: "Otra reserva sintética" },
+    const { restaurantOrderId, spaAccountId, groupId, ...nextBase } = request as any;
+    const nextRequest = { ...nextBase, reservaId: randomUUID(), cliente: { ...request.cliente, razonSocial: "Otra reserva sintética" },
       prefacturaRecovery: { version: 2, payments: [], checkoutRequested: false } };
     const next = { ...nextRequest, operationId: newOperation, requestSnapshot: nextRequest } as any;
     await run({ point, invoice, oldOperation, newOperation, next, data, reservationId });
@@ -37,6 +45,9 @@ async function fixture(run: (f: any) => Promise<void>, reservation = false) {
     await pool!.query("DELETE FROM billing_operations WHERE fiscal_identity->>'pointOfSale'=$1", [String(point)]);
     await pool!.query("DELETE FROM sales_invoices WHERE punto_venta=$1", [point]);
     await pool!.query("DELETE FROM invoice_counters WHERE punto_venta=$1", [point]);
+    if (reservation === 'restaurant') await pool!.query('DELETE FROM restaurant_orders WHERE id=$1',[reservationId]);
+    if (reservation === 'spa') await pool!.query('DELETE FROM spa_accounts WHERE id=$1',[reservationId]);
+    if (reservation === 'group') await pool!.query('DELETE FROM groups WHERE id=$1',[reservationId]);
   }
 }
 
@@ -168,6 +179,117 @@ suite("Recuperación segura de la serie después de un borrador retenido", () =>
     expect((await pool!.query("SELECT * FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows[0]).toEqual(f.invoice);
     expect(mocks.authorize).toHaveBeenCalledTimes(1);
   }));
+
+  it.each(['restaurant','spa','group'] as const)('recupera automáticamente un rechazo de %s y permite facturar a recepción', async area => fixture(async f => {
+    const result = await emit(f.next);
+    expect(result.numero).toBe(254);
+    expect(result.reservaId).toBe(f.next.reservaId);
+    expect((await pool!.query('SELECT stage,invoice_id FROM billing_operations WHERE operation_id=$1',[f.oldOperation])).rows[0]).toMatchObject({stage:'corrected',invoice_id:null});
+    expect((await pool!.query('SELECT id FROM sales_invoices WHERE id=$1',[f.invoice.id])).rows).toHaveLength(0);
+    expect(mocks.consult).toHaveBeenCalledTimes(1);
+    expect(mocks.authorize).toHaveBeenCalledTimes(2);
+  },area));
+
+  it.each(['restaurant','spa','group'] as const)('recupera el CAE de %s sin trasladarlo a la nueva reserva', async area => fixture(async f => {
+    await pool!.query("UPDATE billing_operations SET stage='uncertain',error_code='ARCA_RESULT_UNCERTAIN' WHERE operation_id=$1",[f.oldOperation]);
+    mocks.consult.mockImplementationOnce(async()=>{mocks.last=254;return authorization;});
+    expect((await emit(f.next)).numero).toBe(255);
+    const original=(await pool!.query('SELECT cae,estado,reconciliation_status FROM sales_invoices WHERE id=$1',[f.invoice.id])).rows[0];
+    expect(original).toMatchObject({cae:authorization.cae,estado:'emitida',reconciliation_status:'pendiente'});
+    expect((await pool!.query('SELECT stage FROM billing_operations WHERE operation_id=$1',[f.oldOperation])).rows[0].stage).toBe('authorized');
+    expect(mocks.authorize).toHaveBeenCalledTimes(2);
+  },area));
+
+  it.each(['restaurant','spa','group'] as const)('conserva el pendiente de %s cuando ARCA no puede verificarse', async area => fixture(async f => {
+    mocks.consult.mockRejectedValue(new Error('ARCA unavailable'));
+    await expect(emit(f.next)).rejects.toMatchObject({code:'BILLING_NUMBER_CONFLICT'});
+    expect((await pool!.query('SELECT * FROM sales_invoices WHERE id=$1',[f.invoice.id])).rows[0]).toEqual(f.invoice);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+  },area));
+
+  it.each(['restaurant','spa','group'] as const)('no espera al sector %s mientras otra operación tiene su bloqueo', async area => fixture(async f => {
+    const c=await pool!.connect();
+    try {
+      await c.query('SELECT pg_advisory_lock(hashtext($1))',[`${area==='group'?'group':area}-invoice:${f.reservationId}`]);
+      await expect(emit(f.next)).rejects.toMatchObject({code:'BILLING_NUMBER_CONFLICT'});
+      expect(mocks.consult).not.toHaveBeenCalled();
+    } finally {await c.query('SELECT pg_advisory_unlock_all()');c.release();}
+    expect((await emit(f.next)).numero).toBe(254);
+  },area));
+
+  it('no descarta una factura enlazada a la cuenta SPA', async()=>fixture(async f=>{
+    await pool!.query('UPDATE spa_accounts SET invoice_id=$2 WHERE id=$1',[f.reservationId,f.invoice.id]);
+    await expect(emit(f.next)).rejects.toMatchObject({code:'BILLING_NUMBER_CONFLICT'});
+    expect((await pool!.query('SELECT invoice_id FROM spa_accounts WHERE id=$1',[f.reservationId])).rows[0].invoice_id).toBe(f.invoice.id);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+  },'spa'));
+
+  it.each(['restaurant','spa','group'] as const)('rechaza un snapshot de %s que identifica otra cuenta aunque su hash sea válido', async area=>fixture(async f=>{
+    const {operationSnapshot,payloadHash}=await import('../billing/operationJournal');
+    const field=area==='restaurant'?'restaurantOrderId':area==='spa'?'spaAccountId':'groupId';
+    const snapshot={...f.data.requestSnapshot,[field]:randomUUID()};
+    await pool!.query('UPDATE billing_operations SET request_snapshot=$2,payload_hash=$3 WHERE operation_id=$1',[f.oldOperation,JSON.stringify(snapshot),payloadHash(operationSnapshot(snapshot))]);
+    await expect(emit(f.next)).rejects.toMatchObject({code:'BILLING_NUMBER_CONFLICT'});
+    expect(mocks.consult).not.toHaveBeenCalled();
+    expect((await pool!.query('SELECT * FROM sales_invoices WHERE id=$1',[f.invoice.id])).rows[0]).toEqual(f.invoice);
+  },area));
+
+  it.each(['restaurant','spa','group'] as const)('reconoce el bloqueo de %s que ya pertenece a la misma operación', async area => fixture(async f=>{
+    const {withFinancialScopeLock}=await import('../nightlyPricingGuard');
+    const result=await withFinancialScopeLock(`${area}-invoice:${f.reservationId}`,()=>emit(f.next));
+    expect(result.numero).toBe(254);
+    expect(mocks.consult).toHaveBeenCalledTimes(1);
+  },area));
+
+  it('no espera sobre la fila de un pedido que está siendo cobrado', async()=>fixture(async f=>{
+    const c=await pool!.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SELECT id FROM restaurant_orders WHERE id=$1 FOR UPDATE',[f.reservationId]);
+      await expect(emit(f.next)).rejects.toMatchObject({code:'BILLING_NUMBER_CONFLICT'});
+      expect(mocks.consult).not.toHaveBeenCalled();
+    } finally {await c.query('ROLLBACK');c.release();}
+    expect((await emit(f.next)).numero).toBe(254);
+  },'restaurant'));
+
+  it('reintenta un journal antiguo de restaurante sin cambiar su hash ni aceptar otros datos', async()=>fixture(async f=>{
+    const {operationSnapshot,payloadHash}=await import('../billing/operationJournal');
+    const snapshot={...f.data.requestSnapshot};delete snapshot.restaurantOrderId;
+    const originalHash=payloadHash(operationSnapshot(snapshot));
+    await pool!.query("UPDATE billing_operations SET stage='uncertain',request_snapshot=$2,payload_hash=$3 WHERE operation_id=$1",[f.oldOperation,JSON.stringify(snapshot),originalHash]);
+    const changed={...f.data,requestSnapshot:{...f.data.requestSnapshot,cliente:{...f.data.cliente,razonSocial:'Otro receptor'}}};
+    await expect(emit(changed)).rejects.toMatchObject({code:'BILLING_OPERATION_MISMATCH'});
+    mocks.consult.mockResolvedValueOnce(authorization);
+    expect((await emit(f.data)).id).toBe(f.invoice.id);
+    expect((await pool!.query('SELECT payload_hash FROM billing_operations WHERE operation_id=$1',[f.oldOperation])).rows[0].payload_hash).toBe(originalHash);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+  },'restaurant'));
+
+  it('archiva un negativo histórico de restaurante solo con identidad, journal y consulta explícita; conserva la caja', async()=>fixture(async f=>{
+    const {operationSnapshot,payloadHash}=await import('../billing/operationJournal');
+    const line=(subtotal:number)=>({descripcion:'Consumo o descuento original',cantidad:1,precioUnitario:subtotal,subtotalNeto:subtotal,subtotal,alicuotaIva:'21'});
+    const items=[line(4700),line(-5000)];
+    // Legacy restaurant snapshots did not capture restaurantOrderId. The
+    // immutable journal owner still identifies the exact original order.
+    const snapshot={...f.data.requestSnapshot,items};delete snapshot.restaurantOrderId;
+    await pool!.query("UPDATE sales_invoices SET items=$2,monto_total='-300' WHERE id=$1",[f.invoice.id,JSON.stringify(items)]);
+    await pool!.query("UPDATE billing_operations SET stage='uncertain',error_code='ARCA_RESULT_UNCERTAIN',request_snapshot=$2,payload_hash=$3 WHERE operation_id=$1",[f.oldOperation,JSON.stringify(snapshot),payloadHash(operationSnapshot(snapshot))]);
+    await pool!.query("UPDATE restaurant_orders SET total='0' WHERE id=$1",[f.reservationId]);
+    const cash=(await pool!.query("INSERT INTO cash_movements(area,source_type,source_id,payment_method,amount) VALUES('restaurant','restaurant_order',$1,'efectivo',0) RETURNING *",[f.reservationId])).rows[0];
+    try {
+      mocks.consult.mockRejectedValueOnce(new Error('ARCA unavailable'));
+      await expect(emit(f.next)).rejects.toMatchObject({code:'BILLING_NUMBER_CONFLICT'});
+      expect((await pool!.query('SELECT id FROM sales_invoices WHERE id=$1',[f.invoice.id])).rowCount).toBe(1);
+      expect(mocks.authorize).toHaveBeenCalledTimes(1);
+      expect((await emit(f.next)).numero).toBe(254);
+      expect((await pool!.query('SELECT * FROM cash_movements WHERE id=$1',[cash.id])).rows[0]).toEqual(cash);
+      expect((await pool!.query('SELECT status,total FROM restaurant_orders WHERE id=$1',[f.reservationId])).rows[0]).toEqual({status:'closed',total:'0.00'});
+      const archived=(await pool!.query('SELECT request_snapshot FROM billing_operations WHERE operation_id=$1',[f.oldOperation])).rows[0].request_snapshot.discardedDraft;
+      expect(archived).toMatchObject({id:f.invoice.id,restaurant_order_id:f.reservationId,monto_total:'-300.00'});
+      expect(mocks.consult).toHaveBeenCalledWith(expect.anything(),'homologacion',expect.objectContaining({total:-300}));
+      expect(mocks.authorize).toHaveBeenCalledTimes(2);
+    } finally {await pool!.query('DELETE FROM cash_movements WHERE id=$1',[cash.id]);}
+  },'restaurant'));
 
   it("no espera sobre una reserva que está procesando otra operación financiera", async () => fixture(async f => {
     const c = await pool!.connect();
