@@ -14,7 +14,9 @@ export async function verifyHospitality({password,expectedRevision,fetchImpl=glo
    if(!Array.isArray(data.items)||!Array.isArray(data.areas)||!data.areas.includes(area)||typeof data.pendingToday!=='number'||typeof data.canCoordinate!=='boolean'||data.page!==1)throw Error('Formato no válido');
    checks.push({area,view,available:true,recordsOnPage:data.items.length,pendingToday:data.pendingToday,canCoordinate:data.canCoordinate});
   }
-  return {site:base,revision:expectedRevision,authenticatedInboxChecks:checks,operationalWrites:0};
+  const concepts=await get('/api/charge-types/all');
+  if(!Array.isArray(concepts)||concepts.some(concept=>!Array.isArray(concept.hospitalityRules)))throw Error('Configuración de cargos no disponible');
+  return {site:base,revision:expectedRevision,authenticatedInboxChecks:checks,chargeConcepts:concepts.length,conceptsWithNotice:concepts.filter(concept=>concept.hospitalityRules.length>0).length,operationalWrites:0};
  } finally {if(cookie)await fetchImpl(base+'/api/auth/logout',{method:'POST',redirect:'manual',headers:{Cookie:cookie},signal:AbortSignal.timeout(10000)}).catch(()=>undefined);}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {

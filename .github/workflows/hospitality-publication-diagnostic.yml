@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      EXPECTED_REVISION: 313633b9389d70c3da6d4fd36c6195dc843cf7a0
+      EXPECTED_REVISION: d7fab92ef0a69ccaff929cf041fc7d4413a2af65
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
