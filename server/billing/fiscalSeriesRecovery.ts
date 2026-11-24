@@ -8,7 +8,7 @@ import type { FECAEResult } from "./wsfevClient";
 type Database = Omit<typeof db, "$client">;
 type Lookup = (invoice: any, expected: { total: number; fecha: string; docTipo: number; docNro: string }) => Promise<FECAEResult | null>;
 export type SeriesRecovery = { outcome: "retired" | "authorized" | "review"; invoiceId: number; reason?: string };
-const saleTypes = new Set(["FA", "FB", "FM", "FMB", "FT"]);
+const saleTypes = new Set(["FA", "FB", "FC", "FM", "FMB", "FT"]);
 
 /** A number match is never ownership proof. Only a complete immutable journal
  * belonging to this exact invoice/environment/issuer can be recovered. */
@@ -24,6 +24,8 @@ function provenDraft(invoice: any, operation: BillingOperation | undefined, iden
   return !!operation && saleTypes.has(invoice?.tipo_comprobante) && invoice.estado === "autorizacion_pendiente" &&
     invoice.modo_ficticio === false && !invoice.cae && (operation.invoice_id === Number(invoice.id) || unlinkedPreparation) &&
     stored?.operationId === operation.operation_id && operation.owner_type === owner.type && operation.owner_id === owner.id &&
+    [['reservaId','reserva_id'],['groupId','group_id'],['spaAccountId','spa_account_id'],['restaurantOrderId','restaurant_order_id'],['paymentId','payment_id']]
+      .every(([key,column]) => request[key] === undefined || String(request[key] ?? '') === String(invoice[column] ?? '')) &&
     (["numbered", "submitting", "uncertain", "rejected"].includes(operation.stage) || unlinkedPreparation) &&
     ["environment", "issuer", "type", "pointOfSale"].every(key => stored[key] === (identity as any)[key] && (operation.fiscal_identity as any)?.[key] === stored[key]) &&
     stored.type === invoice.tipo_comprobante && stored.pointOfSale === Number(invoice.punto_venta) &&
@@ -33,8 +35,9 @@ function provenDraft(invoice: any, operation: BillingOperation | undefined, iden
     request.tipoComprobante === invoice.tipo_comprobante &&
     Number(request.puntoVentaOverride ?? request.puntoVenta ?? stored.pointOfSale) === stored.pointOfSale &&
     payloadHash(request) === operation.payload_hash && Array.isArray(request.items) && request.items.length > 0 &&
-    request.items.every((item: any) => Number.isFinite(Number(item.subtotal)) && Number(item.subtotal) >= 0) &&
-    Math.round(request.items.reduce((sum: number, item: any) => sum + Number(item.subtotal), 0) * 100) === Math.round(Number(invoice.monto_total) * 100) &&
+    request.items.every((item: any) => Number.isFinite(Number(item.subtotal))) &&
+    Number.isFinite(Number(invoice.monto_total)) &&
+    request.items.reduce((sum: number, item: any) => sum + Math.round(Number(item.subtotal) * 100), 0) === Math.round(Number(invoice.monto_total) * 100) &&
     payloadHash(request.items) === payloadHash(invoice.items) &&
     String(request.cashFormaPago || "") === String(invoice.cash_forma_pago || "") &&
     payloadHash(request.cashFormaPagoDetalle ?? null) === payloadHash(invoice.cash_forma_pago_detalle ?? null) &&
@@ -58,6 +61,12 @@ async function hasLinks(tx: Pick<Database, "execute">, invoice: any) {
     UNION ALL SELECT 1 FROM group_payments WHERE invoice_id=${id}
     UNION ALL SELECT 1 FROM group_invoices WHERE sales_invoice_id=${id}
     UNION ALL SELECT 1 FROM spa_treatment_sales WHERE sales_invoice_id=${id}
+    UNION ALL SELECT 1 FROM spa_accounts WHERE invoice_id=${id} OR nc_id=${id}
+    UNION ALL SELECT 1 FROM events WHERE invoice_id=${id} OR nc_id=${id}
+    UNION ALL SELECT 1 FROM event_tables WHERE invoice_id=${id} OR nc_id=${id}
+    UNION ALL SELECT 1 FROM restaurant_reservation_advances WHERE invoice_id=${id}
+    UNION ALL SELECT 1 FROM gift_vouchers WHERE sale_invoice_id=${id}
+    UNION ALL SELECT 1 FROM cc_invoice_tracking WHERE sales_invoice_id=${id}
     UNION ALL SELECT 1 FROM account_movements WHERE reference IN (${label},${legacy},${label.replace("-", " ")},${`invoice:${id}:${invoice.tipo_comprobante}:${invoice.punto_venta}:${invoice.numero}`}) LIMIT 1`);
   if (linked.rows.length) return true;
   const payments = await tx.execute(sql`SELECT invoice_ref FROM payments WHERE invoice_ref LIKE ${`%${id}%`}`);
@@ -71,7 +80,7 @@ async function hasLinks(tx: Pick<Database, "execute">, invoice: any) {
 export async function recoverOccupiedFiscalNumber(database: Database, invoiceId: number, identity: FiscalIdentity,
   lookup: Lookup, triggerOperationId?: string): Promise<SeriesRecovery> {
   const review = (reason: string): SeriesRecovery => ({ outcome: "review", invoiceId, reason });
-  return database.transaction(async tx => {
+  return database.transaction(async (tx): Promise<SeriesRecovery> => {
     // A different reservation may currently be collecting or editing its folio.
     // Try, never queue: the caller can already own another financial scope.
     const initial = (await tx.execute(sql`SELECT * FROM sales_invoices WHERE id=${invoiceId}`)).rows[0] as any;
@@ -81,17 +90,28 @@ export async function recoverOccupiedFiscalNumber(database: Database, invoiceId:
       const groups = await tx.execute(sql`SELECT group_id FROM group_reservation_links WHERE reservation_id=${initial.reserva_id}`);
       for (const group of groups.rows as any[]) keys.push(`group-invoice:${group.group_id}`);
       keys.push(`folio-invoice:${initial.reserva_id}`);
-    } else if (initial.group_id) keys.push(`group-invoice:${initial.group_id}`);
-    // SPA/funding have their own financial recovery protocols and reservations.
-    if (initial.spa_account_id || initial.restaurant_order_id || initial.group_id) return review("Requiere recuperar la cuenta de origen.");
+    }
+    if (initial.group_id) keys.push(`group-invoice:${initial.group_id}`);
+    if (initial.spa_account_id) keys.push(`spa-invoice:${initial.spa_account_id}`);
+    if (initial.restaurant_order_id) keys.push(`restaurant-invoice:${initial.restaurant_order_id}`);
     for (const key of [...new Set(keys)].sort()) {
       if (hasFinancialScopeLock(key)) continue;
       const lock = await tx.execute(sql`SELECT pg_try_advisory_xact_lock(hashtext(${key})) AS locked`);
       if ((lock.rows[0] as any)?.locked !== true) return review("La cuenta de origen está procesando otra operación.");
     }
-    const invoice = (await tx.execute(sql`SELECT * FROM sales_invoices WHERE id=${invoiceId} FOR UPDATE`)).rows[0] as any;
+    // These owners also use row locks for payments/edits. Never wait while
+    // holding the fiscal series: a busy source is retried on the next request.
+    if (initial.restaurant_order_id && !(await tx.execute(sql`SELECT id FROM restaurant_orders WHERE id=${initial.restaurant_order_id} FOR UPDATE NOWAIT`)).rows.length)
+      return review("No se encontró el pedido de restaurante original.");
+    if (initial.spa_account_id && !(await tx.execute(sql`SELECT id FROM spa_accounts WHERE id=${initial.spa_account_id} FOR UPDATE NOWAIT`)).rows.length)
+      return review("No se encontró la cuenta SPA original.");
+    if (initial.group_id && !(await tx.execute(sql`SELECT id FROM groups WHERE id=${initial.group_id} FOR UPDATE NOWAIT`)).rows.length)
+      return review("No se encontró el grupo original.");
+    const invoice = (await tx.execute(sql`SELECT * FROM sales_invoices WHERE id=${invoiceId} FOR UPDATE NOWAIT`)).rows[0] as any;
     if (!invoice) return { outcome: "retired", invoiceId };
-    const operation = (await tx.execute(sql`SELECT * FROM billing_operations WHERE operation_id=${invoice.fiscal_identity?.operationId || ""} FOR UPDATE`)).rows[0] as BillingOperation | undefined;
+    if (['reserva_id','group_id','spa_account_id','restaurant_order_id'].some(key => invoice[key] !== initial[key]))
+      return review("La cuenta de origen cambió durante la verificación.");
+    const operation = (await tx.execute(sql`SELECT * FROM billing_operations WHERE operation_id=${invoice.fiscal_identity?.operationId || ""} FOR UPDATE NOWAIT`)).rows[0] as BillingOperation | undefined;
     if (!provenDraft(invoice, operation, identity)) return review("No hay evidencia completa del intento original.");
     const document = resolveFiscalRecipientDocument({ cuit: invoice.cliente_cuit, dni: invoice.cliente_dni, documentType: invoice.cliente_document_type });
     let authorized: FECAEResult | null;
@@ -106,17 +126,25 @@ export async function recoverOccupiedFiscalNumber(database: Database, invoiceId:
       return { outcome: "authorized", invoiceId };
     }
     const rejected = operation!.stage === "rejected" && operation!.error_code === "ARCA_AUTHORIZATION_REJECTED";
+    // Historical negative-total drafts could be marked uncertain by older
+    // parsers. ARCA cannot authorize a negative total (10065); only an exact
+    // immutable match AND an explicit missing-voucher lookup permit retirement.
+    const impossibleNegativeTotal = Number(invoice.monto_total) < 0;
     // "numbered" is committed before "submitting", which is itself committed
     // before any authorization call. All other crash states remain uncertain.
-    if (!rejected && !["numbered", "prepared"].includes(operation!.stage)) return review("El resultado sigue incierto. Recuperá la autorización del comprobante original.");
+    if (!rejected && !impossibleNegativeTotal && !["numbered", "prepared"].includes(operation!.stage)) return review("El resultado sigue incierto. Recuperá la autorización del comprobante original.");
     if (await hasLinks(tx, invoice)) return review("El intento original tiene vínculos económicos que requieren conciliación.");
-    const marker = rejected && invoice.center_settlement_area ? "ARCA_REJECTED_CENTER_CORRECTED"
-      : rejected ? "BILLING_REJECTED_DRAFT_RETIRED" : "BILLING_UNSENT_DRAFT_RETIRED";
+    const marker = (rejected || impossibleNegativeTotal) && invoice.center_settlement_area ? "ARCA_REJECTED_CENTER_CORRECTED"
+      : rejected || impossibleNegativeTotal ? "BILLING_REJECTED_DRAFT_RETIRED" : "BILLING_UNSENT_DRAFT_RETIRED";
     await tx.execute(sql`UPDATE billing_operations SET request_snapshot=jsonb_set(request_snapshot,'{discardedDraft}',${JSON.stringify(invoice)}::jsonb),
       invoice_id=NULL,stage='corrected',error_code=${marker},updated_at=now() WHERE operation_id=${operation!.operation_id}`);
     await audit(tx, operation!, invoice, triggerOperationId, "retired");
     await tx.execute(sql`DELETE FROM sales_invoices WHERE id=${invoiceId} AND estado='autorizacion_pendiente' AND cae IS NULL`);
     return { outcome: "retired", invoiceId };
+  }).catch(error => {
+    // Drizzle wraps PostgreSQL errors; the transaction has rolled back here.
+    if (error?.code === '55P03' || error?.cause?.code === '55P03') return review("La cuenta de origen está procesando otra operación.");
+    throw error;
   });
 }
 
