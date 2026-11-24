@@ -1,3 +1,4 @@
+import { IncludedServicesButton, ReservationIncludedServices } from "@/components/included-services";
 import { GroupRoomAdvanceInvoice } from '@/components/group-room-advance-invoice';
 import {GroupRoomAccount} from '@/components/group-room-account';
 import { calculateGroupPersonalExtrasCap } from "@shared/groupPersonalExtras";
@@ -250,7 +251,7 @@ export function ReservationFormDialog({
   );
 
   const [selectedRoomTypeId, setSelectedRoomTypeId] = useState<string>(reservation?.room?.roomTypeId || reservation?.roomTypeId || defaultValues?.roomTypeId || "");
-  const [selectedPackageId, setSelectedPackageId] = useState<string>("");
+  const [selectedPackageId, setSelectedPackageId] = useState<string>(reservation?.hospitalityPackageId || "");
 
   const { data: maintenanceBlocks = [] } = useQuery<{ roomId: string; blockFrom: string; blockTo: string }[]>({
     queryKey: ["/api/maintenance/blocks"],
@@ -386,6 +387,7 @@ export function ReservationFormDialog({
       return;
     }
     initializedFormSessionRef.current = formSessionKey;
+    setSelectedPackageId(reservation?.hospitalityPackageId || "");
 
       setSelectedGuest(reservation?.guest || null);
       setSelectedCompany(reservation?.company || null);
@@ -807,6 +809,7 @@ export function ReservationFormDialog({
 
   const mutation = useMutation({
     mutationFn: async (data: Partial<InsertReservation>) => {
+      data = {...data, hospitalityPackageId: selectedPackageId || null};
       if (isEditing) {
         if (reservation.pricingScheme === "nightly_v1") {
           if (data.checkInDate !== reservation.checkInDate || data.checkOutDate !== reservation.checkOutDate) {
@@ -3760,6 +3763,7 @@ export function ReservationDetailDialog({
             </StaySection>
 
             <ReservationStayDetails reservationId={reservation.id} guestId={reservation.guestId} />
+            {open && <ReservationIncludedServices reservationId={reservation.id}/>}
             {(reservation.contactName || reservation.contactPhone) && (
               <div className="rounded-lg border border-dashed p-3 space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Contacto de la Reserva</p>
@@ -6123,6 +6127,7 @@ export default function ReservationsPage() {
           <p className="text-muted-foreground">Gestiona todas las reservaciones del hotel</p>
         </div>
         <div className="flex items-center gap-2">
+          <IncludedServicesButton/>
           <Button variant="outline" onClick={() => setWaitlistOpen(true)} data-testid="button-reservation-waitlist">
             <Clock className="mr-2 h-4 w-4" />
             Lista de Espera
