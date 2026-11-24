@@ -13,6 +13,7 @@ import { BookingReviewError, matchesMaskedReplay, parseBookingRevision, redactBo
 import { archiveBookingNotes } from "./bookingPrivate";
 import { settleBooking } from "./settlement";
 import { assignmentContext, assignmentFailure, assertLatestAssignableRevision, validateManualSelection, type ManualAssignment } from './manualAssignment';
+import { captureInboundInventory,inboundInventoryRange } from './inboundInventory';
 
 export function assertInboundStaging(connection: any) {
   if (!connection?.is_active || !operationAllowed(connection,"inbound")) return review("STAGING_ONLY");
@@ -48,11 +49,14 @@ export async function persistInboundRevision(target: Pool, connectionId: string,
     const lockBooking = booking?.bookingId || payload.attributes?.booking_id;
     if (typeof lockBooking === 'string') await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`channex-booking:${connectionId}:${lockBooking}`]);
     const trustedHead = code && !["INVALID_REVISION", "WRONG_PROPERTY"].includes(code);
+    const previous=typeof lockBooking==='string'?(await c.query(`SELECT payload FROM channex_inbound_revisions WHERE connection_id=$1 AND booking_id=$2
+      ORDER BY (status='stale'),COALESCE(inserted_at,created_at) DESC,created_at DESC,revision_id DESC LIMIT 1`,[connectionId,lockBooking])).rows[0]?.payload:null;
     const hash = revisionHash(payload);
     const privateNotes = archiveBookingNotes(input, connectionId, payload.id);
     const inserted = await c.query(`INSERT INTO channex_inbound_revisions(connection_id,revision_id,payload,payload_hash,booking_id,inserted_at,status,review_code,private_notes_encrypted,source_captured)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING revision_id`,
       [connectionId, payload.id, payload, hash, booking?.bookingId || (trustedHead ? payload.attributes.booking_id : null), booking?.insertedAt || (trustedHead ? payload.attributes.inserted_at : null), code ? "review" : "pending", code, privateNotes, sourceCaptured]);
+    let inventoryChanged=!!inserted.rowCount;
     if (!inserted.rowCount) {
       const existing = (await c.query("SELECT payload_hash,payload,acked_at FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2 FOR UPDATE", [connectionId, payload.id])).rows[0];
       if (existing.payload_hash !== hash && !(existing.acked_at && matchesMaskedReplay(existing.payload, payload))) {
@@ -66,11 +70,13 @@ export async function persistInboundRevision(target: Pool, connectionId: string,
         // Re-fetching an identical unacknowledged revision after a parser fix
         // can recover it. Keep the immutable payload/hash and all other review
         // decisions; normal application still checks scope, mapping and money.
-        await c.query(`UPDATE channex_inbound_revisions SET status='pending',review_code=NULL,booking_id=$3,inserted_at=$4
+        const recovered=await c.query(`UPDATE channex_inbound_revisions SET status='pending',review_code=NULL,booking_id=$3,inserted_at=$4
           WHERE connection_id=$1 AND revision_id=$2 AND status='review' AND review_code='INVALID_REVISION' AND acked_at IS NULL`,
           [connectionId, payload.id, booking.bookingId, booking.insertedAt]);
+        inventoryChanged ||= !!recovered.rowCount;
       }
     }
+    if(inventoryChanged)await captureInboundInventory(c,connection,payload,previous);
     await c.query("COMMIT");
     return payload.id as string;
   } catch (error) { await c.query("ROLLBACK"); throw error; } finally { c.release(); }
@@ -129,6 +135,7 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
           const duplicate = await db.execute(sql`SELECT 1 FROM reservations WHERE external_reservation_id=${booking.bookingId} LIMIT 1`);
           if (duplicate.rows.length) return review("UNLINKED_EXTERNAL_RESERVATION");
         }
+        if(!manual&&!links.length&&booking.status!=='cancelled')return review('MANUAL_ASSIGNMENT_REQUIRED');
         const existing = new Map<string, any>();
         for (const link of links) {
           // Lock before inspecting local history. Payment/charge FK inserts
@@ -224,11 +231,13 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
             const map = choice ? { room_type_id: choice.categoryId, room_ids: null, max_occupancy: choice.capacity,
               rate_plan_id: maps.length === 1 && maps[0].room_type_id === choice.categoryId && maps[0].plan_room_type === choice.categoryId && maps[0].currency === booking.currency ? maps[0].rate_plan_id : null } : maps[0];
             const old = existing.get(room.key);
+            if(!manual&&!old)return review('MANUAL_ASSIGNMENT_REQUIRES_REVIEW');
             if (map.room_ids === null && room.occupancy > map.max_occupancy) return review("OCCUPANCY_EXCEEDS_CAPACITY");
             const candidates = (await db.execute(sql`SELECT r.id FROM rooms r WHERE r.floor IS DISTINCT FROM 99
               AND (${!!manual} OR ${config.floor}::int IS NULL OR r.floor=${config.floor}) AND r.room_type_id=${map.room_type_id}
               AND (${!!manual} OR ${sql.param(config.room_ids)}::text[] IS NULL OR r.id=ANY(${sql.param(config.room_ids)}::text[]))
               AND (${!manual} OR r.id=${choice?.id || ''})
+              AND (${!!manual} OR r.id=${old?.roomId || ''})
               AND (${sql.param(map.room_ids)}::text[] IS NULL OR r.id=ANY(${sql.param(map.room_ids)}::text[]))
               AND r.is_active AND NOT COALESCE(r.is_virtual,false) AND r.room_number<>'REUB' AND r.status NOT IN ('maintenance','oos') AND COALESCE(r.max_occupancy,${map.max_occupancy})>=${room.occupancy}
               AND NOT EXISTS(SELECT 1 FROM maintenance_blocks m WHERE m.room_id=r.id AND m.block_from<${booking.departure}::date AND m.block_to>=${booking.arrival}::date)
@@ -289,6 +298,14 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
             WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`);
         }
         await db.execute(sql`UPDATE channex_inbound_revisions SET status='applied',applied_at=now(),review_code=NULL WHERE connection_id=${connectionId} AND revision_id=${revisionId}`);
+        if(manual){
+          const today=(await db.execute(sql`SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS day`)).rows[0].day as string;
+          const {from,to}=inboundInventoryRange(source.payload,null,today);
+          if(to>=from)await db.execute(sql`INSERT INTO channex_ari_outbox(connection_id,kind,date_from,date_to,reason)
+            SELECT s.connection_id,'availability',${from}::date,${to}::date,'channex_inbound:assignment'
+            FROM channex_ari_settings s JOIN channex_connections c ON c.id=s.connection_id
+            WHERE s.capture_started_at IS NOT NULL AND c.is_active AND c.environment=${config.environment} AND c.base_url=${config.base_url}`);
+        }
         if (manual) return { applied: true, replayed: false, reservationIds: (await db.execute(sql`SELECT reservation_id FROM channex_inbound_rooms WHERE connection_id=${connectionId} AND booking_id=${booking.bookingId}`)).rows.map((r: any) => r.reservation_id) };
       })));
     } catch (error) {

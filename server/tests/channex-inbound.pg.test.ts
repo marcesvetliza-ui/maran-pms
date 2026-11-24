@@ -12,7 +12,7 @@ const allowed = ["postgresql://postgres@127.0.0.1:55449/ota_assignment_test", "p
  (process.env.CI==="true"&&/^postgres(?:ql)?:\/\/[^@]*@(?:localhost|127\.0\.0\.1):5432\/maran_test$/.test(process.env.DATABASE_URL||""));
 const suite=allowed?describe:describe.skip;
 let pool:import("pg").Pool, service:typeof import("../channex/inbound"), storage:typeof import("../db-storage").storage;
-const owners:string[]=[], types:string[]=[], guestIds=new Set<string>();
+const owners:string[]=[], types:string[]=[], guestIds=new Set<string>(),intakeActor=randomUUID();
 let databaseToday:string,arrival:string,secondNight:string,departure:string,extendedDeparture:string;
 function revision(property:string, bookingId:string, id:string, status="new",stamp="2026-10-29T23:00:00Z",rooms=1){return {id,attributes:{property_id:property,booking_id:bookingId,inserted_at:stamp,status,
  arrival_date:arrival,departure_date:departure,amount:String(rooms*250),currency:"ARS",customer:{name:"Channel",surname:"Test"},
@@ -30,7 +30,18 @@ async function fixture(rooms=2,extraPlan=false){
  await pool.query("INSERT INTO channex_inbound_settings(connection_id,enabled) VALUES($1,true)",[id]);
  return {id,type,plan};
 }
-async function apply(f:{id:string},r:any){await service.persistInboundRevision(pool,f.id,r);await service.applyInboundRevision(f.id,r.id);return (await pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2",[f.id,r.id])).rows[0];}
+// First assignment is an explicit operator choice. Later modifications and
+// cancellations still exercise the unattended receiver.
+async function apply(f:{id:string},r:any){
+ await service.persistInboundRevision(pool,f.id,r);await service.applyInboundRevision(f.id,r.id);
+ const source=()=>pool.query("SELECT * FROM channex_inbound_revisions WHERE connection_id=$1 AND revision_id=$2",[f.id,r.id]);
+ if((await source()).rows[0].review_code==='MANUAL_ASSIGNMENT_REQUIRED'){
+  const {getInboundAssignmentOptions}=await import('../channex/manualAssignment');const options=await getInboundAssignmentOptions(f.id,r.id,false),assignments:Record<string,string>={};
+  for(const room of options.rooms){const choice=room.choices.find(choice=>!Object.values(assignments).includes(choice.id));if(!choice)return (await source()).rows[0];assignments[room.key]=choice.id;}
+  await service.applyInboundRevision(f.id,r.id,{expectedPayloadHash:options.payloadHash,expectedConfigurationHash:options.configurationHash,assignments,reason:'Synthetic reception assignment',confirmCategoryChange:false,confirmScopeChange:false,actor:{id:intakeActor,name:'Synthetic Reception'},canOverrideScope:false});
+ }
+ return (await source()).rows[0];
+}
 async function linked(f:{id:string}){return (await pool.query("SELECT r.* FROM reservations r JOIN channex_inbound_rooms l ON l.reservation_id=r.id WHERE l.connection_id=$1 ORDER BY l.remote_room_id",[f.id])).rows;}
 suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  beforeAll(async()=>{pool=(await import("../db")).pool;
@@ -38,9 +49,11 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   // cannot keep a fixed stay inside their current/future availability window.
   databaseToday=(await pool.query("SELECT (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date::text AS day")).rows[0].day;
   arrival=addDays(databaseToday,7);secondNight=addDays(arrival,1);departure=addDays(arrival,2);extendedDeparture=addDays(arrival,3);
-  service=await import("../channex/inbound");storage=(await import("../db-storage")).storage;await ensureChannexAriSchema(pool);await ensureChannexInboundSchema(pool);await ensureChannexInboundSchema(pool);});
+  service=await import("../channex/inbound");storage=(await import("../db-storage")).storage;await ensureChannexAriSchema(pool);await ensureChannexInboundSchema(pool);await ensureChannexInboundSchema(pool);
+  await pool.query("INSERT INTO system_users(id,username,password,email,full_name,role,created_at)VALUES($1::text,$1,'unused',$2,'Synthetic Reception','admin',now())",[intakeActor,`${intakeActor}@test.invalid`]);});
  afterAll(async()=>{
   for(const id of owners){
+   await pool.query("DELETE FROM audit_logs WHERE entity_type='channex_manual_assignment' AND details::jsonb->>'connectionId'=$1",[id]);
    const rows=await linked({id});rows.forEach(r=>guestIds.add(r.guest_id));
    await pool.query("DELETE FROM channex_inbound_settlements WHERE connection_id=$1",[id]);
    await pool.query("DELETE FROM channex_inbound_rooms WHERE connection_id=$1",[id]);
@@ -51,7 +64,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   }
   for(const id of guestIds)await pool.query("DELETE FROM guests WHERE id=$1",[id]);
   for(const type of types){await pool.query("DELETE FROM rooms WHERE room_type_id=$1",[type]);await pool.query("DELETE FROM rate_plans WHERE room_type_id=$1",[type]);await pool.query("DELETE FROM room_types WHERE id=$1",[type]);}
-  await pool?.end();
+  await pool.query('DELETE FROM system_users WHERE id=$1',[intakeActor]);await pool?.end();
  });
  it('groups the inbox by booking, respects channel order, filters before pagination and exposes only safe summaries',async()=>{
   const f=await fixture(1);
@@ -133,7 +146,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   await pool.query('UPDATE channex_inbound_settings SET enabled=true WHERE connection_id=$1',[f.id]);
   expect((await apply(f,revision(f.id,`split-${f.id}`,`first-${f.id}`))).status).toBe('applied');
   expect((await linked(f))[0].room_id).toBe(`${f.id}-1`);
-  expect((await apply(f,revision(f.id,`other-${f.id}`,`second-${f.id}`))).review_code).toBe('NO_PILOT_ROOM_AVAILABLE');
+  expect((await apply(f,revision(f.id,`other-${f.id}`,`second-${f.id}`))).review_code).toBe('MANUAL_ASSIGNMENT_REQUIRED');
   expect(await linked(f)).toHaveLength(1);
  });
  it("creates two rooms atomically with exact nightly prices and no cash or invoice",async()=>{
@@ -142,7 +155,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   expect(rows[0].nightly_pricing).toEqual([{date:arrival,rateCents:10000,discountCents:0},{date:secondNight,rateCents:15000,discountCents:0}]);
   const events=(await pool.query("SELECT kind,date_from::text,date_to::text,reason FROM channex_ari_outbox WHERE connection_id=$1",[f.id])).rows;
   expect(events.length).toBeGreaterThan(0);
-  expect(events.every(event=>event.kind==='availability'&&event.date_from===arrival&&event.date_to===secondNight&&event.reason==='reservations:insert')).toBe(true);
+  expect(events.every(event=>event.kind==='availability'&&event.date_from===arrival&&event.date_to===secondNight&&['reservations:insert','channex_inbound:inventory','channex_inbound:assignment'].includes(event.reason))).toBe(true);
   expect((await pool.query("SELECT id FROM payments WHERE reservation_id=ANY($1::varchar[])",[rows.map(r=>r.id)])).rows).toHaveLength(0);
   expect((await pool.query("SELECT id FROM sales_invoices WHERE reserva_id=ANY($1::varchar[])",[rows.map(r=>r.id)])).rows).toHaveLength(0);
  });
@@ -252,7 +265,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   const before=(await pool.query("SELECT (SELECT count(*) FROM guests)::int AS guests,(SELECT count(*) FROM channex_ari_outbox WHERE connection_id=$1)::int AS events",[f.id])).rows[0];
   expect((await apply(f,revision(f.id,"booking-conflict","conflict","new",undefined,2))).status).toBe("review");
   expect((await pool.query("SELECT revision_id FROM channex_inbound_settlements WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
-  expect((await pool.query("SELECT (SELECT count(*) FROM guests)::int AS guests,(SELECT count(*) FROM channex_ari_outbox WHERE connection_id=$1)::int AS events",[f.id])).rows[0]).toEqual(before);
+  expect((await pool.query("SELECT (SELECT count(*) FROM guests)::int AS guests,(SELECT count(*) FROM channex_ari_outbox WHERE connection_id=$1)::int AS events",[f.id])).rows[0]).toEqual({...before,events:before.events+1});
   expect(await linked(f)).toHaveLength(0);expect((await pool.query("SELECT id FROM reservations WHERE external_reservation_id='booking-conflict'")).rows).toHaveLength(0);
  });
  it("does not overwrite a reservation changed by reception",async()=>{
@@ -268,7 +281,7 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  });
  it("does not create a peso reservation from a USD booking",async()=>{
   const f=await fixture(),r=revision(f.id,"booking-usd","usd");r.attributes.currency="USD";
-  expect((await apply(f,r)).review_code).toBe("UNSUPPORTED_CURRENCY");expect(await linked(f)).toHaveLength(0);
+  await expect(apply(f,r)).rejects.toMatchObject({code:'ASSIGNMENT_REQUIRES_REVIEW'});expect(await linked(f)).toHaveLength(0);
  });
  it("imports USD with a frozen audited quote, preserves originals and cancels without cash",async()=>{
   const f=await fixture();
@@ -317,10 +330,10 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
  it("does not create a USD booking without a quote or when conversion overflows",async()=>{
   const f=await fixture();await pool.query("UPDATE rate_plans SET currency='USD' WHERE id=$1",[f.plan]);await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);
   const pending=revision(f.id,"booking-no-rate","no-rate");pending.attributes.currency="USD";
-  expect((await apply(f,pending)).review_code).toBe("SETTLEMENT_RATE_REQUIRED");
+  await expect(apply(f,pending)).rejects.toMatchObject({code:'SETTLEMENT_RATE_REQUIRED'});
   await saveSettlementRate(pool,f.id,{rate:"999999",reason:"Prueba de límite de importes"},"Test operator");
   const overflow=revision(f.id,"booking-overflow","overflow");overflow.attributes.currency="USD";
-  expect((await apply(f,overflow)).review_code).toBe("SETTLEMENT_AMOUNT_EXCEEDS_LIMIT");expect(await linked(f)).toHaveLength(0);
+  await expect(apply(f,overflow)).rejects.toMatchObject({code:'SETTLEMENT_AMOUNT_EXCEEDS_LIMIT'});expect(await linked(f)).toHaveLength(0);
   expect((await pool.query("SELECT * FROM channex_inbound_settlements WHERE connection_id=$1",[f.id])).rows).toHaveLength(0);
  });
  it("rolls back a quote and its audit together if saving fails",async()=>{
