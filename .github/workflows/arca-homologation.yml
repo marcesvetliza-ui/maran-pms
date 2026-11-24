@@ -1,0 +1,40 @@
+name: ARCA — Consulta real de homologación
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/arca-homologation.yml'
+      - 'scripts/check-arca-homologation*'
+      - 'server/billing/homologationProbe*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arca-homologation
+  cancel-in-progress: false
+
+jobs:
+  homologation:
+    name: Verificar consultas autenticadas sin emisión ni cobro
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verificar el ejecutor de la prueba
+        run: node --test scripts/check-arca-homologation.test.mjs
+      - name: Esperar la revisión publicada y el módulo financiero
+        run: node scripts/wait-for-revision.js https://maranpms.com.ar "$GITHUB_SHA"
+      - name: Consultar ARCA mediante el acceso vigente del PMS
+        env:
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+          SMOKE_TEST_USER: admin
+        run: node scripts/check-arca-homologation.mjs
