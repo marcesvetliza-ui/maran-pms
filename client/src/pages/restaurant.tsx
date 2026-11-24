@@ -89,6 +89,7 @@ import {
   FileText,
   Monitor,
   RotateCcw,
+  Copy,
   Download,
   CalendarClock,
   Tag,
@@ -1523,6 +1524,29 @@ export default function RestaurantPage() {
     },
   });
 
+  const repeatItemMutation = useMutation({
+    mutationFn: async ({ orderId, itemId }: { orderId: string; itemId: string }) => {
+      const res = await apiRequest("POST", `/api/restaurant/orders/${orderId}/items/${itemId}/repeat`, {});
+      return res.json();
+    },
+    onSuccess: (newItem: any) => {
+      const append = (order: any) => {
+        if (!order || order.id !== newItem.orderId) return order;
+        const items = [...(order.items || []).filter((item: any) => item.id !== newItem.id), newItem];
+        const total = items.filter((item: any) => !item.paid && item.status !== "cancelled")
+          .reduce((sum: number, item: any) => sum + Number(item.subtotal), 0).toFixed(2);
+        return { ...order, items, total };
+      };
+      setCurrentOrder(append);
+      queryClient.setQueryData<any[]>(["/api/restaurant/orders"], old => old?.map(append));
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+    },
+    onError: (error: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/orders"] });
+      toast({ title: "No se pudo repetir el ítem", description: parseApiError(error), variant: "destructive" });
+    },
+  });
+
   // Helper: refetch orders y sincroniza currentOrder desde la caché fresca.
   // Usar cuando la mutación modifica items existentes (no agrega/elimina) y necesitamos
   // ver el nuevo estado (status, course) antes de que el usuario interactúe.
@@ -2321,6 +2345,26 @@ export default function RestaurantPage() {
     const order = getUpdatedOrder();
     return order?.items || [];
   };
+
+  // Items arrive in insertion order, before grouping the visible rows by course.
+  const lastOrderItem = getOrderItems().filter(item => item.status !== "cancelled").at(-1);
+  const renderRepeatItemButton = (itemId: string) => (
+    <Button
+      size="sm"
+      variant="outline"
+      className="shrink-0 gap-1"
+      disabled={addItemMutation.isPending || repeatItemMutation.isPending || itemId.startsWith("temp-")}
+      onClick={() => {
+        if (currentOrder && !addItemMutation.isPending && !repeatItemMutation.isPending) {
+          repeatItemMutation.mutate({ orderId: currentOrder.id, itemId });
+        }
+      }}
+      data-testid={`button-repeat-item-${itemId}`}
+    >
+      {repeatItemMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+      Repetir ítem
+    </Button>
+  );
 
   const handleDragStart = (table: RestaurantTable) => {
     if (!isEditMode) return;
@@ -4895,8 +4939,8 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                           )}
                         </div>
                         {courseItems.map((item) => (
-                          <div key={item.id} className={`flex items-center justify-between p-2 border rounded mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed bg-muted/30" : "bg-background"}`}>
-                            <div className="flex items-center gap-2">
+                          <div key={item.id} className={`flex flex-wrap items-center justify-between gap-2 p-2 border rounded mb-1 ${item.status === "waiting_course" ? "opacity-50 border-dashed bg-muted/30" : "bg-background"}`}>
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
                               <span className="font-medium text-sm">
                                 {item.notes?.startsWith("[") ? item.notes.match(/^\[(.+?)\]/)?.[1] || item.menuItem?.name || "Item" : item.menuItem?.name || "Item"}
                               </span>
@@ -4907,6 +4951,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                               )}
                             </div>
                             <div className="flex items-center gap-2">
+                              {item.id === lastOrderItem?.id && renderRepeatItemButton(item.id)}
                               {item.status === "waiting_course" && currentOrder && (
                                 <div className="flex items-center gap-0.5">
                                   {[1, 2, 3].filter(c => c !== item.course).map(c => (
@@ -5039,6 +5084,18 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
 
           {orderView === "menu" && !pendingItem && (
             <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+              {lastOrderItem && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3" data-testid="last-added-item">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Último ítem agregado</p>
+                    <p className="text-sm font-medium break-words">
+                      {lastOrderItem.notes?.match(/^\[(.+?)\]/)?.[1] || lastOrderItem.menuItem?.name || "Ítem"}
+                      <span className="ml-2 text-muted-foreground">x{lastOrderItem.quantity}</span>
+                    </p>
+                  </div>
+                  {renderRepeatItemButton(lastOrderItem.id)}
+                </div>
+              )}
               {/* Buscador */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -5287,7 +5344,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                 <Button
                   className="flex-1"
                   onClick={handleConfirmItem}
-                  disabled={addItemMutation.isPending}
+                  disabled={addItemMutation.isPending || repeatItemMutation.isPending}
                   data-testid="button-confirm-item"
                 >
                   {addItemMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

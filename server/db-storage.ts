@@ -4924,6 +4924,7 @@ export class DatabaseStorage implements IStorage {
               'notes',      oi.notes,
               'sentAt',     oi.sent_at,
               'paid',       oi.paid,
+              'createdAt',  oi.created_at,
               'menuItem', jsonb_build_object(
                 'id',              mi.id,
                 'categoryId',      mi.category_id,
@@ -4939,7 +4940,7 @@ export class DatabaseStorage implements IStorage {
                 'defaultCourse',   mi.default_course,
                 'inventoryItemId', mi.inventory_item_id
               )
-            ) ORDER BY oi.id
+            ) ORDER BY oi.created_at, oi.id
           ) FILTER (WHERE oi.id IS NOT NULL),
           '[]'::json
         ) AS items,
