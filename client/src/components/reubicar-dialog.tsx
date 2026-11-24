@@ -24,7 +24,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/App";
-import { queryClient } from "@/lib/queryClient";
+import {
+  queryClient,
+  apiRequest,
+  parseApiErrorPayload,
+} from "@/lib/queryClient";
 import { formatDisplayDate } from "@shared/date-display";
 import type { RelocationPreview } from "@shared/relocation";
 const statuses: Record<string, string> = {
@@ -37,19 +41,17 @@ const statuses: Record<string, string> = {
   no_molestar: "No molestar",
 };
 async function request<T>(url: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method: body ? "POST" : "GET",
-    credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const result = await response.json();
-  if (!response.ok)
-    throw Object.assign(
-      new Error(result.error || "No se pudo cargar la información."),
-      { code: result.code },
-    );
-  return result;
+  try {
+    return await (await apiRequest(body ? "POST" : "GET", url, body)).json();
+  } catch (error) {
+    const payload = parseApiErrorPayload(error);
+    if (payload)
+      throw Object.assign(
+        new Error(payload.error || "No se pudo completar la solicitud."),
+        { code: payload.code },
+      );
+    throw error;
+  }
 }
 type SearchResult = {
   id: string;
@@ -108,6 +110,14 @@ export function ReubicarDialog({
     [groupWarning, setGroupWarning] = useState(false),
     [ackGroup, setAckGroup] = useState(false),
     [submitError, setSubmitError] = useState("");
+  const confirmationRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (destination)
+      confirmationRef.current?.scrollIntoView({
+        block: "nearest",
+        behavior: "smooth",
+      });
+  }, [destination]);
   const attempt = useRef<{ signature: string; id: string } | null>(null);
   useEffect(() => {
     if (open) {
@@ -290,7 +300,7 @@ export function ReubicarDialog({
               )}
               {r && (
                 <>
-                  <div className="rounded-xl border bg-muted/40 p-4 space-y-1">
+                  <div className="sticky top-0 z-10 rounded-xl border bg-background p-3 space-y-1 shadow-sm">
                     <div className="flex justify-between gap-3 flex-wrap">
                       <strong>
                         {r.guest} · Hab. {r.room}
@@ -445,6 +455,7 @@ export function ReubicarDialog({
                   )}
                   {selected && (
                     <section
+                      ref={confirmationRef}
                       className="rounded-xl border border-primary/40 p-4 space-y-3"
                       aria-label="Confirmar cambio"
                     >

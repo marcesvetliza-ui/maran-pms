@@ -254,3 +254,23 @@ it("resets confirmations and selection when refreshing stale options", async () 
     screen.getByRole("button", { name: "Confirmar cambio" }),
   ).toBeDisabled();
 });
+
+it("blocks the write while the current session is being verified", async () => {
+  const { holdSessionWrites } = await import("@/lib/session-write-guard");
+  const owner = Symbol("reubicar test");
+  mount();
+  await screen.findByRole("radio", { name: /Hab. 303/ });
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("radio", { name: /Hab. 303/ }));
+  await user.type(screen.getByLabelText("Motivo del cambio"), "Pedido huésped");
+  holdSessionWrites(owner, true);
+  try {
+    await user.click(screen.getByRole("button", { name: "Confirmar cambio" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "verificando la conexión",
+    );
+    expect(posts).toHaveLength(0);
+  } finally {
+    holdSessionWrites(owner, false);
+  }
+});
