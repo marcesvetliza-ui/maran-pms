@@ -1,4 +1,5 @@
 import { isSelectableGuest } from "@shared/guest-selection";
+import { IncludedServicesButton } from "@/components/included-services";
 import { RestaurantAreaSettings } from '@/components/restaurant-area-settings';
 import {useRestaurantLayout} from '@/hooks/use-restaurant-layout';
 import { restaurantTablePlacement } from '@shared/restaurant-layout';
@@ -2640,6 +2641,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           <p className="text-muted-foreground">Gestiona mesas, pedidos y menu</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <IncludedServicesButton area="restaurant"/>
           <InventoryPendingConsumptions area="restaurant" readOnly compact label="Consumos pendientes de stock"/>
           <Link href="/mozo">
             <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-goto-mozo">

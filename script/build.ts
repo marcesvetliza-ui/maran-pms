@@ -97,6 +97,7 @@ async function buildAll() {
     entryPoints: ["script/install-spa-funding.ts"], platform: "node", bundle: true,
     format: "esm", outfile: "dist/install-spa-funding.mjs", packages: "external",
   });
+  await writeFile("dist/hospitality-inclusions.sql", await readFile("migrations/20261124_hospitality_inclusions.sql"));
   await mkdir("dist/funding-sql/operational", { recursive: true });
   for (const file of ["schema.sql", "operational/schema.sql"]) {
     await writeFile(`dist/funding-sql/${file}`, await readFile(`server/billing/funding/${file}`));

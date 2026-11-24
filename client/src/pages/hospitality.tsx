@@ -1,4 +1,6 @@
 import { isSelectableGuest } from "@shared/guest-selection";
+import { IncludedServicesPanel } from "@/components/included-services";
+import { allowedInclusionAreas } from "@shared/hospitalityInclusions";
 import {HospitalitySpecialDates} from "@/components/hospitality-special-dates";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState,useEffect } from "react";
@@ -1264,10 +1266,11 @@ function HistoryTab() {
 
 // ========== MAIN PAGE ==========
 export default function HospitalityPage() {
-  const {hasPermission}=useAuth();
+  const {hasPermission,user}=useAuth();
   const search=useSearch();
   const [tab,setTab]=useState(()=>new URLSearchParams(search).get('tab')==='stay-notes'?'stay-notes':'dashboard');
   useEffect(()=>setTab(new URLSearchParams(search).get('tab')==='stay-notes'?'stay-notes':'dashboard'),[search]);
+  const canInclusions=!!user&&allowedInclusionAreas(user.role).length>0;
   const canCampaign=hasPermission("api:hospitality:campaigns");
   return (
     <div className="hospitality-page p-4 sm:p-6 space-y-6">
@@ -1286,8 +1289,10 @@ export default function HospitalityPage() {
           <TabsTrigger value="stay-notes" data-testid="tab-stay-notes">Notas de Estadía</TabsTrigger>
           <TabsTrigger value="history" data-testid="tab-history">Historial</TabsTrigger>
           {canCampaign&&<TabsTrigger value="special-dates" data-testid="tab-special-dates">Fechas especiales</TabsTrigger>}
+          {canInclusions&&<TabsTrigger value="included-services">Servicios incluidos</TabsTrigger>}
         </TabsList>
 
+        {canInclusions&&<TabsContent value="included-services" className="mt-6"><IncludedServicesPanel/></TabsContent>}
         {canCampaign&&<TabsContent value="special-dates" className="mt-6"><HospitalitySpecialDates/></TabsContent>}
         <TabsContent value="dashboard" className="mt-6">
           <DashboardTab />

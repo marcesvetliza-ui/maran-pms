@@ -1,3 +1,4 @@
+import { InclusionTemplateEditor } from "@/components/inclusion-rules-editor";
 import { useState, useEffect } from "react";
 import { fmtMoney } from "@/lib/utils";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -353,6 +354,8 @@ function PackageFormDialog({
             </div>
           </div>
 
+          {open && pkg?.id && <InclusionTemplateEditor key={pkg.id} type="package" id={pkg.id}/> }
+          {!pkg && <p className="text-sm text-muted-foreground">Después de crear el paquete, abrí Editar para configurar los avisos y cantidades de Hospitalidad.</p>}
           <div className="border-t pt-4">
             <div className="flex items-center justify-between mb-3">
               <Label className="text-base font-medium">Servicios Incluidos</Label>
