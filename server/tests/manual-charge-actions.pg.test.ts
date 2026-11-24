@@ -3,6 +3,7 @@ import * as http from "node:http";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { computeGroupOperationalLedger } from "../billing/groupOperationalLedger";
 
 const testDatabaseUrl = process.env.MANUAL_CHARGE_ACTIONS_TEST_DATABASE_URL;
 const databaseName = testDatabaseUrl ? new URL(testDatabaseUrl).pathname.replace(/^\//, "") : "";
@@ -325,16 +326,67 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     expect((await testPool.query('SELECT balance::text FROM folios WHERE id=$1',[f.folioId])).rows[0].balance).toBe('0.00');
     expect((await voidRestaurant(f)).body.alreadyAnulado).toBe(true);
   });
-  it.each(['room-payment','master-payment','room-distribution','fiscal-source','unknown-invoice','unknown-allocation','finished-group'])('keeps a covered or ambiguous group charge unchanged (%s)',async mode=>{
+  it.each(['fiscal-source','unknown-invoice','finished-group'])('keeps a billed or closed group charge unchanged (%s)',async mode=>{
     const f=await groupRestaurantFixture();
-    if(mode==='room-payment')await testPool.query('INSERT INTO payments(id,reservation_id,amount)VALUES($1,$2,10)',[randomUUID(),f.reservationId]);
-    if(mode==='master-payment'||mode==='room-distribution')await testPool.query("INSERT INTO group_payments(id,group_id,amount,destination,distribution_detail)VALUES($1,$2,10,$3,$4)",[randomUUID(),f.groupId,mode==='master-payment'?'master_folio':'group_distribution',JSON.stringify({[f.reservationId]:10})]);
     if(mode==='fiscal-source'||mode==='unknown-invoice')await testPool.query("INSERT INTO sales_invoices(group_id,estado,source_charge_amounts)VALUES($1,'emitida',$2)",[f.groupId,mode==='fiscal-source'?JSON.stringify({[`reservation:${f.reservationId}:charge:${f.chargeId}`]:300.50}):null]);
-    if(mode==='unknown-allocation')await testPool.query("INSERT INTO group_payments(id,group_id,amount,destination)VALUES($1,$2,10,'group_distribution')",[randomUUID(),f.groupId]);
     if(mode==='finished-group')await testPool.query("UPDATE groups SET status='finished' WHERE id=$1",[f.groupId]);
     const before=await restaurantSnapshot();const result=await voidRestaurant(f);expect(result.status,JSON.stringify(result.body)).toBe(409);
     expect((await testPool.query('SELECT status FROM charges WHERE id=$1',[f.chargeId])).rows[0].status).toBe('active');
     expect(await restaurantSnapshot()).toEqual(before);
+  });
+  it.each(['room-payment','master-payment','room-distribution','unknown-allocation'].flatMap(funding=>['edit','void'].map(operation=>({funding,operation}))))('allows reception to $operation a group Restaurant charge with $funding without changing money',async({funding,operation})=>{
+    const f=await groupRestaurantFixture();
+    if(funding==='room-payment')await testPool.query('INSERT INTO payments(id,reservation_id,amount)VALUES($1,$2,400)',[randomUUID(),f.reservationId]);
+    else await testPool.query('INSERT INTO group_payments(id,group_id,amount,destination,distribution_detail)VALUES($1,$2,400,$3,$4)',[randomUUID(),f.groupId,funding==='master-payment'?'master_folio':'group_distribution',funding==='unknown-allocation'?null:JSON.stringify({[f.reservationId]:400})]);
+    // The folio retains its payment when correcting the charge creates credit.
+    if(funding==='room-payment'){
+      await testPool.query("INSERT INTO folio_movements(folio_id,type,amount,description,source_type)VALUES($1,'payment',400,'Anticipo anterior','payment')",[f.folioId]);
+      await testPool.query('UPDATE folios SET total_payments=400,balance=-99.50 WHERE id=$1',[f.folioId]);
+    }
+    const before=await restaurantSnapshot(),parents=(await testPool.query('SELECT * FROM group_payments ORDER BY id')).rows;
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`);
+    expect(actions.body.charges[0]).toMatchObject({eligible:true,canEdit:true,roomOnly:true});
+    const result=operation==='edit'
+      ?await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Importe corregido contra ticket',amount:'200.25'})
+      :await voidRestaurant(f);
+    expect(result.status,JSON.stringify(result.body)).toBe(200);
+    expect(await restaurantSnapshot()).toEqual(before);
+    expect((await testPool.query('SELECT * FROM group_payments ORDER BY id')).rows).toEqual(parents);
+    const folio=(await testPool.query('SELECT total_charges::text,total_payments::text,balance::text FROM folios WHERE id=$1',[f.folioId])).rows[0];
+    expect(folio).toEqual({total_charges:operation==='edit'?'200.25':'0.00',total_payments:funding==='room-payment'?'400.00':'0.00',balance:funding==='room-payment'?(operation==='edit'?'-199.75':'-400.00'):(operation==='edit'?'200.25':'0.00')});
+    const roomPayments=(await testPool.query("SELECT * FROM payments WHERE reservation_id=$1 AND coalesce(status,'active')<>'anulado'",[f.reservationId])).rows;
+    const groupLedger=computeGroupOperationalLedger([{accommodationTotal:0,extrasTotal:Number(folio.total_charges),payments:roomPayments} as any],[],parents.filter(p=>p.group_id===f.groupId) as any);
+    expect(groupLedger.payments).toBe(400);
+    expect(groupLedger.balance).toBe(operation==='edit'?-199.75:-400);
+    const audit=(await testPool.query('SELECT details FROM audit_logs WHERE entity_id=$1 ORDER BY timestamp DESC',[f.chargeId])).rows[0];
+    expect(JSON.parse(audit.details).after).toMatchObject({scope:'room_only',restaurantConsumptionPreserved:true});
+    if(operation==='void')expect((await voidRestaurant(f)).body.alreadyAnulado).toBe(true);
+  });
+  it.each(['edit','void'])('allows %s when the group invoice covers accommodation or a different room only',async operation=>{
+    const f=await groupRestaurantFixture();
+    await testPool.query("INSERT INTO sales_invoices(group_id,estado,source_charge_amounts)VALUES($1,'emitida',$2)",[f.groupId,JSON.stringify({[`reservation:${f.reservationId}:accommodation`]:1000,'reservation:another-room:charge:other-charge':200})]);
+    const result=operation==='edit'?await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Extra personal corregido',amount:'200'}):await voidRestaurant(f);
+    expect(result.status,JSON.stringify(result.body)).toBe(200);
+  });
+  it.each(['edit','void'].flatMap(operation=>['charge','unit','unknown'].map(coverage=>({operation,coverage}))))('preserves group fiscal protection for $operation with $coverage coverage',async({operation,coverage})=>{
+    const f=await groupRestaurantFixture(),source=coverage==='unit'?`reservation:${f.reservationId}:charge:charge-unit:${f.chargeId}:1`:`reservation:${f.reservationId}:charge:${f.chargeId}`;
+    await testPool.query("INSERT INTO sales_invoices(group_id,estado,source_charge_amounts)VALUES($1,'emitida',$2)",[f.groupId,coverage==='unknown'?null:JSON.stringify({[source]:300.50})]);
+    const before=await restaurantSnapshot();
+    const result=operation==='edit'?await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'No guardar',amount:'200'}):await voidRestaurant(f);
+    expect(result.status).toBe(409);
+    expect((await testPool.query('SELECT amount::text,status FROM charges WHERE id=$1',[f.chargeId])).rows[0]).toEqual({amount:'300.50',status:'active'});
+    expect(await restaurantSnapshot()).toEqual(before);
+  });
+  it.each(['completed','partial','pending'])('permits a group charge edit only after a fully reconciled credit (%s)',async mode=>{
+    const f=await groupRestaurantFixture();
+    const original=(await testPool.query("INSERT INTO sales_invoices(group_id,tipo_comprobante,estado,source_charge_amounts,monto_total,monto_acreditado)VALUES($1,'FB',$2,$3,300.50,$4)RETURNING id",[f.groupId,mode==='partial'?'parcial':'anulada',JSON.stringify({[`reservation:${f.reservationId}:charge:${f.chargeId}`]:300.50}),mode==='partial'?'100':'300.50'])).rows[0].id;
+    const nc=(await testPool.query("INSERT INTO sales_invoices(tipo_comprobante,estado,nota_credito_id,monto_total,reconciliation_status)VALUES('NCB','emitida',$1,$2,$3)RETURNING id",[original,mode==='partial'?'100':'300.50',mode==='pending'?'pendiente':'conciliada'])).rows[0].id;
+    await testPool.query('UPDATE sales_invoices SET nota_credito_id=$2 WHERE id=$1',[original,nc]);
+    const fiscal=(await testPool.query('SELECT * FROM sales_invoices WHERE id=ANY($1) ORDER BY id',[[original,nc]])).rows;
+    const result=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Consumo corregido tras NC',amount:'200'});
+    expect(result.status,JSON.stringify(result.body)).toBe(mode==='completed'?200:409);
+    expect((await testPool.query('SELECT * FROM sales_invoices WHERE id=ANY($1) ORDER BY id',[[original,nc]])).rows).toEqual(fiscal);
+    expect((await testPool.query('SELECT amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0].amount).toBe(mode==='completed'?'200.00':'300.50');
   });
   it('allows this room when other rooms alone have explicit payments and invoices',async()=>{
     const f=await groupRestaurantFixture();
@@ -527,10 +579,10 @@ runIsolatedPostgresTests("manual prefactura extras actions (isolated PostgreSQL)
     const changed=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(before),description:'No debería guardar',amount:'100.00'},headers);
     expect(changed.status).toBe(403);expect((await testPool.query('SELECT description,amount::text FROM charges WHERE id=$1',[f.chargeId])).rows[0]).toEqual(before);
   });
-  it('retains the existing Restaurant group review rule for Commercial',async()=>{
+  it('allows the existing Commercial group edit permission for Restaurant imputations',async()=>{
     const f=await groupRestaurantFixture(),headers={'x-test-role':'comercial'},before=await restaurantSnapshot();
-    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`,undefined,headers);expect(actions.status).toBe(200);expect(actions.body.charges[0].canEdit).toBe(false);
-    const changed=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Restaurant grupo corregido',amount:'250.00'},headers);expect(changed.status,JSON.stringify(changed.body)).toBe(409);expect(await restaurantSnapshot()).toEqual(before);
+    const actions=await request('GET',`/api/reservations/${f.reservationId}/manual-charge-actions`,undefined,headers);expect(actions.status).toBe(200);expect(actions.body.charges[0].canEdit).toBe(true);
+    const changed=await request('PATCH',`/api/reservations/${f.reservationId}/manual-charges/${f.chargeId}`,{...bodyFor(),description:'Restaurant grupo corregido',amount:'250.00'},headers);expect(changed.status,JSON.stringify(changed.body)).toBe(200);expect(await restaurantSnapshot()).toEqual(before);
   });
   it.each(['closed-room','closed-folio','invoiced'])('retains existing Commercial group protections (%s)',async mode=>{
     const f=await commercialGroupFixture(),headers={'x-test-role':'comercial'};

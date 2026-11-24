@@ -27,12 +27,15 @@ async function openCancellation(){
  const user=userEvent.setup();await user.click(await screen.findByTestId("tab-folio"));await user.click(await screen.findByTestId("button-anular-charge-spa-charge"));return user;
 }
 it("requires a reason before cancelling the SPA room charge and refreshes its cancelled state",async()=>{
+ const groupKeys=[['/api/groups','group','folio'],['/api/groups/group/master-folio'],['group-room-account',reservation.id]];
+ for(const key of groupKeys)queryClient.setQueryData(key,{balance:95000});
  const invalidation=vi.spyOn(queryClient,"invalidateQueries");
  const user=await openCancellation(),confirm=screen.getByTestId("button-confirm-anular");
  expect(confirm).toBeDisabled();await user.type(screen.getByTestId("input-motivo-anulacion"),"Error de carga");expect(confirm).toBeEnabled();await user.click(confirm);
  await waitFor(()=>expect(toast).toHaveBeenCalledWith(expect.objectContaining({title:"Cargo anulado"})));
  expect(screen.queryByTestId("input-motivo-anulacion")).not.toBeInTheDocument();
  await waitFor(()=>expect(screen.queryByTestId("button-anular-charge-spa-charge")).not.toBeInTheDocument());
+ for(const key of groupKeys)expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
  const calls=(fetch as ReturnType<typeof vi.fn>).mock.calls.filter(([url])=>String(url).endsWith("/anular"));
  for(const key of ["/api/rooms/in-house","/api/rooms/arriving-today","/api/dashboard/departures","/api/planning"]) expect(invalidation).toHaveBeenCalledWith({queryKey:[key]});
  invalidation.mockRestore();

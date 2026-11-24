@@ -26,6 +26,8 @@ export function ReservationChargeVoid({reservationId,charge,role,onSaved}: {
       await Promise.all([
         queryClient.invalidateQueries({queryKey:["/api/reservations",reservationId]}),
         ...["/api/reservations","/api/folios","/api/planning","/api/rooms/in-house","/api/rooms/arriving-today","/api/dashboard/departures","spa-account-folio","spa-prefactura-account"].map(key=>queryClient.invalidateQueries({queryKey:[key]})),
+        queryClient.invalidateQueries({queryKey:['group-room-account']}),
+        queryClient.invalidateQueries({predicate:query=>typeof query.queryKey[0]==='string'&&query.queryKey[0].startsWith('/api/groups')}),
       ]);
       toast({title:"Cargo anulado",description:result.roomOnly ? "Se anuló la imputación a la habitación. El consumo de Restaurante permanece sin cambios." : "El cargo se anuló con su motivo e historial."});
     },

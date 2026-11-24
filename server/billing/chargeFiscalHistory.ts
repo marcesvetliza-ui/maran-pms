@@ -2,7 +2,7 @@ import { unitParent } from '@shared/chargeUnits';
 import type { PoolClient } from "pg";
 
 /** Shared provenance check for edits and cancellations of reservation charges. */
-export async function invoiceSourceConflict(client: PoolClient, reservationId: string, chargeId: string, schema?: string, allowReversed = false): Promise<string | null> {
+export async function invoiceSourceConflict(client: PoolClient, reservationId: string, chargeId: string, schema?: string, allowReversed = false, groupId?: string): Promise<string | null> {
   if (schema && !/^[a-z_][a-z0-9_]*$/.test(schema)) throw new Error("Invalid schema");
   const prefix = schema ? `"${schema}".` : "";
   const result = await client.query(
@@ -10,6 +10,7 @@ export async function invoiceSourceConflict(client: PoolClient, reservationId: s
        SELECT si.id
          FROM ${prefix}sales_invoices si
         WHERE si.reserva_id = $1
+           ${groupId ? 'OR si.group_id = $2' : ''}
            OR si.folio_id IN (
                 SELECT f.id FROM ${prefix}folios f
                  WHERE f.entity_type = 'reservation' AND f.entity_id = $1
@@ -26,7 +27,7 @@ export async function invoiceSourceConflict(client: PoolClient, reservationId: s
             to_jsonb(si)->>'reconciliation_status' AS reconciliation_status
        FROM ${prefix}sales_invoices si
        JOIN invoice_history history ON history.id = si.id`,
-    [reservationId],
+    groupId ? [reservationId, groupId] : [reservationId],
   );
 
   const invoicesById = new Map(result.rows.map((row: any) => [String(row.id), row]));
@@ -111,6 +112,13 @@ export async function invoiceSourceConflict(client: PoolClient, reservationId: s
     released.add(String(original.id));notes.forEach(note=>released.add(String(note.id)));
   }
 
+  const roomSourcePrefix = `reservation:${reservationId}:charge:`;
+  const groupedSource = roomSourcePrefix + chargeId;
+  const matchesCharge = (id: string) => {
+    const source = id.startsWith(roomSourcePrefix) ? id.slice(roomSourcePrefix.length) : id;
+    return source === chargeId || unitParent(source) === chargeId
+      || unitParent(id) === groupedSource || id.startsWith(groupedSource + ':');
+  };
   for (const invoice of result.rows) {
     if(released.has(String(invoice.id)))continue;
     const mapping = resolveSourceMap(invoice);
@@ -118,7 +126,7 @@ export async function invoiceSourceConflict(client: PoolClient, reservationId: s
       return `La factura ${invoice.id} no conserva el detalle de cargos de origen; no se puede modificar con seguridad.`;
     }
     const referencias = typeof invoice.observaciones === "string" && invoice.observaciones.includes(chargeId);
-    if (mapping.sourceIds.has(chargeId) || [...mapping.sourceIds].some(id=>unitParent(id)===chargeId) || referencias) {
+    if ([...mapping.sourceIds].some(matchesCharge) || referencias) {
       return `El cargo ya tiene historial fiscal asociado (comprobante ${invoice.id}, estado ${invoice.estado ?? "desconocido"}).`;
     }
   }

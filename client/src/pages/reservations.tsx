@@ -2871,6 +2871,8 @@ export function ReservationDetailDialog({
           queryClient.invalidateQueries({ queryKey: ["/api/rooms/arriving-today"] }),
           queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] }),
           queryClient.invalidateQueries({ queryKey: ["/api/planning"] }),
+          queryClient.invalidateQueries({ queryKey: ['group-room-account'] }),
+          queryClient.invalidateQueries({ predicate: query => typeof query.queryKey[0] === 'string' && query.queryKey[0].startsWith('/api/groups') }),
         ]);
       } catch {
         toast({ title: "El cargo ya se anuló", description: "Falta actualizar el folio. Actualizá la pantalla antes de continuar." });

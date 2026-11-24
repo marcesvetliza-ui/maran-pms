@@ -52,7 +52,7 @@ export async function anularRestaurantRoomCharge(
         throw support.actionError(409, "Solo se pueden anular cargos activos.");
       }
 
-      const movement = await inspectRestaurantRoomCharge(client, reservationId, charge, false, true);
+      const movement = await inspectRestaurantRoomCharge(client, reservationId, charge);
 
       const updated = await client.query(
         `UPDATE charges SET status = 'anulado', anulado_por = $1,
@@ -100,7 +100,7 @@ export async function anularRestaurantRoomCharge(
 }
 
 /** Verifies the room imputation without touching the Restaurant sale. */
-export async function inspectRestaurantRoomCharge(client: import('pg').PoolClient, reservationId: string, charge: NonNullable<Awaited<ReturnType<typeof support.getCharge>>>, allowReversed = false, allowGroupVoid = false) {
+export async function inspectRestaurantRoomCharge(client: import('pg').PoolClient, reservationId: string, charge: NonNullable<Awaited<ReturnType<typeof support.getCharge>>>, allowReversed = false) {
   if (charge.category !== 'restaurant' || charge.status !== 'active' || charge.is_recurring || charge.unit_amount != null || !support.cents(charge.amount)) throw support.actionError(409,'Solo se pueden corregir cargos activos de Restaurante sin cálculo recurrente.');
   const chargeId = charge.id, expected = {amount:support.cents(charge.amount)!};
       const group = await client.query(
@@ -109,10 +109,11 @@ export async function inspectRestaurantRoomCharge(client: import('pg').PoolClien
       );
       if(group.rows.length){
         const link=group.rows[0];
-        if(!allowGroupVoid||group.rows.length!==1||!link.group_id||!['tentative','blocked','confirmed','inhouse','checked_in','in_house'].includes(link.status))throw support.actionError(409,'La edición o el vínculo grupal de este cargo requiere revisión en el Folio Maestro.','group_scope_review');
-        await assertUnfundedGroupRoomCharge(client,link.group_id,reservationId,chargeId);
+        if(group.rows.length!==1||!link.group_id||!['tentative','blocked','confirmed','inhouse','checked_in','in_house'].includes(link.status))throw support.actionError(409,'El vínculo o estado del grupo requiere revisión antes de corregir el cargo.','group_scope_review');
       }
-      const fiscal = await support.invoiceSourceConflict(client, reservationId, chargeId, undefined, allowReversed);
+      // Payments remain intact. Group membership or an advance does not freeze
+      // Reception's charge corrections; only the charge's fiscal scope matters.
+      const fiscal = await support.invoiceSourceConflict(client, reservationId, chargeId, undefined, allowReversed, group.rows[0]?.group_id);
       if (fiscal) throw support.actionError(409, fiscal, "fiscal_history");
 
       const transfer = await client.query(
@@ -193,28 +194,4 @@ export async function editRestaurantRoomCharge(reservationId:string, chargeId:st
       await client.query('COMMIT');return {...support.publicCharge(updated),roomOnly:true};
     }catch(error){await client.query('ROLLBACK');throw error;}
   });
-}
-
-/** No billing or receipt is reversed here; an already covered charge needs its fiscal/account circuit. */
-async function assertUnfundedGroupRoomCharge(client:import('pg').PoolClient,groupId:string,reservationId:string,chargeId:string){
- const roomPaid=await client.query("SELECT 1 FROM payments WHERE reservation_id=$1 AND coalesce(status,'active')<>'anulado' AND amount::numeric>0 LIMIT 1",[reservationId]);
- const parents=await client.query('SELECT amount::text,destination,distribution,distribution_detail FROM group_payments WHERE group_id=$1 AND amount::numeric>0',[groupId]);
- let funded=roomPaid.rows.length>0;
- for(const parent of parents.rows){
-  if(parent.destination==='master_folio'||parent.distribution==='master_folio'){funded=true;continue;}
-  let detail=parent.distribution_detail;try{if(typeof detail==='string')detail=JSON.parse(detail);}catch{detail=null;}
-  const values=detail&&typeof detail==='object'&&!Array.isArray(detail)?Object.values(detail).map(Number):[];
-  if(!values.length||values.some(v=>!Number.isFinite(v)||v<0)||values.reduce((n,v)=>n+Math.round(v*100),0)!==Math.round(Number(parent.amount)*100))throw support.actionError(409,'Hay un cobro grupal sin distribución verificable por habitación. Revisá su aplicación antes de anular el cargo.','group_charge_funding_unknown');
-  if(Number(detail[reservationId]||0)>0)funded=true;
- }
- if(funded)throw support.actionError(409,'La habitación o el Folio Maestro ya tienen pagos aplicados. Revisá la imputación antes de anular este cargo; no se modificaron cobros ni Caja.','group_charge_funded');
- const invoices=await client.query(`SELECT id,source_charge_ids,source_charge_amounts FROM sales_invoices WHERE group_id=$1 AND estado IN ('emitida','parcial','autorizacion_pendiente','anulada')`,[groupId]);
- const target=`reservation:${reservationId}:charge:${chargeId}`;
- const parse=(v:any)=>{try{return typeof v==='string'?JSON.parse(v):v;}catch{return null;}};
- for(const invoice of invoices.rows){
-  const ids=parse(invoice.source_charge_ids),amounts=parse(invoice.source_charge_amounts);
-  const keys=[...(Array.isArray(ids)?ids:[]),...(amounts&&typeof amounts==='object'&&!Array.isArray(amounts)?Object.keys(amounts):[])];
-  if(!keys.length)throw support.actionError(409,`El comprobante grupal ${invoice.id} no identifica sus conceptos. Requiere revisión antes de anular el cargo.`,'group_fiscal_history');
-  if(keys.some(id=>id===target||id===chargeId||String(id).startsWith(`charge-unit:${chargeId}:`)||String(id).startsWith(target+':')))throw support.actionError(409,`El cargo está asociado al comprobante grupal ${invoice.id}. Corregí primero su facturación; no se anuló la imputación.`,'group_fiscal_history');
- }
 }
