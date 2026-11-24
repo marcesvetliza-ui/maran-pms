@@ -266,6 +266,17 @@ export function InclusionTemplateEditor({
       >
         {save.isPending ? "Guardando…" : "Guardar incluidos"}
       </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        disabled={save.isPending || query.isFetching}
+        onClick={() => {
+          setDirty(false);
+          void query.refetch();
+        }}
+      >
+        Volver a cargar incluidos
+      </Button>
     </section>
   );
 }

@@ -102,6 +102,7 @@ function ServiceAction({
         variant: "destructive",
       });
       await invalidate();
+      if (/^409:/.test(String((e as Error)?.message))) onClose();
     },
   });
   const title =
@@ -559,11 +560,13 @@ export function IncludedServicesPanel({
               </div>
               <span className="rounded-md bg-muted px-2 py-1 text-xs">
                 {s.cancelled
-                  ? "Cancelado"
+                  ? s.sourceStatus === "vencido"
+                    ? "Vencido"
+                    : "Cancelado"
                   : s.used >= s.quantity
                     ? "Utilizado"
                     : s.ready
-                      ? s.sourceKind === "spa_sale"
+                      ? s.readyWhen === "spa_completed"
                         ? "SPA completado · coordinar atención"
                         : "Listo para atender"
                       : s.present

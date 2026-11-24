@@ -403,6 +403,11 @@ describe.skipIf(!enabled)(
           )
         ).rows[0].n,
       ).toBe(0);
+      await pool!.query(
+        "UPDATE spa_treatment_sales SET status='vencido' WHERE id=$1",
+        [id],
+      );
+      expect((await benefits(id)).every((b) => b.cancelled)).toBe(true);
     });
     it("el turno SPA directo genera incluidos y su cancelación los retira", async () => {
       const id = prefix + "-" + randomUUID();

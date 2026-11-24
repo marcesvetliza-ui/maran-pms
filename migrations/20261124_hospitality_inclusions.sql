@@ -88,7 +88,7 @@ BEGIN
   ELSIF TG_TABLE_NAME='spa_treatment_sales' THEN
     catalog:=NEW.treatment_id; source_key:='spa_sale:'||NEW.id; owner:='treatment';
     SELECT name INTO source_title FROM spa_treatments WHERE id=catalog;
-    units:=NEW.quantity_purchased; cancelled:=NEW.status='cancelado';
+    units:=NEW.quantity_purchased; cancelled:=NEW.status IN ('cancelado','vencido');
   ELSE
     -- A prepaid sale is the entitlement source. Its appointment must never duplicate it.
     IF NEW.sold_treatment_sale_id IS NOT NULL THEN
