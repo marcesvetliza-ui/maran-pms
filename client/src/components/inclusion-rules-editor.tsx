@@ -18,11 +18,13 @@ export function InclusionRulesEditor({
   value,
   onChange,
   spa = false,
+  charge = false,
   disabled = false,
 }: {
   value: InclusionRule[];
   onChange: (rules: InclusionRule[]) => void;
   spa?: boolean;
+  charge?: boolean;
   disabled?: boolean;
 }) {
   const add = (area: InclusionRule["area"]) =>
@@ -33,7 +35,7 @@ export function InclusionRulesEditor({
         area,
         service: "",
         quantity: 1,
-        basis: spa ? "stay" : "person_night",
+        basis: spa || charge ? "stay" : "person_night",
         conditions: "",
         readyWhen: spa ? "coordinate" : "arrival",
       },
@@ -49,7 +51,7 @@ export function InclusionRulesEditor({
         Indicá qué le corresponde al cliente y cómo se calcula. La programación
         de mesa, turno o habitación se coordina con cada área.
       </p>
-      {!spa && (
+      {!spa && !charge && (
         <p className="text-xs text-muted-foreground">
           Por persona usa el total de pasajeros declarados, incluidos los
           menores. Para una cantidad fija, elegí Por noche o Por estadía.
@@ -128,10 +130,10 @@ export function InclusionRulesEditor({
                 }
               >
                 {Object.entries(inclusionBasisLabels)
-                  .filter(([k]) => !spa || k === "stay")
+                  .filter(([k]) => !(spa || charge) || k === "stay")
                   .map(([k, v]) => (
                     <option key={k} value={k}>
-                      {spa && k === "stay" ? "Por turno / unidad vendida" : v}
+                      {charge ? "Por unidad del cargo" : spa && k === "stay" ? "Por turno / unidad vendida" : v}
                     </option>
                   ))}
               </select>

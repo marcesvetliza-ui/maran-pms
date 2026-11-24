@@ -1,3 +1,5 @@
+import { RoomChargeHospitalityPreview,useRoomChargeHospitality } from "@/components/room-charge-hospitality";
+import type { ChargeType } from "@shared/schema";
 import { CancelledCollectionCorrection } from "./cancelled-collection-correction";
 import { RestaurantConsumptionDetail, restaurantOrderNumberForCharge } from "./restaurant-consumption-detail";
 import { compareReservationsByRoom } from "@/lib/reservation-list-order";
@@ -587,6 +589,8 @@ export function PrefacturaDialog({
   // el diálogo y abrir el folio de la reserva aparte).
   const [showAddCharge, setShowAddCharge] = useState(false);
   const [addChargePresetId, setAddChargePresetId] = useState("manual");
+  const [addChargeHospitalityQty,setAddChargeHospitalityQty]=useState(1);
+  const chargeHospitality=useRoomChargeHospitality();
   const [addChargeDescription, setAddChargeDescription] = useState("");
   const [addChargeAmount, setAddChargeAmount] = useState("");
   const [addChargeCategory, setAddChargeCategory] = useState("otros");
@@ -761,7 +765,7 @@ export function PrefacturaDialog({
   const { data: posConfigs = [] } = useQuery<any[]>({ queryKey: ["/api/pos-configs"], queryFn: async () => (await apiRequest("GET", "/api/pos-configs")).json(), enabled: open });
   const { data: companies = [] } = useQuery<any[]>({ queryKey: ["/api/companies"], enabled: open });
   const { data: agencies = [] } = useQuery<any[]>({ queryKey: ["/api/agencies"], enabled: open });
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string; allowPriceEdit: boolean }[]>({
+  const { data: chargeTypesData = [] } = useQuery<ChargeType[]>({
     queryKey: ["/api/charge-types"],
     enabled: open,
   });
@@ -1168,12 +1172,13 @@ export function PrefacturaDialog({
     String(pendingFiscalAttempt?.invoiceRequest?.cliente?.condicionIva || "").toLowerCase() === "exento" || (!pendingFiscalAttempt && !!serverAttempt?.recoverable);
 
   const addChargePresets = [
-    ...chargeTypesData.map(ct => ({ id: ct.id, label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowPriceEdit: ct.allowPriceEdit ?? false })),
-    { id: "manual", label: "Cargo editable", description: "", amount: "", category: "otros", allowPriceEdit: true },
+    ...chargeTypesData.map(ct => ({ id: ct.id,hospitalityRules:ct.hospitalityRules||[],label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category, allowPriceEdit: ct.allowPriceEdit ?? false })),
+    { id: "manual",hospitalityRules:[],label: "Cargo editable", description: "", amount: "", category: "otros", allowPriceEdit: true },
   ];
 
   function handleAddChargePresetSelect(id: string) {
     setAddChargePresetId(id);
+    setAddChargeHospitalityQty(1);
     const preset = addChargePresets.find(p => p.id === id);
     if (!preset) return;
     setAddChargeDescription(preset.description || preset.label);
@@ -1189,13 +1194,15 @@ export function PrefacturaDialog({
     setIsAddingCharge(true);
     try {
       const scope = viewScope.current.version;
-      const response = await apiRequest("POST", "/api/charges", {
+      const preset=addChargePresets.find(p=>p.id===addChargePresetId);
+      const qty=preset?.hospitalityRules?.length?addChargeHospitalityQty:1;
+      const response = await apiRequest("POST", "/api/charges", chargeHospitality.payload({
         description: addChargeDescription.trim(),
-        amount: addChargeAmount,
+        amount: qty===1?addChargeAmount:(Number(addChargeAmount)*qty).toFixed(2),
         category: addChargeCategory,
         reservationId,
         date: getLocalToday(),
-      });
+      },preset,qty));
       const created = await response.json();
       if (scope !== viewScope.current.version) return;
       if (!created?.id) throw new Error("El cargo se guardó, pero no se pudo identificar. Actualizá el folio antes de continuar.");
@@ -1203,6 +1210,8 @@ export function PrefacturaDialog({
       await refetchFolio();
       if (scope !== viewScope.current.version) return;
       toast({ title: "Cargo agregado", description: "Se sumó al folio de esta habitación." });
+      chargeHospitality.reset();setAddChargeHospitalityQty(1);
+      queryClient.invalidateQueries({predicate:q=>typeof q.queryKey[0]==='string'&&q.queryKey[0].startsWith('/api/hospitality/included-services')});
       setShowAddCharge(false);
       setAddChargePresetId("manual");
       setAddChargeDescription("");
@@ -2522,6 +2531,8 @@ export function PrefacturaDialog({
                     data-testid="input-add-charge-description"
                   />
                 </div>
+                {!!addChargePresets.find(p=>p.id===addChargePresetId)?.hospitalityRules?.length&&<label className="block text-sm">Cantidad<Input type="number" min={1} max={10000} value={addChargeHospitalityQty} onChange={e=>setAddChargeHospitalityQty(Number(e.target.value))} aria-label="Cantidad de unidades del cargo"/></label>}
+                <RoomChargeHospitalityPreview preset={addChargePresets.find(p=>p.id===addChargePresetId)} quantity={addChargeHospitalityQty}/>
                 <div className="flex justify-end gap-2 pt-1">
                   <Button
                     type="button"

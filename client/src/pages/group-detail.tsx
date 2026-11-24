@@ -1,3 +1,5 @@
+import { RoomChargeHospitalityPreview,useRoomChargeHospitality } from "@/components/room-charge-hospitality";
+import type { ChargeType } from "@shared/schema";
 import { useAuth } from "@/App";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, supportsGroupCreditAdvance } from "@shared/groupCreditAdvance";
 import { GroupCreditAdvanceConfirmation } from "@/components/group-credit-advance-confirmation";
@@ -1303,23 +1305,26 @@ export default function GroupDetailPage() {
     },
   });
 
-  const { data: chargeTypesData = [] } = useQuery<{ id: string; label: string; description: string; defaultAmount: string; category: string }[]>({
+  const { data: chargeTypesData = [] } = useQuery<ChargeType[]>({
     queryKey: ["/api/charge-types"],
   });
   const chargePresets = [
-    ...chargeTypesData.map(ct => ({ label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category })),
-    { label: "Cargo personalizado", description: "", amount: "", category: "otros" },
+    ...chargeTypesData.map(ct => ({ id:ct.id,hospitalityRules:ct.hospitalityRules||[],label: ct.label, description: ct.description, amount: String(ct.defaultAmount), category: ct.category })),
+    { id:"",hospitalityRules:[],label: "Cargo personalizado", description: "", amount: "", category: "otros" },
   ];
 
+  const individualChargeHospitality=useRoomChargeHospitality();
   const addIndividualChargeMutation = useMutation({
     mutationFn: async ({ reservationId, description, amount, category }: { reservationId: string; description: string; amount: string; category: string }) => {
       const todayStr = getArgentinaToday();
-      return apiRequest("POST", "/api/charges", { reservationId, description, amount, category, date: todayStr });
+      return apiRequest("POST", "/api/charges", individualChargeHospitality.payload({ reservationId, description, amount, category, date: todayStr },indivChargePreset===''?undefined:chargePresets[Number(indivChargePreset)],indivChargeQty));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId] });
       queryClient.invalidateQueries({ queryKey: ["/api/groups", groupId, "folio"] });
       toast({ title: "Cargo agregado a la reserva" });
+      individualChargeHospitality.reset();
+      queryClient.invalidateQueries({predicate:q=>typeof q.queryKey[0]==='string'&&q.queryKey[0].startsWith('/api/hospitality/included-services')});
       setChargingReservation(null);
       setIndivChargePreset("");
       setIndivChargeDesc("");
@@ -5747,6 +5752,7 @@ export default function GroupDetailPage() {
                 </SelectContent>
               </Select>
             </div>
+            <RoomChargeHospitalityPreview preset={indivChargePreset===''?undefined:chargePresets[Number(indivChargePreset)]} quantity={indivChargeQty}/>
             {indivChargeDesc && indivChargeAmount && (
               <div className="rounded-md bg-muted px-3 py-2 text-sm">
                 Total: <strong>${(parseFloat(indivChargeAmount || "0") * indivChargeQty).toLocaleString("es-AR", { minimumFractionDigits: 2 })}</strong>

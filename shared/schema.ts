@@ -366,6 +366,11 @@ export const charges = pgTable("charges", {
   anuladoPor: text("anulado_por"),
   motivoAnulacion: text("motivo_anulacion"),
   anuladoAt: timestamp("anulado_at"),
+  chargeTypeId: varchar("charge_type_id"),
+  hospitalityUnits: integer("hospitality_units"),
+  hospitalityRulesSnapshot: jsonb("hospitality_rules_snapshot").$type<import("./hospitalityInclusions").InclusionRule[]>(),
+  hospitalityRequestId: varchar("hospitality_request_id"),
+  hospitalityCreationSnapshot: jsonb("hospitality_creation_snapshot"),
   isRecurring: boolean("is_recurring").notNull().default(false),
   unitAmount: decimal("unit_amount", { precision: 10, scale: 2 }),
 });
@@ -385,6 +390,7 @@ export const chargeTypes = pgTable("charge_types", {
   sortOrder: integer("sort_order").notNull().default(0),
   allowPriceEdit: boolean("allow_price_edit").notNull().default(false),
   allowRecurring: boolean("allow_recurring").notNull().default(false),
+  hospitalityRules: jsonb("hospitality_rules").$type<import("./hospitalityInclusions").InclusionRule[]>().notNull().default([]),
 });
 export const insertChargeTypeSchema = createInsertSchema(chargeTypes).omit({ id: true });
 export type InsertChargeType = z.infer<typeof insertChargeTypeSchema>;

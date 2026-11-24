@@ -15,7 +15,7 @@ beforeEach(()=>{
   const url=String(input);const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json'}});
   if(url.endsWith('/manual-charges/parking')&&init?.method==='PATCH'){
    if(fail)return json({error:'El cargo cambió desde que se abrió.'},409);
-   const body=JSON.parse(String(init.body));charge={...charge,description:body.description,amount:body.amount};return json(charge);
+   const body=JSON.parse(String(init.body));charge={...charge,description:body.description,amount:body.amount,...(body.quantity!==undefined?{hospitalityUnits:body.quantity}:{})};return json(charge);
   }
   if(url.endsWith('/manual-charge-actions'))return json({charges:[{...charge,eligible,reason:eligible?undefined:'El cargo tiene comprobantes asociados.'}]});
   if(url===`/api/reservations/${reservation.id}`)return json(reservation);
@@ -72,4 +72,14 @@ it.each(['folio','checkout'] as const)('edits a Restaurant imputation from %s wi
  await user.type(screen.getByLabelText('Motivo del cambio'),'Consumo cargado de más');
  await user.click(screen.getByRole('button',{name:'Guardar cargo'}));
  await waitFor(()=>expect(charge.amount).toBe('1500'));
+});
+
+it('permite corregir la cantidad vendida de un cargo con incluidos conservando la revisión original',async()=>{
+ charge={...charge,category:'restaurant',description:'Media pensión',hospitalityUnits:4,isRecurring:false};
+ const user=await open('folio');expect(screen.getByText(/Este cargo habilita servicios de Hospitalidad/)).toBeInTheDocument();
+ await user.clear(screen.getByLabelText('Cantidad vendida'));await user.type(screen.getByLabelText('Cantidad vendida'),'2');
+ await user.type(screen.getByLabelText('Motivo del cambio'),'Se vendieron dos unidades');await user.click(screen.getByRole('button',{name:'Guardar cargo'}));
+ await waitFor(()=>expect(charge.hospitalityUnits).toBe(2));
+ const patch=(fetch as ReturnType<typeof vi.fn>).mock.calls.find(([url,init])=>String(url).endsWith('/manual-charges/parking')&&init?.method==='PATCH');
+ expect(JSON.parse(String(patch?.[1]?.body))).toMatchObject({quantity:2,expectedQuantity:4,motivo:'Se vendieron dos unidades'});
 });

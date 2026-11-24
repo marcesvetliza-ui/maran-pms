@@ -1,3 +1,4 @@
+import {hospitalityChargeFacts,hospitalityChargeUnitPrice,hospitalityChargeEditUnits} from "../roomChargeHospitalityActions";
 import { randomUUID } from "node:crypto";
 import { invoiceSourceConflict } from "../billing/chargeFiscalHistory";
 import type { Express } from "express";
@@ -24,6 +25,7 @@ type ChargeRow = {
   created_by: string | null;
   is_recurring: boolean;
   unit_amount: string | null;
+  hospitality_units?: number | null;
   anulado_por: string | null;
   motivo_anulacion: string | null;
   anulado_at: Date | null;
@@ -52,7 +54,7 @@ function money(centsValue: bigint): string {
 
 function assertAllowedBody(body: unknown, operation: "edit" | "void"): asserts body is Record<string, unknown> {
   const allowed = operation === "edit"
-    ? new Set(["description", "amount", "motivo", "expectedDescription", "expectedAmount"])
+    ? new Set(["description", "amount", "motivo", "expectedDescription", "expectedAmount","quantity","expectedQuantity"])
     : new Set(["motivo", "expectedDescription", "expectedAmount"]);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw actionError(400, "El cuerpo de la solicitud no es válido.");
@@ -96,6 +98,7 @@ function publicCharge(row: ChargeRow) {
     createdBy: row.created_by,
     isRecurring: row.is_recurring,
     unitAmount: row.unit_amount,
+    hospitalityUnits: row.hospitality_units??null,
     anuladoPor: row.anulado_por,
     motivoAnulacion: row.motivo_anulacion,
     anuladoAt: row.anulado_at,
@@ -152,7 +155,7 @@ function reservationIsClosed(reservation: { status: string; folio_status?: strin
 async function getCharge(client: PoolClient, reservationId: string, chargeId: string) {
   const result = await client.query(
     `SELECT id, reservation_id, description, amount::text, date::text, category, status,
-            created_by, is_recurring, unit_amount::text, anulado_por, motivo_anulacion, anulado_at
+            created_by, is_recurring, unit_amount::text,hospitality_units, anulado_por, motivo_anulacion, anulado_at
        FROM charges
       WHERE id = $1 AND reservation_id = $2
       FOR UPDATE`,
@@ -168,7 +171,8 @@ async function inspectManualSource(
   charge: ChargeRow,
   operation: "edit" | "void" = "edit",
 ): Promise<{ eligible: boolean; reason?: string; movementId?: string; movementSnapshot?: Record<string, unknown>; supplement?: "early_checkin" | "late_checkout"; legacySupplement?: boolean }> {
-  if (!MANUAL_CHARGE_CATEGORIES.has(charge.category) || (operation === "edit" && (charge.is_recurring || charge.unit_amount != null))) {
+  const hospitality=await hospitalityChargeFacts(client,charge.id);
+  if ((!MANUAL_CHARGE_CATEGORIES.has(charge.category) && !hospitality) || (operation === "edit" && (charge.is_recurring || charge.unit_amount != null) && !hospitality)) {
     return { eligible: false, reason: "El origen del cargo no corresponde a un extra manual editable." };
   }
   if (!charge.description.trim() || !cents(charge.amount)) {
@@ -241,7 +245,8 @@ async function inspectManualSource(
     return { eligible: false, reason: "El cargo tiene otros movimientos financieros vinculados." };
   }
 
-  const fiscalConflict = await invoiceSourceConflict(client, reservationId, charge.id, undefined, operation === 'edit');
+  const groupId=hospitality?(await client.query('SELECT group_id FROM group_reservation_links WHERE reservation_id=$1',[reservationId])).rows[0]?.group_id:undefined;
+  const fiscalConflict = await invoiceSourceConflict(client, reservationId, charge.id, undefined, operation === 'edit',groupId);
   if (fiscalConflict) return { eligible: false, reason: fiscalConflict };
 
   if (charge.status !== "active") {
@@ -325,7 +330,7 @@ async function loadActions(client: PoolClient, reservationId: string, role?: str
   assertChargeEditScope(reservation, role);
   const result = await client.query(
     `SELECT id, reservation_id, description, amount::text, date::text, category, status,
-            created_by, is_recurring, unit_amount::text, anulado_por, motivo_anulacion, anulado_at
+            created_by, is_recurring, unit_amount::text,hospitality_units, anulado_por, motivo_anulacion, anulado_at
        FROM charges
       WHERE reservation_id = $1
       ORDER BY date DESC, id
@@ -344,6 +349,7 @@ async function loadActions(client: PoolClient, reservationId: string, role?: str
     charges.push({
       id: row.id,
       roomOnly: row.category==='restaurant',
+      hospitalityUnits:row.hospitality_units??null,isRecurring:row.is_recurring,
       eligible: proof.eligible && !reservationIsClosed(reservation),
       ...(reason ? { reason } : {}),
       description: row.description,
@@ -398,6 +404,7 @@ async function mutateManualCharge(
         throw actionError(409, "El extra cambió desde que se abrió. Actualizá la pantalla e intentá nuevamente.", "stale_snapshot");
       }
 
+      if(await hospitalityChargeFacts(client,chargeId))await client.query("SELECT set_config('hospitality.actor_id',$1,true),set_config('hospitality.actor_name',$2,true)",[actor.id,actor.name]);
       const proof = await inspectManualSource(client, reservationId, charge, operation);
       if (!proof.movementId && !proof.legacySupplement) {
         throw actionError(409, proof.reason ?? "No se pudo comprobar el origen manual del cargo.", "source_conflict");
@@ -430,15 +437,17 @@ async function mutateManualCharge(
       let result: ChargeRow;
       let afterMovement: unknown;
       if (operation === "edit") {
+        const hospitalityUnitPrice=await hospitalityChargeUnitPrice(client,chargeId,nextAmount!,actor);
+        const hospitalityUnits=await hospitalityChargeEditUnits(client,chargeId,body);
         const updateCharge = await client.query(
           `UPDATE charges
-              SET description = $1, amount = $2
+              SET description = $1, amount = $2, unit_amount=coalesce($7::numeric,unit_amount),hospitality_units=coalesce($8::integer,hospitality_units)
             WHERE id = $3 AND reservation_id = $4
               AND description = $5 AND amount::numeric = $6::numeric
               AND status = 'active'
           RETURNING id, reservation_id, description, amount::text, date::text, category, status,
-                    created_by, is_recurring, unit_amount::text, anulado_por, motivo_anulacion, anulado_at`,
-          [nextDescription, money(nextAmount!), chargeId, reservationId, expected.description, money(expected.amount)],
+                    created_by, is_recurring, unit_amount::text,hospitality_units, anulado_por, motivo_anulacion, anulado_at`,
+          [nextDescription, money(nextAmount!), chargeId, reservationId, expected.description, money(expected.amount),hospitalityUnitPrice,hospitalityUnits],
         );
         if (!updateCharge.rows[0]) {
           throw actionError(409, "El extra cambió desde que se abrió. Actualizá la pantalla e intentá nuevamente.", "stale_snapshot");
@@ -469,7 +478,7 @@ async function mutateManualCharge(
               AND description = $5 AND amount::numeric = $6::numeric
               AND status = 'active'
           RETURNING id, reservation_id, description, amount::text, date::text, category, status,
-                    created_by, is_recurring, unit_amount::text, anulado_por, motivo_anulacion, anulado_at`,
+                    created_by, is_recurring, unit_amount::text,hospitality_units, anulado_por, motivo_anulacion, anulado_at`,
           [actor.name, motivo, chargeId, reservationId, expected.description, money(expected.amount)],
         );
         if (!updateCharge.rows[0]) {

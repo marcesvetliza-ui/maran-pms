@@ -1,3 +1,6 @@
+import { RoomChargeInclusionEditor } from "@/components/room-charge-hospitality";
+import { chargeInclusionRulesSchema } from "@shared/roomChargeHospitality";
+import type { InclusionRule } from "@shared/hospitalityInclusions";
 import {useRoomStatusCorrection} from "@/components/use-room-status-correction";
 import { useState, useEffect } from "react";
 import { getArgentinaToday } from "@/lib/date-utils";
@@ -929,6 +932,7 @@ export default function RoomsPage() {
   const [ctCategory, setCtCategory] = useState("otros");
   const [ctAllowPriceEdit, setCtAllowPriceEdit] = useState(false);
   const [ctAllowRecurring, setCtAllowRecurring] = useState(false);
+  const [ctHospitalityRules,setCtHospitalityRules]=useState<InclusionRule[]>([]);
   const [ctFormOpen, setCtFormOpen] = useState(false);
   const [deletingCTId, setDeletingCTId] = useState<string | null>(null);
 
@@ -939,11 +943,13 @@ export default function RoomsPage() {
 
   function openNewCT() {
     setEditingCT(null);
+    setCtHospitalityRules([]);
     setCtLabel(""); setCtDescription(""); setCtAmount(""); setCtCategory("otros"); setCtAllowPriceEdit(false); setCtAllowRecurring(false);
     setCtFormOpen(true);
   }
   function openEditCT(ct: ChargeType) {
     setEditingCT(ct);
+    setCtHospitalityRules(ct.hospitalityRules||[]);
     setCtLabel(ct.label); setCtDescription(ct.description);
     setCtAmount(String(ct.defaultAmount)); setCtCategory(ct.category);
     setCtAllowPriceEdit(ct.allowPriceEdit ?? false);
@@ -953,8 +959,8 @@ export default function RoomsPage() {
 
   const saveCTMutation = useMutation({
     mutationFn: () => editingCT
-      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit, allowRecurring: ctAllowRecurring })
-      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit, allowRecurring: ctAllowRecurring }),
+      ? apiRequest("PATCH", `/api/charge-types/${editingCT.id}`, { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit, allowRecurring: ctAllowRecurring, hospitalityRules: ctHospitalityRules })
+      : apiRequest("POST", "/api/charge-types", { label: ctLabel, description: ctDescription, defaultAmount: parseFloat(ctAmount), category: ctCategory, allowPriceEdit: ctAllowPriceEdit, allowRecurring: ctAllowRecurring, hospitalityRules: ctHospitalityRules }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types/all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/charge-types"] });
@@ -1563,7 +1569,7 @@ export default function RoomsPage() {
 
       {/* ── Dialog: Cargos en Habitaciones ────────────────────────────────── */}
       <Dialog open={chargesSheetOpen} onOpenChange={v => { setChargesSheetOpen(v); if (!v) setCtFormOpen(false); }}>
-        <DialogContent className="max-w-lg flex flex-col max-h-[85vh]">
+        <DialogContent className="max-w-2xl flex flex-col max-h-[90dvh] overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ReceiptText className="h-5 w-5 text-primary" />
@@ -1574,7 +1580,8 @@ export default function RoomsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+          <div className="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1">
+          <div className="space-y-2">
             {chargeTypesList.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-8">Sin cargos configurados</p>
             )}
@@ -1690,11 +1697,12 @@ export default function RoomsPage() {
                   <p className="text-xs text-muted-foreground mt-0.5">Permite usar este cargo como repetitivo (se actualiza al cambiar las noches)</p>
                 </div>
               </div>
+              <RoomChargeInclusionEditor value={ctHospitalityRules} onChange={setCtHospitalityRules} disabled={saveCTMutation.isPending}/>
               <div className="flex gap-2 pt-1">
                 <Button variant="outline" className="flex-1" onClick={() => setCtFormOpen(false)}>Cancelar</Button>
                 <Button
                   className="flex-1"
-                  disabled={!ctLabel.trim() || !ctDescription.trim() || !ctAmount || parseFloat(ctAmount) <= 0 || saveCTMutation.isPending}
+                  disabled={!ctLabel.trim() || !ctDescription.trim() || !ctAmount || parseFloat(ctAmount) <= 0 || !chargeInclusionRulesSchema.safeParse(ctHospitalityRules).success || saveCTMutation.isPending}
                   onClick={() => saveCTMutation.mutate()}
                   data-testid="btn-save-ct"
                 >
@@ -1710,6 +1718,7 @@ export default function RoomsPage() {
               </Button>
             </div>
           )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
