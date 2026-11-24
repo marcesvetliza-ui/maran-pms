@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { ArrowUpRight, BedDouble, CalendarDays, ChevronDown, Link2 } from 'lucide-react';
+import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import { formatDisplayDate, formatDisplayDateTime } from '@shared/date-display';
 import { Button } from './ui/button';
@@ -52,21 +55,77 @@ const guest=(r:Booking)=>r.guest_name || r.reservations[0]?.guestName || 'Huésp
 const canAssign=(r:Booking)=>!r.reservations.length&&r.booking_status!=='cancelled'&&['pending','review'].includes(r.status)&&!['INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'');
 const pmsLink=(id:string)=>`/reservations?view=${encodeURIComponent(id)}&returnTo=%2Fota-channels`;
 type Detail={notes:string|null;notesStatus:string;settlements:{reservation_id:string;source_currency:string;source_total:string;exchange_rate:string;settlement_currency:string;settlement_total:string;created_at:string}[]};
+const stayLabels:Record<string,string>={confirmed:'Reservada',checked_in:'Alojada',checked_out:'Finalizada',cancelled:'Cancelada',no_show:'No se presentó',web_checkin:'Pre check-in'};
+function stayLabel(status:string){return stayLabels[status]||'Estado no informado';}
 function BookingDetail({connectionId,booking:r,canRetry,pending,onRetry,assignOpen,onAssigned}:{connectionId:string;booking:Booking;canRetry:boolean;pending:boolean;onRetry:(id:string)=>void;assignOpen:boolean;onAssigned:()=>void}){
  const [assigning,setAssigning]=useState(assignOpen);
+ const [technicalOpen,setTechnicalOpen]=useState(false);
  const q=useQuery<Detail>({queryKey:['channex-booking-detail',connectionId,r.revision_id],staleTime:0,gcTime:0,retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false,
  queryFn:async()=>(await apiRequest('GET',`/api/channex/connections/${encodeURIComponent(connectionId)}/inbound/booking-detail/${encodeURIComponent(r.revision_id)}`)).json()});
- return <div className="space-y-5 text-sm">
- <section className="grid gap-3 sm:grid-cols-2"><div><p className="text-muted-foreground">Canal / referencia</p><p>{r.channel||'Canal no informado'} · {r.reference||r.booking_id||'Sin identificar'}</p></div><div><p className="text-muted-foreground">Estadía</p><p>{formatDisplayDate(r.arrival||r.reservations[0]?.checkInDate)} → {formatDisplayDate(r.departure||r.reservations[0]?.checkOutDate)}</p></div><div><p className="text-muted-foreground">Importe original del canal</p><p className="font-medium">{amount(r)}</p></div><div><p className="text-muted-foreground">Última recepción</p><p>{formatDisplayDateTime(r.created_at)}</p></div></section>
- <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold">Estado de la reserva</h3><p>Canal: {bookingLabels[r.booking_status||'']||'Estado no identificado'}</p><Result revision={r}/>
- {canRetry&&r.status==='review'&&!['MANUAL_ASSIGNMENT_REQUIRED','INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'')&&<Button variant="outline" disabled={pending} onClick={()=>onRetry(r.revision_id)}>Reintentar revisión</Button>}</section>
- {canRetry&&canAssign(r)&&<div>{assigning?<ChannexManualAssignment key={r.revision_id} connectionId={connectionId} revisionId={r.revision_id} onAssigned={onAssigned}/>:<Button onClick={()=>setAssigning(true)}>Asignar al PMS</Button>}</div>}
- <section className="space-y-2"><h3 className="font-semibold">Habitaciones y reserva en PMS</h3>{r.reservations.length?r.reservations.map(local=><div key={local.id} className="rounded border p-3"><p>{local.category} · Habitación {local.roomNumber}</p><p>{formatDisplayDate(local.checkInDate)} → {formatDisplayDate(local.checkOutDate)}</p><a className="underline text-primary" href={pmsLink(local.id)}>Ver reserva en PMS {local.code}</a></div>):<p className="text-muted-foreground">Todavía no hay una reserva vinculada en el PMS.</p>}</section>
- {q.isLoading?<p>Cargando conversión y observaciones…</p>:q.error?<div role="alert"><p>No se pudo consultar la conversión y las observaciones.</p><Button variant="outline" onClick={()=>void q.refetch()}>Volver a consultar detalle</Button></div>:q.data&&<>
- <section className="space-y-2"><h3 className="font-semibold">Conversión registrada en el PMS</h3>{q.data.settlements.length?q.data.settlements.map(s=><div key={s.reservation_id} className="rounded border p-3 space-y-1"><p>{r.reservations.find(local=>local.id===s.reservation_id)?.code||'Reserva vinculada'}</p><p>Original: {amount({...r,amount:s.source_total,currency:s.source_currency})}</p><p>Cotización conservada: ARS {new Intl.NumberFormat('es-AR',{maximumFractionDigits:6}).format(Number(s.exchange_rate))} por {s.source_currency}</p><p>Registrado: {amount({...r,amount:s.settlement_total,currency:s.settlement_currency})}</p><p className="text-muted-foreground">{formatDisplayDateTime(s.created_at)} · Los movimientos posteriores y el saldo se consultan en el folio.</p></div>):<p className="text-muted-foreground">No hay una conversión registrada para esta reserva. No se calcula con la cotización actual.</p>}</section>
- <section className="space-y-2"><h3 className="font-semibold">Observaciones del canal</h3>{q.data.notesStatus==='available'?<p className="whitespace-pre-wrap break-words rounded border p-3">{q.data.notes}</p>:<p className="text-muted-foreground">{q.data.notesStatus==='payment_omitted'?'Se omitió una observación que contenía información de pago.':q.data.notesStatus==='unavailable'?'Las observaciones guardadas no están disponibles en este momento.':'No hay observaciones del canal conservadas para esta reserva.'}</p>}</section>
- </>}
- <section className="border-t pt-4"><h3 className="font-semibold">Historial ({r.revision_count})</h3><History connectionId={connectionId} revisionId={r.revision_id}/></section>
+ const arrival=r.arrival||r.reservations[0]?.checkInDate,departure=r.departure||r.reservations[0]?.checkOutDate;
+ const nights=arrival&&departure?differenceInCalendarDays(parseISO(departure),parseISO(arrival)):null;
+ const requiresReview=r.status==='review'&&r.review_code!=='MANUAL_ASSIGNMENT_REQUIRED';
+ const sameStatus=r.reservations.length&&r.reservations.every(local=>local.status===r.reservations[0].status)?r.reservations[0].status:null;
+ return <div className="space-y-6 text-sm min-w-0" data-testid="ota-booking-detail">
+   <section aria-label="Resumen de la reserva" className="space-y-4">
+     <div className="flex flex-wrap items-center gap-2">
+       <Badge variant="outline">{r.channel||'Canal no informado'}</Badge>
+       <span className="font-medium break-all">{r.reference?`Reserva ${r.reference}`:'Referencia no informada'}</span>
+       {r.booking_status==='cancelled'?<Badge variant="destructive">Cancelada en el canal</Badge>:sameStatus?<Badge variant="secondary">{stayLabel(sameStatus)} en PMS</Badge>:<Badge variant="secondary">{canAssign(r)?'Pendiente de asignación':r.reservations.length?'Vinculada al PMS':'Sin vincular en PMS'}</Badge>}
+     </div>
+     <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+       <div className="rounded-lg border bg-muted/20 p-4"><dt className="flex items-center gap-2 text-muted-foreground"><CalendarDays className="h-4 w-4"/>Ingreso</dt><dd className="mt-2 text-lg font-semibold tabular-nums">{formatDisplayDate(arrival)}</dd></div>
+       <div className="rounded-lg border bg-muted/20 p-4"><dt className="text-muted-foreground">Salida</dt><dd className="mt-2 text-lg font-semibold tabular-nums">{formatDisplayDate(departure)}</dd>{nights!==null&&Number.isFinite(nights)&&nights>0&&<dd className="mt-1 text-xs text-muted-foreground">{nights} {nights===1?'noche':'noches'}</dd>}</div>
+       <div className="col-span-2 rounded-lg border bg-primary/5 p-4 sm:col-span-1"><dt className="text-muted-foreground">Importe original del canal</dt><dd className="mt-2 text-lg font-semibold tabular-nums break-words">{amount(r)}</dd></div>
+     </dl>
+   </section>
+
+   {requiresReview&&<section role="status" aria-label="Atención requerida" className="rounded-lg border border-amber-400 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-2">
+     <h3 className="font-semibold">Esta reserva requiere atención</h3>
+     <p>{reasons[r.review_code||'']||'Revisá la reserva y su configuración antes de continuar.'}</p>
+     {canRetry&&!['INVALID_REVISION','WRONG_PROPERTY','REVISION_ID_COLLISION','MASKED_GUEST_DATA'].includes(r.review_code||'')&&<Button variant="outline" disabled={pending} onClick={()=>onRetry(r.revision_id)}>Reintentar revisión</Button>}
+   </section>}
+
+   <div className="grid gap-6 md:grid-cols-2">
+   <section className="space-y-3" aria-labelledby="ota-rooms-heading">
+     <div className="flex flex-wrap items-center justify-between gap-2"><h3 id="ota-rooms-heading" className="flex items-center gap-2 font-semibold"><BedDouble className="h-4 w-4"/>Habitaciones en el PMS</h3>{r.reservations.length>1&&<span className="text-xs text-muted-foreground">{r.reservations.length} habitaciones</span>}</div>
+     {r.reservations.length?<div className="grid gap-3">{r.reservations.map(local=><div key={local.id} className="rounded-lg border p-4 space-y-3 min-w-0">
+       <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs text-muted-foreground">Habitación</p><p className="text-xl font-semibold text-primary">{local.roomNumber||'Sin asignar'}</p><p className="font-medium">{local.category||'Categoría no informada'}</p></div><Badge variant="outline">{stayLabel(local.status)}</Badge></div>
+       <p className="text-xs text-muted-foreground">{formatDisplayDate(local.checkInDate)} → {formatDisplayDate(local.checkOutDate)}</p>
+       <a className="inline-flex items-center gap-1 font-medium text-primary underline underline-offset-4" href={pmsLink(local.id)}>Ver reserva en PMS<ArrowUpRight className="h-4 w-4"/></a>
+     </div>)}</div>:<div className="rounded-lg border border-dashed p-4 space-y-3"><p className="text-muted-foreground">Todavía no hay una reserva vinculada en el PMS.</p>{canAssign(r)&&<p>La habitación la asigna recepción.</p>}
+       {canRetry&&canAssign(r)&&!assigning&&<Button onClick={()=>setAssigning(true)}>Asignar al PMS</Button>}
+     </div>}
+     {canRetry&&canAssign(r)&&assigning&&<ChannexManualAssignment key={r.revision_id} connectionId={connectionId} revisionId={r.revision_id} onAssigned={onAssigned}/>}
+   </section>
+
+   {q.isLoading?<p role="status" className="text-muted-foreground">Cargando importes y observaciones…</p>:q.error?<div role="alert" className="rounded-lg border p-4 space-y-2"><p>No se pudo consultar la conversión y las observaciones.</p><Button variant="outline" onClick={()=>void q.refetch()}>Volver a consultar detalle</Button></div>:q.data&&<>
+     <section className="space-y-3" aria-labelledby="ota-amounts-heading"><h3 id="ota-amounts-heading" className="font-semibold">Importe registrado en el PMS</h3>
+       {q.data.settlements.length?<><div className="grid gap-3">{q.data.settlements.map(s=>{const local=r.reservations.find(local=>local.id===s.reservation_id);return <div key={s.reservation_id} className="rounded-lg border p-4 space-y-2 min-w-0">
+         {local&&<p className="text-muted-foreground">Habitación {local.roomNumber} · {local.category}</p>}
+         <p className="text-lg font-semibold tabular-nums">{amount({...r,amount:s.settlement_total,currency:s.settlement_currency})}</p>
+         <p className="text-xs text-muted-foreground">Original: {amount({...r,amount:s.source_total,currency:s.source_currency})}</p>
+         <p className="text-xs text-muted-foreground">Cotización conservada: {s.settlement_currency} {new Intl.NumberFormat('es-AR',{maximumFractionDigits:6}).format(Number(s.exchange_rate))} por {s.source_currency}</p>
+       </div>;})}</div><p className="text-xs text-muted-foreground">Importe registrado al recibir la reserva. Los movimientos posteriores y el saldo actual se consultan en el folio.</p></>:<p className="text-muted-foreground">No hay una conversión registrada para esta reserva. No se calcula con la cotización actual.</p>}
+     </section>
+     <section className="space-y-3 md:col-span-2" aria-labelledby="ota-notes-heading"><h3 id="ota-notes-heading" className="font-semibold">Observaciones del canal</h3>{q.data.notesStatus==='available'?<p className="whitespace-pre-wrap break-words rounded-lg border bg-muted/20 p-4 leading-relaxed">{q.data.notes}</p>:<p className="text-muted-foreground">{q.data.notesStatus==='payment_omitted'?'Se omitió una observación que contenía información de pago.':q.data.notesStatus==='unavailable'?'Las observaciones guardadas no están disponibles en este momento.':'No hay observaciones del canal conservadas para esta reserva.'}</p>}</section>
+   </>}
+   </div>
+
+   <Collapsible open={technicalOpen} onOpenChange={setTechnicalOpen} className="rounded-lg border">
+     <CollapsibleTrigger asChild><Button variant="ghost" className="h-auto w-full justify-between gap-3 p-4 text-left whitespace-normal" data-testid="button-ota-connection-detail"><span className="flex items-center gap-2"><Link2 className="h-4 w-4 shrink-0"/>Conexión e historial</span><ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${technicalOpen?'rotate-180':''}`}/></Button></CollapsibleTrigger>
+     <CollapsibleContent><div className="border-t p-4 space-y-5 min-w-0">
+       <section className="space-y-2"><h3 className="font-semibold">Sincronización con Channex</h3><Result revision={r}/><p className="text-xs text-muted-foreground">Último evento del canal: {bookingLabels[r.booking_status||'']||'No identificado'}. Este evento no indica el estado actual de la estadía en el PMS.</p></section>
+       <dl className="grid gap-3 sm:grid-cols-2 text-xs">
+         <div><dt className="text-muted-foreground">Última recepción</dt><dd>{formatDisplayDateTime(r.created_at)}</dd></div>
+         <div><dt className="text-muted-foreground">Confirmación a Channex</dt><dd>{r.acked_at?formatDisplayDateTime(r.acked_at):'Pendiente'}</dd></div>
+         <div><dt className="text-muted-foreground">Identificador de reserva en Channex</dt><dd className="break-all font-mono">{r.booking_id||'No informado'}</dd></div>
+         <div><dt className="text-muted-foreground">Identificador de revisión</dt><dd className="break-all font-mono">{r.revision_id}</dd></div>
+         {r.reservations.map(local=><div key={local.id}><dt className="text-muted-foreground">Referencia PMS · Habitación {local.roomNumber}</dt><dd className="break-all font-mono">{local.code}</dd></div>)}
+       </dl>
+       <section className="border-t pt-4"><h3 className="font-semibold">Historial ({r.revision_count})</h3>{technicalOpen&&<History connectionId={connectionId} revisionId={r.revision_id}/>}</section>
+     </div></CollapsibleContent>
+   </Collapsible>
  </div>;
 }
 export function ChannexReservationsInbox({connectionId,canRetry,pending,onRetry}: {
@@ -110,6 +169,6 @@ export function ChannexReservationsInbox({connectionId,canRetry,pending,onRetry}
  </tbody></table></div>
  <div className="flex items-center justify-between gap-2"><span className="text-sm text-muted-foreground">25 reservas por página</span><div className="flex gap-2"><Button variant="outline" disabled={page===1} onClick={()=>setPage(page-1)}>Anterior</Button><Button variant="outline" disabled={page*q.data.pageSize>=q.data.counts[view]} onClick={()=>setPage(page+1)}>Siguiente</Button></div></div>
  </>}
- <Dialog open={!!selected} onOpenChange={open=>{if(!open)setSelected(null);}}><DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{selected?guest(selected):'Detalle de reserva'}</DialogTitle><DialogDescription>Detalle de la reserva recibida y su aplicación al PMS.</DialogDescription></DialogHeader>{selected&&<BookingDetail key={selected.revision_id} connectionId={connectionId} booking={q.data?.bookings.find(r=>selected.booking_id?r.booking_id===selected.booking_id:r.revision_id===selected.revision_id)||selected} canRetry={canRetry} pending={pending} onRetry={onRetry} assignOpen={assignOpen} onAssigned={()=>void q.refetch()}/>}</DialogContent></Dialog>
+ <Dialog open={!!selected} onOpenChange={open=>{if(!open)setSelected(null);}}><DialogContent className="flex max-h-[90vh] max-h-[90dvh] w-[calc(100%_-_1rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0"><DialogHeader className="shrink-0 border-b px-5 py-4 pr-12 text-left"><DialogTitle className="break-words text-xl">{selected?guest(selected):'Detalle de reserva'}</DialogTitle><DialogDescription>Datos de la reserva y su estadía en el PMS.</DialogDescription></DialogHeader><div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5" data-testid="ota-booking-detail-scroll">{selected&&<BookingDetail key={selected.revision_id} connectionId={connectionId} booking={q.data?.bookings.find(r=>selected.booking_id?r.booking_id===selected.booking_id:r.revision_id===selected.revision_id)||selected} canRetry={canRetry} pending={pending} onRetry={onRetry} assignOpen={assignOpen} onAssigned={()=>void q.refetch()}/>}</div><DialogFooter className="shrink-0 border-t px-5 py-3"><Button variant="outline" onClick={()=>setSelected(null)}>Cerrar detalle</Button></DialogFooter></DialogContent></Dialog>
  </section>;
 }
