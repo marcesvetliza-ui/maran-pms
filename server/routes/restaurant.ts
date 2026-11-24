@@ -505,22 +505,26 @@ export function registerRestaurantRoutes(app: Express) {
       const effectivePaymentMethod = isRoomCharge && effectivePrimaryMethod === "cuenta_habitacion" ? "room_charge" : effectivePrimaryMethod;
       if (effectivePrimaryMethod === "cuenta_corriente") assertFinancialSchemaReady();
 
-      let finalTotal = parseFloat(order.total || "0");
-      let discountAmount = 0;
-      if (discount && discount > 0) {
-        if (discountType === "percent") {
-          discountAmount = finalTotal * discount / 100;
-        } else {
-          discountAmount = discount;
-        }
-        finalTotal = Math.max(0, finalTotal - discountAmount);
+      const originalCents = paymentCents(order.total || "0");
+      const discountValue = Number(discount ?? 0);
+      if (originalCents === null || !Number.isFinite(discountValue) || discountValue < 0
+        || (discountType === "percent" && discountValue > 100)) {
+        return res.status(400).json({ error: "Revisá el total y el descuento del pedido; el porcentaje debe estar entre 0 y 100" });
       }
-
-      // Apply reservation advance credit (pre-paid deposits)
-      const advanceCredit = parseFloat(String(reservationAdvanceCredit || 0)) || 0;
-      if (advanceCredit > 0) {
-        finalTotal = Math.max(0, finalTotal - advanceCredit);
+      const discountCents = discountType === "percent"
+        ? Math.round(originalCents * discountValue / 100) : paymentCents(discountValue);
+      if (discountCents === null || !Number.isSafeInteger(discountCents) || discountCents > originalCents) {
+        return res.status(400).json({ error: "El descuento no puede superar el importe del pedido" });
       }
+      // Validate before closing or spending an advance. Clamping only the
+      // collection to zero left the invoice's original deductions negative.
+      const advanceCents = paymentCents(reservationAdvanceCredit ?? 0);
+      if (advanceCents === null || advanceCents > originalCents - discountCents) {
+        return res.status(400).json({ error: "El anticipo aplicado no puede superar el saldo del pedido después del descuento" });
+      }
+      const discountAmount = discountCents / 100;
+      const advanceCredit = advanceCents / 100;
+      const finalTotal = (originalCents - discountCents - advanceCents) / 100;
 
       // Validate all tenders before closing the order, consuming a voucher or
       // writing any cash/room movement. Compare persisted amounts in cents.
@@ -548,7 +552,7 @@ export function registerRestaurantRoutes(app: Express) {
       }
 
       const singleRoomReservationId = primarySplit?.roomReservationId || effectiveReservationId;
-      const folioChargeTotal = Math.max(0, parseFloat(order.total || "0") - discountAmount);
+      const folioChargeTotal = (originalCents - discountCents) / 100;
 
       // Aplicar y consumir el voucher de regalo ANTES de cerrar el pedido: si
       // no está disponible (ya usado, vencido, área equivocada), el pedido no
@@ -794,7 +798,9 @@ export function registerRestaurantRoutes(app: Express) {
             const qty = item.quantity || 1;
             const grossUnit = parseFloat((grossItem / qty).toFixed(2));
             const netUnit = parseFloat((grossUnit / 1.21).toFixed(4));
-            const grossTotal = parseFloat((grossUnit * qty).toFixed(2));
+            // The stored line total is authoritative; rounding a divided unit
+            // price first can lose a cent and turn a full discount negative.
+            const grossTotal = parseFloat(grossItem.toFixed(2));
             const netTotal = parseFloat((netUnit * qty).toFixed(4));
 
             invoiceItems.push({ descripcion: itemName, cantidad: qty, precioUnitario: netUnit, alicuotaIva: "21" as const, subtotalNeto: netTotal, subtotal: grossTotal });

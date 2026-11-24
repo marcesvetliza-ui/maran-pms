@@ -94,6 +94,55 @@ suite("PostgreSQL: restaurant fiscal call follows the local payment commit", () 
     expect(invoice.emit).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { discount: 122, discountType: 'fixed' },
+    { discount: 101, discountType: 'percent' },
+    { discount: -1 },
+    { discount: 'invalid' },
+    { reservationAdvanceCredit: 122 },
+    { reservationAdvanceCredit: 'invalid' },
+    { reservationAdvanceCredit: -1 },
+    { discount: 60, reservationAdvanceCredit: 62 },
+  ])('rejects excessive or invalid deductions before closing or emitting (%j)', async deductions => {
+    const f = await fixture('close');
+    invoice.emit.mockReset();
+    const r = await request(f.method, f.path, { ...f.body, ...deductions });
+    expect(r.status, JSON.stringify(r.body)).toBe(400);
+    expect((await storage.getRestaurantOrder(f.id))!.status).toBe('open');
+    expect((await pool!.query('SELECT id FROM cash_movements WHERE source_id=$1', [f.id])).rows).toHaveLength(0);
+    expect((await pool!.query("SELECT id FROM folios WHERE entity_type='restaurant_order' AND entity_id=$1", [f.id])).rows).toHaveLength(0);
+    expect((await storage.getOrderItems(f.id)).every(item => !item.paid)).toBe(true);
+    expect(invoice.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { discount: '10', discountType: 'fixed', expected: 111 },
+    { discount: 10, discountType: 'percent', expected: 108.9 },
+  ])('keeps valid discounts consistent between payment, folio and invoice (%j)', async example => {
+    const f = await fixture('close');
+    invoice.emit.mockReset().mockResolvedValue({ id: 12345 });
+    const r = await request(f.method, f.path, { ...f.body, discount: example.discount, discountType: example.discountType });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(Number(r.body.total)).toBe(example.expected);
+    expect(Number((await pool!.query('SELECT amount FROM cash_movements WHERE source_id=$1', [f.id])).rows[0].amount)).toBe(example.expected);
+    const payload = invoice.emit.mock.calls[0][0];
+    expect(Math.round(payload.items.reduce((sum: number, item: any) => sum + item.subtotal, 0) * 100)).toBe(Math.round(example.expected * 100));
+    expect(await storage.getFolioWithMovementsByEntity('restaurant_order', f.id)).toMatchObject({ balance: '0.00' });
+  });
+
+  it('preserves the stored line cents when a full discount follows a divided unit price', async () => {
+    const f = await fixture('close');
+    await storage.updateRestaurantOrder(f.id, { total: '0.01' });
+    const [item] = await storage.getOrderItems(f.id);
+    await storage.updateOrderItem(item.id, { quantity: 3, unitPrice: '0.00', subtotal: '0.01' });
+    invoice.emit.mockReset().mockResolvedValue({ id: 12345 });
+    const r = await request(f.method, f.path, { ...f.body, discount: 100, discountType: 'percent' });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(Number(r.body.total)).toBe(0);
+    const { calcularMontos } = await import('../billing/invoiceService');
+    expect(calcularMontos(invoice.emit.mock.calls[0][0].items, 'FB')).toMatchObject({ montoTotal: 0, montoNeto: 0, montoIva21: 0 });
+  });
+
   it("does not emit an invoice for a payment rolled back after fiscal preparation", async () => {
     const f = await fixture("close");
     mockCommittedInvoice(f.id);

@@ -340,6 +340,12 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   if (collectionError) throw Object.assign(new Error(collectionError), {statusCode:400});
   const config=await getBillingConfig();
   if(isNonFiscalTipo(data.tipoComprobante)) return emitirFacturaUnlocked(data,config);
+  // Discounts may be negative lines; each resulting fiscal bucket must still
+  // be nonnegative. Reject before a journal, number or draft can be reserved.
+  if (data.items.some(item => !Number.isFinite(Number(item.subtotal)))
+    || Object.values(calcularMontos(data.items, data.tipoComprobante)).some(amount => !Number.isFinite(amount) || amount < 0)) {
+    throw new BillingPreflightError("Los importes fiscales no pueden ser negativos ni inválidos. Revisá los consumos, descuentos y anticipos antes de emitir.");
+  }
   const environment=(config as any).arcaAmbiente??"ficticio";
   if (!["ficticio", "homologacion", "produccion"].includes(environment)) throw new BillingPreflightError("El ambiente de facturación configurado no es válido. No se emitió ningún comprobante.");
   // Funding never uses ficticio. Preserve the existing synthetic emitter and
