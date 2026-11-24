@@ -27,7 +27,7 @@ export async function diagnoseInvoices({password,fetchImpl=globalThis.fetch}){
   for(const target of targets){
    const matches=listed.filter(i=>i.tipo_comprobante==='FB'&&Number(i.punto_venta)===5&&Number(i.numero)===target.number&&Number(i.monto_total)===target.amount);
    if(matches.length!==1)throw Error('No se encontró un único comprobante '+target.number);
-   const invoice=await read('/api/billing/invoices/'+matches[0].id);if(Number(invoice.id)!==Number(matches[0].id))throw Error('Identidad de comprobante no válida');invoices.push(invoice);
+   const invoice=await read('/api/billing/invoices/'+matches[0].id);invoice.area_name=matches[0].area_name;if(Number(invoice.id)!==Number(matches[0].id))throw Error('Identidad de comprobante no válida');invoices.push(invoice);
   }
   const cash=[];let shiftCount=0,shiftLimitReached=false;
   const from=Date.parse('2026-11-23T03:00:00Z'),to=Date.parse('2026-11-25T03:00:00Z');

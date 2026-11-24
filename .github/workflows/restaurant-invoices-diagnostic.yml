@@ -10,6 +10,8 @@ jobs:
     if: github.ref == 'refs/heads/diag/restaurant-invoices-reconciliation-20261124'
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    env:
+      EXPECTED_REVISION: cd08702e1210547a6c9b046cee332c32bbe76553
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -17,6 +19,8 @@ jobs:
           node-version: '22'
       - name: Verificar privacidad y alcance de consultas
         run: node --test scripts/diagnose-restaurant-invoices.test.mjs
+      - name: Esperar la corrección publicada
+        run: node scripts/wait-for-revision.js https://maranpms.com.ar "$EXPECTED_REVISION"
       - name: Revisar las tres facturas y un caso de contraste sin cambiar operaciones
         env:
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
