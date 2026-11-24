@@ -5,7 +5,7 @@ import {
   surveySectorTargets,
   type SurveySector,
 } from "@shared/survey-sectors";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { SurveyScheduleSettings } from "./survey-schedule-settings";
 import { useSearch } from "wouter";
@@ -24,6 +24,8 @@ import {
   Send,
   Settings2,
   AlertTriangle,
+  ChevronDown,
+  ClipboardList,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -55,12 +57,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   reviewStates,
@@ -819,6 +828,15 @@ function ReviewDetail({
     [assigned, setAssigned] = useState(""),
     [actionAreas, setActionAreas] = useState<string[]>([]),
     [note, setNote] = useState("");
+  const [managementOpen, setManagementOpen] = useState(false);
+  const managementRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (managementOpen)
+      managementRef.current?.scrollIntoView?.({
+        block: "start",
+        behavior: "smooth",
+      });
+  }, [managementOpen]);
   useEffect(() => {
     if (detail.data) {
       setStatus(detail.data.review.followupStatus);
@@ -870,197 +888,434 @@ function ReviewDetail({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Opinión y seguimiento</DialogTitle>
+      <DialogContent className="flex max-h-[90vh] max-h-[90dvh] w-[calc(100%_-_1rem)] max-w-4xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12 text-left">
+          <DialogTitle className="break-words text-xl">
+            {r?.guestName || "Opinión y seguimiento"}
+          </DialogTitle>
+          <DialogDescription>
+            Respuesta del huésped y seguimiento del equipo.
+          </DialogDescription>
         </DialogHeader>
-        {detail.isLoading && <p>Cargando…</p>}
-        {detail.isError && <p role="alert">No se pudo abrir la opinión.</p>}
-        {r && (
-          <div className="space-y-5">
-            <section className="space-y-2">
-              <strong>
-                {r.guestName} · {stars(r.rating)}
-              </strong>
-              <p className="text-sm text-muted-foreground">
-                {reviewSources[r.source as keyof typeof reviewSources] ||
-                  r.source}{" "}
-                · {formatDisplayDate(r.reviewDate)} · Hab. {r.roomNumber || "—"}
-              </p>
-              <p className="text-sm">
-                {r.sector ? surveySectors[r.sector] : "Sin sector"} ·{" "}
-                {r.surveyKind === "generic"
-                  ? "Enlace genérico"
-                  : r.surveyKind === "personal"
-                    ? "Vinculada a una estadía"
-                    : "Opinión registrada"}
-              </p>
-              <p className="text-sm">
-                {r.surveyKind === "generic"
-                  ? `Visita: ${formatDisplayDate(r.visitDate)}`
-                  : `Estadía: ${formatDisplayDate(r.checkIn)} al ${formatDisplayDate(r.checkOut)}`}
-              </p>
-              {r.eventName && <p className="text-sm">Evento: {r.eventName}</p>}
-              {(r.contactEmail || r.contactPhone) && (
-                <p className="text-sm break-words">
-                  Contacto:{" "}
-                  {[r.contactEmail, r.contactPhone].filter(Boolean).join(" · ")}
-                </p>
-              )}
-              <h3 className="font-medium">Respuesta original del huésped</h3>
-              <blockquote className="rounded bg-muted p-3 whitespace-pre-wrap">
-                {r.content || "Sin comentario escrito."}
-              </blockquote>
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(r.areaRatings).map(([k, v]) => (
-                  <Badge key={k} variant="outline">
-                    {areas.find((a) => a.key === k)?.name || k}: {v}/5
+        <div
+          className="min-h-0 overflow-y-auto overscroll-contain px-5 py-5"
+          data-testid="review-detail-scroll"
+        >
+          {detail.isLoading && <p role="status">Cargando opinión…</p>}
+          {detail.isError && <p role="alert">No se pudo abrir la opinión.</p>}
+          {r && (
+            <div className="space-y-6 min-w-0">
+              <section
+                aria-label="Resumen de la encuesta"
+                className="space-y-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">
+                    {reviewSources[r.source as keyof typeof reviewSources] ||
+                      r.source}
                   </Badge>
-                ))}
-              </div>
+                  <Badge variant="outline">
+                    {r.sector ? surveySectors[r.sector] : "Sin sector"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {r.surveyKind === "generic"
+                      ? "Enlace genérico"
+                      : r.surveyKind === "personal"
+                        ? "Vinculada a una estadía"
+                        : "Opinión registrada"}
+                  </span>
+                  <Badge variant="secondary">
+                    {reviewStates[r.followupStatus]}
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="rounded-lg border bg-primary/5 p-4">
+                    <p className="text-sm text-muted-foreground">
+                      Calificación general
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">
+                      {r.rating}
+                      <span className="text-base font-normal text-muted-foreground">
+                        {" "}
+                        / 5
+                      </span>
+                    </p>
+                    <div
+                      className="mt-2 flex gap-1 text-amber-500"
+                      aria-hidden="true"
+                    >
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <Star
+                          key={value}
+                          className={`h-4 w-4 ${value <= r.rating ? "fill-current" : "text-muted-foreground/30"}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border bg-muted/20 p-4">
+                    <p className="text-sm text-muted-foreground">
+                      Recomendación
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">
+                      {r.nps != null ? (
+                        <>
+                          {r.nps}
+                          <span className="text-base font-normal text-muted-foreground">
+                            {" "}
+                            / 10
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-base font-normal text-muted-foreground">
+                          Sin respuesta
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="col-span-2 rounded-lg border bg-muted/20 p-4 sm:col-span-1">
+                    <p className="text-sm text-muted-foreground">
+                      {r.roomNumber ? "Habitación" : "Sector evaluado"}
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-primary">
+                      {r.roomNumber ||
+                        (r.sector ? surveySectors[r.sector] : "Sin informar")}
+                    </p>
+                    {r.roomType && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {r.roomType}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-muted-foreground">
+                      Fecha de respuesta
+                    </dt>
+                    <dd className="font-medium">
+                      {formatDisplayDate(r.reviewDate)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">
+                      {r.surveyKind === "generic"
+                        ? "Fecha de visita"
+                        : "Estadía"}
+                    </dt>
+                    <dd className="font-medium">
+                      {r.surveyKind === "generic"
+                        ? formatDisplayDate(r.visitDate)
+                        : `${formatDisplayDate(r.checkIn)} → ${formatDisplayDate(r.checkOut)}`}
+                    </dd>
+                  </div>
+                  {r.eventName && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-muted-foreground">Evento</dt>
+                      <dd className="break-words">{r.eventName}</dd>
+                    </div>
+                  )}
+                  {(r.contactEmail || r.contactPhone) && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-muted-foreground">
+                        Contacto del huésped
+                      </dt>
+                      <dd className="flex flex-wrap gap-x-4 gap-y-1">
+                        {r.contactEmail && (
+                          <span className="break-all">{r.contactEmail}</span>
+                        )}
+                        {r.contactPhone && (
+                          <span className="break-all">{r.contactPhone}</span>
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                {r.contactRequested && (
+                  <p
+                    role="status"
+                    className="flex items-start gap-2 rounded-lg border border-amber-400 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-sm font-medium"
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    Solicitó que el hotel lo contacte.
+                  </p>
+                )}
+              </section>
+
+              <section
+                className="space-y-3"
+                aria-labelledby="review-original-heading"
+              >
+                <h3
+                  id="review-original-heading"
+                  className="flex items-center gap-2 font-semibold"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  Respuesta original del huésped
+                </h3>
+                <blockquote className="rounded-lg border bg-muted/20 p-4 whitespace-pre-wrap break-words leading-relaxed">
+                  {r.content || "Sin comentario escrito."}
+                </blockquote>
+              </section>
+
+              {(Object.keys(r.areaRatings).length > 0 ||
+                (r.notApplicable || []).length > 0) && (
+                <section
+                  className="space-y-3"
+                  aria-labelledby="review-ratings-heading"
+                >
+                  <h3 id="review-ratings-heading" className="font-semibold">
+                    Puntajes por área
+                  </h3>
+                  <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+                    {Object.entries(r.areaRatings).map(([key, value]) => (
+                      <div key={key} className="rounded-lg border p-3 min-w-0">
+                        <p className="text-sm font-medium break-words">
+                          {areas.find((a) => a.key === key)?.name || key}
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums">
+                          {value}
+                          <span className="text-sm font-normal text-muted-foreground">
+                            {" "}
+                            / 5
+                          </span>
+                        </p>
+                        <div
+                          className="mt-2 h-1.5 rounded-full bg-muted"
+                          aria-hidden="true"
+                        >
+                          <div
+                            className={`h-full rounded-full ${value <= 2 ? "bg-amber-500" : "bg-primary"}`}
+                            style={{ width: `${value * 20}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    {(r.notApplicable || []).map((key) => (
+                      <div
+                        key={key}
+                        className="rounded-lg border border-dashed bg-muted/10 p-3 min-w-0"
+                      >
+                        <p className="text-sm font-medium break-words">
+                          {areas.find((a) => a.key === key)?.name ||
+                            r.areaQuestions[key] ||
+                            key}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          No utilicé / No corresponde
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
               {Object.entries(r.areaTextAnswers || {}).map(([key, answer]) => (
-                <div key={key} className="space-y-1">
-                  <p className="text-sm font-medium">
+                <section key={key} className="space-y-2">
+                  <h3 className="text-sm font-semibold break-words">
                     {r.areaQuestions[key] ||
                       areas.find((a) => a.key === key)?.question ||
                       key}
-                  </p>
-                  <p className="rounded bg-muted p-3 whitespace-pre-wrap break-words">
+                  </h3>
+                  <p className="rounded-lg border p-4 whitespace-pre-wrap break-words leading-relaxed">
                     {answer}
                   </p>
-                </div>
+                </section>
               ))}
-              {(r.notApplicable || []).map((key) => (
-                <p key={key} className="text-sm text-muted-foreground">
-                  {r.areaQuestions[key] || key}: No utilicé / No corresponde
-                </p>
-              ))}
-              {r.nps !== null && <p>Recomendación: {r.nps}/10</p>}
-              {r.contactRequested && (
-                <p className="font-medium">
-                  Solicitó que el hotel lo contacte.
-                </p>
+              {Object.keys(r.areaQuestions || {}).length > 0 && (
+                <details className="rounded-lg border">
+                  <summary className="p-4 text-sm cursor-pointer font-medium">
+                    Preguntas que respondió el huésped
+                  </summary>
+                  <dl className="space-y-3 border-t p-4 text-sm">
+                    {Object.entries(r.areaQuestions).map(([key, question]) => (
+                      <div key={key}>
+                        <dt className="text-muted-foreground break-words">
+                          {question}
+                        </dt>
+                        <dd className="mt-1 whitespace-pre-wrap break-words">
+                          {r.areaTextAnswers?.[key] ||
+                            (r.notApplicable?.includes(key)
+                              ? "No utilicé / No corresponde"
+                              : r.areaRatings[key] != null
+                                ? `${r.areaRatings[key]}/5`
+                                : "Sin respuesta registrada")}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
               )}
-              {r.staffResponse && (
-                <p>Respuesta previa del equipo: {r.staffResponse}</p>
-              )}
-            </section>
-            {Object.keys(r.areaQuestions || {}).length > 0 && (
-              <details>
-                <summary className="text-sm cursor-pointer">
-                  Preguntas que respondió el huésped
-                </summary>
-                {Object.entries(r.areaQuestions).map(([key, question]) => (
-                  <p key={key} className="text-sm mt-2">
-                    {question}:{" "}
-                    {r.areaTextAnswers?.[key] ||
-                      (r.notApplicable?.includes(key)
-                        ? "No utilicé / No corresponde"
-                        : `${r.areaRatings[key]}/5`)}
-                  </p>
-                ))}
-              </details>
-            )}
-            <section className="space-y-3 border-t pt-4">
-              <h3 className="font-semibold">Gestión interna</h3>
-              <p className="text-xs text-muted-foreground">
-                Estas notas no modifican la opinión original y no se envían al
-                huésped.
-              </p>
-              <SelectField
-                label="Estado del caso"
-                disabled={!canEditCase}
-                value={status}
-                onChange={setStatus}
+
+              <Collapsible
+                ref={managementRef}
+                open={managementOpen}
+                onOpenChange={setManagementOpen}
+                className="rounded-lg border"
+                data-testid="review-internal-management"
               >
-                {Object.entries(reviewStates).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </SelectField>
-              <label className="block text-sm space-y-1">
-                Responsable
-                <Input
-                  aria-label="Responsable"
-                  disabled={!canEditCase}
-                  value={assigned}
-                  onChange={(e) => setAssigned(e.target.value)}
-                  placeholder="Nombre o equipo responsable"
-                  maxLength={160}
-                />
-              </label>
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">
-                  Áreas que deben intervenir
-                </legend>
-                <div className="flex flex-wrap gap-3">
-                  {areas.map((a) => (
-                    <label
-                      key={a.key}
-                      className="text-sm flex items-center gap-1"
-                    >
-                      <Checkbox
-                        disabled={!canEditCase}
-                        checked={actionAreas.includes(a.key)}
-                        onCheckedChange={(v) =>
-                          setActionAreas((p) =>
-                            v === true
-                              ? [...p, a.key]
-                              : p.filter((k) => k !== a.key),
-                          )
-                        }
-                      />
-                      {a.name}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              {canEditCase && (
-                <>
-                  <label className="block text-sm space-y-1">
-                    Nota interna
-                    <Textarea
-                      aria-label="Nota interna"
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      maxLength={5000}
-                    />
-                  </label>
+                <CollapsibleTrigger asChild>
                   <Button
-                    disabled={save.isPending}
-                    onClick={() => save.mutate()}
+                    variant="ghost"
+                    className="h-auto w-full justify-between gap-3 p-4 text-left whitespace-normal"
                   >
-                    Guardar seguimiento
+                    <span className="flex flex-wrap items-center gap-2">
+                      <ClipboardList className="h-4 w-4 shrink-0" />
+                      Gestión interna
+                      <Badge variant="secondary">
+                        {reviewStates[r.followupStatus]}
+                      </Badge>
+                      {r.assignedTo && (
+                        <span className="text-xs text-muted-foreground break-words">
+                          {r.assignedTo}
+                        </span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      className={`h-4 w-4 shrink-0 transition-transform ${managementOpen ? "rotate-180" : ""}`}
+                    />
                   </Button>
-                </>
-              )}
-            </section>
-            <section className="space-y-2">
-              <h3 className="font-medium">Historial</h3>
-              {detail.data?.events.map((e) => (
-                <div key={e.id} className="border-l-2 pl-3 text-sm">
-                  <p className="text-muted-foreground">
-                    {formatHotelDateTime(e.createdAt)} · {e.actor}
-                  </p>
-                  <p>
-                    {e.kind === "received"
-                      ? "Encuesta recibida"
-                      : e.kind === "created"
-                        ? "Opinión registrada"
-                        : `Seguimiento: ${reviewStates[e.details.status as keyof typeof reviewStates] || e.details.status}`}
-                  </p>
-                  {e.details.assignedTo && (
-                    <p>Responsable: {e.details.assignedTo}</p>
-                  )}
-                  {e.details.note && (
-                    <p className="whitespace-pre-wrap">{e.details.note}</p>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="space-y-4 border-t p-4">
+                    <p className="text-xs text-muted-foreground">
+                      Estas notas no modifican la opinión original y no se
+                      envían al huésped.
+                    </p>
+                    {r.staffResponse && (
+                      <div className="space-y-1 text-sm">
+                        <p className="font-medium">
+                          Respuesta previa del equipo
+                        </p>
+                        <p className="rounded-lg bg-muted/30 p-3 whitespace-pre-wrap break-words">
+                          {r.staffResponse}
+                        </p>
+                      </div>
+                    )}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <SelectField
+                        label="Estado del caso"
+                        disabled={!canEditCase}
+                        value={status}
+                        onChange={setStatus}
+                      >
+                        {Object.entries(reviewStates).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </SelectField>
+                      <label className="block text-sm space-y-1.5">
+                        Responsable
+                        <Input
+                          aria-label="Responsable"
+                          disabled={!canEditCase}
+                          value={assigned}
+                          onChange={(e) => setAssigned(e.target.value)}
+                          placeholder="Nombre o equipo responsable"
+                          maxLength={160}
+                        />
+                      </label>
+                    </div>
+                    <fieldset className="space-y-2">
+                      <legend className="text-sm font-medium">
+                        Áreas que deben intervenir
+                      </legend>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {areas.map((area) => (
+                          <label
+                            key={area.key}
+                            className={`flex items-start gap-2 rounded-md border p-3 text-sm min-w-0 ${actionAreas.includes(area.key) ? "border-primary/40 bg-primary/5" : ""}`}
+                          >
+                            <Checkbox
+                              className="shrink-0 mt-0.5"
+                              disabled={!canEditCase}
+                              checked={actionAreas.includes(area.key)}
+                              onCheckedChange={(value) =>
+                                setActionAreas((previous) =>
+                                  value === true
+                                    ? [...previous, area.key]
+                                    : previous.filter(
+                                        (key) => key !== area.key,
+                                      ),
+                                )
+                              }
+                            />
+                            <span className="break-words">{area.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    {canEditCase && (
+                      <label className="block text-sm space-y-1.5">
+                        Nota interna
+                        <Textarea
+                          aria-label="Nota interna"
+                          value={note}
+                          onChange={(e) => setNote(e.target.value)}
+                          maxLength={5000}
+                          rows={3}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+              <details className="rounded-lg border">
+                <summary className="cursor-pointer p-4 text-sm font-medium">
+                  Historial del seguimiento ({detail.data?.events.length || 0})
+                </summary>
+                <div className="space-y-3 border-t p-4">
+                  {detail.data?.events.length ? (
+                    detail.data.events.map((event) => (
+                      <div
+                        key={event.id}
+                        className="border-l-2 pl-3 text-sm space-y-1"
+                      >
+                        <p className="text-xs text-muted-foreground">
+                          {formatHotelDateTime(event.createdAt)} · {event.actor}
+                        </p>
+                        <p>
+                          {event.kind === "received"
+                            ? "Encuesta recibida"
+                            : event.kind === "created"
+                              ? "Opinión registrada"
+                              : `Seguimiento: ${reviewStates[event.details.status as keyof typeof reviewStates] || event.details.status}`}
+                        </p>
+                        {event.details.assignedTo && (
+                          <p>Responsable: {event.details.assignedTo}</p>
+                        )}
+                        {event.details.note && (
+                          <p className="whitespace-pre-wrap break-words">
+                            {event.details.note}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No hay movimientos de seguimiento registrados.
+                    </p>
                   )}
                 </div>
-              ))}
-            </section>
-          </div>
-        )}
+              </details>
+            </div>
+          )}
+        </div>
+        <DialogFooter className="shrink-0 border-t px-5 py-3 gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Cerrar detalle
+          </Button>
+          {r &&
+            canEditCase &&
+            (managementOpen ? (
+              <Button disabled={save.isPending} onClick={() => save.mutate()}>
+                {save.isPending ? "Guardando…" : "Guardar seguimiento"}
+              </Button>
+            ) : (
+              <Button onClick={() => setManagementOpen(true)}>
+                Gestionar seguimiento
+              </Button>
+            ))}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

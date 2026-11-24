@@ -170,6 +170,11 @@ describe("Reseñas: filtros del servidor y seguimiento separado de la respuesta"
     await user.click(
       within(dialog).getByRole("button", { name: "Ver encuesta completa" }),
     );
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Gestionar seguimiento",
+      }),
+    );
     await within(screen.getByRole("dialog")).findByLabelText("Nota interna");
   });
   it("abre las respuestas escritas desde el ojo aunque no haya comentario general", async () => {
@@ -217,6 +222,18 @@ describe("Reseñas: filtros del servidor y seguimiento separado de la respuesta"
     );
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("Comentario original del huésped");
+    expect(
+      within(dialog).getByText("Solicitó que el hotel lo contacte."),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByLabelText("Estado del caso"),
+    ).not.toBeInTheDocument();
+    expect(state.request.mock.calls.every(([method]) => method === "GET")).toBe(
+      true,
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Gestionar seguimiento" }),
+    );
     await user.selectOptions(
       within(dialog).getByLabelText("Estado del caso"),
       "in_progress",
