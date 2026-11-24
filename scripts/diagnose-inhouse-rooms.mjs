@@ -24,7 +24,10 @@ export async function diagnoseInHouse({password,fetchImpl=globalThis.fetch,now=n
    listedDeclaredPax:listed.reduce((s,r)=>s+(Number(r.numberOfGuests)||0),0),
    listedPeopleRows:listed.reduce((s,r)=>s+1+(r.companions?.length||0),0),
    checkedInRooms:checkedIn.length,checkedInDeclaredPax:checkedIn.reduce((s,r)=>s+(Number(r.numberOfGuests)||0),0),
-   checkedInPeopleRows:checkedIn.reduce((s,r)=>s+1+(Number(r.companionsCount)||0),0),rooms:[]};
+   checkedInPeopleRows:checkedIn.reduce((s,r)=>s+1+(Number(r.companionsCount)||0),0),
+   checkedInKnownPax:checkedIn.reduce((s,r)=>s+Math.max(Number(r.numberOfGuests)||1,1+(Number(r.companionsCount)||0)),0),
+   checkedInUniqueRooms:new Set(checkedIn.map(r=>r.roomNumber)).size,
+   omitted:checkedIn.filter(r=>!listedIds.has(r.reservationId)).map(r=>({roomNumber:r.roomNumber,status:r.reservationStatus,checkIn:r.checkIn,checkOut:r.checkOut,declaredPax:r.numberOfGuests,registeredCompanions:r.companionsCount})),rooms:[]};
   for(const number of rooms){
    const matches=await get('/api/reservations?dateMode=all&statuses=checked_in,web_checkin&search='+number+'&limit=50');
    if(!Array.isArray(matches))throw new DiagnosticError('Formato de reserva inesperado.');
