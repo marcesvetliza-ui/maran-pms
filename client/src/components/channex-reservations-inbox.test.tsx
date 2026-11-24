@@ -6,14 +6,14 @@ import {apiRequest} from '@/lib/queryClient';
 import {ChannexReservationsInbox} from './channex-reservations-inbox';
 vi.mock('@/lib/queryClient',()=>({apiRequest:vi.fn()}));
 const revision={revision_id:'r3',booking_id:'booking',booking_status:'cancelled',status:'review',review_code:'LOCAL_FINANCIAL_HISTORY',acked_at:'2026-11-16T12:00:00Z',created_at:'2026-11-16T12:00:00Z',inserted_at:'2026-11-16T12:00:00Z',channel:'Booking.com',reference:'123456',guest_name:'Ana Perez',arrival:'2026-12-01',departure:'2026-12-02',amount:'145.00',currency:'USD'};
-const booking={...revision,revision_count:3,inbox_view:'cancelled',reservations:[{id:'pms',code:'RES123',roomNumber:'307',category:'Premium'}]};
+const booking={...revision,revision_count:3,inbox_view:'cancelled',reservations:[{id:'pms',code:'RES123',roomNumber:'307',category:'Premium',status:'confirmed',checkInDate:'2026-12-01',checkOutDate:'2026-12-02'}]};
 function mount(canRetry=true){const client=new QueryClient({defaultOptions:{queries:{retry:false}}});const onRetry=vi.fn();render(<QueryClientProvider client={client}><ChannexReservationsInbox connectionId="conn" canRetry={canRetry} pending={false} onRetry={onRetry}/></QueryClientProvider>);return onRetry;}
 afterEach(()=>{cleanup();vi.resetAllMocks();});
-function mock(){vi.mocked(apiRequest).mockImplementation(async(_method,url)=>{
+function mock(detailBooking=booking){vi.mocked(apiRequest).mockImplementation(async(_method,url)=>{
  const path=String(url);
  const data=path.includes('/booking-detail/')?{notes:'Llegada después de las 22 hs',notesStatus:'available',settlements:[{reservation_id:'pms',source_currency:'USD',source_total:'145.00',exchange_rate:'1545.000000',settlement_currency:'ARS',settlement_total:'224025.00',created_at:'2026-11-16T12:00:00Z'}]}:
  path.includes('/history/')?{total:3,revisions:[revision,{...revision,revision_id:'r2',status:'applied',booking_status:'modified'},{...revision,revision_id:'r1',status:'applied',booking_status:'new'}]}:
- {counts:{all:26,attention:1,new:24,modified:0,cancelled:2},channels:['Booking.com','Expedia'],bookings:path.includes('view=modified')?[]:[booking],page:1,pageSize:25};
+ {counts:{all:26,attention:1,new:24,modified:0,cancelled:2},channels:['Booking.com','Expedia'],bookings:path.includes('view=modified')?[]:[detailBooking],page:1,pageSize:25};
  return new Response(JSON.stringify(data),{status:200});});}
 it('shows a table, separates cancellation from application state and loads audited details only when opened',async()=>{
  mock();const onRetry=mount();const user=userEvent.setup();await screen.findByText('Ana Perez');
@@ -23,7 +23,14 @@ it('shows a table, separates cancellation from application state and loads audit
  await user.click(screen.getByRole('button',{name:/Ver detalle de Ana Perez/}));const dialog=await screen.findByRole('dialog');await within(dialog).findByText('Llegada después de las 22 hs');
  expect(within(dialog).getByText(/224.025,00/)).toBeInTheDocument();expect(within(dialog).getByText(/Cotización conservada: ARS 1.545 por USD/)).toBeInTheDocument();
  expect(within(dialog).getByRole('link',{name:/Ver reserva en PMS/})).toHaveAttribute('href','/reservations?view=pms&returnTo=%2Fota-channels');
- await within(dialog).findByText('Revisión: r1');await user.click(within(dialog).getByRole('button',{name:'Reintentar revisión'}));expect(onRetry).toHaveBeenCalledWith('r3');
+ expect(within(dialog).getByText('1 noche')).toBeInTheDocument();
+ expect(within(dialog).getByText('Reservada')).toBeInTheDocument();
+ expect(within(dialog).getByText('Cancelada en el canal')).toBeInTheDocument();
+ expect(within(dialog).queryByText('RES123')).not.toBeInTheDocument();
+ expect(vi.mocked(apiRequest).mock.calls.some(([,url])=>String(url).includes('/history/'))).toBe(false);
+ await user.click(within(dialog).getByRole('button',{name:'Reintentar revisión'}));expect(onRetry).toHaveBeenCalledWith('r3');
+ await user.click(within(dialog).getByRole('button',{name:'Conexión e historial'}));
+ await within(dialog).findByText('Revisión: r1');expect(within(dialog).getByText('RES123')).toBeInTheDocument();
  expect(vi.mocked(apiRequest).mock.calls.every(([method])=>method==='GET')).toBe(true);
 });
 it('applies search, channel and stay filters on the server and resets pagination',async()=>{
@@ -41,7 +48,7 @@ it('rejects reversed dates without making a request and can clear filters',async
  expect(apiRequest).toHaveBeenCalledTimes(1);await user.click(screen.getByRole('button',{name:'Limpiar filtros'}));expect(screen.getByLabelText('Desde')).toHaveValue('');
 });
 it('opens details by keyboard and hides retry for read-only reception',async()=>{
- mock();mount(false);await screen.findByText('Ana Perez');const {fireEvent}=await import('@testing-library/react');fireEvent.keyDown(screen.getAllByRole('row')[1],{key:'Enter'});const dialog=await screen.findByRole('dialog');await within(dialog).findByText('Revisión: r1');expect(within(dialog).queryByRole('button',{name:'Reintentar revisión'})).not.toBeInTheDocument();
+ mock({...booking,booking_status:'new',reservations:booking.reservations.map(local=>({...local,status:'checked_in'}))});mount(false);await screen.findByText('Ana Perez');const {fireEvent}=await import('@testing-library/react');fireEvent.keyDown(screen.getAllByRole('row')[1],{key:'Enter'});const dialog=await screen.findByRole('dialog');await within(dialog).findByText('Llegada después de las 22 hs');expect(within(dialog).getByText('Alojada en PMS')).toBeInTheDocument();expect(within(dialog).queryByRole('button',{name:'Reintentar revisión'})).not.toBeInTheDocument();await userEvent.click(within(dialog).getByRole('button',{name:'Conexión e historial'}));await within(dialog).findByText('Revisión: r1');
 });
 it('shows query failures without treating the inbox as empty',async()=>{
  vi.mocked(apiRequest).mockRejectedValue(new Error('offline'));mount();expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo consultar la bandeja');
