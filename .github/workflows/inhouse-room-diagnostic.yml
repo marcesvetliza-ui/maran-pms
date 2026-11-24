@@ -21,5 +21,5 @@ jobs:
       - name: Consultar únicamente estados, fechas y cantidades de las habitaciones indicadas
         env:
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
-          PREVIOUS_VERIFY_INHOUSE_CONSISTENCY: 'true'
+          VERIFY_HOLDER_CORRECTION: 'true'
         run: node scripts/diagnose-room1001-holder.mjs
