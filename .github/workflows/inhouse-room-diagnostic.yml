@@ -1,0 +1,24 @@
+name: Diagnóstico de habitaciones In House — solo lectura
+on:
+  push:
+    branches: [diag/inhouse-rooms-20261124]
+    paths: ['scripts/diagnose-inhouse-rooms*', '.github/workflows/inhouse-room-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/diag/inhouse-rooms-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Verificar privacidad y alcance de la consulta
+        run: node --test scripts/diagnose-inhouse-rooms.test.mjs
+      - name: Consultar únicamente estados, fechas y cantidades de las habitaciones indicadas
+        env:
+          SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+        run: node scripts/diagnose-inhouse-rooms.mjs
