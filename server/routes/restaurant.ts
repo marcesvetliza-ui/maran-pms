@@ -939,6 +939,50 @@ export function registerRestaurantRoutes(app: Express) {
     }
   });
 
+  // A repeat is a new, unpaid unit. Read its price/notes from the original
+  // row rather than trusting client amounts or copying preparation/payment state.
+  app.post("/api/restaurant/orders/:orderId/items/:itemId/repeat", requireAuth, async (req, res) => {
+    try {
+      const result = await withDatabaseTransaction(async () => {
+        const [order] = await db.select().from(restaurantOrders)
+          .where(eq(restaurantOrders.id, req.params.orderId)).for("update");
+        if (!order) return { status: 404, body: { error: "Pedido no encontrado" } };
+        if (order.status === "closed" || order.status === "cancelled") {
+          return { status: 409, body: { error: "El pedido ya está cerrado o anulado" } };
+        }
+        const [source] = await db.select().from(orderItems).where(and(
+          eq(orderItems.id, req.params.itemId), eq(orderItems.orderId, order.id)));
+        if (!source || source.status === "cancelled") {
+          return { status: 409, body: { error: "El ítem ya no está disponible para repetir" } };
+        }
+        const menuItem = await storage.getMenuItem(source.menuItemId);
+        if (!menuItem || menuItem.isActive === "false" || menuItem.isAvailable === "false" || menuItem.category?.isActive === "false") {
+          return { status: 409, body: { error: "El plato está inactivo o no disponible" } };
+        }
+        const item = await storage.createOrderItem({
+          orderId: order.id, menuItemId: source.menuItemId, quantity: 1,
+          unitPrice: source.unitPrice, subtotal: source.unitPrice,
+          notes: source.notes, course: source.course,
+          status: (source.course || 1) <= (order.activeCourse || 1) ? "pending" : "waiting_course",
+          createdAt: new Date(),
+        });
+        const [totals] = await db.select({ total: sql<string>`coalesce(sum(${orderItems.subtotal}), 0)::text` })
+          .from(orderItems).where(and(eq(orderItems.orderId, order.id), eq(orderItems.paid, false), not(eq(orderItems.status, "cancelled"))));
+        const total = Number(totals.total);
+        const net = Number((total / 1.21).toFixed(2));
+        await storage.updateRestaurantOrder(order.id, {
+          subtotal: net.toFixed(2), tax: (total - net).toFixed(2),
+          total: total.toFixed(2), status: "in_progress",
+        });
+        return { status: 201, body: { ...item, menuItem } };
+      });
+      res.status(result.status).json(result.body);
+    } catch (error) {
+      console.error("[repeat-item] Error al repetir ítem:", error);
+      res.status(500).json({ error: "No se pudo repetir el ítem. Actualizá la comanda antes de reintentar." });
+    }
+  });
+
   // Advance course
   app.post("/api/restaurant/orders/:id/advance-course", async (req, res) => {
     try {

@@ -2017,6 +2017,10 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE order_items ADD COLUMN paid boolean NOT NULL DEFAULT false`)))
   );
 
+  await withTimeout("order_items.created_at", T, () =>
+    db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE order_items ADD COLUMN created_at timestamp NOT NULL DEFAULT now()`)))
+  );
+
   // order_items: course y sent_at — en el schema desde el inicio pero por las dudas los aseguramos
   await withTimeout("order_items.course_sent_at", T, () =>
     db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`
