@@ -1,3 +1,5 @@
+import {roomAssignments, type RoomAssignment} from "./roomAssignments";
+
 /**
  * Availability is interval-based. A room's housekeeping status describes its
  * current state, not whether it can be sold for a future stay.
@@ -40,7 +42,7 @@ export function isRoomAvailableForInterval(input: {
   room: { id: string; status: string; roomNumber?: string | null; isActive?: boolean | null; isVirtual?: boolean | null };
   checkIn: string;
   checkOut: string;
-  reservations: Array<{ id: string; roomId: string; status: string; checkInDate: string; checkOutDate: string }>;
+  reservations: Array<{ id: string; roomId: string; status: string; checkInDate: string; checkOutDate: string; roomTypeId?: string; roomHistory?: RoomAssignment[] | null }>;
   maintenanceBlocks: Array<{ roomId: string; blockFrom: string; blockTo: string }>;
   excludedReservationIds?: ReadonlySet<string>;
 }): boolean {
@@ -48,10 +50,9 @@ export function isRoomAvailableForInterval(input: {
   if (!isOperationalInventoryRoom(room) || room.status === "maintenance" || room.status === "oos") return false;
 
   const hasReservationConflict = reservations.some((reservation) =>
-    reservation.roomId === room.id &&
     ACTIVE_ROOM_RESERVATION_STATUSES.includes(reservation.status as typeof ACTIVE_ROOM_RESERVATION_STATUSES[number]) &&
     !excludedReservationIds?.has(reservation.id) &&
-    intervalsOverlap(checkIn, checkOut, reservation.checkInDate, reservation.checkOutDate),
+    roomAssignments({...reservation, roomTypeId:reservation.roomTypeId||""}).some(s => s.roomId===room.id && intervalsOverlap(checkIn,checkOut,s.from,s.to)),
   );
   if (hasReservationConflict) return false;
 

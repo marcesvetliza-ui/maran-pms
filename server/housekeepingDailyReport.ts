@@ -12,6 +12,8 @@ function visibleForHousekeeping(note:{category:PreferenceCategory;visibleTo:stri
 }
 export async function loadHousekeepingDailyReport(date:string){
   if(!validCalendarDate(date))throw Object.assign(new Error('Fecha inválida'),{statusCode:400});
+  const assignedRoom=sql<string>`COALESCE((SELECT h->>'roomId' FROM jsonb_array_elements(COALESCE(${reservations.roomHistory},'[]'::jsonb)) h
+    WHERE h->>'from'<=${date} AND h->>'to'>${date} LIMIT 1),${reservations.roomId})`;
   // Explicit projection: money, phone, documents and generic reservation notes never leave this query.
   const rows=await db.select({reservationId:reservations.id,guestId:reservations.guestId,roomId:rooms.id,
     roomNumber:rooms.roomNumber,roomStatus:rooms.status,guestFirstName:guests.firstName,guestLastName:guests.lastName,
@@ -20,7 +22,7 @@ export async function loadHousekeepingDailyReport(date:string){
     earlyCheckIn:reservations.earlyCheckIn,earlyCheckInTime:reservations.earlyCheckInTime,
     lateCheckOut:reservations.lateCheckOut,lateCheckOutTime:reservations.lateCheckOutTime,
     preparation:reservations.housekeepingPreparation})
-    .from(reservations).innerJoin(rooms,eq(rooms.id,reservations.roomId))
+    .from(reservations).innerJoin(rooms,eq(rooms.id,assignedRoom))
     .leftJoin(guests,eq(guests.id,reservations.guestId)).leftJoin(bedTypes,eq(bedTypes.id,reservations.bedTypeId))
     .where(and(sql`COALESCE(${rooms.isVirtual},false)=false`,or(
       and(eq(reservations.checkOutDate,date),inArray(reservations.status,['checked_in','checked_out'])),

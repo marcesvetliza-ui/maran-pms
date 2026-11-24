@@ -1,3 +1,4 @@
+import {registerRelocationRoutes} from "../relocation";
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { db } from "../db";
@@ -5,6 +6,7 @@ import { planningDayNotes } from "../../shared/schema";
 import { and, gte, lte } from "drizzle-orm";
 
 export function registerPlanningRoutes(app: Express) {
+  registerRelocationRoutes(app);
   app.get("/api/planning", async (req, res) => {
     try {
       const startDate = req.query.start as string;

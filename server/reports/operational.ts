@@ -44,7 +44,7 @@ export function registerOperationalReportRoutes(app: Express) {
                r.total_room_amount, r.final_rate_per_night
         FROM reservations r
         LEFT JOIN guests g ON r.guest_id = g.id
-        LEFT JOIN rooms ro ON r.room_id = ro.id
+        LEFT JOIN rooms ro ON ro.id = COALESCE((SELECT h->>'roomId' FROM jsonb_array_elements(COALESCE(r.room_history,'[]'::jsonb)) h WHERE h->>'from'<=r.check_in_date::text AND h->>'to'>r.check_in_date::text LIMIT 1),r.room_id)
         LEFT JOIN room_types rt ON r.room_type_id = rt.id
         WHERE r.check_in_date BETWEEN ${from} AND ${to} AND r.status != 'cancelled'
         ORDER BY r.check_in_date, ro.room_number

@@ -1,3 +1,4 @@
+import {assignmentOn, type RoomAssignment} from "@shared/roomAssignments";
 import {nightlyReportPrices} from "@shared/nightlyReportPrices";
 import {dateRange} from "../reports/lodging";
 import { and, asc, eq, gt, gte, inArray, isNotNull, lt, lte, sql } from "drizzle-orm";
@@ -100,6 +101,7 @@ function statusSoldOnDay(status:string,date:string,today:string){
 }
 
 type RawReservationRow = {
+  roomHistory?: RoomAssignment[] | null;
   id: string;
   roomId: string;
   roomTypeId: string;
@@ -160,6 +162,7 @@ async function loadRangeData(from: string, toExclusive: string) {
     db.select({
       id: reservations.id,
       roomId: reservations.roomId,
+      roomHistory:reservations.roomHistory,
       roomTypeId: reservations.roomTypeId,
       status: reservations.status,
       checkInDate: reservations.checkInDate,
@@ -268,7 +271,7 @@ export async function computeRevenueBoard(from: string, toExclusive: string): Pr
     // Mismo universo que roomsAvailable: una reserva sobre una habitación que
     // ya no es operativa (virtual/inactiva) no cuenta como "vendida" acá,
     // igual que esa habitación no cuenta como "disponible" arriba.
-    const nightsToday = resRows.filter(r =>
+    const nightsToday = resRows.map(r=>({...r,roomId:assignmentOn(r,date)?.roomId||""})).filter(r =>
       operationalRoomIds.has(r.roomId) &&
       statusSoldOnDay(r.status, date, today) && r.checkInDate <= date && date < r.checkOutDate,
     );
@@ -287,7 +290,7 @@ export async function getRevenueDayDetail(date: string): Promise<RevenueDayDetai
     !blockRows.some(b => b.roomId === room.id && b.blockFrom <= date && date < b.blockTo),
   ).length;
 
-  const nightsToday = resRows.filter(r =>
+  const nightsToday = resRows.map(r=>({...r,roomId:assignmentOn(r,date)?.roomId||""})).filter(r =>
     operationalRoomIds.has(r.roomId) &&
     statusSoldOnDay(r.status, date, today) && r.checkInDate <= date && date < r.checkOutDate,
   );

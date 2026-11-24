@@ -1,3 +1,4 @@
+import {ReubicarAction} from "@/components/reubicar-dialog";
 import { planningMoveDates } from "@/lib/planning-move";
 import { formatDisplayDate } from "@shared/date-display";
 import {PreparationBadge} from "@/components/housekeeping-preparation";
@@ -923,6 +924,7 @@ export default function PlanningPage() {
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" data-testid="planning-fetching-indicator" />
               )}
             </div>
+            <ReubicarAction />
             {/* Navegación de fechas — pegada a la grilla para acceso rápido */}
             <div className="flex items-center gap-1">
               <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => navigateDays("prev", 7)} title="Semana anterior" data-testid="button-prev-week">
