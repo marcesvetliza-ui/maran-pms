@@ -625,7 +625,7 @@ export default function BillingPage() {
                                     <Badge variant="outline" className="text-xs text-amber-800 border-amber-400 bg-amber-50 dark:bg-amber-950/20">
                                       <AlertTriangle className="w-3 h-3 mr-1" />Pendiente de conciliar
                                     </Badge>
-                                    <div className="text-[10px] text-amber-700 dark:text-amber-300">{f.tipo_comprobante?.startsWith("NC") ? "No emitir otra NC" : f.group_id ? "Vinculación con el grupo pendiente" : "Revisión de la operación pendiente"}</div>
+                                    <div className="text-[10px] text-amber-700 dark:text-amber-300">{f.tipo_comprobante?.startsWith("NC") ? "No emitir otra NC" : f.group_id ? "Vinculación con el grupo pendiente" : f.restaurant_order_id ? "Revisión administrativa de Caja" : "Revisión de la operación pendiente"}</div>
                                     {getReconciliationError(f) && (
                                       <div className="text-[10px] text-amber-700 dark:text-amber-300">{getReconciliationError(f)}</div>
                                     )}

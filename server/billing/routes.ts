@@ -875,6 +875,7 @@ export function registerBillingRoutes(app: Express) {
                CASE
                  WHEN ${area === "restaurant"} THEN 'restaurant'
                  WHEN si.reserva_id IS NOT NULL THEN 'recepcion'
+                 WHEN si.restaurant_order_id IS NOT NULL THEN 'restaurant'
                  ELSE pc.area
                END AS area_name,
                g.name AS group_name,

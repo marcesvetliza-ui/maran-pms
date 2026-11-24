@@ -5,6 +5,8 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 const invoice = vi.hoisted(() => ({ emit: vi.fn() }));
+const administrativeCheck = vi.hoisted(() => ({ request: vi.fn() }));
+vi.mock("../billing/restaurantInvoiceReconciliation", () => ({ requestRestaurantInvoiceReconciliation: administrativeCheck.request }));
 vi.mock("../billing/invoiceService", async (importOriginal) => ({
   ...await importOriginal<typeof import("../billing/invoiceService")>(),
   emitirFactura: invoice.emit,
@@ -92,6 +94,19 @@ suite("PostgreSQL: restaurant fiscal call follows the local payment commit", () 
     expect(r.status).toBe(200);
     expect(r.body.invoiceId).toBe(12345);
     expect(invoice.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the invoice/PDF and lets the next table close if administrative scheduling fails", async () => {
+    const first = await fixture("close"), next = await fixture("close");
+    administrativeCheck.request.mockImplementationOnce(() => { throw new Error("synthetic administrative failure"); });
+    invoice.emit.mockReset().mockResolvedValueOnce({ id: 12345 }).mockResolvedValueOnce({ id: 12346 });
+    const a = await request(first.method, first.path, first.body);
+    const b = await request(next.method, next.path, next.body);
+    expect(a.status).toBe(200); expect(a.body.invoiceId).toBe(12345);
+    expect(b.status).toBe(200); expect(b.body.invoiceId).toBe(12346);
+    expect((await storage.getRestaurantOrder(first.id))!.status).toBe("closed");
+    expect((await storage.getRestaurantOrder(next.id))!.status).toBe("closed");
+    expect(invoice.emit).toHaveBeenCalledTimes(2);
   });
 
   it.each([
