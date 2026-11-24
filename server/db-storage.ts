@@ -16,7 +16,7 @@ import { activeSalesRecord } from "./salesArchive";
 import { inventoryUnitCorrectionWindow } from './inventoryUnitCorrection';
 import { validateInventoryConversions } from './inventoryConversionValidation';
 import { INVENTORY_UNITS } from '@shared/inventoryUnits';
-import {breakfastEligibility} from "./stayEligibility";
+import {breakfastEligibility,inHouseEligibility} from "./stayEligibility";
 import {preparationMoveWarning} from "./housekeepingPreparation";
 import { protectInventoryItemDeactivation, requireActiveInventoryReferences } from "./inventoryLifecycle";
 import { stockUnits } from "./inventorySafety";
@@ -2220,14 +2220,14 @@ export class DatabaseStorage implements IStorage {
     const breakfastsTomorrow = Number((tonightRows.rows[0] as any)?.pax ?? 0);
     const roomsTonight = Number((tonightRows.rows[0] as any)?.rooms_count ?? 0);
 
-    // Personas in house = sum(numberOfGuests) de reservas checked_in activas hoy
+    // Presence lasts until actual check-out, including today's/overdue departures.
+    // Companions are already part of declared pax; use the greater known count.
     const inHouseRows = await db.execute(sql`
-      SELECT COALESCE(SUM(r.number_of_guests), 0) AS pax
+      SELECT COALESCE(SUM(GREATEST(COALESCE(r.number_of_guests,1),1+
+        (SELECT COUNT(*)::int FROM reservation_companions c WHERE c.reservation_id=r.id))),0) AS pax
       FROM reservations r
       JOIN rooms rm ON rm.id = r.room_id
-      WHERE r.check_in_date <= ${today}
-        AND r.check_out_date > ${today}
-        AND r.status = 'checked_in'
+      WHERE ${inHouseEligibility(today,today)}
         AND (rm.is_virtual IS NULL OR rm.is_virtual = false)
     `);
     const inHouseGuests = Number((inHouseRows.rows[0] as any)?.pax ?? 0);

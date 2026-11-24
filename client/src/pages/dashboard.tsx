@@ -34,6 +34,8 @@ import { BreakfastList } from "@/components/breakfast-list";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { ReservationWithDetails, RoomWithType } from "@shared/schema";
 import { useState as useLocalState } from "react";
+import { useHousekeepingDay as useHotelDay } from '@/hooks/use-housekeeping-day';
+import { inHousePax } from '@shared/inHousePax';
 
 type DashboardStats = {
   totalRooms: number;
@@ -224,9 +226,7 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const [inHouseOpen, setInHouseOpen] = useLocalState(false);
   const [breakfastOpen, setBreakfastOpen] = useLocalState(false);
-  const [inHouseDate, setInHouseDate] = useLocalState(() =>
-    getArgentinaToday()
-  );
+  const inHouseDate = useHotelDay();
   const [policeFrom, setPoliceFrom] = useLocalState(() =>
     getArgentinaToday()
   );
@@ -236,6 +236,7 @@ export default function Dashboard() {
 
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
+    refetchInterval: 30_000,
   });
 
   const { data: recentReservations, isLoading: reservationsLoading } = useQuery<ReservationWithDetails[]>({
@@ -264,6 +265,9 @@ export default function Dashboard() {
       return res.json();
     },
     enabled: inHouseOpen,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchInterval: 30_000,
   });
 
   const totalInHouse = stats ? stats.inHouseGuests : 0;
@@ -272,7 +276,8 @@ export default function Dashboard() {
     const fmt = (d: string) => d ? new Date(d + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
     const selectedDateObj = new Date(inHouseDate + "T12:00:00");
     const dateStr = selectedDateObj.toLocaleDateString("es-ES", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-    const totalPax = inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0);
+    const totalPax = inHouseData.reduce((s,e)=>s+inHousePax(e.numberOfGuests,e.companions?.length??0),0);
+    const identifiedPax = inHouseData.reduce((s,e)=>s+1+(e.companions?.length??0),0);
 
     const rows = inHouseData.flatMap((entry) => {
       const g = entry.guest;
@@ -317,7 +322,7 @@ export default function Dashboard() {
       @media print { @page { margin: 12mm; size: landscape; } }
     </style></head><body>
     <h1>Listado In House — Maran Suites & Towers</h1>
-    <p class="sub">${dateStr} &nbsp;·&nbsp; ${inHouseData.length} habitación(es) &nbsp;·&nbsp; ${totalPax} persona(s) identificada(s)</p>
+    <p class="sub">${dateStr} &nbsp;·&nbsp; ${inHouseData.length} habitación(es) &nbsp;·&nbsp; ${totalPax} huésped(es) alojado(s) &nbsp;·&nbsp; ${identifiedPax} persona(s) identificada(s)</p>
     <table>
       <thead><tr>
         <th>Hab.</th><th>Apellido y Nombre</th><th>Tipo Doc.</th><th>N° Doc.</th>
@@ -351,6 +356,7 @@ export default function Dashboard() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/inhouse"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/arrivals"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/departures"] });
       queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
@@ -498,7 +504,7 @@ export default function Dashboard() {
             </div>
             <CardDescription>
               Ocupantes actuales (check-in confirmado) ·{" "}
-              {inHouseLoading ? "…" : `${inHouseData.length} habitación(es) · ${inHouseData.reduce((s, e) => s + (e.numberOfGuests || 0), 0)} huéspedes declarados · ${inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0)} identificados`}
+              {inHouseLoading ? "…" : `${inHouseData.length} habitación(es) · ${inHouseData.reduce((s,e)=>s+inHousePax(e.numberOfGuests,e.companions?.length??0),0)} huéspedes alojados · ${inHouseData.reduce((s, e) => s + 1 + (e.companions?.length ?? 0), 0)} identificados`}
             </CardDescription>
           </CardHeader>
           <CardContent>

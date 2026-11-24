@@ -17,7 +17,7 @@ import { purchaseDocumentAfterEdit } from "./purchase-invoice-document";
 import { canEditPurchaseInvoice, purchaseInvoiceBalanceAfterEdit, PURCHASE_INVOICE_EDIT_ALL_PERMISSION } from "@shared/purchase-invoice-edit";
 import { requireCashView, cashShiftAccess } from "./cash-user-access";
 import { canViewCash, canOperateCash } from "@shared/cash-user-access";
-import {breakfastEligibility, validCalendarDate} from "./stayEligibility";
+import {breakfastEligibility, inHouseEligibility, validCalendarDate} from "./stayEligibility";
 import {createSpecialPurchase} from './specialPurchase';
 import { assertSpecialPurchaseNumberAvailable, specialPurchasePointInput, specialPurchaseReference } from './specialPurchaseNumbering';
 import {applyPurchaseAdjustments} from "@shared/purchaseInvoiceDiscount";
@@ -506,7 +506,7 @@ export async function registerRoutes(
     }
   });
 
-  // In-house guests: reservations active on the requested date (by date range)
+  // Current confirmed presence, or the existing historical stay-date interval.
   app.get("/api/dashboard/inhouse", requireAuth, async (req, res) => {
     try {
       const { reservationCompanions } = await import("@shared/schema");
@@ -518,7 +518,7 @@ export async function registerRoutes(
       let activeReservations: typeof reservations.$inferSelect[] = [];
       let roomNumberMap = new Map<string, string>();
 
-      // En casa: check-in realizado y fecha dentro de la estadía, sin habitaciones virtuales.
+      // Current presence includes departures still awaiting actual check-out.
       const rows = await db.select({
         reservation: reservations,
         roomNumber: rooms.roomNumber,
@@ -527,9 +527,7 @@ export async function registerRoutes(
         .innerJoin(rooms, eq(rooms.id, reservations.roomId))
         .where(
           and(
-            eq(reservations.status, "checked_in"),
-            sql`${reservations.checkInDate} <= ${requestedDate}`,
-            sql`${reservations.checkOutDate} > ${requestedDate}`,
+            inHouseEligibility(requestedDate,today,'reservations'),
             sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`
           )
         );
@@ -620,7 +618,7 @@ export async function registerRoutes(
         .innerJoin(rooms, eq(rooms.id, reservations.roomId))
         .where(
           mode === "inhouse"
-            ? and(eq(reservations.status, "checked_in"), sql`${reservations.checkInDate} <= ${requestedDate}`, sql`${reservations.checkOutDate} > ${requestedDate}`, sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`)
+            ? and(inHouseEligibility(requestedDate,today,'reservations'), sql`(${rooms.isVirtual} IS NULL OR ${rooms.isVirtual} = false)`)
             : and(
                 sql`${reservations.checkInDate} >= ${from}`,
                 sql`${reservations.checkInDate} <= ${to}`,
