@@ -170,10 +170,10 @@ export function GroupOccupantDialog({
                 <span>Motivo del reemplazo</span>
                 <Textarea
                   value={reason}
-                  minLength={10}
+                  minLength={5}
                   maxLength={1000}
                   disabled={mutation.isPending}
-                  placeholder="Explicá por qué se reemplaza al huésped (mínimo 10 caracteres)"
+                  placeholder="Explicá por qué se reemplaza al huésped (mínimo 5 caracteres)"
                   onChange={(e) => {
                     setReason(e.target.value);
                     setConfirmedFingerprint(null);

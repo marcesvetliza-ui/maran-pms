@@ -105,7 +105,7 @@ export function registerReceptionOperationRoutes(app: Express) {
   app.post("/api/billing/reservations/:reservationId/operations/:operationId/cancel-collection", requireAuth, requirePermission("sidebar:/reservations"), async (req,res) => {
     if (!CANCELLED_COLLECTION_ROLES.includes(String(req.user?.role))) return res.status(403).json({error:"La anulación del cobro requiere un supervisor de recepción."});
     const reason = String(req.body?.reason || "").trim(), fingerprint = req.body?.fingerprint;
-    if (req.body?.acknowledge !== true || typeof fingerprint !== 'string' || reason.length < 10 || reason.length > 500)
+    if (req.body?.acknowledge !== true || typeof fingerprint !== 'string' || reason.length < 5 || reason.length > 500)
       return res.status(400).json({error:"Confirmá el importe y el motivo de la anulación del cobro."});
     try {
       const result = await withReservationFinancialLock(req.params.reservationId, () => db.transaction(async tx => {

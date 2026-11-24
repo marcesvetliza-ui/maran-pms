@@ -25,7 +25,7 @@ export function CashCardRectification({invoiceId,method,onSaved}:{invoiceId:numb
     <label className="block text-sm">Motivo<Input aria-label="Motivo de rectificación" value={reason} onChange={e=>{setReason(e.target.value);setPreview(null);}} maxLength={1000}/></label>
     <label className="block text-sm">Referencia de comprobación<Input aria-label="Referencia de comprobación del cierre" placeholder="Ej.: control del cupón o del POS, sin datos de tarjeta" value={evidenceRef} onChange={e=>{setEvidence(e.target.value);setPreview(null);}} maxLength={500}/></label>
    </fieldset>
-   {!pending&&<Button variant="outline" disabled={busy||reason.trim().length<10||evidenceRef.trim().length<3} onClick={()=>void review()}>Revisar rectificación</Button>}
+   {!pending&&<Button variant="outline" disabled={busy||reason.trim().length<5||evidenceRef.trim().length<3} onClick={()=>void review()}>Revisar rectificación</Button>}
    {preview&&!pending&&<div className="space-y-1 text-sm">
     <p>Turno #{preview.shiftNumber} · cierre {new Date(preview.closedAt).toLocaleString('es-AR')} · revisión {preview.revision}</p>
     <p>{money(preview.amount)}: {label(preview.oldMethod)} → {label(preview.newMethod)}</p>

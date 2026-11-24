@@ -367,8 +367,8 @@ export function registerSpaRoutes(app: Express) {
     if (action !== "discard" && action !== "keep") {
       return res.status(400).json({ error: "La acción solicitada no es válida" });
     }
-    if (reason.length < 10) {
-      return res.status(400).json({ error: "Indicá un motivo de al menos 10 caracteres para la auditoría" });
+    if (reason.length < 5) {
+      return res.status(400).json({ error: "Indicá un motivo de al menos 5 caracteres para la auditoría" });
     }
     const expectedConfirmation = action === "keep" ? `CONSERVAR ${invoiceId}` : `DESCARTAR ${invoiceId}`;
     if (confirmation !== expectedConfirmation) {

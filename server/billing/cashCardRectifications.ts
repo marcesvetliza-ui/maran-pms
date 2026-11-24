@@ -29,7 +29,7 @@ export async function prepareCardRectification(tx:any,context:any,action:CardCor
  const oldMethod=normalizeToSpanishPaymentMethod(cash.payment_method);
  if(!shift||shift.status!=='closed'||!['tarjeta_credito','tarjeta_debito'].includes(oldMethod)||
     !['tarjeta_credito','tarjeta_debito'].includes(method)||method===oldMethod)throw fail('La rectificación de cierre sólo admite cambiar Crédito ↔ Débito de un cobro existente.');
- if(action.reason.trim().length<10||action.reason.length>1000||action.evidenceRef.trim().length<3||action.evidenceRef.length>500)throw fail('Indicá un motivo y una referencia de comprobación para rectificar el cierre.');
+ if(action.reason.trim().length<5||action.reason.length>1000||action.evidenceRef.trim().length<3||action.evidenceRef.length>500)throw fail('Indicá un motivo y una referencia de comprobación para rectificar el cierre.');
  const summaries=(await tx.execute(sql`SELECT * FROM cash_closing_summaries WHERE shift_id=${shift.id} FOR UPDATE`)).rows;
  if(summaries.length!==1)throw fail('El cierre original no es unívoco. Requiere conciliación de Administración.');
  const summary=summaries[0];

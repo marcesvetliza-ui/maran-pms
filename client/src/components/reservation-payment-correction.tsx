@@ -34,7 +34,7 @@ export function ReservationPaymentCorrection({reservationId,payment,onClose,onSa
    <fieldset disabled={busy||!!attempt} className="space-y-3">
     <label className="block">Qué ocurrió<select aria-label="Tipo de corrección" className="block w-full rounded border bg-background p-2" value={action} onChange={e=>{setAction(e.target.value);setPreview(null);setRestore(false);}}><option value="change_method">Se cobró, pero el medio está mal registrado</option><option value="void_nonexistent">El cobro registrado nunca existió</option></select></label>
     {action==='change_method'?<label className="block">Medio correcto<select aria-label="Medio correcto" className="block w-full rounded border bg-background p-2" value={method} onChange={e=>{setMethod(e.target.value);setPreview(null);}}>{fundingMethods.map(m=><option key={m} value={m}>{fundingMethodLabels[m]}</option>)}</select></label>:<p>Se retirará el registro erróneo. No se registra una devolución de dinero ni se anula una factura.</p>}
-    <label className="block">Motivo<Input placeholder="Explicá el motivo (mínimo 10 caracteres)" value={reason} maxLength={1000} onChange={e=>{setReason(e.target.value);setPreview(null);}}/></label>
+    <label className="block">Motivo<Input placeholder="Explicá el motivo (mínimo 5 caracteres)" value={reason} maxLength={1000} onChange={e=>{setReason(e.target.value);setPreview(null);}}/></label>
     <label className="block">Referencia de comprobación<Input value={evidence} maxLength={500} placeholder="Ej.: cupón, control de Caja o registro del error" onChange={e=>{setEvidence(e.target.value);setPreview(null);}}/></label>
    </fieldset>
    {preview&&!attempt&&<div className="space-y-2 rounded border p-3">
@@ -44,7 +44,7 @@ export function ReservationPaymentCorrection({reservationId,payment,onClose,onSa
     {action==='void_nonexistent'&&preview.restorationSummary?.map((r:any)=><p key={`${r.paymentId}:${r.invoiceId}`} className="text-sm">{fundingMethodLabels[r.method as keyof typeof fundingMethodLabels]||r.method} · {fundingMoney(r.amountCents)} → {r.invoiceLabel}</p>)}
    </div>}
    {attempt?<Button disabled={busy} onClick={()=>void confirm()}>Recuperar la misma corrección</Button>:<>
-    <Button variant="outline" disabled={busy||reason.trim().length<10||evidence.trim().length<3} onClick={()=>void review()}>Revisar corrección</Button>
+    <Button variant="outline" disabled={busy||reason.trim().length<5||evidence.trim().length<3} onClick={()=>void review()}>Revisar corrección</Button>
     {preview&&<Button disabled={busy||JSON.stringify(preview.request)!==JSON.stringify(request)} onClick={()=>void confirm()}>Confirmar corrección</Button>}
    </>}
   </>}

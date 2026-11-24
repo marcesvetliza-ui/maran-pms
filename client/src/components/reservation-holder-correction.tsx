@@ -83,7 +83,7 @@ export function ReservationHolderCorrection({
     preview.data?.canCorrect &&
     !!guest &&
     guest.id !== preview.data.guest.id &&
-    reason.trim().length >= 10 &&
+    reason.trim().length >= 5 &&
     confirmed &&
     !busy &&
     !preview.isFetching;
@@ -186,7 +186,7 @@ export function ReservationHolderCorrection({
                         placeholder="Ej.: el pasajero previsto no viajó y otra persona se alojó desde el ingreso."
                       />
                       <span className="text-xs text-muted-foreground">
-                        Mínimo 10 caracteres. Se registra junto al titular
+                        Mínimo 5 caracteres. Se registra junto al titular
                         anterior, el nuevo titular, el operador y la fecha.
                       </span>
                     </label>
