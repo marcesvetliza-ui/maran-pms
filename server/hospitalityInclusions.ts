@@ -127,13 +127,14 @@ export function registerHospitalityInclusions(app: Express) {
       ];
       if (q.reservationId) countClauses.push(sql`r.id=${q.reservationId}`);
       const [count] = await rows(
-        sql`SELECT count(*)::int AS n ${contextJoins} WHERE ${sql.join(countClauses, sql` AND `)}`,
+        sql`SELECT count(*)::int AS n,count(*) FILTER(WHERE b.acknowledged_at IS NULL)::int AS unseen ${contextJoins} WHERE ${sql.join(countClauses, sql` AND `)}`,
       );
       res.json({
         items: result.slice(0, 100),
         hasMore: result.length > 100,
         page: q.page,
         pendingToday: count.n,
+        unseenToday: count.unseen,
         canCoordinate: canCoordinate(req),
         areas,
       });

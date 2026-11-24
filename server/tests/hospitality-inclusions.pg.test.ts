@@ -222,6 +222,23 @@ describe.skipIf(!enabled)(
           (b: any) => b.person.includes("Corregida") && b.room === "QA-MOVIDA",
         ),
       ).toBe(true);
+      for (const benefit of await benefits(id))
+        await action(benefit, {
+          action: "acknowledge",
+          quantity: undefined,
+          note: undefined,
+        });
+      expect((await api("GET", `?reservationId=${id}`)).body.unseenToday).toBe(
+        0,
+      );
+      await pool!.query(
+        "UPDATE reservations SET status='checked_in' WHERE id=$1",
+        [id],
+      );
+      expect((await api("GET", `?reservationId=${id}`)).body.unseenToday).toBe(
+        1,
+      );
+      expect((await benefits(id)).every((b) => b.used === 0)).toBe(true);
     });
     it("visto no consume; atención parcial y reintento conservan una sola utilización", async () => {
       const id = await fixture();
@@ -427,6 +444,17 @@ describe.skipIf(!enabled)(
         [id, today()],
       );
       expect(await benefits(id)).toHaveLength(1);
+      await action((await benefits(id))[0], {
+        action: "acknowledge",
+        quantity: undefined,
+        note: undefined,
+      });
+      await pool!.query(
+        "UPDATE spa_appointments SET status='completed' WHERE id=$1",
+        [id],
+      );
+      expect((await benefits(id))[0].acknowledged_at).toBeNull();
+      expect((await benefits(id))[0].used).toBe(0);
       await pool!.query(
         "UPDATE spa_appointments SET status='cancelled' WHERE id=$1",
         [id],

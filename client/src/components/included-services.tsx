@@ -27,6 +27,7 @@ import {
 type Result = {
   items: IncludedService[];
   pendingToday: number;
+  unseenToday?: number;
   hasMore: boolean;
   page: number;
   canCoordinate: boolean;
@@ -788,6 +789,11 @@ export function IncludedServicesButton({
             className="rounded-full bg-amber-100 px-2 text-amber-900"
           >
             {data.data.pendingToday}
+          </span>
+        )}
+        {!!data.data?.unseenToday && (
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+            Por ver
           </span>
         )}
       </Button>

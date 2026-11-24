@@ -79,6 +79,9 @@ BEGIN
       cancelled:=item.manually_cancelled OR NEW.status IN ('cancelled','no_show') OR (item.kind='reservation' AND item.catalog_id IS DISTINCT FROM NEW.hospitality_package_id);
       UPDATE hospitality_included_sources SET active=NOT cancelled WHERE id=item.id;
       PERFORM hospitality_reconcile_source(item.id,NEW.check_in_date,NEW.check_out_date,NEW.number_of_guests,1,cancelled);
+      IF TG_OP='UPDATE' AND NEW.status='checked_in' AND OLD.status IS DISTINCT FROM NEW.status THEN
+        UPDATE hospitality_included_services SET acknowledged_at=NULL,version=version+1 WHERE source_id=item.id AND NOT hospitality_included_services.cancelled AND used<quantity AND ready_when='arrival';
+      END IF;
     END LOOP;
     catalog:=NEW.hospitality_package_id; IF catalog IS NULL THEN RETURN NEW; END IF;
     source_key:='reservation:'||NEW.id||':package:'||catalog; owner:='package';
@@ -92,6 +95,12 @@ BEGIN
   ELSE
     -- A prepaid sale is the entitlement source. Its appointment must never duplicate it.
     IF NEW.sold_treatment_sale_id IS NOT NULL THEN
+      IF TG_OP='UPDATE' AND NEW.status IN ('in_progress','completed') AND OLD.status IS DISTINCT FROM NEW.status THEN
+        PERFORM 1 FROM hospitality_included_sources WHERE id='spa_sale:'||NEW.sold_treatment_sale_id FOR UPDATE;
+        UPDATE hospitality_included_services SET acknowledged_at=NULL,version=version+1
+        WHERE source_id='spa_sale:'||NEW.sold_treatment_sale_id AND NOT hospitality_included_services.cancelled AND used<quantity
+          AND (ready_when='arrival' OR (ready_when='spa_completed' AND NEW.status='completed'));
+      END IF;
       UPDATE hospitality_included_sources SET active=false WHERE kind='spa_appointment' AND entity_id=NEW.id;
       UPDATE hospitality_included_services SET cancelled=true,needs_review=used>0,version=version+1 WHERE source_id IN (SELECT id FROM hospitality_included_sources WHERE kind='spa_appointment' AND entity_id=NEW.id);
       RETURN NEW;
@@ -119,6 +128,11 @@ BEGIN
   VALUES(source_key,CASE TG_TABLE_NAME WHEN 'reservations' THEN 'reservation' WHEN 'spa_treatment_sales' THEN 'spa_sale' ELSE 'spa_appointment' END,NEW.id,catalog,coalesce(source_title,'Servicios incluidos'),coalesce(rules,'[]'::jsonb),NOT cancelled,'origen')
   ON CONFLICT(id) DO UPDATE SET active=excluded.active;
   PERFORM hospitality_reconcile_source(source_key,start_date,end_date,people,units,cancelled);
+  IF TG_TABLE_NAME='spa_appointments' AND TG_OP='UPDATE' AND NEW.status IN ('in_progress','completed') AND OLD.status IS DISTINCT FROM NEW.status THEN
+    UPDATE hospitality_included_services SET acknowledged_at=NULL,version=version+1
+    WHERE source_id=source_key AND NOT hospitality_included_services.cancelled AND used<quantity
+      AND (ready_when='arrival' OR (ready_when='spa_completed' AND NEW.status='completed'));
+  END IF;
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS hospitality_reservation_change ON reservations;

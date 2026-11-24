@@ -49,6 +49,12 @@ export function InclusionRulesEditor({
         Indicá qué le corresponde al cliente y cómo se calcula. La programación
         de mesa, turno o habitación se coordina con cada área.
       </p>
+      {!spa && (
+        <p className="text-xs text-muted-foreground">
+          Por persona usa el total de pasajeros declarados, incluidos los
+          menores. Para una cantidad fija, elegí Por noche o Por estadía.
+        </p>
+      )}
       <div className="flex flex-wrap gap-3">
         {inclusionAreas.map((area) => (
           <label key={area} className="flex items-center gap-2 text-sm">

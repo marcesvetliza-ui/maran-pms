@@ -22,6 +22,8 @@ ni cambia Maran. El pase a Maran queda sujeto a la revisión del propietario.
    cuenta registros de servicios pendientes y vigentes de hoy, no personas,
    cantidades ni avisos sin leer. Cada noche puede tener su propio registro.
    Los servicios aún sin fecha se encuentran en Todos los pendientes.
+   «Por ver» identifica avisos sin revisar; el check-in y la finalización de SPA
+   renuevan el aviso de disponibilidad aunque se hubiera visto la previsión.
 5. **Visto** solo confirma lectura. **Coordinar** informa el próximo horario de
    atención pendiente y deja historial. **Registrar atención** solicita cantidad
    y detalle, descuenta solo esa cantidad y registra operador y momento.
