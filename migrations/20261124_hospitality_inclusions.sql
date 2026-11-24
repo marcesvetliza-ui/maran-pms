@@ -122,7 +122,7 @@ BEGIN
     UPDATE hospitality_included_sources SET active=false WHERE kind='spa_appointment' AND entity_id=NEW.id AND id<>source_key;
     UPDATE hospitality_included_services SET cancelled=true,needs_review=used>0,version=version+1 WHERE source_id IN (SELECT id FROM hospitality_included_sources WHERE kind='spa_appointment' AND entity_id=NEW.id AND id<>source_key);
   END IF;
-  IF source_title IS NULL AND NOT EXISTS(SELECT 1 FROM hospitality_included_sources WHERE id=source_key) THEN RAISE EXCEPTION 'No se encontró el producto de los incluidos'; END IF;
+  IF owner='package' AND source_title IS NULL AND NOT EXISTS(SELECT 1 FROM hospitality_included_sources WHERE id=source_key) THEN RAISE EXCEPTION 'No se encontró el producto de los incluidos'; END IF;
   SELECT t.rules INTO rules FROM hospitality_inclusion_templates t WHERE t.owner_type=owner AND t.owner_id=catalog;
   INSERT INTO hospitality_included_sources(id,kind,entity_id,catalog_id,title,rules_snapshot,active,created_by)
   VALUES(source_key,CASE TG_TABLE_NAME WHEN 'reservations' THEN 'reservation' WHEN 'spa_treatment_sales' THEN 'spa_sale' ELSE 'spa_appointment' END,NEW.id,catalog,coalesce(source_title,'Servicios incluidos'),coalesce(rules,'[]'::jsonb),NOT cancelled,'origen')
