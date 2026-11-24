@@ -1,3 +1,4 @@
+import { withFinancialScopeLock } from "../nightlyPricingGuard";
 import { nonFiscalCollectionError } from "@shared/cash-document-classification";
 import { spaPlanningMoveSchema, spaMoveEndTime } from "@shared/spaPlanningMove";
 import { spaAppointmentCancellationSchema } from "@shared/spaAppointmentCancellation";
@@ -92,15 +93,7 @@ const INVOICE_TO_SPA_PAYMENT_METHOD: Record<string, string> = {
 };
 
 async function withSpaInvoiceAuthorizationLock<T>(accountId: string, action: () => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  const lockKey = `spa-invoice:${accountId}`;
-  try {
-    await client.query("SELECT pg_advisory_lock(hashtext($1))", [lockKey]);
-    return await action();
-  } finally {
-    await client.query("SELECT pg_advisory_unlock(hashtext($1))", [lockKey]).catch(() => undefined);
-    client.release();
-  }
+  return withFinancialScopeLock(`spa-invoice:${accountId}`, action);
 }
 
 function isValidSpaTime(value: unknown): value is string {

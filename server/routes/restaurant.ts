@@ -15,6 +15,7 @@ import { eq, and, not, inArray, gte, lte, sql } from "drizzle-orm";
 import { sendEmailWithPdfAttachment } from "../email-service";
 import { generateRestaurantOrderReceiptPdf, getRestaurantReceiptTypeLabel } from "../restaurantPdfs";
 import { assertFinancialSchemaReady } from "../migrate";
+import { withFinancialScopeLock } from "../nightlyPricingGuard";
 import { getArgentinaOperationalDate, getArgentinaOperationalParts } from "../utils/argentinaDateTime";
 
 async function registerRestaurantCashMovement(...args: Parameters<typeof storage.registerCashMovement>) {
@@ -102,7 +103,7 @@ async function validRestaurantRoomReservation(id: unknown): Promise<boolean> {
 function queueRestaurantInvoice(data: Parameters<typeof emitirFactura>[0]): void {
   afterRestaurantPaymentCommit(async () => {
     try {
-      const invoice = await emitirFactura(data);
+      const invoice = await withFinancialScopeLock(`restaurant-invoice:${data.restaurantOrderId}`, () => emitirFactura(data));
       return { invoiceId: invoice.id };
     } catch (error) {
       console.error("[Billing] Error emitiendo factura restaurant:", error);
