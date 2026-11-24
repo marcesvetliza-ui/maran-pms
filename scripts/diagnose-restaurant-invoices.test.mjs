@@ -13,11 +13,12 @@ function harness(fail=false){
  else if(u.pathname==='/api/cash/movements')data=[{id:'move-1',sourceType:'comprobante',sourceId:'1',area:'restaurant',amount:152500,paymentMethod:'efectivo',sourceLabel:'ETIQUETA PRIVADA',description:'DESCRIPCIÓN PRIVADA'}];
  else if(u.pathname==='/api/restaurant/orders/order-1')data={id:'order-1',orderNumber:'ORD-TEST',status:'closed',total:152500,guest:{name:'HUÉSPED PRIVADO'},waiterName:'MOZO PRIVADO'};
  else if(u.pathname==='/api/restaurant/orders/order-1/folio-payments')data=[];
+ else if(u.pathname==='/api/folios/restaurant_order/order-1')data={id:'folio-1',totalCharges:'152500',totalPayments:'152500',balance:'0',movements:[]};
  else throw Error('Ruta inesperada');
  return {status:200,json:async()=>data};};return {fetchImpl,calls};
 }
 test('consulta solo comprobantes elegidos y relaciones, sin escribir operaciones ni divulgar datos personales',async()=>{
- const h=harness(),r=await diagnoseInvoices({password:'PASSWORD_PRIVATE',fetchImpl:h.fetchImpl});assert.equal(r.operationalWrites,0);assert.equal(r.invoices.length,4);assert.equal(r.invoices[0].relatedCash[0].amount,152500);assert.equal(r.invoices[0].order.number,'ORD-TEST');
+ const h=harness(),r=await diagnoseInvoices({password:'PASSWORD_PRIVATE',fetchImpl:h.fetchImpl});assert.equal(r.operationalWrites,0);assert.equal(r.invoices.length,4);assert.equal(r.invoices[0].relatedCash[0].amount,152500);assert.equal(r.invoices[0].order.number,'ORD-TEST');assert.match(r.invoices[0].invoiceFingerprint,/^[a-f0-9]{64}$/);assert.match(r.invoices[0].financialFingerprint,/^[a-f0-9]{64}$/);
  const text=JSON.stringify(r);for(const word of ['PRIVADO','PRIVADA','PASSWORD_PRIVATE','SESSION_PRIVATE','privado@example.test'])assert.ok(!text.includes(word));
  for(const c of h.calls)if(!['/api/auth/login','/api/auth/logout'].includes(c.path))assert.equal(c.method,'GET');
  assert.ok(h.calls.every(c=>c.path!=='/api/restaurant/orders'));assert.equal(h.calls.at(-1).path,'/api/auth/logout');
