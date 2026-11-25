@@ -83,6 +83,16 @@ export function createPrefacturaSubmission(storage: Pick<Storage, "getItem" | "s
       attempt.acknowledgedPaymentIds = ids.filter(id => ownIds.has(id));
       storage.setItem(key(reservationId), JSON.stringify(attempt));
     },
+    synchronizeVerified(reservationId: string | number, operationId: string, attempt: PrefacturaAttempt) {
+      const current = this.pending(reservationId);
+      if (!current || current.invoiceRequest?.creditOperationId !== operationId ||
+          attempt.invoiceRequest?.creditOperationId !== operationId ||
+          attempt.invoiceRequest?.prefacturaRecovery?.version !== 2) throw new Error("La operación cambió. Se conserva el pedido original.");
+      assertReservation(reservationId, attempt);
+      // The server's immutable snapshot, never current form values, is the
+      // authority for amounts, CC settlement, acknowledged rows and checkout.
+      storage.setItem(key(reservationId), JSON.stringify({ ...attempt, ownerReservationId: String(reservationId) }));
+    },
     replaceUnissued(reservationId: string | number, originalOperationId: string, replacement: PrefacturaAttempt) {
       const current = this.pending(reservationId);
       if (!current || current.invoice || current.acknowledgedPaymentIds?.length || current.invoiceRequest?.creditOperationId !== originalOperationId ||

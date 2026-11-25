@@ -38,26 +38,26 @@ const { PrefacturaDialog } = await import("./PrefacturaDialog");
 const RESERVATION_ID = "res-homolog-pv-1";
 
 const FOLIO = {
-  reservationCode: "R-202",
-  guestName: "Svetliza Marcelo",
-  roomNumber: "202",
+  reservationCode: "R-FIXTURE",
+  guestName: "Fixture Persona",
+  roomNumber: "9002",
   checkInDate: "2026-10-01",
   checkOutDate: "2026-10-04",
   nights: 3,
-  roomRate: "70000.00",
-  roomTotal: 70000,
+  roomRate: "1000.00",
+  roomTotal: 1000,
   charges: [{
     id: "charge-room",
     description: "Alojamiento",
-    amount: "70000.00",
+    amount: "1000.00",
     category: "alojamiento",
     date: "2026-10-01",
   }],
-  totalCharges: 70000,
+  totalCharges: 1000,
   payments: [],
   totalPayments: 0,
-  grandTotal: 70000,
-  balance: 70000,
+  grandTotal: 1000,
+  balance: 1000,
 };
 
 const RESERVATION = {
@@ -65,12 +65,12 @@ const RESERVATION = {
   status: "checked_in",
   checkOutDate: "2026-10-04",
   guest: {
-    firstName: "Marcelo",
-    lastName: "Svetliza",
+    firstName: "Persona",
+    lastName: "Fixture",
     vatCondition: "consumidor_final",
-    documentNumber: "23232323",
+    documentNumber: "00000000",
   },
-  room: { roomNumber: "202" },
+  room: { roomNumber: "9002" },
 } as any;
 
 // Varios PV operativos activos — ninguno debe terminar usándose en homologación.
@@ -114,7 +114,7 @@ function buildFetchMock() {
         puntoVenta: 5,
         numero: 11,
         cae: "CAE-TEST-900",
-        montoTotal: "70000.00",
+        montoTotal: "1000.00",
       }), { status: 201, headers: { "Content-Type": "application/json" } });
     }
     if (strUrl.includes("/api/payments") && method === "POST") {
@@ -235,9 +235,9 @@ describe("PrefacturaDialog — Punto de venta en homologación", () => {
   it("permite corregir explícitamente un intento que el servidor confirma que no salió", async () => {
     const operation = crypto.randomUUID();
     const original = { reservaId: RESERVATION_ID, tipoComprobante: "FB", puntoVentaOverride: 21, creditOperationId: operation,
-      sourceChargeIds: ["accommodation"], sourceChargeAmounts: { accommodation: 70000 },
-      items: [{ descripcion: "Alojamiento", subtotal: 70000 }],
-      cliente: { razonSocial: "Marcelo", condicionIva: "Consumidor Final" } };
+      sourceChargeIds: ["accommodation"], sourceChargeAmounts: { accommodation: 1000 },
+      items: [{ descripcion: "Alojamiento", subtotal: 1000 }],
+      cliente: { razonSocial: "Persona", condicionIva: "Consumidor Final" } };
     sessionStorage.setItem(`prefactura-pending:${RESERVATION_ID}`, JSON.stringify({ invoiceRequest: original, invoice: null, payments: [], checkoutRequested: true }));
     const base = buildFetchMock();
     fetchMock = vi.fn(async (url, options) => {
@@ -256,25 +256,24 @@ describe("PrefacturaDialog — Punto de venta en homologación", () => {
   it("recupera desde otra sesión y registra solo el pago que falta, sin volver a facturar", async () => {
     const operation = crypto.randomUUID();
     const first = crypto.randomUUID(), second = crypto.randomUUID();
-    const payments = [first, second].map(paymentRequestId => ({ reservationId: RESERVATION_ID, paymentRequestId, amount: "35000.00", method: "efectivo", date: "2026-11-03", notes: null, reference: null }));
-    const invoice = { id: 701, tipoComprobante: "FB", puntoVenta: 5, numero: 10, cae: "71234567890123", montoTotal: "70000.00" };
-    const original = { reservaId: RESERVATION_ID, creditOperationId: operation, tipoComprobante: "FB", puntoVentaOverride: 5, cliente: { razonSocial: "Marcelo", condicionIva: "Consumidor Final" }, prefacturaRecovery: { version: 2, payments, checkoutRequested: true } };
+    const payments = [first, second].map(paymentRequestId => ({ reservationId: RESERVATION_ID, paymentRequestId, amount: "500.00", method: "efectivo", date: "2026-11-03", notes: null, reference: null }));
+    const invoice = { id: 701, tipoComprobante: "FB", puntoVenta: 5, numero: 10, cae: "71234567890123", montoTotal: "1000.00" };
+    const original = { reservaId: RESERVATION_ID, creditOperationId: operation, tipoComprobante: "FB", puntoVentaOverride: 5, cliente: { razonSocial: "Persona", condicionIva: "Consumidor Final" }, prefacturaRecovery: { version: 2, payments, checkoutRequested: true } };
     const status = { operationId: operation, stage: "authorized", safeToCorrect: false, invoice, acknowledgedPaymentIds: [first], attempt: { invoiceRequest: original, invoice, payments, checkoutRequested: true, acknowledgedPaymentIds: [first] } };
     const base = buildFetchMock();
     fetchMock = vi.fn(async (url, options) => {
       // The first acknowledged payment has already reduced the live balance.
-      if (String(url).endsWith("/folio")) return Response.json({...FOLIO,balance:35000,totalPayments:35000,payments:[{...payments[0],id:"already-paid",invoiceRef:JSON.stringify({id:701})}]});
+      if (String(url).endsWith("/folio")) return Response.json({...FOLIO,balance:500,totalPayments:500,payments:[{...payments[0],id:"already-paid",invoiceRef:JSON.stringify({id:701})}]});
       if (String(url).endsWith("/pending-operation")) return Response.json({ pending: status });
       if (String(url).endsWith("/reception-status")) return Response.json(status);
       return base(url, options);
     });
     vi.stubGlobal("fetch", fetchMock);
-    const user = userEvent.setup(); renderDialog();
-    await user.click(await screen.findByTestId("button-retry-prefactura"));
+    renderDialog();
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/payments" && options?.method === "POST")).toBe(true));
     const posted = fetchMock.mock.calls.filter(([url, options]) => String(url) === "/api/payments" && options?.method === "POST");
     expect(posted).toHaveLength(1);
-    expect(JSON.parse(String(posted[0][1]?.body))).toMatchObject({ paymentRequestId: second, amount: "35000.00", invoiceData: { id: 701 } });
+    expect(JSON.parse(String(posted[0][1]?.body))).toMatchObject({ paymentRequestId: second, amount: "500.00", invoiceData: { id: 701 } });
     expect(fetchMock.mock.calls.some(([url, options]) => String(url) === "/api/billing/invoices" && options?.method === "POST")).toBe(false);
   });
 });

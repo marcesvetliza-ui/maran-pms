@@ -61,8 +61,9 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const canCloseCancelled = await canCloseCancelledReceptionOperation(db, operation, invoice);
   const collectionCorrectionCompleted = operation.stage === 'corrected' && operation.error_code === 'BILLING_CANCELLED_COLLECTION_REVERSED';
   const cancelledCollection = collectionCorrectionCompleted ? null : await cancelledReceptionCollection(db, operation, invoice);
-  const departure = recovery?.checkoutDebtAccount && recovery.checkoutRequested
-    ? (await db.execute(sql`SELECT status FROM reservations WHERE id=${operation.owner_id}`)).rows[0] as any : null;
+  const departure = recovery?.checkoutRequested
+    ? (await db.execute(sql`SELECT status, checked_out_at >= (SELECT created_at FROM billing_operations WHERE operation_id=${operation.operation_id}) AS completed_after_intent
+        FROM reservations WHERE id=${operation.owner_id}`)).rows[0] as any : null;
   const debt = recovery?.checkoutDebtAccount;
   // Reopening a stay does not undo its already committed account transfer.
   // Prove that exact departure by its payment key, linked account movement and
@@ -86,11 +87,16 @@ export async function receptionOperationStatus(operation: BillingOperation) {
           AND a.details::jsonb->>'amount'=p.amount::text
           AND a.details::jsonb->>'accountEntityType'=${debt.entityType} AND a.details::jsonb->>'accountEntityId'=${debt.entityId})
       LIMIT 1`)).rows.length > 0 : false;
-  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone && (!departure || departure.status === 'checked_out' || completedDeparture);
+  const financiallyComplete = issued && acknowledged.length === expected.length && ccDone && creditsDone && (!debt || !departure || departure.status === 'checked_out' || completedDeparture);
+  // Billing may commit before checkout. Keep that intent discoverable from
+  // another browser, but never close again a stay that was later reopened.
+  const departureComplete = !recovery?.checkoutRequested || departure?.status === 'checked_out' ||
+    completedDeparture || departure?.completed_after_intent === true;
+  const recoveryComplete = financiallyComplete && departureComplete;
   return {
     operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled, canRetryNumberConflict,
-    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete,
-    departureReopened: completedDeparture && departure?.status === 'checked_in',
+    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, recoveryComplete,
+    departureReopened: (completedDeparture || departure?.completed_after_intent === true) && departure?.status === 'checked_in',
     cancelledCollection, collectionCorrectionCompleted, code: operation.error_code,
     paymentConflictMessage: paymentConflicts.length ? "El cobro de este intento ya existe, pero fue modificado o requiere conciliación. Administración debe revisar el pago vinculado; no se volverá a cobrar ni a cambiar su forma de pago. El check-out se gestiona por separado desde la reserva, trasladando el saldo actual a Cuenta Corriente si corresponde." : null,
     message: invoice?.estado === "anulada" ? `La factura ${invoice.tipo_comprobante} ${invoice.punto_venta}-${invoice.numero} de este intento está anulada. ${canCloseCancelled ? "Podés cerrar el intento anterior sin emitir ni cobrar y volver a revisar la cuenta vigente." : "Su anulación o sus cobros requieren conciliación antes de cerrar el intento."}` : operation.error_code === "BILLING_NUMBER_CONFLICT" ? `La serie ${operation.fiscal_identity.type}, PV ${operation.fiscal_identity.pointOfSale}, número ${operation.request_snapshot?._numberAttempt ?? "propuesto"}${conflict ? `, está ocupada por el comprobante interno #${conflict.id}` : ", necesita volver a verificarse"}. Al completar la operación se consultará ARCA y se recuperará el borrador anterior si hay evidencia suficiente, conservando los importes y pagos originales.` : archived ? "El borrador anterior fue archivado después de verificar que ARCA no lo autorizó. Revisá sus datos antes de preparar un nuevo intento." : null,
@@ -163,7 +169,7 @@ export function registerReceptionOperationRoutes(app: Express) {
         const rows = (await db.execute(sql`SELECT * FROM billing_operations WHERE owner_type='reservation' AND owner_id=${req.params.reservationId} AND stage<>'corrected' ORDER BY created_at DESC LIMIT 20`)).rows as BillingOperation[];
         for (const operation of rows) {
           const status = await receptionOperationStatus(operation);
-          if (status.attempt && !status.financiallyComplete) return status;
+          if (status.attempt && !status.recoveryComplete) return status;
         }
         return null;
       })();

@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { BILLING_OPERATION_SCHEMA_SQL } from "../billing/operationJournal";
 import { lastAuthorizedForRequest } from "./helpers/wsfeLastAuthorizedFixture";
 const mocks = vi.hoisted(() => ({ point: 9900, environment: "homologacion", authorize: vi.fn(), consult: vi.fn(), token: vi.fn() }));
-vi.mock("../billing/billingConfig", () => ({ getBillingConfig: async () => ({ arcaAmbiente: mocks.environment, puntoVenta: mocks.point, puntoVentaHomolog: mocks.point, arcaCuit: "30717698130" }) }));
+vi.mock("../billing/billingConfig", () => ({ getBillingConfig: async () => ({ arcaAmbiente: mocks.environment, puntoVenta: mocks.point, puntoVentaHomolog: mocks.point, arcaCuit: "00000000000" }) }));
 vi.mock("../billing/wsaaClient", () => ({ getTokenAuth: mocks.token }));
 vi.mock("../billing/wsfevClient", () => ({ feCAESolicitar: mocks.authorize, feCompConsultar: mocks.consult }));
 vi.mock("../auth", () => ({ requireAuth: (req: any, _res: any, next: any) => { req.user = { role: "admin" }; next(); }, requirePermission: () => (_req: any, _res: any, next: any) => next() }));
@@ -15,7 +15,7 @@ const pool = process.env.DATABASE_URL ? new pg.Pool({ connectionString: process.
 let emitirFactura: typeof import("../billing/invoiceService").emitirFactura;
 let server: http.Server; let base: string;
 const originalFetch = global.fetch;
-const authorization = { cae: "71234567890123", caeFechaVto: new Date("2026-11-13T15:00:00Z") };
+const authorization = { cae: "00000000000000", caeFechaVto: new Date("2026-11-13T15:00:00Z") };
 async function fixture(run: (f: any) => Promise<void>) {
   mocks.point = 10000 + Math.floor(Math.random() * 70000);
   const op = randomUUID(), reservation = randomUUID(), requestId = randomUUID();
@@ -91,6 +91,24 @@ suite("Estabilidad de facturación de Recepción con PostgreSQL y ARCA simulado"
     await emitirFactura(f.data);
     expect(mocks.authorize).toHaveBeenCalledTimes(1);
     expect((await pool!.query("SELECT id FROM sales_invoices WHERE punto_venta=$1", [f.point])).rows).toHaveLength(1);
+  }));
+
+  it("recupera una salida pendiente desde otra sesión sin resucitarla después de reabrir la estadía", async () => fixture(async f => {
+    await pool!.query("INSERT INTO reservations(id,reservation_code,guest_id,room_type_id,room_id,check_in_date,check_out_date,status,created_at) VALUES($1::text,$1::text,$2,$3,$4,'2026-11-24','2026-11-25','checked_in',now())", [f.reservation,randomUUID(),randomUUID(),randomUUID()]);
+    try {
+      const snapshot={...f.request,prefacturaRecovery:{version:2,payments:[],checkoutRequested:true}};
+      await emitirFactura({...f.data,requestSnapshot:snapshot});
+      const found=await request(`/api/billing/reservations/${f.reservation}/pending-operation`);
+      expect(found.status).toBe(200);
+      expect(found.body.pending).toMatchObject({operationId:f.op,financiallyComplete:true,recoveryComplete:false});
+      await pool!.query("UPDATE reservations SET status='checked_out',checked_out_at=now()+interval '1 second' WHERE id=$1",[f.reservation]);
+      expect((await request(`/api/billing/reservations/${f.reservation}/pending-operation`)).body.pending).toBeNull();
+      await pool!.query("UPDATE reservations SET status='checked_in' WHERE id=$1",[f.reservation]);
+      expect((await request(`/api/billing/reservations/${f.reservation}/pending-operation`)).body.pending).toBeNull();
+      expect((await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/reception-status`)).body)
+        .toMatchObject({recoveryComplete:true,departureReopened:true});
+      expect(mocks.authorize).toHaveBeenCalledTimes(1);
+    } finally { await pool!.query('DELETE FROM reservations WHERE id=$1',[f.reservation]); }
   }));
 
   it("no reutiliza la operación con otros datos ni con otro ambiente", async () => fixture(async f => {
