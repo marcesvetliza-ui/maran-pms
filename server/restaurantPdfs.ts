@@ -39,6 +39,7 @@ export interface RestaurantReceiptData {
   receiptType: string | null;
   closedAt?: string | null;
   total: string;
+  advanceApplied?: string;
   comments?: string | null;
   items: Array<{
     name: string;
@@ -175,6 +176,14 @@ export async function generateRestaurantOrderReceiptPdf(data: RestaurantReceiptD
     if (data.items.length === 0) {
       doc.fillColor("#888888").fontSize(8).font("Helvetica").text("Sin ítems", margin + 4, y + 4);
       y += 18;
+    }
+
+    if (Number(data.advanceApplied || 0) > 0) {
+      if(y>pageH-130){doc.addPage();y=40;}
+      doc.fillColor('#334155').fontSize(9).font('Helvetica');
+      doc.text('Anticipos aplicados',margin+4,y+5,{width:300});
+      doc.text(`-$${fmtMoney(Number(data.advanceApplied))}`,colTotal,y+5,{width:contentW-(colTotal-margin),align:'right'});
+      y+=22;
     }
 
     // ── TOTAL ────────────────────────────────────────────────────────────────

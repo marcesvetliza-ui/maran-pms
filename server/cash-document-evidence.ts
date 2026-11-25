@@ -11,13 +11,14 @@ export async function enrichCashDocumentEvidence<T extends Movement>(movements: 
   const sources = await executor.execute(sql`
     WITH input AS (SELECT * FROM jsonb_to_recordset(${input}::jsonb) AS i(key text,source_type text,source_id text,payment_id text))
     SELECT i.*, p.invoice_ref AS reservation_ref, gp.invoice_ref AS group_ref, ep.invoice_ref AS event_ref,
-           gp.invoice_id AS group_invoice, sa.invoice_id AS spa_invoice,
-           COALESCE(p.id,gp.id,sp.id,ep.id) AS known_payment
+           gp.invoice_id AS group_invoice, sa.invoice_id AS spa_invoice, rec.invoice_id AS restaurant_event_invoice,
+           COALESCE(p.id,gp.id,sp.id,ep.id,rec.advance_id) AS known_payment
     FROM input i
     LEFT JOIN payments p ON i.source_type='reservation' AND p.id=i.payment_id AND p.reservation_id=i.source_id
     LEFT JOIN group_payments gp ON i.source_type='group_payment' AND gp.id=COALESCE(i.payment_id,i.source_id)
     LEFT JOIN spa_payments sp ON i.source_type='spa_account' AND sp.id=i.payment_id AND sp.account_id=i.source_id
     LEFT JOIN spa_accounts sa ON sa.id=sp.account_id
+    LEFT JOIN restaurant_event_collections rec ON i.source_type='restaurant_event_advance' AND rec.advance_id=COALESCE(i.payment_id,i.source_id)
     LEFT JOIN event_payments ep ON i.source_type='event_payment' AND ep.id=COALESCE(i.payment_id,i.source_id)
   `);
   const evidence = sources.rows.map(row => {
@@ -26,7 +27,7 @@ export async function enrichCashDocumentEvidence<T extends Movement>(movements: 
     for (const ref of [row.reservation_ref,row.group_ref,row.event_ref]) {
       try { const id=Number(JSON.parse(ref || "null")?.id); if (Number.isSafeInteger(id) && id>0) ids.add(id); else if (ref) invalid_ref = true; } catch { invalid_ref = true; }
     }
-    for (const value of [row.group_invoice,row.spa_invoice,row.source_type==='comprobante' ? row.source_id : null]) {
+    for (const value of [row.group_invoice,row.spa_invoice,row.restaurant_event_invoice,row.source_type==='comprobante' ? row.source_id : null]) {
       const id=Number(value); if (Number.isSafeInteger(id) && id>0) ids.add(id);
     }
     return {...row,invoice_ids:[...ids],invalid_ref};

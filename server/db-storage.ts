@@ -4577,7 +4577,9 @@ export class DatabaseStorage implements IStorage {
     const tables = await db.select().from(restaurantTables).where(eq(restaurantTables.isActive, "true"));
     const areas = await db.select().from(restaurantAreas);
     const areasMap = new Map(areas.map(a => [a.id, a]));
-    return tables.map(t => ({ ...t, area: areasMap.get(t.areaId)! }));
+    const eventLinks=await db.execute(sql`SELECT a.table_id,s.order_id FROM restaurant_event_assignments a JOIN restaurant_event_services s ON s.reservation_id=a.reservation_id JOIN restaurant_orders o ON o.id=s.order_id WHERE o.status NOT IN ('closed','cancelled')`);
+    const eventOrderByTable=new Map(eventLinks.rows.map((r:any)=>[r.table_id,r.order_id]));
+    return tables.map(t => ({ ...t, area: areasMap.get(t.areaId)!, eventServiceOrderId:eventOrderByTable.get(t.id)||null }));
   }
 
   async getRestaurantTable(id: string): Promise<RestaurantTableWithArea | undefined> {
@@ -4748,7 +4750,8 @@ export class DatabaseStorage implements IStorage {
       .where(
         and(
           not(inArray(restaurantOrders.status, ["closed", "cancelled"])),
-          sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') < (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+          sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') < (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`,
+          sql`NOT EXISTS(SELECT 1 FROM restaurant_event_services es WHERE es.order_id=${restaurantOrders.id})`
         )
       );
 
@@ -4787,6 +4790,8 @@ export class DatabaseStorage implements IStorage {
 
     let repairedCount = 0;
     for (const table of occupiedTables) {
+      const eventActive=await db.execute(sql`SELECT 1 FROM restaurant_event_assignments a JOIN restaurant_event_services s ON s.reservation_id=a.reservation_id JOIN restaurant_orders o ON o.id=s.order_id WHERE a.table_id=${table.id} AND o.status NOT IN ('closed','cancelled')`);
+      if(eventActive.rows.length)continue;
       const activeOrder = await db.select({ id: restaurantOrders.id })
         .from(restaurantOrders)
         .where(
@@ -5125,7 +5130,7 @@ export class DatabaseStorage implements IStorage {
       // Usa SQL nativo para evitar problemas de timezone entre Node y PostgreSQL.
       conditions.push(not(inArray(restaurantOrders.status, ["closed", "cancelled"])));
       conditions.push(
-        sql`DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date`
+        sql`(DATE(${restaurantOrders.openedAt} AT TIME ZONE 'America/Argentina/Buenos_Aires') >= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date OR EXISTS(SELECT 1 FROM restaurant_event_services es WHERE es.order_id=${restaurantOrders.id}))`
       );
     }
     // Cancelled orders belong to the shift in which they were cancelled,
@@ -5296,7 +5301,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTableReservations(): Promise<TableReservationWithTable[]> {
-    const res = await db.select().from(tableReservations);
+    const res = await db.select().from(tableReservations).where(sql`NOT EXISTS(SELECT 1 FROM restaurant_event_bookings eb WHERE eb.reservation_id=${tableReservations.id})`);
     const tables = await db.select().from(restaurantTables);
     const tablesMap = new Map(tables.map(t => [t.id, t]));
     const enriched = await this._enrichReservationsWithAdvances(res);
@@ -5316,7 +5321,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTableReservationsByDate(date: string): Promise<TableReservationWithTable[]> {
-    const res = await db.select().from(tableReservations).where(eq(tableReservations.reservationDate, date));
+    const res = await db.select().from(tableReservations).where(and(eq(tableReservations.reservationDate, date),sql`NOT EXISTS(SELECT 1 FROM restaurant_event_bookings eb WHERE eb.reservation_id=${tableReservations.id})`));
     const tables = await db.select().from(restaurantTables);
     const tablesMap = new Map(tables.map(t => [t.id, t]));
     const enriched = await this._enrichReservationsWithAdvances(res);
@@ -5351,7 +5356,7 @@ export class DatabaseStorage implements IStorage {
 
   async getReservationAdvancesByTable(tableId: string, date: string): Promise<RestaurantReservationAdvance[]> {
     const reservs = await db.select().from(tableReservations).where(
-      and(eq(tableReservations.tableId, tableId), eq(tableReservations.reservationDate, date))
+      and(eq(tableReservations.tableId, tableId), eq(tableReservations.reservationDate, date),sql`NOT EXISTS(SELECT 1 FROM restaurant_event_bookings eb WHERE eb.reservation_id=${tableReservations.id})`)
     );
     if (reservs.length === 0) return [];
     const ids = reservs.map(r => r.id);
@@ -6411,7 +6416,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEventRooms(): Promise<EventRoom[]> {
-    return db.select().from(eventRooms);
+    return db.select().from(eventRooms).where(sql`NOT EXISTS(SELECT 1 FROM events e JOIN restaurant_events re ON re.event_id=e.id WHERE e.event_room_id=${eventRooms.id})`);
   }
 
   async getEventRoom(id: string): Promise<EventRoom | undefined> {
@@ -6449,7 +6454,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEvents(): Promise<EventWithDetails[]> {
-    const allEvents = await db.select().from(events);
+    const allEvents = await db.select().from(events).where(sql`NOT EXISTS(SELECT 1 FROM restaurant_events re WHERE re.event_id=${events.id})`);
     const results: EventWithDetails[] = [];
     for (const event of allEvents) {
       results.push(await this.enrichEvent(event));
@@ -6467,7 +6472,8 @@ export class DatabaseStorage implements IStorage {
     const eventsInRange = await db.select().from(events).where(
       and(
         sql`${events.startDate} <= ${endDate}`,
-        sql`${events.endDate} >= ${startDate}`
+        sql`${events.endDate} >= ${startDate}`,
+        sql`NOT EXISTS(SELECT 1 FROM restaurant_events re WHERE re.event_id=${events.id})`
       )
     );
     const results: EventWithDetails[] = [];
@@ -6720,7 +6726,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getEventPlanningData(startDate: string, endDate: string): Promise<EventPlanningData> {
-    const allEventRooms = await db.select().from(eventRooms).where(eq(eventRooms.isActive, "true"));
+    const allEventRooms = await db.select().from(eventRooms).where(and(eq(eventRooms.isActive, "true"),sql`NOT EXISTS(SELECT 1 FROM events e JOIN restaurant_events re ON re.event_id=e.id WHERE e.event_room_id=${eventRooms.id})`));
     const days: string[] = [];
     const currentDate = new Date(startDate);
     const end = new Date(endDate);
@@ -6733,7 +6739,8 @@ export class DatabaseStorage implements IStorage {
       and(
         sql`${events.startDate} <= ${endDate}`,
         sql`${events.endDate} >= ${startDate}`,
-        ne(events.status, "cancelled")
+        ne(events.status, "cancelled"),
+        sql`NOT EXISTS(SELECT 1 FROM restaurant_events re WHERE re.event_id=${events.id})`
       )
     );
 

@@ -61,6 +61,7 @@ export function isNonFiscalTipo(tipo: string): tipo is NonFiscalTipo {
 
 export interface NewInvoiceData {
   operationId?: string;
+  expectedFiscalIdentity?: {environment:string;issuer:string;pointOfSale:number};
   requestSnapshot?: Record<string, any>;
   tipoComprobante: "FA" | "FB" | "FC" | "FT" | "FM" | "FMB" | "NCA" | "NCB" | "NCC" | "NCT" | "NCM" | "NCMB" | "NDA" | "NDB" | "NDT" | "NDM" | "NDMB" | "NDC" | NonFiscalTipo;
   cliente: {
@@ -350,6 +351,10 @@ export async function emitirFactura(data: NewInvoiceData): Promise<typeof salesI
   const collectionError = nonFiscalCollectionError(data.tipoComprobante, data.cashFormaPagoDetalle?.length ? data.cashFormaPagoDetalle.filter(row=>Number(row.amount)>0).map(row=>row.method) : [data.cashFormaPago]);
   if (collectionError) throw Object.assign(new Error(collectionError), {statusCode:400});
   const config=await getBillingConfig();
+  if(data.expectedFiscalIdentity){
+    const actual={environment:config.arcaAmbiente??'ficticio',issuer:String(config.arcaCuit??config.cuit).replace(/\D/g,''),pointOfSale:Number(data.puntoVentaOverride??(config.arcaAmbiente==='homologacion'?config.puntoVentaHomolog:config.puntoVenta))};
+    if(Object.entries(data.expectedFiscalIdentity).some(([key,value])=>actual[key as keyof typeof actual]!==value))throw Object.assign(new Error('La configuración fiscal cambió desde este intento. Conservamos sus datos originales.'),{statusCode:409,code:'BILLING_IDENTITY_CHANGED'});
+  }
   if(isNonFiscalTipo(data.tipoComprobante)) return emitirFacturaUnlocked(data,config);
   const environment=(config as any).arcaAmbiente??"ficticio";
   if (!["ficticio", "homologacion", "produccion"].includes(environment)) throw new BillingPreflightError("El ambiente de facturación configurado no es válido. No se emitió ningún comprobante.");

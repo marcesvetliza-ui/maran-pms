@@ -10,6 +10,7 @@ export const restaurantInvoiceScope = sql`
   AND COALESCE(orig.center_settlement_area,'restaurant')='restaurant'
   AND (
     EXISTS (SELECT 1 FROM restaurant_orders ro WHERE ro.id=si.restaurant_order_id OR ro.id=orig.restaurant_order_id)
+    OR EXISTS(SELECT 1 FROM restaurant_event_collections rec WHERE rec.invoice_id IN (si.id,orig.id))
     OR si.center_settlement_area='restaurant' OR orig.center_settlement_area='restaurant'
     OR (
       EXISTS (SELECT 1 FROM cash_movements cm WHERE cm.source_type='comprobante' AND cm.source_id IN (si.id::text,orig.id::text) AND cm.area='restaurant')
