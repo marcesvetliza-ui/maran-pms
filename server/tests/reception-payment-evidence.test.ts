@@ -47,11 +47,27 @@ describe("Discovery of issued invoices after a partial credit note", () => {
     cashFormaPago: "cuenta_corriente", prefacturaRecovery: { version: 2, payments: [], checkoutRequested: true }
   } };
   it("does not resurrect a completed CC settlement as pending after a partial NC", async () => {
-    vi.mocked(db.execute).mockResolvedValueOnce({ rows: [{ id: 125, estado: "parcial", credit_reapplication_intent: { status: "completed", settlement: { status: "completed" } } }] } as any);
+    vi.mocked(db.execute).mockReset().mockResolvedValueOnce({ rows: [{ id: 125, estado: "parcial", credit_reapplication_intent: { status: "completed", settlement: { status: "completed" } } }] } as any)
+      .mockResolvedValueOnce({rows:[{status:'checked_out',completed_after_intent:true}]} as any);
     expect(await receptionOperationStatus(operation)).toMatchObject({ stage: "authorized", financiallyComplete: true, invoice: { id: 125 }, attempt: { invoice: { id: 125 } } });
   });
   it("keeps an unfinished CC settlement pending even when invoice is issued", async () => {
-    vi.mocked(db.execute).mockResolvedValueOnce({ rows: [{ id: 125, estado: "parcial", credit_reapplication_intent: { status: "completed", settlement: { status: "pending" } } }] } as any);
+    vi.mocked(db.execute).mockReset().mockResolvedValueOnce({ rows: [{ id: 125, estado: "parcial", credit_reapplication_intent: { status: "completed", settlement: { status: "pending" } } }] } as any)
+      .mockResolvedValueOnce({rows:[{status:'checked_in',completed_after_intent:false}]} as any);
     expect(await receptionOperationStatus(operation)).toMatchObject({ financiallyComplete: false, attempt: { invoice: null } });
+  });
+  it.each(['checked_in','checked_out'])('discovers an unfinished ordinary checkout independently of its complete invoice (%s)', async status => {
+    vi.mocked(db.execute).mockReset()
+      .mockResolvedValueOnce({rows:[{id:125,estado:'emitida'}]} as any)
+      .mockResolvedValueOnce({rows:[{status,completed_after_intent:status==='checked_out'}]} as any);
+    const result=await receptionOperationStatus({...operation,request_snapshot:{prefacturaRecovery:{version:2,payments:[],checkoutRequested:true}}});
+    expect(result).toMatchObject({financiallyComplete:true,recoveryComplete:status==='checked_out'});
+  });
+  it('does not repeat an ordinary departure after the stay was reopened', async () => {
+    vi.mocked(db.execute).mockReset()
+      .mockResolvedValueOnce({rows:[{id:125,estado:'emitida'}]} as any)
+      .mockResolvedValueOnce({rows:[{status:'checked_in',completed_after_intent:true}]} as any);
+    expect(await receptionOperationStatus({...operation,request_snapshot:{prefacturaRecovery:{version:2,payments:[],checkoutRequested:true}}}))
+      .toMatchObject({financiallyComplete:true,recoveryComplete:true,departureReopened:true});
   });
 });

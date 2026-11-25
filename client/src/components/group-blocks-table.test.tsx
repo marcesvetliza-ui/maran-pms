@@ -1,0 +1,103 @@
+import {
+  render,
+  screen,
+  within,
+  cleanup,
+  waitFor,
+} from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import userEvent from "@testing-library/user-event";
+import { afterEach, it, expect, vi } from "vitest";
+import { GroupBlocksTable } from "./group-blocks-table";
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+const block = (id: string, date: string, quantity: number) => ({
+  id,
+  roomTypeId: "fixture-type",
+  quantity,
+  blockCheckInDate: date,
+  blockCheckOutDate: date === "2026-01-01" ? "2026-01-02" : "2026-01-03",
+  roomType: { name: "Fixture Premium", code: "FIX" },
+});
+const stay = (id: string, date: string) => ({
+  id,
+  roomId: id + "-room",
+  roomTypeId: "fixture-type",
+  checkInDate: date,
+  checkOutDate: date === "2026-01-01" ? "2026-01-02" : "2026-01-03",
+  status: "confirmed",
+  guestId: id + "-guest",
+  guest: { firstName: "Fixture", lastName: id },
+  room: { roomNumber: id },
+});
+it("shows the missing room on the right date block and lists each actual room", () => {
+  const g = {
+    id: "fixture-group",
+    checkInDate: "2026-01-01",
+    checkOutDate: "2026-01-03",
+    blocks: [
+      block("later", "2026-01-02", 1),
+      block("earlier", "2026-01-01", 2),
+    ],
+    reservations: [stay("9001", "2026-01-01"), stay("9002", "2026-01-02")],
+  } as any;
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <GroupBlocksTable
+        group={g}
+        onAssign={vi.fn()}
+        onDelete={vi.fn()}
+        onSaved={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+  expect(
+    within(screen.getByTestId("row-block-earlier")).getByText(
+      "Falta asignar 1",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    within(screen.getByTestId("row-block-later")).getByText("Completo"),
+  ).toBeInTheDocument();
+  expect(
+    within(screen.getByTestId("row-block-earlier")).getByRole("link"),
+  ).toHaveAttribute("href", "/reservations?view=9001");
+});
+it("identifies ambiguous metadata through its own endpoint without a room, payment or invoice write", async () => {
+  const g = {
+    id: "fixture-group",
+    checkInDate: "2026-01-01",
+    checkOutDate: "2026-01-02",
+    blocks: [block("one", "2026-01-01", 1), block("two", "2026-01-01", 1)],
+    reservations: [stay("9001", "2026-01-01")],
+  } as any;
+  const fetcher = vi.fn(async (_url?: any, _options?: any) =>
+    Response.json({ ok: true }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+  const saved = vi.fn();
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <GroupBlocksTable
+        group={g}
+        onAssign={vi.fn()}
+        onDelete={vi.fn()}
+        onSaved={saved}
+      />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.selectOptions(
+    screen.getByLabelText("Bloque de la reserva 9001"),
+    "two",
+  );
+  await user.click(screen.getByRole("button", { name: "Ubicar en bloque" }));
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(String(fetcher.mock.calls[0][0])).toBe(
+    "/api/groups/fixture-group/reservations/9001/block",
+  );
+});

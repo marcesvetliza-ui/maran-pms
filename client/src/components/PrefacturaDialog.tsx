@@ -19,6 +19,7 @@ import { isDebitAnnulmentCredit } from "@shared/debitNoteActions";
 import { calculateCheckoutDiscount, checkoutDiscountFromInvoice } from "@shared/checkoutDiscount";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPrefacturaSubmission, type PrefacturaAttempt } from "@/lib/prefactura-submission";
+import { automaticPrefacturaAction } from "@/lib/prefactura-auto-recovery";
 import { readPrefacturaSelection, savePrefacturaSelection, retainedPrefacturaSelection, pendingPrefacturaSourceIds, originalPrefacturaLines } from "@/lib/prefactura-selection";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest, parseApiError, parseApiErrorPayload } from "@/lib/queryClient";
@@ -540,6 +541,17 @@ export function PrefacturaDialog({
   const selectionValue = useRef(new Set<string>());
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const viewScope = useRef({ id: String(reservationId), open, version: 0 });
+  const automaticRecoveryRuns = useRef(new Set<string>());
+  const automaticRecoveryCompleted = useRef(new Set<string>());
+  const automaticRecoveryRetries = useRef(new Map<string, number>());
+  const [automaticRecoveryEpoch, setAutomaticRecoveryEpoch] = useState(0);
+  const automaticRecoveryTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [automaticRecoveryRunning, setAutomaticRecoveryRunning] = useState(false);
+  const [automaticRecoveryError, setAutomaticRecoveryError] = useState<string | null>(null);
+  useEffect(() => {
+    setAutomaticRecoveryError(null); setAutomaticRecoveryRunning(false);
+    return () => { automaticRecoveryTimers.current.forEach(clearTimeout); automaticRecoveryTimers.current = []; };
+  }, [open, reservationId]);
   if (viewScope.current.id !== String(reservationId) || viewScope.current.open !== open) {
     viewScope.current = { id: String(reservationId), open, version: viewScope.current.version + 1 };
   }
@@ -698,7 +710,7 @@ export function PrefacturaDialog({
   });
   useEffect(() => {
     const remote = discoveredOperation?.pending;
-    if (!open || !remote?.attempt || !submission.current!.restore(reservationId, remote.attempt)) return;
+    if (!open || !remote?.attempt || automaticRecoveryCompleted.current.has(remote.operationId) || !submission.current!.restore(reservationId, remote.attempt)) return;
     setHasPendingSubmission(true); setCreditOperationId(remote.operationId);
     const sources = pendingPrefacturaSourceIds(remote.attempt);
     if (sources !== null) setSelectedIds(new Set(sources));
@@ -1539,6 +1551,118 @@ export function PrefacturaDialog({
       ? apiRequest('POST', `/api/reservations/${reservationId}/check-out-to-account`, {operationId:debt.operationId,entityType:debt.entityType,entityId:debt.entityId,expectedBalance:balance.toFixed(2)})
       : apiRequest('POST', `/api/reservations/${reservationId}/check-out`, {requireSettled:true});
   }
+
+  const automaticRecoveryAction = automaticPrefacturaAction(reservationId, localOperationId, receptionStatus);
+  useEffect(() => {
+    if (!open || !hasPendingSubmission || !folio || invoicesLoading || isSubmitting ||
+        correctionViewVersion !== viewScope.current.version || correctReceptionAttempt.isPending ||
+        !automaticRecoveryAction || !localOperationId || submission.current!.isBusy()) return;
+    const scope = viewScope.current.version;
+    const runKey = `${scope}:${reservationId}:${localOperationId}`;
+    if (automaticRecoveryRuns.current.has(runKey)) return;
+    automaticRecoveryRuns.current.add(runKey);
+    if (!submission.current!.acquire()) return;
+    const active = () => viewScope.current.open && viewScope.current.version === scope;
+    const assertActive = () => { if (!active()) throw new Error("La reserva abierta cambió. Se conserva su operación original."); };
+    setAutomaticRecoveryRunning(true); setAutomaticRecoveryError(null); setIsSubmitting(true); setSubmitError(null);
+    void (async () => {
+      try {
+        // Recheck immediately before writes; a query cache is not evidence of
+        // a still-valid operation, nor permission to use another room's plan.
+        const status = await (await apiRequest("GET", `/api/billing/reservations/${reservationId}/operations/${localOperationId}/reception-status`)).json();
+        assertActive();
+        const action = automaticPrefacturaAction(reservationId, localOperationId, status);
+        if (!action) throw new Error(status.paymentConflictMessage || status.message || "La operación requiere revisión de Administración. No se modificaron sus datos.");
+        if (action === "correct") {
+          // Existing correction endpoint proves absence of fiscal/monetary
+          // effects again under its financial locks. Never erase locally first.
+          const corrected = await (await apiRequest("POST", `/api/billing/reservations/${reservationId}/operations/${localOperationId}/correct-reception`, {})).json();
+          assertActive();
+          if (corrected.closedCancelled) { await finishCancelledAttempt(corrected); return; }
+          if (!corrected.corrected) throw new Error("No se pudo actualizar el estado de la operación.");
+          const request = corrected.request;
+          if (!request || String(request.reservaId) !== String(reservationId) || request.creditOperationId !== localOperationId) {
+            throw new Error("La respuesta no corresponde a la operación original. Se conserva su seguimiento.");
+          }
+          automaticRecoveryCompleted.current.add(localOperationId);
+          submission.current!.complete(reservationId); setHasPendingSubmission(false);
+          const next = newSettlementOperationId(); setCreditOperationId(next);
+          window.sessionStorage.setItem(settlementOperationKey(reservationId), next);
+          // A preflight rejection needs editable data, not a fresh automatic
+          // issuance. Restore original recipient, sources and payment method.
+          setTipo(request.tipoComprobante); setPuntoVenta(String(request.puntoVentaOverride || ""));
+          billingRecipientTouched.current = true;
+          setRazonSocial(request.cliente?.razonSocial || ""); setCuit(request.cliente?.cuit || "");
+          setDni(request.cliente?.dni || ""); setCondicionIva(request.cliente?.condicionIva || "Consumidor Final");
+          setDomicilio(request.cliente?.domicilio || "");
+          setDocumentType(request.cliente?.documentType || "");
+          setNationality(request.folioContext?.nationality || ""); setNationalityCode(request.folioContext?.nationalityCode || "");
+          setGroupBillingAction(request.groupDocumentationOnly || request.reservationBillingAction === 'invoice_only' ? 'invoice_only' : 'collect_and_invoice');
+          setInvoiceObservations(request.observaciones || "");
+          if (request.checkoutDiscount) {
+            setShowDiscount(true); setDiscountType(request.checkoutDiscount.type);
+            setDiscountValue(String(request.checkoutDiscount.value)); setDiscountReason(request.checkoutDiscount.reason || "");
+          }
+          const originalCc = request.reservationSettlementMethod === "cuenta_corriente" || request.cashFormaPago === "cuenta_corriente";
+          setSaleCondition(originalCc ? "cuenta_corriente" : "contado");
+          if (request.ccEntityType) setBillingTarget(request.ccEntityType);
+          if (request.ccEntityId) setBillingEntityId(request.ccEntityId);
+          setDoCheckout(status.attempt.checkoutRequested === true);
+          if (Array.isArray(request.sourceChargeIds)) setSelectedIds(new Set(request.sourceChargeIds));
+          await Promise.all([refetchFolio(), refetchEmittedInvoices()]); assertActive();
+          toast({ title: "Prefactura actualizada", description: "El intento sin emisión quedó resuelto. Revisá los datos originales antes de confirmar." });
+          return;
+        }
+        submission.current!.synchronizeVerified(reservationId, localOperationId, status.attempt);
+        const attempt = submission.current!.pending(reservationId)!;
+        const completed = await submission.current!.run(reservationId, async (url, body) => {
+          assertActive(); return (await apiRequest("POST", url, body)).json();
+        }, assertActive);
+        assertActive();
+        if (completed.checkoutRequested) {
+          // The checkout may have committed before its HTTP response was lost.
+          const current = await (await apiRequest("GET", `/api/reservations/${reservationId}`)).json();
+          assertActive();
+          if (current.status !== "checked_out") {
+            if (attempt.checkoutDebtAccount || folio.groupId) await performConfirmedDeparture(attempt, assertActive);
+            else await apiRequest("POST", `/api/reservations/${reservationId}/check-out`, { requireSettled: true });
+          }
+        }
+        const [freshFolio, freshInvoices] = await Promise.all([refetchFolio(), refetchEmittedInvoices()]);
+        assertActive();
+        if (freshFolio.error || freshInvoices.error) throw new Error("La operación se registró, pero falta actualizar la cuenta. Se conservará su seguimiento sin repetir cobros.");
+        automaticRecoveryCompleted.current.add(localOperationId);
+        submission.current!.complete(reservationId); setHasPendingSubmission(false);
+        window.sessionStorage.removeItem(settlementOperationKey(reservationId));
+        setCreditOperationId(newSettlementOperationId()); setCheckoutFailed(false);
+        await Promise.all(["/api/reservations", "/api/reservations/check-out", "/api/dashboard/departures", "/api/rooms",
+          "/api/rooms/in-house", "/api/dashboard/stats", "/api/planning", "/api/housekeeping", "/api/payments", "/api/billing/invoices",
+          "/api/groups", "group-room-account", "group-advance-availability", "/api/account-movements", "/api/account-summary",
+        ].map(key => queryClient.invalidateQueries({ queryKey: [key] })));
+        assertActive();
+        toast({ title: "Operación completada automáticamente", description: "Se conservaron el comprobante y la modalidad de pago originales." });
+        if (completed.checkoutRequested) { onCheckoutComplete?.(); onClose(); }
+      } catch (error) {
+        if (active()) {
+          setAutomaticRecoveryError(parseApiError(error)); void refetchReceptionStatus();
+          const retries = automaticRecoveryRetries.current.get(runKey) || 0;
+          if (retries < 2 && /502|503|504|Failed to fetch|NetworkError|network|connection|fetch failed/i.test(String(error))) {
+            automaticRecoveryRetries.current.set(runKey, retries + 1);
+            automaticRecoveryTimers.current.push(setTimeout(() => {
+              if (!active()) return;
+              automaticRecoveryRuns.current.delete(runKey);
+              setAutomaticRecoveryEpoch(value => value + 1);
+            }, retries === 0 ? 2000 : 10000));
+          }
+        }
+      } finally {
+        submission.current!.release();
+        if (active()) { setAutomaticRecoveryRunning(false); setIsSubmitting(false); }
+        else setAutomaticRecoveryEpoch(value => value + 1);
+      }
+    })();
+  }, [open, reservationId, hasPendingSubmission, folio, invoicesLoading, isSubmitting,
+    correctReceptionAttempt.isPending, automaticRecoveryAction, localOperationId, receptionStatus, automaticRecoveryEpoch]);
 
 
   // A linked company/agency is a billing option, never a forced recipient:
@@ -2852,10 +2976,15 @@ export function PrefacturaDialog({
               </div>
             )}
 
-            {(hasPendingSubmission || hasPendingAccountCheckout || serverAttempt || rejectionError) && (
+            {hasPendingSubmission && (!receptionStatus || automaticRecoveryAction || automaticRecoveryError) && (
+              <div role={automaticRecoveryError ? "alert" : "status"} className="rounded-md border p-3 text-sm" data-testid="prefactura-automatic-recovery">
+                {automaticRecoveryError || (automaticRecoveryRunning ? "Actualizando automáticamente la operación original…" : "Verificando el estado de la operación…")}
+              </div>
+            )}
+            {((hasPendingSubmission && !!receptionStatus && !automaticRecoveryAction && !automaticRecoveryError) || hasPendingAccountCheckout || serverAttempt || rejectionError) && (
               <div role="alert" className="rounded-md border border-amber-300 p-3 space-y-2">
                 {folio?.groupId&&<p className="text-sm">Podés completar el cobro y el cierre de esta habitación desde esta prefactura. Se conservan los datos del intento original; las otras habitaciones del grupo no se cierran.</p>}
-                <p className="text-sm">{rejectionError ? "No se pudo consultar el intento fiscal. Volvé a abrir la prefactura antes de emitir." : serverAttempt ? "Hay un intento A rechazado por la condición IVA Exento. Verificá el rechazo para recuperar los datos originales y preparar una Factura B sin emitir ni cobrar." : "Hay una operación pendiente. El reintento conserva sus importes, formas de pago y comprobante originales, sin repetir lo ya registrado."}</p>
+                <p className="text-sm">{rejectionError ? "No se pudo consultar el intento fiscal. Volvé a abrir la prefactura antes de emitir." : serverAttempt ? "Hay un intento A rechazado por la condición IVA Exento. Verificá el rechazo para recuperar los datos originales y preparar una Factura B sin emitir ni cobrar." : "La operación requiere revisión antes de continuar. Se conservan el comprobante y los pagos originales."}</p>
                 {accountCheckoutAttempt && <div className="rounded border bg-background p-3 text-sm" data-testid="account-checkout-original-intent">
                   Cierre con traslado a Cuenta Corriente: ${fmtMoney(Number(accountCheckoutAttempt.expectedBalance))} a {accountCheckoutAttempt.entityName}. Se conserva el pedido original al reintentar.
                 </div>}

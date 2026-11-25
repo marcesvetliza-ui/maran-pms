@@ -1,3 +1,4 @@
+import { assertRoomBatchPayment } from './groupRoomInvoiceBatch';
 import { voidReservationPaymentWithLedger } from "./reservationPaymentVoid";
 import { restaurantTablePlacement } from '@shared/restaurant-layout';
 import { lodgingOccupancy } from '@shared/lodgingOccupancy';
@@ -2767,7 +2768,13 @@ export class DatabaseStorage implements IStorage {
 
     const totalRooms = blocks.reduce((sum, b) => sum + b.quantity, 0);
     const assignedRooms = reservationsList.filter(r => r.status !== "cancelled" && r.status !== "checked_out").length;
-    return { ...group, blocks, reservations: reservationsList, totalRooms, assignedRooms };
+    const reservationBlockIds: Record<string,string|null> = {};
+    const conflictingReservationBlockIds: string[] = [];
+    for (const link of links) {
+      if (link.reservationId in reservationBlockIds && reservationBlockIds[link.reservationId] !== (link.blockId || null)) conflictingReservationBlockIds.push(link.reservationId);
+      else reservationBlockIds[link.reservationId] = link.blockId || null;
+    }
+    return { ...group, blocks, reservations: reservationsList, totalRooms, assignedRooms, reservationBlockIds, conflictingReservationBlockIds };
   }
 
   async createGroup(group: InsertGroup): Promise<Group> {
@@ -3103,6 +3110,7 @@ export class DatabaseStorage implements IStorage {
       ratePlanId?: string | null;
       guestId?: string | null;
       canonicalRoomTypeId?: string;
+      blockId?: string;
       overrideTentativeGroupWarning?: boolean;
     }
   ): Promise<Reservation | undefined> {
@@ -3121,10 +3129,22 @@ export class DatabaseStorage implements IStorage {
 
     const blocks = await this.getGroupBlocks(groupId);
     const canonicalRoomTypeId = options?.canonicalRoomTypeId || room.roomTypeId;
-    const matchingBlock = blocks.find(b => b.roomTypeId === canonicalRoomTypeId);
+    const sameTypeBlocks=blocks.filter(b=>b.roomTypeId===canonicalRoomTypeId);
+    const datedMatches=sameTypeBlocks.filter(b=>(!options?.checkInDate || (b.blockCheckInDate||group.checkInDate)<=options.checkInDate) && (!options?.checkOutDate || (b.blockCheckOutDate||group.checkOutDate)>=options.checkOutDate));
+    const matchingBlock = options?.blockId ? sameTypeBlocks.find(b=>b.id===options.blockId) : datedMatches[0];
+    if(options?.blockId && !matchingBlock)throw new Error('El bloque no pertenece a este grupo y categoría.');
 
     const checkInDate = options?.checkInDate || matchingBlock?.blockCheckInDate || group.checkInDate;
     const checkOutDate = options?.checkOutDate || matchingBlock?.blockCheckOutDate || group.checkOutDate;
+    if(options?.blockId && matchingBlock) {
+      const {summarizeGroupBlocks,compatibleGroupBlocks}=await import('@shared/groupBlockAssignments');
+      const detail=(await this.getGroup(groupId))!;
+      const candidate={id:'new',status:'confirmed',roomTypeId:canonicalRoomTypeId,checkInDate,checkOutDate};
+      if(!compatibleGroupBlocks(detail,candidate,false).some(b=>b.id===matchingBlock.id))throw new Error('Las fechas no corresponden al bloque elegido.');
+      const summary=summarizeGroupBlocks(detail).byBlock[matchingBlock.id];
+      if(summary.reviewReservationIds.length)throw new Error('Hay asignaciones por revisar en este bloque antes de agregar otra habitación.');
+      if(summary.reservations.length>=matchingBlock.quantity)throw new Error('El bloque elegido ya tiene todos sus cupos asignados.');
+    }
     const agreedRate = options?.agreedRate || matchingBlock?.agreedRate || "0";
     const ratePlanId = options?.ratePlanId !== undefined ? options.ratePlanId : (matchingBlock?.ratePlanId || null);
 
@@ -3190,6 +3210,7 @@ export class DatabaseStorage implements IStorage {
     await this.createGroupReservationLink({
       groupId,
       reservationId: reservation.id,
+      blockId: options?.blockId || (datedMatches.length===1 ? matchingBlock?.id : null) || null,
     });
 
     return reservation;
@@ -3222,6 +3243,7 @@ export class DatabaseStorage implements IStorage {
    * payments are traceable allocations and must never be added again to a total.
    */
   async recordGroupPayment(input: {
+    roomInvoiceBatchId?: string;
     creditAdvanceAuthorization?: import("@shared/groupCreditAdvance").GroupCreditAdvanceConfirmation & { userId: string };
     paymentRequest?: import("./reservationPaymentRequest").ReservationPaymentRequest;
     groupId: string;
@@ -3277,6 +3299,7 @@ export class DatabaseStorage implements IStorage {
         SELECT id, name FROM groups WHERE id = ${input.groupId} FOR UPDATE
       `);
       if (!lock.rows[0]) throw Object.assign(new Error("Grupo no encontrado"), { statusCode: 404 });
+      await assertRoomBatchPayment(tx,input.roomInvoiceBatchId,input.groupId,input.paymentRequest);
 
       let creditAdvanceAudit: Record<string, unknown> | undefined;
       let creditAdvanceActor: { id: string; username: string } | undefined;

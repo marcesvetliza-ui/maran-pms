@@ -1,4 +1,8 @@
+import { GroupRoomInvoiceDialog } from '@/components/group-room-invoice-dialog';
 import { RoomChargeHospitalityPreview,useRoomChargeHospitality } from "@/components/room-charge-hospitality";
+import { summarizeGroupBlocks,hasGroupPassenger } from '@shared/groupBlockAssignments';
+import { GroupBlocksTable } from '@/components/group-blocks-table';
+import { GroupExistingReservationDialog } from '@/components/group-existing-reservation-dialog';
 import type { ChargeType } from "@shared/schema";
 import { useAuth } from "@/App";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, supportsGroupCreditAdvance } from "@shared/groupCreditAdvance";
@@ -525,7 +529,6 @@ export function AssignBlockDialog({
   onSuccess: () => void;
 }) {
   const { toast } = useToast();
-  const placeholderCode = `GROUP-${group.id}`;
 
   const defaultCheckIn = block.blockCheckInDate || group.checkInDate;
   const defaultCheckOut = block.blockCheckOutDate || group.checkOutDate;
@@ -533,22 +536,13 @@ export function AssignBlockDialog({
   // this dialog. Do not infer it from a possibly stale reservation join.
   const canonicalRoomTypeId = block.roomTypeId;
 
-  // Distribute reservations across same-type blocks sequentially
-  const sameTypeBlocks = [...group.blocks]
-    .filter(b => b.roomTypeId === canonicalRoomTypeId)
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const blockIndex = sameTypeBlocks.findIndex(b => b.id === block.id);
-  let offset = 0;
-  for (let i = 0; i < blockIndex; i++) offset += sameTypeBlocks[i].quantity;
-
-  const allActiveOfType = group.reservations.filter(r => {
-    return r.roomTypeId === canonicalRoomTypeId && !["cancelled", "checked_out"].includes(r.status);
-  });
-  const thisBlockReservations = allActiveOfType.slice(offset, offset + block.quantity);
+  const blockSummary=summarizeGroupBlocks(group).byBlock[block.id];
+  const assignedIds=new Set(blockSummary.reservations.map(r=>r.id));
+  const thisBlockReservations=group.reservations.filter(r=>assignedIds.has(r.id));
   // A reservation is a placeholder if it has no guestId (new approach) or still uses the
   // legacy shared group guest (older reservations created before the per-room fix).
-  const isPlaceholder = (r: any) => !r.guestId || r.guest?.codigo === placeholderCode;
-  const placeholderReservations = thisBlockReservations.filter(r => isPlaceholder(r));
+  const isPlaceholder = (r: any) => !hasGroupPassenger(group.id,r);
+  const placeholderReservations = thisBlockReservations.filter(r => isPlaceholder(r) && r.status!=='checked_out');
   const realAssignedCount = thisBlockReservations.filter(r => !isPlaceholder(r)).length;
   const emptyCount = Math.max(0, block.quantity - thisBlockReservations.length);
 
@@ -635,6 +629,7 @@ export function AssignBlockDialog({
           await apiRequestWithGroupInventoryWarning("POST", `/api/groups/${group.id}/assign-room`, {
             roomId: row.roomId,
             roomTypeId: canonicalRoomTypeId,
+            blockId: block.id,
             guestId: row.guestId || undefined,
             guestFirstName: row.firstName.trim(),
             guestLastName: row.lastName.trim(),
@@ -906,6 +901,7 @@ export function buildGroupInvoiceRecipientInitialValues({
 }
 
 export default function GroupDetailPage() {
+  const [showExistingReservation,setShowExistingReservation]=useState(false);
   const { hasPermission } = useAuth();
   const canGroupCreditAdvance = hasPermission?.(GROUP_CREDIT_ADVANCE_PERMISSION) ?? false;
   const params = useParams();
@@ -924,6 +920,7 @@ export default function GroupDetailPage() {
   const [showRoomingListDialog, setShowRoomingListDialog] = useState(false);
   const [showCheckInConfirm, setShowCheckInConfirm] = useState(false);
   const [showCheckOutConfirm, setShowCheckOutConfirm] = useState(false);
+  const [showRoomInvoices,setShowRoomInvoices] = useState(false);
   const [showGroupPaymentDialog, setShowGroupPaymentDialog] = useState(false);
   const [groupPaymentRows, setGroupPaymentRows] = useState<Array<{method: string; amount: string; reference: string; retencionEnabled?: boolean; retencionTipo?: "iibb" | "ganancias"; retencionMonto?: string}>>([{method: "cash", amount: "", reference: ""}]);
   const [groupPaymentReceiptType, setGroupPaymentReceiptType] = useState("sin_comprobante");
@@ -2008,6 +2005,9 @@ export default function GroupDetailPage() {
     );
   }
 
+  const allocatedRoomCount=new Set(group.reservations.filter(r=>!['cancelled','no_show'].includes(r.status) &&
+    (r.status==='checked_out'||r.roomId && !r.room?.isVirtual)).map(r=>r.id)).size;
+
   // Keep the three financial validations independent: collection media,
   // fiscal concepts, and source availability represent different ledgers.
   const groupPaymentIsFiscal = ["factura_a", "factura_b", "factura_t", "factura_mipyme_a", "factura_mipyme_b"].includes(groupPaymentReceiptType);
@@ -2278,8 +2278,8 @@ export default function GroupDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className={`text-3xl font-bold ${group.blocks.length > 0 && group.assignedRooms > group.totalRooms ? "text-destructive" : ""}`}>
-                {group.assignedRooms}
+              <span className={`text-3xl font-bold ${group.blocks.length > 0 && allocatedRoomCount > group.totalRooms ? "text-destructive" : ""}`}>
+                {allocatedRoomCount}
               </span>
               {group.blocks.length > 0 ? (
                 <span className="text-muted-foreground">/ {group.totalRooms} bloqueadas</span>
@@ -2287,27 +2287,27 @@ export default function GroupDetailPage() {
                 <span className="text-muted-foreground">asignadas</span>
               )}
             </div>
-            {group.blocks.length > 0 && group.assignedRooms > group.totalRooms && (
+            {group.blocks.length > 0 && allocatedRoomCount > group.totalRooms && (
               <div className="mt-1 flex items-center gap-1 text-sm text-destructive font-medium">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                <span>Excede el bloque en {group.assignedRooms - group.totalRooms} habitación(es). Agregue un bloque adicional.</span>
+                <span>Excede el bloque en {allocatedRoomCount - group.totalRooms} habitación(es). Agregue un bloque adicional.</span>
               </div>
             )}
-            {group.blocks.length === 0 && group.assignedRooms === 0 && (
+            {group.blocks.length === 0 && allocatedRoomCount === 0 && (
               <div className="mt-1 text-sm text-muted-foreground">
                 Sin habitaciones asignadas aún.
               </div>
             )}
-            {group.blocks.length > 0 && group.totalRooms > group.assignedRooms && (
+            {group.blocks.length > 0 && group.totalRooms > allocatedRoomCount && (
               <div className="mt-1 flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                <span>{group.totalRooms - group.assignedRooms} habitación(es) sin asignar</span>
+                <span>{group.totalRooms - allocatedRoomCount} habitación(es) sin asignar</span>
               </div>
             )}
             <div className="mt-2 h-2 w-full rounded-full bg-muted overflow-hidden">
               <div
-                className={`h-full transition-all ${group.assignedRooms > group.totalRooms ? "bg-destructive" : "bg-primary"}`}
-                style={{ width: `${group.totalRooms > 0 ? Math.min(100, (group.assignedRooms / group.totalRooms) * 100) : 0}%` }}
+                className={`h-full transition-all ${allocatedRoomCount > group.totalRooms ? "bg-destructive" : "bg-primary"}`}
+                style={{ width: `${group.totalRooms > 0 ? Math.min(100, (allocatedRoomCount / group.totalRooms) * 100) : 0}%` }}
               />
             </div>
           </CardContent>
@@ -2372,6 +2372,10 @@ export default function GroupDetailPage() {
           </CardContent>
       </Card>
 
+      <GroupExistingReservationDialog group={group} open={showExistingReservation} onOpenChange={setShowExistingReservation} onSaved={()=>{
+        void queryClient.invalidateQueries({queryKey:['/api/groups']});void queryClient.invalidateQueries({queryKey:['/api/reservations']});
+        void queryClient.invalidateQueries({predicate:q=>Array.isArray(q.queryKey)&&q.queryKey[0]==='/api/planning'});
+      }}/>
       <Tabs defaultValue="blocks" className="w-full">
         <TabsList>
           <TabsTrigger value="blocks" data-testid="tab-blocks">
@@ -2402,54 +2406,8 @@ export default function GroupDetailPage() {
             </CardHeader>
             <CardContent>
               {group.blocks.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead>Cantidad</TableHead>
-                      <TableHead>Plan Tarifario</TableHead>
-                      <TableHead>Tarifa Acordada</TableHead>
-                      <TableHead className="w-[150px]">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.blocks.map((block) => (
-                      <TableRow key={block.id} data-testid={`row-block-${block.id}`}>
-                        <TableCell className="font-medium">
-                          {block.roomType?.name} ({block.roomType?.code})
-                        </TableCell>
-                        <TableCell>{block.quantity}</TableCell>
-                        <TableCell>
-                          {block.ratePlan?.name || <span className="text-muted-foreground">-</span>}
-                        </TableCell>
-                        <TableCell>
-                          {block.agreedRate ? `$${block.agreedRate}` : <span className="text-muted-foreground">-</span>}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setAssigningBlock(block)}
-                              data-testid={`button-assign-${block.id}`}
-                            >
-                              <DoorOpen className="mr-1 h-3 w-3" />
-                              Asignar
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => setDeleteBlockId(block.id)}
-                              data-testid={`button-delete-block-${block.id}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <GroupBlocksTable group={group} onAssign={setAssigningBlock} onDelete={setDeleteBlockId}
+                  onSaved={()=>{void queryClient.invalidateQueries({queryKey:["/api/groups",groupId]});}}/>
               ) : (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <Hotel className="h-10 w-10 text-muted-foreground/50" />
@@ -2465,8 +2423,9 @@ export default function GroupDetailPage() {
         <TabsContent value="reservations" className="mt-4">
           <Card>
             <CardHeader>
-              <CardTitle>Reservas del Grupo</CardTitle>
-              <CardDescription>Habitaciones asignadas individualmente</CardDescription>
+              <div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>Reservas del Grupo</CardTitle>
+              <CardDescription>Habitaciones asignadas individualmente</CardDescription></div>
+              <Button variant="outline" onClick={()=>setShowExistingReservation(true)} data-testid="button-import-existing-reservation"><Plus className="mr-2 h-4 w-4"/>Incorporar reserva existente</Button></div>
             </CardHeader>
             <CardContent>
               {(() => {
@@ -2675,7 +2634,8 @@ export default function GroupDetailPage() {
           ) : masterFolio ? (
             <div className="space-y-5">
 
-              {pendingReceipt&&<div role="status" className="rounded border p-3 text-sm">Hay un cobro pendiente de confirmar. Conservamos sus importes y distribución. <Button disabled={groupPaymentMutation.isPending} onClick={()=>groupPaymentMutation.mutate()}>Reintentar cobro pendiente</Button></div>}
+              <Button variant="outline" disabled={!!pendingReceipt||groupPaymentMutation.isPending} onClick={()=>{setShowGroupPaymentDialog(false);setShowRoomInvoices(true);}} data-testid="button-group-room-invoices"><Receipt className="mr-2 h-4 w-4"/>Facturas individuales por habitación</Button>
+          {pendingReceipt&&<div role="status" className="rounded border p-3 text-sm">Hay un cobro pendiente de confirmar. Conservamos sus importes y distribución. <Button disabled={groupPaymentMutation.isPending} onClick={()=>groupPaymentMutation.mutate()}>Reintentar cobro pendiente</Button></div>}
               <GroupAdvanceAllocation key={groupId} groupId={groupId} onSaved={async()=>{await refreshGroupBillingState();}}/>
               {/* ── Configuración del Folio Maestro ── */}
               <Card>
@@ -3984,6 +3944,7 @@ export default function GroupDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      <GroupRoomInvoiceDialog group={group} open={showRoomInvoices} onOpenChange={setShowRoomInvoices} onSaved={()=>{void refreshGroupBillingState();}} />
       <Dialog open={showGroupPaymentDialog} onOpenChange={(open) => {
         if (!open) {
           // Outside-click / Escape must not silently discard a partially filled

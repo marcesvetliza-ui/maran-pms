@@ -1,4 +1,8 @@
+import { registerGroupRoomInvoiceBatchRoutes } from './group-room-invoice-batches';
 import { parseGroupCreditAdvanceConfirmation } from "@shared/groupCreditAdvance";
+import { associateReservationBlock } from '../groupBlockAssignments';
+import { summarizeGroupBlocks } from '@shared/groupBlockAssignments';
+import { previewReservationImport, importExistingReservation } from '../groupReservationImport';
 import {normalizeToSpanishPaymentMethod} from '../payment-method';
 import {parseReservationPaymentRequest} from '../reservationPaymentRequest';
 import {getGroupPaymentRequest,replayGroupPayment} from '../groupPaymentRequest';
@@ -356,8 +360,38 @@ async function getOrCreatePlaceholderGuest(groupId: string, groupName: string) {
 }
 
 export function registerGroupsRoutes(app: Express) {
+  registerGroupRoomInvoiceBatchRoutes(app);
   registerGroupOccupantRoutes(app);
   registerGroupAssignmentReleaseRoutes(app);
+  app.get('/api/groups/:groupId/reservation-candidates', requireAuth, requirePermission('sidebar:/groups'), async(req,res)=>{
+    try {
+      const q=String(req.query.q||'').trim().slice(0,120);
+      if(q.length<2)return res.json([]);
+      const pattern=`%${q}%`;
+      const rows=await db.execute(sql`SELECT r.id,r.reservation_code AS "code",r.check_in_date AS "checkInDate",r.check_out_date AS "checkOutDate",r.room_type_id AS "roomTypeId",r.status,
+        rm.room_number AS "roomNumber",concat_ws(' ',g.last_name,g.first_name) AS "guestName"
+        FROM reservations r LEFT JOIN guests g ON g.id=r.guest_id LEFT JOIN rooms rm ON rm.id=r.room_id
+        WHERE r.status IN ('tentative','pending','confirmed','web_checkin','checked_in')
+          AND NOT EXISTS(SELECT 1 FROM group_reservation_links gl WHERE gl.reservation_id=r.id)
+          AND (r.reservation_code ILIKE ${pattern} OR rm.room_number ILIKE ${pattern} OR concat_ws(' ',g.last_name,g.first_name) ILIKE ${pattern})
+        ORDER BY r.check_in_date DESC,r.reservation_code LIMIT 25`);
+      res.json(rows.rows);
+    }catch{res.status(503).json({error:'No se pudieron buscar las reservas.'});}
+  });
+  app.post('/api/groups/:groupId/import-reservation/preview', requireAuth, requirePermission('sidebar:/groups'), async(req,res)=>{
+    try{res.json(await previewReservationImport(req.params.groupId,String(req.body.reservationId||''),req.body));}
+    catch(error:any){res.status(error.statusCode||500).json({error:error.message||'No se pudo revisar la reserva.'});}
+  });
+  app.post('/api/groups/:groupId/import-reservation', requireAuth, requirePermission('sidebar:/groups'), async(req,res)=>{
+    try{res.json(await importExistingReservation(req.params.groupId,String(req.body.reservationId||''),req.body,req.user||{}));}
+    catch(error:any){res.status(error.statusCode||500).json({error:error.message||'No se pudo incorporar la reserva.',notApplied:!!error.statusCode&&error.statusCode<500});}
+  });
+  app.post('/api/groups/:groupId/reservations/:reservationId/block', requireAuth, requirePermission('sidebar:/groups'), async(req,res)=>{
+    try {
+      if(typeof req.body.blockId!=='string')return res.status(400).json({error:'Seleccioná el bloque.'});
+      res.json(await associateReservationBlock(req.params.groupId,req.params.reservationId,req.body.blockId,req.user||{}));
+    } catch(error:any){res.status(error.statusCode||500).json({error:error.message||'No se pudo identificar el bloque.'});}
+  });
   // Groups
   app.get("/api/groups", async (req, res) => {
     try {
@@ -728,7 +762,7 @@ export function registerGroupsRoutes(app: Express) {
             lastModifiedBy: null,
           } as any);
 
-          await storage.createGroupReservationLink({ groupId: group.id, reservationId: reservation.id });
+          await storage.createGroupReservationLink({ groupId: group.id, reservationId: reservation.id, blockId: block.id });
           await db.update(roomsTable).set({ status: "occupied" }).where(eq(roomsTable.id, room.id));
           autoAssigned++;
         }
@@ -762,33 +796,21 @@ export function registerGroupsRoutes(app: Express) {
       if (!block) return res.status(404).json({ error: "Group block not found" });
       await assertGroupStructureCanChange(block.groupId);
 
-      // Determine the placeholders to release before removing the block. The
-      // destructive block operation itself is deliberately performed first:
-      // its storage-level transaction repeats the financial guard, so a
-      // concurrent receipt cannot leave reservations/rooms mutated after the
-      // endpoint returns a 409.
-      const reservationsToCancel: any[] = [];
-      const group = await storage.getGroup(block.groupId);
-      if (group) {
-        const placeholderCode = `GROUP-${block.groupId}`;
-        const remainingBlocks = group.blocks.filter(b => b.id !== req.params.id && b.roomTypeId === block.roomTypeId);
-        const remainingCapacity = remainingBlocks.reduce((sum, b) => sum + b.quantity, 0);
-
-        const allPlaceholders = group.reservations.filter((r: any) =>
-          r.room?.roomTypeId === block.roomTypeId &&
-          // Placeholder = no real guest assigned (null guestId) OR legacy shared placeholder guest
-          (!r.guestId || r.guest?.codigo === placeholderCode) &&
-          !["cancelled", "checked_out"].includes(r.status)
-        );
-
-        // Cancel excess placeholder reservations (beyond remaining capacity)
-        reservationsToCancel.push(...allPlaceholders.slice(remainingCapacity));
-      }
-
-      const deleted = await db.transaction(async (tx) => {
-        // Serialize the activity recheck with group-payment recording before
-        // changing either the block or its placeholder reservations.
+      const deleted = await withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
+        const tx = db;
+        // Re-read membership and passengers after the same group/inventory locks
+        // used by assignment and imports; stale block identities cannot cancel a stay.
         await tx.execute(sql`SELECT id FROM groups WHERE id = ${block.groupId} FOR UPDATE`);
+        const group = await storage.getGroup(block.groupId);
+        const currentBlock = group?.blocks.find(candidate => candidate.id === block.id);
+        if (!group || !currentBlock) return false;
+        const allocation = summarizeGroupBlocks(group).byBlock[block.id];
+        if (allocation.reviewReservationIds.length) throw Object.assign(new Error('Identificá las asignaciones de este bloque antes de eliminarlo.'), { statusCode: 409 });
+        const ids = new Set(allocation.reservations.map(reservation => reservation.id));
+        const reservationsToCancel = group.reservations.filter(reservation => ids.has(reservation.id));
+        if (reservationsToCancel.some(reservation => !['tentative','pending','confirmed'].includes(reservation.status) || reservation.guestId && reservation.guest?.codigo !== `GROUP-${block.groupId}`)) {
+          throw Object.assign(new Error('El bloque tiene reservas con pasajero o salidas realizadas. Conservá su historial y revisá sus asignaciones.'), { statusCode: 409 });
+        }
         const activity = await tx.execute(sql`
           SELECT (
             EXISTS (SELECT 1 FROM group_payments WHERE group_id = ${block.groupId})
@@ -802,14 +824,24 @@ export function registerGroupsRoutes(app: Express) {
           );
         }
         for (const reservation of reservationsToCancel) {
+          const financial = await tx.execute(sql`SELECT (
+            EXISTS(SELECT 1 FROM payments WHERE reservation_id=${reservation.id})
+            OR EXISTS(SELECT 1 FROM sales_invoices WHERE reserva_id=${reservation.id})
+            OR EXISTS(SELECT 1 FROM charges WHERE reservation_id=${reservation.id})
+            OR EXISTS(SELECT 1 FROM account_movements WHERE reservation_id=${reservation.id})
+          ) AS activity`);
+          if ((financial.rows[0] as any)?.activity || reservation.voucherId || reservation.voucherCode || Number(reservation.earlyCheckInCharge||0) || Number(reservation.lateCheckOutCharge||0)) {
+            throw Object.assign(new Error('El cupo tiene movimientos o servicios. Revisá su cuenta antes de eliminar el bloque.'), {statusCode:409});
+          }
           await tx.update(reservationsTable).set({ status: "cancelled" }).where(eq(reservationsTable.id, reservation.id));
           if (reservation.roomId) {
             await tx.update(roomsTable).set({ status: "available" }).where(eq(roomsTable.id, reservation.roomId));
           }
         }
+        await tx.update(groupReservationLinks).set({blockId:null}).where(eq(groupReservationLinks.blockId,block.id));
         const result = await tx.delete(groupRoomBlocks).where(eq(groupRoomBlocks.id, req.params.id));
         return (result.rowCount ?? 0) > 0;
-      });
+      }));
       if (!deleted) return res.status(404).json({ error: "Group block not found" });
       res.status(204).send();
     } catch (error: any) {
@@ -961,7 +993,7 @@ export function registerGroupsRoutes(app: Express) {
   // Group Room Assignment
   app.post("/api/groups/:groupId/assign-room", async (req, res) => {
     try {
-      const { roomId, roomTypeId, guestId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId } = req.body;
+      const { roomId, roomTypeId, guestId, guestFirstName, guestLastName, checkInDate, checkOutDate, agreedRate, ratePlanId, blockId } = req.body;
       if (!roomId || (!guestId && !guestFirstName)) {
         return res.status(400).json({ error: "Room ID and guest first name are required" });
       }
@@ -976,14 +1008,18 @@ export function registerGroupsRoutes(app: Express) {
         return res.status(404).json({ error: "Grupo no encontrado" });
       }
       const activeAssigned = (group.reservations || []).filter(
-        (r: any) => r.status !== "cancelled" && r.status !== "checked_out"
+        (r: any) => !["cancelled","no_show"].includes(r.status)
       ).length;
       if (activeAssigned >= group.totalRooms) {
         return res.status(400).json({
           error: `El grupo ya tiene todas sus habitaciones asignadas (${group.totalRooms}). Para agregar más, primero agregue un bloque adicional.`
         });
       }
-      const reservation = await storage.assignRoomToGroup(
+      const reservation = await withLodgingInventoryMutationLock(()=>withDatabaseTransaction(async()=>{
+        await db.execute(sql`SELECT id FROM groups WHERE id=${req.params.groupId} FOR UPDATE`);
+        const fresh=await storage.getGroup(req.params.groupId);
+        if(!fresh || fresh.reservations.filter(r=>!['cancelled','no_show'].includes(r.status)).length>=fresh.totalRooms)throw Object.assign(new Error('El grupo ya tiene todos sus cupos asignados.'),{statusCode:409});
+        return storage.assignRoomToGroup(
         req.params.groupId,
         roomId,
         guestFirstName || "",
@@ -995,9 +1031,11 @@ export function registerGroupsRoutes(app: Express) {
           ratePlanId: ratePlanId !== undefined ? ratePlanId : undefined,
           guestId: guestId || undefined,
           canonicalRoomTypeId: roomTypeId || undefined,
+          blockId: typeof blockId==='string' ? blockId : undefined,
           overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
         }
-      );
+        );
+      }));
       if (!reservation) {
         return res.status(400).json({ error: "Could not assign room to group" });
       }
@@ -1459,6 +1497,7 @@ export function registerGroupsRoutes(app: Express) {
         supplied: rawSettlementBreakdown,
       });
       const recorded = await storage.recordGroupPayment({
+        roomInvoiceBatchId: req.body.groupRoomInvoiceBatchId,
         paymentRequest,
         groupId: req.params.groupId,
         destination: "group_distribution",

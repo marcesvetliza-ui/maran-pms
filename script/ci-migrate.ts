@@ -13,6 +13,7 @@
  * Usage: DATABASE_URL=postgres://... npx tsx script/ci-migrate.ts
  */
 import { runMigrations, verifyFinancialSchema } from "../server/migrate";
+import { ensureGroupReservationsSchema } from "../server/groupReservationsSchema";
 import { db } from "../server/db";
 import { sql } from "drizzle-orm";
 import { ensureRoomPreventiveSchema } from "../server/maintenance/roomPreventiveSchema";
@@ -36,6 +37,7 @@ async function main() {
 
   console.log("[ci-migrate] Ejecutando runMigrations()...");
   await runMigrations();
+  await ensureGroupReservationsSchema();
   await ensureRoomPreventiveSchema();
   await ensureSupplierExpenseSchema();
   await ensureReviewsSchema();

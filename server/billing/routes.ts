@@ -1,3 +1,4 @@
+import { assertRoomBatchInvoice } from '../groupRoomInvoiceBatch';
 import { groupRoomAdvanceInvoicePreview } from './groupRoomAdvanceInvoice';
 import {isStandaloneSpaCashReceipt,settleStandaloneSpaCashReceipt} from './spaReceiptSettlement';
 import {validateIndividualGroupPlan,assertIndividualGroupInvoice,assertGroupBillingAction} from './individualGroupFolio';
@@ -1215,6 +1216,7 @@ export function registerBillingRoutes(app: Express) {
       let { tipoComprobante, cliente, items, recipientMode, recipientConsumerFinal, recipientEntity, reservaId, paymentId: rawPaymentId, groupId: rawGroupId, groupPaymentId: rawGroupPaymentId, groupPaymentIntent, spaAccountId: rawSpaAccountId, folioId, puntoVenta: pvBody, puntoVentaOverride, cashArea, cashFormaPago, cashFormaPagoDetalle, cashLabel: cashLabelBody, ccEntityType, ccEntityId, sourceChargeIds, sourceChargeAmounts, observaciones, folioContext, creditReapplications, ordinaryAdvanceApplications, creditOperationId, reservationSettlementMethod } = req.body;
       const giftExpiryError = giftVoucherItemsExpiryError(items);
       if (giftExpiryError) return res.status(400).json({ error: giftExpiryError });
+      await assertRoomBatchInvoice(req.body);
       await assertGroupBillingAction(req.body);
       if (req.body.prefacturaRecovery?.version === 2 && !isNonFiscalTipo(String(tipoComprobante)) && reservaId && typeof creditOperationId === "string" && /^[0-9a-f-]{20,}$/i.test(creditOperationId)) {
         assertFinancialSchemaReady();
@@ -1569,6 +1571,7 @@ export function registerBillingRoutes(app: Express) {
       let reusedExistingClaim = false;
       let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
+        await assertRoomBatchInvoice(req.body);
         if (groupRoomAdvance) {
           // Recover the receipt's exact document before recalculating mutable
           // capacity. Pending drafts already reserve their original sources.
@@ -1834,7 +1837,7 @@ export function registerBillingRoutes(app: Express) {
               : {}),
           };
           creditIntent = {
-            ...(groupDocumentationOnly?{groupDocumentationOnly:true}:{}),
+            ...(groupDocumentationOnly?{groupDocumentationOnly:true,...(req.body.groupRoomInvoiceBatchId?{groupRoomInvoiceBatchId:req.body.groupRoomInvoiceBatchId}:{})}:{}),
             ...(individualGroupId&&!groupDocumentationOnly?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments,acknowledgeUnassignedAdvance:req.body.acknowledgeUnassignedAdvance===true}}:{}),
             ...(req.body.correctionOriginalInvoiceId ? {correctionOriginalInvoiceId:Number(req.body.correctionOriginalInvoiceId)} : {}),
             operationId: creditOperationId,
@@ -2167,6 +2170,7 @@ export function registerBillingRoutes(app: Express) {
           tipoComprobante,
           operationId: typeof req.body.operationId === "string" ? req.body.operationId : creditOperationId,
           requestSnapshot: req.body,
+          expectedFiscalIdentity: req.body.expectedFiscalIdentity,
           cliente: persistedCliente,
           recipientEntity: fallbackRecipientEntity,
           centerSettlementArea: recipientMode === "centro_comprobantes" ? String(cashArea) : undefined,
