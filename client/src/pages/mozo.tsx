@@ -83,8 +83,8 @@ export default function MozoPage() {
     ["open", "in_progress"].includes(o.status)
   );
   const getTableOrder = useCallback(
-    (tableId: string) => activeOrders.find((o: any) => o.tableId === tableId),
-    [activeOrders]
+    (tableId: string) => activeOrders.find((o: any) => o.tableId === tableId || o.id === (tables.find((t:any)=>t.id===tableId) as any)?.eventServiceOrderId),
+    [activeOrders,tables]
   );
   const selectedTable = tables.find((t: any) => t.id === selectedTableId);
 
