@@ -5119,6 +5119,8 @@ WHERE status='limpia_ocupada' AND housekeeping_service_date IS NULL;`);
 
   const { ensureHospitalityInclusionsSchema } = await import("./hospitalityInclusionsSchema");
   await ensureHospitalityInclusionsSchema();
+  const {ensureRestaurantEventsSchema}=await import('./restaurantEventsSchema');
+  await ensureRestaurantEventsSchema();
   const {specialDatesTables} = await import("./hospitalitySpecialDatesSchema");
   for (const table of specialDatesTables)
     await db.execute(sql.raw(createTableWithoutRerunNotice(table.name, table.ddl)));

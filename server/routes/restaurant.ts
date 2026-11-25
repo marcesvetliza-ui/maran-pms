@@ -1,3 +1,4 @@
+import {restaurantEventOrderContext,applyRestaurantEventCredit,prepareRestaurantEventFinalDocument,completeRestaurantEventFinalDocument} from '../restaurantEvents';
 import { registerRestaurantAreaSettingsRoutes } from './restaurantAreaSettings';
 import {registerRestaurantLayoutRoutes} from './restaurantLayout';
 import {copyDishRecipe} from "../copyDishRecipe";
@@ -101,7 +102,11 @@ async function validRestaurantRoomReservation(id: unknown): Promise<boolean> {
   return !!reservation && reservation.status === "checked_in";
 }
 
-function queueRestaurantInvoice(data: Parameters<typeof emitirFactura>[0]): void {
+async function queueRestaurantInvoice(data: Parameters<typeof emitirFactura>[0]): Promise<void> {
+  if(data.restaurantOrderId&&await prepareRestaurantEventFinalDocument(data.restaurantOrderId,data)){
+    const id=data.restaurantOrderId;
+    afterRestaurantPaymentCommit(()=>completeRestaurantEventFinalDocument(id));return;
+  }
   afterRestaurantPaymentCommit(async () => {
     try {
       const invoice = await withFinancialScopeLock(`restaurant-invoice:${data.restaurantOrderId}`, () => emitirFactura(data));
@@ -413,6 +418,9 @@ export function registerRestaurantRoutes(app: Express) {
         // Rejecting a waiter from an expired shift must also roll back the
         // existing stale-order cleanup; no previous order is lost on failure.
         const result = await withTableOpenLock(tableId, () => withDatabaseTransaction(async () => {
+          await db.execute(sql`SELECT id FROM restaurant_tables WHERE id=${tableId} FOR UPDATE`);
+          const eventOrder=await db.execute(sql`SELECT o.id,o.order_number AS "orderNumber" FROM restaurant_event_services s JOIN restaurant_event_assignments a ON a.reservation_id=s.reservation_id JOIN restaurant_orders o ON o.id=s.order_id WHERE a.table_id=${tableId} AND o.status NOT IN ('closed','cancelled')`);
+          if(eventOrder.rows.length)return {conflict:eventOrder.rows[0] as {id:string;orderNumber:string}};
           // Verificar si hay una orden activa de HOY para esta mesa
           const activeToday = await db
             .select({ id: restaurantOrders.id, orderNumber: restaurantOrders.orderNumber })
@@ -530,6 +538,8 @@ export function registerRestaurantRoutes(app: Express) {
       const advanceCredit = advanceCents / 100;
       const finalTotal = (originalCents - discountCents - advanceCents) / 100;
 
+      const eventContext=await restaurantEventOrderContext(order.id);
+      if(eventContext&&advanceCents!==Math.min(Math.round(Number(eventContext.availableCredit)*100),originalCents-discountCents))return res.status(409).json({error:'Los anticipos disponibles cambiaron. Actualizá la cuenta.'});
       // Validate all tenders before closing the order, consuming a voucher or
       // writing any cash/room movement. Compare persisted amounts in cents.
       const totalCents = paymentCents(finalTotal);
@@ -594,6 +604,8 @@ export function registerRestaurantRoutes(app: Express) {
         return res.status(409).json({ error: "El pedido ya fue cerrado" });
       }
 
+      if(eventContext)await applyRestaurantEventCredit(order.id,advanceCredit.toFixed(2),(folioChargeTotal).toFixed(2),(req as any).user?.id || (req as any).user?.username || 'sistema');
+
       // Room charges — support multiple cuenta_habitacion splits
       const today = getArgentinaOperationalDate();
       const orderLabel = `Restaurante - Pedido ${order.orderNumber}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
@@ -624,6 +636,7 @@ export function registerRestaurantRoutes(app: Express) {
         await storage.updateRestaurantTable(order.tableId, { status: "available" });
       }
 
+      if(!eventContext || finalTotal>0){
       const cashLabel = `Pedido ${order.orderNumber}${order.tableId ? "" : " (sin mesa)"}${discountAmount > 0 ? ` (Desc: $${discountAmount.toFixed(2)})` : ""}`;
       if (Array.isArray(paymentSplits) && paymentSplits.length > 1) {
         // Multi-split: one cash register entry per split
@@ -656,6 +669,8 @@ export function registerRestaurantRoutes(app: Express) {
           console.error("Error registrando movimiento de caja:", e);
           throw e;
         }
+      }
+
       }
 
       // Motor financiero: escribir al folio del pedido (no aplica a consumos internos)
@@ -716,7 +731,7 @@ export function registerRestaurantRoutes(app: Express) {
 
       // Mark reservation advances as applied to this order
       // Use the order's openedAt date (not today) to correctly find advances for multi-day orders.
-      if (advanceCredit > 0 && order.tableId) {
+      if (advanceCredit > 0 && order.tableId && !eventContext) {
         try {
           const orderDate = order.openedAt
             ? getArgentinaOperationalDate(order.openedAt)
@@ -826,10 +841,10 @@ export function registerRestaurantRoutes(app: Express) {
           // Línea negativa por seña/anticipo de reserva (si aplica)
           if (advanceCredit > 0) {
             const netAdv = parseFloat((advanceCredit / 1.21).toFixed(4));
-            invoiceItems.push({ descripcion: `Seña / Anticipo reserva`, cantidad: 1, precioUnitario: -netAdv, alicuotaIva: "21" as const, subtotalNeto: -netAdv, subtotal: -parseFloat(advanceCredit.toFixed(2)) });
+            invoiceItems.push({ descripcion: eventContext ? `Anticipos aplicados` : `Seña / Anticipo reserva`, cantidad: 1, precioUnitario: -netAdv, alicuotaIva: "21" as const, subtotalNeto: -netAdv, subtotal: -parseFloat(advanceCredit.toFixed(2)) });
           }
 
-          queueRestaurantInvoice({
+          await queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
@@ -843,6 +858,7 @@ export function registerRestaurantRoutes(app: Express) {
             puntoVentaOverride: pvOverride ? parseInt(pvOverride) : undefined,
           });
         } catch (e) {
+          if(eventContext)throw e;
           console.error("[Billing] Error emitiendo factura restaurant:", e);
         }
       }
@@ -1278,7 +1294,7 @@ export function registerRestaurantRoutes(app: Express) {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
           const splitOrder = order;
-          queueRestaurantInvoice({
+          await queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
@@ -1519,7 +1535,7 @@ export function registerRestaurantRoutes(app: Express) {
               subtotal: parseFloat(i.subtotal),
             };
           }));
-          queueRestaurantInvoice({
+          await queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
@@ -2633,7 +2649,7 @@ export function registerRestaurantRoutes(app: Express) {
       }));
       const pdf = await generateRestaurantOrderReceiptPdf({ orderNumber: order.orderNumber,
         orderLabel: order.orderLabel, waiterName: order.waiterName, receiptType: order.receiptType,
-        closedAt: order.closedAt ? String(order.closedAt) : null, total: await restaurantReceiptTotal(order), items, comments: order.notes });
+        closedAt: order.closedAt ? String(order.closedAt) : null, total: await restaurantReceiptTotal(order), advanceApplied:(await restaurantEventOrderContext(order.id))?.advance_applied, items, comments: order.notes });
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", 'inline; filename="Ticket_Restaurante.pdf"');
       res.send(pdf);
@@ -2682,6 +2698,7 @@ export function registerRestaurantRoutes(app: Express) {
         receiptType: order.receiptType,
         closedAt: (order as any).closedAt ? String((order as any).closedAt) : null,
         total: await restaurantReceiptTotal(order),
+        advanceApplied:(await restaurantEventOrderContext(order.id))?.advance_applied,
         items: enrichedItems,
         comments: order.notes,
       });

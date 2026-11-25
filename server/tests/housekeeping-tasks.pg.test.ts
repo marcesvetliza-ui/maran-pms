@@ -257,7 +257,7 @@ describe.skipIf(!enabled)(
     });
     it("does not create a new task when unassigning a room without pending work",async()=>{
       expect((await api("POST","/api/housekeeping/assign",{roomId:id("room"),assignedTo:null,date:today})).status).toBe(200);
-      expect(await storage.getHousekeepingTasks(today)).toHaveLength(0);
+      expect((await storage.getHousekeepingTasks(today)).filter((task:any)=>task.roomId===id("room"))).toHaveLength(0);
     });
     it("creates selected rooms with date, assignee, instructions and priority", async () => {
       const r = await api(

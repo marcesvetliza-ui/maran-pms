@@ -1,4 +1,5 @@
 import { isSelectableGuest } from "@shared/guest-selection";
+import {RestaurantEvents} from '@/components/restaurant-events';
 import { IncludedServicesButton } from "@/components/included-services";
 import { RestaurantAreaSettings } from '@/components/restaurant-area-settings';
 import {useRestaurantLayout} from '@/hooks/use-restaurant-layout';
@@ -1136,10 +1137,12 @@ export default function RestaurantPage() {
     refetchInterval: 30000, // poll every 30s so NC void movements appear without page reload
   });
   const restaurantOrderVoidMovements: any[] = (restaurantOrderFolioData?.movements ?? []).filter((m: any) => m.type === "void");
-  const eventTableAdvance = closeOrderArea?.areaType === "event"
+  const {data:eventOrderContext}=useQuery<any>({queryKey:['/api/restaurant/events/orders',currentOrder?.id],queryFn:async()=>{const r=await apiRequest('GET','/api/restaurant/events/orders/'+currentOrder!.id);return r.json();},enabled:!!currentOrder?.id,staleTime:0,refetchOnWindowFocus:true});
+  const eventTableAdvance = !eventOrderContext&&closeOrderArea?.areaType === "event"
     ? parseFloat((closeOrderTable as any)?.eventAdvanceAmount || "0")
     : 0;
-  const totalAdvanceCredit = closeDialogTableAdvances
+  const sendEventKitchenMutation=useMutation({mutationFn:async()=>{if(!currentOrder)throw new Error('Elegí la cuenta');return apiRequest('POST','/api/restaurant/orders/'+currentOrder.id+'/send-kitchen',{});},onSuccess:()=>{queryClient.invalidateQueries({queryKey:['/api/restaurant/orders']});toast({title:'Pendientes enviados a cocina'});},onError:(e:Error)=>toast({title:'No se pudo enviar',description:parseApiError(e),variant:'destructive'})});
+  const totalAdvanceCredit = eventOrderContext?Math.min(Number(eventOrderContext.availableCredit),Number(currentOrder?.total||0)):closeDialogTableAdvances
     .filter(a => !a.appliedToOrderId)
     .reduce((s, a) => s + parseFloat(a.amount || "0"), 0) + eventTableAdvance;
 
@@ -2118,9 +2121,9 @@ export default function RestaurantPage() {
       // órdenes viejas (de días anteriores) que escaparon el filtro abran el dialog.
       const todayArgentina = getArgentinaToday();
       const findTodayOrder = (orderList: typeof orders) => orderList.find((o) => {
-        if (o.tableId !== table.id || o.status === "closed" || o.status === "cancelled") return false;
+        if ((o.tableId !== table.id && o.id !== (table as any).eventServiceOrderId) || o.status === "closed" || o.status === "cancelled") return false;
         const orderDate = toArgentinaDateStr(new Date(o.openedAt));
-        return orderDate === todayArgentina;
+        return orderDate === todayArgentina || o.id === (table as any).eventServiceOrderId;
       });
       const tableOrder = findTodayOrder(orders);
       if (tableOrder) {
@@ -2696,7 +2699,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
       </Dialog>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
           <TabsTrigger value="floor" data-testid="tab-floor">
             <MapPin className="h-4 w-4 mr-2" />
             Plano de Mesas
@@ -2717,7 +2720,11 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             <Users className="h-4 w-4 mr-2" />
             Clientes
           </TabsTrigger>
+          <TabsTrigger value="restaurant_events" data-testid="tab-restaurant-events"><CalendarDays className="mr-2 h-4 w-4"/>Evento restaurant</TabsTrigger>
         </TabsList>
+        <TabsContent value="restaurant_events"><RestaurantEvents onOpenOrder={async(id)=>{
+          const response=await apiRequest('GET','/api/restaurant/orders/'+id);const order=await response.json();await queryClient.fetchQuery({queryKey:['/api/restaurant/events/orders',id],queryFn:async()=>{const context=await apiRequest('GET','/api/restaurant/events/orders/'+id);return context.json();}});setCurrentOrder(order);setSelectedTable(tables.find(t=>t.id===order.tableId)||null);setOrderView('comanda');setIsOrderDialogOpen(true);
+        }}/></TabsContent>
 
         {/* ==================== FLOOR PLAN TAB ==================== */}
         <TabsContent value="floor" className="space-y-4">
@@ -4735,7 +4742,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                   size="sm"
                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
                   onClick={() => { setCancelledOrderSnapshot({ order: getUpdatedOrder(), items: getOrderItems() }); setCancelOrderReason(""); setShowCancelOrderDialog(true); }}
-                  data-testid="button-cancel-order"
+                  disabled={!!eventOrderContext} data-testid="button-cancel-order"
                 >
                   <XCircle className="h-4 w-4 mr-1" />
                   Anular Pedido
@@ -4754,7 +4761,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                     size="sm"
                     className="h-7 text-xs gap-1"
                     onClick={() => { setIsTransferMode(true); setTransferSelectedIds(new Set()); setTransferTargetOrderId(""); setTransferNewWaiter(""); }}
-                    data-testid="button-transfer-items"
+                    disabled={!!eventOrderContext} data-testid="button-transfer-items"
                   >
                     <ArrowRightLeft className="h-3.5 w-3.5" />
                     Transferir ítems
@@ -4914,6 +4921,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
             </div>
           )}
 
+          {eventOrderContext&&<div className="mx-4 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950 dark:bg-blue-950 dark:text-blue-100"><strong>{eventOrderContext.eventName} · {eventOrderContext.guestName}</strong><p>Anticipos disponibles: ${fmtMoney(Number(eventOrderContext.availableCredit))}. Se descuentan al cerrar la cuenta. Las mesas de esta reserva comparten la cuenta.</p>{!['closed','cancelled'].includes(eventOrderContext.orderStatus)&&<Button size="sm" className="mt-2" disabled={sendEventKitchenMutation.isPending} onClick={()=>sendEventKitchenMutation.mutate()}>Enviar pendientes a cocina</Button>}</div>}
           {orderView === "comanda" && (
             <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
               <h3 className="font-semibold text-lg">Comanda</h3>
@@ -6058,7 +6066,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       <div className="pt-2 border-t">
                         <Button variant="outline" size="sm" className="w-full"
                           onClick={() => { setIsSplitMode(true); setSplitDialogMode("equal_parts"); }}
-                          data-testid="button-split-bill"
+                          disabled={!!eventOrderContext} data-testid="button-split-bill"
                         ><Banknote className="h-4 w-4 mr-2" />Dividir Cuenta</Button>
                       </div>
                     </>
