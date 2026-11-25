@@ -10,6 +10,16 @@ const base = {
 };
 
 describe("group inventory accounting", () => {
+  it("uses dated usable capacity only when the caller supplies it", () => {
+    expect(evaluateGroupInventory(base)).toBeNull();
+    expect(evaluateGroupInventory({ ...base, operationalInventoryByDate: { "2026-10-11": 2 } })).toMatchObject({
+      date: "2026-10-11", hardDemand: 3, operationalInventory: 2,
+    });
+    expect(evaluateGroupInventory({ ...base, operationalInventoryByDate: {} })).toBeNull();
+    expect(evaluateGroupInventory({ ...base, operationalInventoryByDate: { "2026-10-10": 0 } })).toMatchObject({
+      date: "2026-10-10", operationalInventory: 0, code: "GROUP_BLOCK_SHORTAGE",
+    });
+  });
   it("commits confirmed blocks per night", () => {
     expect(evaluateGroupInventory({ ...base, operationalInventory: 3 })).toBeNull();
     expect(evaluateGroupInventory({ ...base, operationalInventory: 2 })).toMatchObject({ code: "GROUP_BLOCK_WARNING", canOverride: true });

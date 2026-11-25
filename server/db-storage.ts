@@ -1224,6 +1224,7 @@ export class DatabaseStorage implements IStorage {
     excludeReservationId?: string;
     contextGroupId?: string;
     hasSpecificRoom?: boolean;
+    operationalInventoryByDate?: Record<string, number>;
     override?: boolean;
   }): Promise<GroupInventoryConflict | null> {
     const [roomRows, groupRows, blockRows, linkRows, reservationRows] = await Promise.all([
@@ -1257,6 +1258,7 @@ export class DatabaseStorage implements IStorage {
     const inventoryReservations=[...new Map([...reservationRows,...departed].map(row=>[row.id,row])).values()];
     return evaluateGroupInventory({
       roomTypeId: input.roomTypeId,
+      operationalInventoryByDate: input.operationalInventoryByDate,
       checkIn: input.checkInDate,
       checkOut: input.checkOutDate,
       operationalInventory: roomRows.filter(room => room.roomTypeId===input.roomTypeId && isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,

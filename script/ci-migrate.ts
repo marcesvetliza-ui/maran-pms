@@ -14,6 +14,7 @@
  */
 import { runMigrations, verifyFinancialSchema } from "../server/migrate";
 import { ensureGroupReservationsSchema } from "../server/groupReservationsSchema";
+import { ensureBookingEngineSchema } from "../server/bookingEngineSchema";
 import { db } from "../server/db";
 import { sql } from "drizzle-orm";
 import { ensureRoomPreventiveSchema } from "../server/maintenance/roomPreventiveSchema";
@@ -37,6 +38,7 @@ async function main() {
 
   console.log("[ci-migrate] Ejecutando runMigrations()...");
   await runMigrations();
+  await ensureBookingEngineSchema();
   await ensureGroupReservationsSchema();
   await ensureRoomPreventiveSchema();
   await ensureSupplierExpenseSchema();
