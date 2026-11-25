@@ -178,8 +178,8 @@ export function registerRestaurantRoutes(app: Express) {
       validatePhysicalTableCreation(req.body);
       const table = await storage.createRestaurantTable(req.body);
       res.status(201).json(table);
-    } catch (error) {
-      res.status(500).json({ error: "Error creating table" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.statusCode ? error.message : "Error creating table" });
     }
   });
 
