@@ -1,4 +1,6 @@
 import {restaurantEventOrderContext,applyRestaurantEventCredit,prepareRestaurantEventFinalDocument,completeRestaurantEventFinalDocument} from '../restaurantEvents';
+import {validatePhysicalTableCreation,validateLegacyTablePatch,retiredEventPreloadError,retiredEventPreloadMessage} from '../restaurantLegacyEvents';
+import {hasLegacyEventPreload} from '@shared/restaurant-event-legacy';
 import { registerRestaurantAreaSettingsRoutes } from './restaurantAreaSettings';
 import {registerRestaurantLayoutRoutes} from './restaurantLayout';
 import {copyDishRecipe} from "../copyDishRecipe";
@@ -177,6 +179,7 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.post("/api/restaurant/tables", async (req, res) => {
     try {
+      validatePhysicalTableCreation(req.body);
       const table = await storage.createRestaurantTable(req.body);
       res.status(201).json(table);
     } catch (error: any) {
@@ -186,20 +189,30 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.patch("/api/restaurant/tables/:id", async (req, res) => {
     try {
-      const table = await storage.updateRestaurantTable(req.params.id, req.body);
+      const table = await withDatabaseTransaction(async () => {
+        const [current] = await db.select().from(restaurantTables).where(eq(restaurantTables.id,req.params.id)).for('update');
+        if (!current) return undefined;
+        validateLegacyTablePatch(current,req.body);
+        return storage.updateRestaurantTable(req.params.id,req.body);
+      });
       if (!table) return res.status(404).json({ error: "Table not found" });
       res.json(table);
-    } catch (error) {
-      res.status(500).json({ error: "Error updating table" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.statusCode ? error.message : "Error updating table" });
     }
   });
 
   app.delete("/api/restaurant/tables/:id", async (req, res) => {
     try {
-      await storage.deleteRestaurantTable(req.params.id);
+      await withDatabaseTransaction(async () => {
+        const [current] = await db.select().from(restaurantTables).where(eq(restaurantTables.id,req.params.id)).for('update');
+        if (!current) return;
+        if (hasLegacyEventPreload(current)) throw retiredEventPreloadError('La mesa conserva una precarga o datos anteriores. Revisalos antes de eliminarla; sus anticipos se conservan.');
+        await storage.deleteRestaurantTable(req.params.id);
+      });
       res.status(204).send();
-    } catch (error) {
-      res.status(500).json({ error: "Error deleting table" });
+    } catch (error: any) {
+      res.status(error?.statusCode || 500).json({ error: error?.statusCode ? error.message : "Error deleting table" });
     }
   });
 
@@ -388,6 +401,8 @@ export function registerRestaurantRoutes(app: Express) {
   app.post("/api/restaurant/orders", async (req, res) => {
     try {
       const { waiterName, tableId, areaId, orderLabel } = req.body;
+      const {legacyReservationId,...orderInput} = req.body;
+      let legacyOrderData: {covers:number;orderLabel:string;notes?:string|null} | undefined;
       if (!tableId && !areaId) {
         return res.status(400).json({ error: "Se requiere mesa o area" });
       }
@@ -397,7 +412,8 @@ export function registerRestaurantRoutes(app: Express) {
       const createOrder = async () => {
         const orderNumber = storage.generateOrderNumber();
         const order = await storage.createRestaurantOrder({
-          ...req.body,
+          ...orderInput,
+          ...legacyOrderData,
           orderNumber,
           openedAt: new Date(),
         });
@@ -418,7 +434,7 @@ export function registerRestaurantRoutes(app: Express) {
         // Rejecting a waiter from an expired shift must also roll back the
         // existing stale-order cleanup; no previous order is lost on failure.
         const result = await withTableOpenLock(tableId, () => withDatabaseTransaction(async () => {
-          await db.execute(sql`SELECT id FROM restaurant_tables WHERE id=${tableId} FOR UPDATE`);
+          const [openingTable] = await db.select().from(restaurantTables).where(eq(restaurantTables.id,tableId)).for('update');
           const eventOrder=await db.execute(sql`SELECT o.id,o.order_number AS "orderNumber" FROM restaurant_event_services s JOIN restaurant_event_assignments a ON a.reservation_id=s.reservation_id JOIN restaurant_orders o ON o.id=s.order_id WHERE a.table_id=${tableId} AND o.status NOT IN ('closed','cancelled')`);
           if(eventOrder.rows.length)return {conflict:eventOrder.rows[0] as {id:string;orderNumber:string}};
           // Verificar si hay una orden activa de HOY para esta mesa
@@ -435,6 +451,19 @@ export function registerRestaurantRoutes(app: Express) {
             .limit(1);
           if (activeToday.length > 0) {
             return { conflict: activeToday[0] };
+          }
+          const openingArea = openingTable ? await storage.getRestaurantArea(openingTable.areaId) : null;
+          if (openingTable?.status === 'preloaded') {
+            legacyOrderData={covers:openingTable.eventSeats || openingTable.capacity,orderLabel:openingTable.eventClientName || `Mesa ${openingTable.tableNumber}`,notes:openingTable.eventNotes};
+          } else if (openingArea?.areaType === 'event') {
+            const pending = await db.execute(sql`SELECT r.guest_name,r.party_size,r.notes FROM table_reservations r WHERE r.table_id=${tableId}
+              AND r.status IN ('pending','confirmed','check_in','seated')
+              AND (r.reservation_date=${getArgentinaOperationalDate()} OR r.id=${legacyReservationId || ''})
+              AND NOT EXISTS(SELECT 1 FROM restaurant_event_bookings eb WHERE eb.reservation_id=r.id)
+              ORDER BY r.reservation_date,r.reservation_time,r.id LIMIT 1`);
+            const reservation=pending.rows[0] as any;
+            if (!reservation) throw retiredEventPreloadError();
+            legacyOrderData={covers:reservation.party_size,orderLabel:reservation.guest_name,notes:reservation.notes};
           }
           // Cerrar órdenes viejas (de días anteriores) antes de crear la nueva
           const staleForTable = await db
@@ -466,6 +495,7 @@ export function registerRestaurantRoutes(app: Express) {
         return res.status(201).json(result.order);
       }
 
+      if (areaId && (await storage.getRestaurantArea(areaId))?.areaType === 'event') throw retiredEventPreloadError();
       const order = await createOrder();
       res.status(201).json(order);
     } catch (error) {
@@ -1088,6 +1118,9 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.post("/api/restaurant/table-reservations", async (req, res) => {
     try {
+      const table = req.body.tableId ? await storage.getRestaurantTable(req.body.tableId) : null;
+      const areas = await Promise.all([table?.areaId,req.body.areaId].filter(Boolean).map(id=>storage.getRestaurantArea(id)));
+      if (areas.some(area=>area?.areaType==='event')) return res.status(409).json({error:retiredEventPreloadMessage});
       const tableReservation = await storage.createTableReservation({
         ...req.body,
         createdAt: new Date(),
@@ -1100,6 +1133,13 @@ export function registerRestaurantRoutes(app: Express) {
 
   app.patch("/api/restaurant/table-reservations/:id", async (req, res) => {
     try {
+      const current = await storage.getTableReservation(req.params.id);
+      if (!current) return res.status(404).json({error:'Reservation not found'});
+      const currentTable = current.tableId ? await storage.getRestaurantTable(current.tableId) : null;
+      const currentArea = await storage.getRestaurantArea(currentTable?.areaId || current.areaId || '');
+      const targetTable = req.body.tableId ? await storage.getRestaurantTable(req.body.tableId) : null;
+      const targetAreas = await Promise.all([targetTable?.areaId,req.body.areaId].filter(Boolean).map(id=>storage.getRestaurantArea(id)));
+      if (currentArea?.areaType !== 'event' && targetAreas.some(area=>area?.areaType==='event')) return res.status(409).json({error:retiredEventPreloadMessage});
       const tableReservation = await storage.updateTableReservation(req.params.id, req.body);
       if (!tableReservation) return res.status(404).json({ error: "Reservation not found" });
       res.json(tableReservation);

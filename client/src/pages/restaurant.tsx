@@ -1,3 +1,5 @@
+import {RestaurantLegacyEventPreload} from '@/components/restaurant-legacy-event-preload';
+import {restaurantEventTableAction} from '@shared/restaurant-event-legacy';
 import { isSelectableGuest } from "@shared/guest-selection";
 import {RestaurantEvents} from '@/components/restaurant-events';
 import { IncludedServicesButton } from "@/components/included-services";
@@ -806,14 +808,6 @@ export default function RestaurantPage() {
   // ── EVENTO POR MESA ─────────────────────────────────────────────────────────
   const [isEventConfigOpen, setIsEventConfigOpen] = useState(false);
   const [eventConfigTable, setEventConfigTable] = useState<RestaurantTable | null>(null);
-  const [evtClientName, setEvtClientName] = useState("");
-  const [evtClientPhone, setEvtClientPhone] = useState("");
-  const [evtClientEmail, setEvtClientEmail] = useState("");
-  const [evtSeats, setEvtSeats] = useState(2);
-  const [evtNotes, setEvtNotes] = useState("");
-  const [evtAdvanceAmount, setEvtAdvanceAmount] = useState("");
-  const [evtAdvanceMethod, setEvtAdvanceMethod] = useState("efectivo");
-  const [evtAdvanceDate, setEvtAdvanceDate] = useState(() => getArgentinaToday());
   const [showItemNotes, setShowItemNotes] = useState(false);
   const [reservationViewMode, setReservationViewMode] = useState<"day" | "all" | "past">("day");
   const [reservationDateFilter, setReservationDateFilter] = useState(
@@ -1350,16 +1344,6 @@ export default function RestaurantPage() {
     },
   });
 
-  const updateTableEventMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Record<string, unknown> }) => {
-      const res = await apiRequest("PATCH", `/api/restaurant/tables/${id}`, data);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/restaurant/tables"] });
-    },
-  });
-
   const createEventualWaiterMutation = useMutation({
     mutationFn: async (fullName: string) => {
       const res = await apiRequest("POST", "/api/restaurant/eventual-waiters", { fullName });
@@ -1377,7 +1361,7 @@ export default function RestaurantPage() {
   });
 
   const createOrderMutation = useMutation({
-    mutationFn: async (data: { tableId?: string; areaId?: string; covers: number; waiterName: string; orderLabel?: string }) => {
+    mutationFn: async (data: { tableId?: string; areaId?: string; covers: number; waiterName: string; orderLabel?: string; legacyReservationId?: string }) => {
       const res = await fetch("/api/restaurant/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2083,14 +2067,6 @@ export default function RestaurantPage() {
 
   const openEventConfig = (table: RestaurantTable) => {
     setEventConfigTable(table);
-    setEvtClientName(table.eventClientName || "");
-    setEvtClientPhone(table.eventClientPhone || "");
-    setEvtClientEmail((table as any).eventClientEmail || "");
-    setEvtSeats(table.eventSeats || table.capacity);
-    setEvtNotes(table.eventNotes || "");
-    setEvtAdvanceAmount((table as any).eventAdvanceAmount || "");
-    setEvtAdvanceMethod((table as any).eventAdvanceMethod || "efectivo");
-    setEvtAdvanceDate((table as any).eventAdvanceDate || getArgentinaToday());
     setIsEventConfigOpen(true);
   };
 
@@ -2098,15 +2074,10 @@ export default function RestaurantPage() {
     if (isEditMode) return;
     setSelectedTable(table);
 
-    // ── Evento por Mesa logic ─────────────────────────────────────────────────
     const tableArea = areas.find(a => a.id === table.areaId);
-    if (tableArea?.areaType === "event") {
-      if (table.status === "available" || table.status === "preloaded") {
-        openEventConfig(table);
-        return;
-      }
-      // occupied → fall through to normal POS below
-    }
+    const eventAction = restaurantEventTableAction(table, tableArea?.areaType);
+    if (eventAction === 'legacy') { openEventConfig(table); return; }
+    if (eventAction === 'events') { setActiveTab('restaurant_events'); return; }
 
     if (table.status === "available") {
       setCurrentOrder(null);
@@ -2227,6 +2198,7 @@ export default function RestaurantPage() {
             tableId: reservation.tableId,
             covers: reservation.partySize,
             waiterName: "",
+            legacyReservationId: reservation.id,
           });
         } else if (table.status === "occupied") {
           const tableOrder = orders.find(o => o.tableId === table.id && o.status !== "closed" && o.status !== "cancelled");
@@ -2960,6 +2932,10 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       </div>
                     </CardHeader>
                     <CardContent>
+                      {area.areaType === 'event' && <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900 dark:bg-blue-950/30">
+                        <p>Las reservas nuevas de este salón se gestionan en Evento restaurant. Las precargas y cuentas anteriores se conservan.</p>
+                        <Button size="sm" variant="outline" disabled={isEditMode} onClick={() => setActiveTab('restaurant_events')}>Ir a Evento restaurant</Button>
+                      </div>}
                       <div
                         className="grid gap-1 p-4 bg-muted/30 rounded-lg relative"
                         style={{
@@ -4298,210 +4274,16 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
         </DialogContent>
       </Dialog>
 
-      {/* ── EVENTO POR MESA — Configurar Mesa Dialog ───────────────────────────── */}
-      <Dialog open={isEventConfigOpen} onOpenChange={setIsEventConfigOpen}>
-        <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-violet-600" />
-              Mesa {eventConfigTable?.tableNumber} — Evento
-            </DialogTitle>
-            <DialogDescription>
-              {eventConfigTable?.status === "preloaded"
-                ? "Mesa pre-cargada. Editá los datos o iniciá el servicio."
-                : "Cargá los datos del cliente antes de iniciar el servicio."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-1">
-            <div className="space-y-2">
-              <Label htmlFor="evt-client-name">Nombre del cliente / anfitrión</Label>
-              <Input
-                id="evt-client-name"
-                value={evtClientName}
-                onChange={(e) => setEvtClientName(e.target.value)}
-                placeholder="Ej: Familia García"
-                data-testid="input-evt-client-name"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="evt-client-phone">Teléfono</Label>
-                <Input
-                  id="evt-client-phone"
-                  value={evtClientPhone}
-                  onChange={(e) => setEvtClientPhone(e.target.value)}
-                  placeholder="Ej: 343 4123456"
-                  data-testid="input-evt-client-phone"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="evt-seats">Comensales</Label>
-                <Input
-                  id="evt-seats"
-                  type="number"
-                  min={1}
-                  value={evtSeats}
-                  onChange={(e) => setEvtSeats(parseInt(e.target.value) || 1)}
-                  data-testid="input-evt-seats"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="evt-client-email">Email</Label>
-              <Input
-                id="evt-client-email"
-                type="email"
-                value={evtClientEmail}
-                onChange={(e) => setEvtClientEmail(e.target.value)}
-                placeholder="Ej: cliente@email.com"
-                data-testid="input-evt-client-email"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="evt-notes">Notas internas</Label>
-              <Textarea
-                id="evt-notes"
-                value={evtNotes}
-                onChange={(e) => setEvtNotes(e.target.value)}
-                placeholder="Ej: menú especial, alergias, decoración..."
-                rows={2}
-                data-testid="input-evt-notes"
-              />
-            </div>
-
-            {/* Seña / Anticipo */}
-            <div className="rounded-md border border-dashed p-3 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Seña / Anticipo (opcional)</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="evt-adv-amount" className="text-sm">Monto</Label>
-                  <Input
-                    id="evt-adv-amount"
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    value={evtAdvanceAmount}
-                    onChange={(e) => setEvtAdvanceAmount(e.target.value)}
-                    data-testid="input-evt-advance-amount"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="evt-adv-method" className="text-sm">Forma de pago</Label>
-                  <Select value={evtAdvanceMethod} onValueChange={setEvtAdvanceMethod}>
-                    <SelectTrigger id="evt-adv-method" data-testid="select-evt-advance-method">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="efectivo">Efectivo</SelectItem>
-                      <SelectItem value="transferencia">Transferencia</SelectItem>
-                      <SelectItem value="tarjeta_debito">Tarjeta Débito</SelectItem>
-                      <SelectItem value="tarjeta_credito">Tarjeta Crédito</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="evt-adv-date" className="text-sm">Fecha de la seña</Label>
-                <Input
-                  id="evt-adv-date"
-                  type="date"
-                  value={evtAdvanceDate}
-                  onChange={(e) => setEvtAdvanceDate(e.target.value)}
-                  data-testid="input-evt-advance-date"
-                />
-              </div>
-            </div>
-
-            {eventConfigTable?.status === "preloaded" && (
-              <div className="rounded-md bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800 px-3 py-2 flex items-center gap-2 text-sm text-violet-700 dark:text-violet-300">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                Mesa pre-cargada — listo para iniciar servicio cuando llegue el cliente.
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setIsEventConfigOpen(false)}
-              className="sm:mr-auto"
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={updateTableEventMutation.isPending}
-              onClick={() => {
-                if (!eventConfigTable) return;
-                updateTableEventMutation.mutate({
-                  id: eventConfigTable.id,
-                  data: {
-                    status: "preloaded",
-                    eventClientName: evtClientName.trim() || null,
-                    eventClientPhone: evtClientPhone.trim() || null,
-                    eventClientEmail: evtClientEmail.trim() || null,
-                    eventSeats: evtSeats,
-                    eventNotes: evtNotes.trim() || null,
-                    eventAdvanceAmount: evtAdvanceAmount ? parseFloat(evtAdvanceAmount).toFixed(2) : null,
-                    eventAdvanceMethod: evtAdvanceAmount ? evtAdvanceMethod : null,
-                    eventAdvanceDate: evtAdvanceAmount ? evtAdvanceDate : null,
-                  },
-                }, {
-                  onSuccess: () => {
-                    toast({ title: "Mesa pre-cargada", description: `Mesa ${eventConfigTable.tableNumber} lista para el evento.` });
-                    setIsEventConfigOpen(false);
-                  },
-                });
-              }}
-              data-testid="button-evt-preload"
-            >
-              {updateTableEventMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-2" />}
-              Guardar Pre-carga
-            </Button>
-            <Button
-              disabled={createOrderMutation.isPending}
-              onClick={() => {
-                if (!eventConfigTable) return;
-                const table = eventConfigTable;
-                const label = evtClientName.trim() || `Mesa ${table.tableNumber}`;
-                const covers = evtSeats || table.capacity;
-
-                // 1. Close this dialog immediately so the POS dialog can open on top
-                setIsEventConfigOpen(false);
-                setSelectedTable(table);
-
-                // 2. Persist event data (fire-and-forget — no chaining)
-                updateTableEventMutation.mutate({
-                  id: table.id,
-                  data: {
-                    eventClientName: evtClientName.trim() || null,
-                    eventClientPhone: evtClientPhone.trim() || null,
-                    eventClientEmail: evtClientEmail.trim() || null,
-                    eventSeats: covers,
-                    eventNotes: evtNotes.trim() || null,
-                    eventAdvanceAmount: evtAdvanceAmount ? parseFloat(evtAdvanceAmount).toFixed(2) : null,
-                    eventAdvanceMethod: evtAdvanceAmount ? evtAdvanceMethod : null,
-                    eventAdvanceDate: evtAdvanceAmount ? evtAdvanceDate : null,
-                  },
-                });
-
-                // 3. Create order — global onSuccess opens the POS dialog
-                createOrderMutation.mutate({
-                  tableId: table.id,
-                  covers,
-                  waiterName: "",
-                  orderLabel: label,
-                });
-              }}
-              data-testid="button-evt-start-service"
-            >
-              {createOrderMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UtensilsCrossed className="h-4 w-4 mr-2" />}
-              Iniciar Servicio
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <RestaurantLegacyEventPreload table={eventConfigTable} open={isEventConfigOpen}
+        onClose={() => setIsEventConfigOpen(false)} starting={createOrderMutation.isPending}
+        onOpenEvents={() => { setIsEventConfigOpen(false); setActiveTab('restaurant_events'); }}
+        onStart={() => {
+          const table = eventConfigTable;
+          if (!table || table.status !== 'preloaded') return;
+          setIsEventConfigOpen(false); setSelectedTable(table);
+          createOrderMutation.mutate({ tableId: table.id, covers: table.eventSeats || table.capacity,
+            waiterName: '', orderLabel: table.eventClientName || `Mesa ${table.tableNumber}` });
+        }} />
 
       {/* New Order Dialog (table-based) */}
       <Dialog open={isNewOrderDialogOpen} onOpenChange={(open) => { if (open) setIsNewOrderDialogOpen(true); }}>
@@ -7460,6 +7242,11 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
           <DialogHeader className="shrink-0">
             <DialogTitle>Nueva Reserva</DialogTitle>
           </DialogHeader>
+          {!editingReservation && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-blue-50 p-3 text-sm dark:bg-blue-950/30">
+            <p>Para cenas y eventos con menú, usá Evento restaurant.</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => { setIsReservationDialogOpen(false); setActiveTab('restaurant_events'); }}>Ir a Evento restaurant</Button>
+          </div>}
+
           <Form {...reservationForm}>
             <form id="reservation-form" onSubmit={reservationForm.handleSubmit((data) => {
               const payload = { ...data, tableId: data.tableId || null, status: "confirmed" };
@@ -7583,7 +7370,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       <FormControl><SelectTrigger data-testid="select-reservation-area"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
                         <SelectItem value="__none__">Sin especificar</SelectItem>
-                        {areas.filter(a => a.isActive === "true").map(a => (
+                        {areas.filter(a => a.isActive === "true" && (a.areaType !== "event" || !!editingReservation)).map(a => (
                           <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                         ))}
                       </SelectContent>
@@ -7650,7 +7437,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                       : []
                   );
                   const activeTables = tables.filter(t =>
-                    t.isActive === "true" && (!watchedAreaId || t.areaId === watchedAreaId)
+                    t.isActive === "true" && (!watchedAreaId || t.areaId === watchedAreaId) && (!!editingReservation || areas.find(a => a.id === t.areaId)?.areaType !== "event")
                   );
                   return (
                     <FormItem>
@@ -7984,7 +7771,7 @@ ${esc(closeComments.trim())}</div><hr>` : ""}
                         {
                           onSuccess: () => {
                             if (!_hasOrder) {
-                              createOrderMutation.mutate({ tableId: _tableId, covers: _res.partySize, waiterName: "" });
+                              createOrderMutation.mutate({ tableId: _tableId, covers: _res.partySize, waiterName: "", legacyReservationId: _res.id });
                             }
                           },
                         }
