@@ -5,6 +5,7 @@ import { guardGroupGuestReplacement, lockGroupAssignmentFinancialWriter } from '
 import {hospitalityNotificationVisibility,applyHospitalityNotificationStatus,requestHospitalityNotificationRefresh,closeHospitalityBellItem,lockHospitalityNotifications} from './hospitalityNotifications';
 import { normalizeToSpanishPaymentMethod } from "./payment-method";
 import { GROUP_CREDIT_ADVANCE_PERMISSION, parseGroupCreditAdvanceConfirmation, supportsGroupCreditAdvance, groupCreditAdvanceSummary } from "@shared/groupCreditAdvance";
+import {roomAssignments, assignmentOn, historyAfterMove} from "@shared/roomAssignments";
 import {getGroupPaymentRequest} from './groupPaymentRequest';
 import {lockRoomInvoiceCollection,finishRoomInvoiceCollection} from './billing/reservationInvoiceCollection';
 import { lockPostCheckoutInvoicePayment } from "./billing/postCheckoutInvoicePayment";
@@ -1153,6 +1154,7 @@ export class DatabaseStorage implements IStorage {
       const insertData = { ...(reservation as any) };
       delete insertData.housekeepingPreparation;
       delete insertData.housekeepingBedPreparation;
+      delete insertData.roomHistory;
       const contextGroupId = insertData._inventoryContextGroupId as string | undefined;
       const overrideSoft = insertData._inventoryOverrideTentativeGroupWarning === true;
       delete insertData._inventoryContextGroupId;
@@ -1224,20 +1226,20 @@ export class DatabaseStorage implements IStorage {
     override?: boolean;
   }): Promise<GroupInventoryConflict | null> {
     const [roomRows, groupRows, blockRows, linkRows, reservationRows] = await Promise.all([
-      db.select({ id: rooms.id, roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId)),
+      db.select({ id: rooms.id, roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms),
       db.select({ id: groups.id, name: groups.name, status: groups.status, checkInDate: groups.checkInDate, checkOutDate: groups.checkOutDate }).from(groups),
       db.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.roomTypeId, input.roomTypeId)),
       db.select().from(groupReservationLinks),
       db.select({
-        id: reservations.id, roomId: reservations.roomId, roomTypeId: reservations.roomTypeId,
+        id: reservations.id, roomId: reservations.roomId, roomTypeId: reservations.roomTypeId, roomHistory:reservations.roomHistory,
         checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate,
         status: reservations.status, checkedOutAt:reservations.checkedOutAt,
       }).from(reservations).where(and(
-        eq(reservations.roomTypeId, input.roomTypeId),
         lt(reservations.checkInDate, input.checkOutDate),
         gt(reservations.checkOutDate, input.checkInDate),
       )),
     ]);
+    const physicalTypes=new Map(roomRows.map(room=>[room.id,room.roomTypeId]));
     const linkByReservation = new Map(linkRows.map(link => [link.reservationId, link.groupId]));
     // Departures before the requested night still fulfill their group's block.
     // Fetch only assignments belonging to overlapping active groups, not the
@@ -1256,10 +1258,10 @@ export class DatabaseStorage implements IStorage {
       roomTypeId: input.roomTypeId,
       checkIn: input.checkInDate,
       checkOut: input.checkOutDate,
-      operationalInventory: roomRows.filter(room => isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
+      operationalInventory: roomRows.filter(room => room.roomTypeId===input.roomTypeId && isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
       groups: groupRows,
       blocks: blockRows,
-      reservations: inventoryReservations.map(row => ({ ...row, groupId: linkByReservation.get(row.id) ?? null })),
+      reservations: inventoryReservations.flatMap(row => roomAssignments(row).map(span=>({ ...row, roomId:span.roomId,physicalRoomTypeId:physicalTypes.get(span.roomId)||span.roomTypeId,checkInDate:span.from,checkOutDate:span.to,groupId:linkByReservation.get(row.id)??null }))),
       excludeReservationId: input.excludeReservationId,
       contextGroupId: input.contextGroupId,
       hasSpecificRoom: input.hasSpecificRoom,
@@ -1280,7 +1282,7 @@ export class DatabaseStorage implements IStorage {
     const allLinks = await db.select().from(groupReservationLinks);
     const relevantReservationIds = new Set(allLinks.map(link => link.reservationId));
     const linkedReservations = relevantReservationIds.size
-      ? await db.select({ id: reservations.id, roomId:reservations.roomId, roomTypeId: reservations.roomTypeId, checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate, status: reservations.status, checkedOutAt:reservations.checkedOutAt }).from(reservations).where(inArray(reservations.id, [...relevantReservationIds]))
+      ? await db.select({ id: reservations.id, roomId:reservations.roomId, roomHistory:reservations.roomHistory, roomTypeId: reservations.roomTypeId, checkInDate: reservations.checkInDate, checkOutDate: reservations.checkOutDate, status: reservations.status, checkedOutAt:reservations.checkedOutAt }).from(reservations).where(inArray(reservations.id, [...relevantReservationIds]))
       : [];
     const groupRows = allGroups.map(row => row.id === groupId ? {
       ...row,
@@ -1302,17 +1304,17 @@ export class DatabaseStorage implements IStorage {
 
   private async evaluateGroupInventoryForType(input: any): Promise<GroupInventoryConflict | null> {
     const [inventoryRooms, [roomType]] = await Promise.all([
-      db.select({ roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms).where(eq(rooms.roomTypeId, input.roomTypeId)),
+      db.select({ id:rooms.id, roomTypeId: rooms.roomTypeId, roomNumber: rooms.roomNumber, isActive: rooms.isActive, isVirtual: rooms.isVirtual, status: rooms.status }).from(rooms),
       db.select({ id: roomTypes.id, name: roomTypes.name }).from(roomTypes).where(eq(roomTypes.id, input.roomTypeId)).limit(1),
     ]);
     const conflict = evaluateGroupInventory({
       roomTypeId: input.roomTypeId,
       checkIn: input.groupRows.find((group: any) => group.id === input.groupId).checkInDate,
       checkOut: input.groupRows.find((group: any) => group.id === input.groupId).checkOutDate,
-      operationalInventory: inventoryRooms.filter((room: any) => isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
+      operationalInventory: inventoryRooms.filter((room: any) => room.roomTypeId===input.roomTypeId && isOperationalInventoryRoom(room) && room.status !== "maintenance" && room.status !== "oos").length,
       groups: input.groupRows,
       blocks: input.effectiveBlocks,
-      reservations: input.linkedReservations.map((row: any) => ({ ...row, groupId: input.linksByReservation.get(row.id) })),
+      reservations: input.linkedReservations.flatMap((row:any)=>roomAssignments(row).map(span=>({...row,roomId:span.roomId,physicalRoomTypeId:inventoryRooms.find(room=>room.id===span.roomId)?.roomTypeId||span.roomTypeId,checkInDate:span.from,checkOutDate:span.to,groupId:input.linksByReservation.get(row.id)}))),
       contextGroupId: input.groupId,
       candidateUnits: 0,
     });
@@ -1336,7 +1338,18 @@ export class DatabaseStorage implements IStorage {
         if (released.rows.length) throw Object.assign(new Error('Esta asignación ya fue liberada y tiene un cupo de reemplazo en el grupo. Asigná el pasajero en ese cupo; el historial cancelado se conserva.'), { statusCode: 409 });
       }
       await guardGroupGuestReplacement(existing, reservation.guestId);
+      delete (reservation as any).roomHistory;
       await guardPricingUpdate(existing, reservation);
+      if(existing.roomHistory?.length && reservation.checkInDate && reservation.checkInDate!==existing.checkInDate)
+        throw Object.assign(new Error("La estadía tiene cambios de habitación. No se puede alterar su ingreso histórico."),{statusCode:409});
+      if(existing.roomHistory?.length && reservation.checkOutDate && reservation.checkOutDate<=existing.roomHistory.at(-1)!.to)
+        throw Object.assign(new Error("La salida no puede borrar un tramo de habitación ya realizado."),{statusCode:409});
+      if(reservation.roomId && reservation.roomId!==existing.roomId){
+        if(existing.status==='checked_in' && existing.checkInDate<=getArgentinaToday() && existing.checkOutDate>getArgentinaToday()) {
+          const origin=await this.getRoom(existing.roomId);
+          reservation={...reservation,roomHistory:historyAfterMove(existing,getArgentinaToday(),origin?.roomTypeId||existing.roomTypeId)};
+        } else if(existing.roomHistory?.length) throw Object.assign(new Error("Usá Reubicar para conservar el historial de habitaciones."),{statusCode:409});
+      }
       if (reservation.guestId && reservation.guestId !== existing.guestId) {
         reservation = { ...reservation, stayDetails: null };
         await db.delete(reservationCompanions).where(and(eq(reservationCompanions.reservationId, id), isNotNull(reservationCompanions.profileMemberId)));
@@ -1364,7 +1377,8 @@ export class DatabaseStorage implements IStorage {
       const inventoryRelevant = ["roomId", "roomTypeId", "checkInDate", "checkOutDate", "status"]
         .some(key => Object.prototype.hasOwnProperty.call(safeReservation, key));
       if (inventoryRelevant && finalRoomId && finalCheckIn && finalCheckOut) {
-        const physicalConflict = await this.checkOverbooking(finalRoomId, finalCheckIn, finalCheckOut, id);
+        const physicalFrom = (reservation as any).roomHistory?.at(-1)?.to || existing.roomHistory?.at(-1)?.to || finalCheckIn;
+        const physicalConflict = await this.checkOverbooking(finalRoomId, physicalFrom, finalCheckOut, id);
         if (physicalConflict) {
           throw Object.assign(new Error("La habitación ya tiene una reserva en esas fechas."), {
             statusCode: 409,
@@ -2107,20 +2121,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async checkOverbooking(roomId: string, checkInDate: string, checkOutDate: string, excludeReservationId?: string): Promise<boolean> {
-    const activeStatuses = ["tentative", "pending", "reserved", "confirmed", "web_checkin", "checked_in"] as const;
-    let conditions = and(
-      eq(reservations.roomId, roomId),
-      inArray(reservations.status, activeStatuses as any),
-      sql`${reservations.checkInDate} < ${checkOutDate}`,
-      sql`${reservations.checkOutDate} > ${checkInDate}`
-    );
-
-    if (excludeReservationId) {
-      conditions = and(conditions, ne(reservations.id, excludeReservationId));
-    }
-
-    const conflicts = await db.select({ cnt: count() }).from(reservations).where(conditions);
-    return (conflicts[0]?.cnt ?? 0) > 0;
+    const rows = await db.select().from(reservations).where(and(
+      inArray(reservations.status,["tentative","pending","reserved","confirmed","web_checkin","checked_in"] as any),
+      lt(reservations.checkInDate,checkOutDate),gt(reservations.checkOutDate,checkInDate),
+      or(eq(reservations.roomId,roomId),sql`${reservations.roomHistory} @> ${JSON.stringify([{roomId}])}::jsonb`),
+      ...(excludeReservationId?[ne(reservations.id,excludeReservationId)]:[]),
+    ));
+    return rows.some(stay=>roomAssignments(stay).some(span=>span.roomId===roomId&&span.from<checkOutDate&&span.to>checkInDate));
   }
 
   async getDashboardStats() {
@@ -2330,6 +2337,7 @@ export class DatabaseStorage implements IStorage {
           id: res.id,
           guestName: guest ? `${guest.lastName} ${guest.firstName}`.trim() : "(Sin huésped)",
           housekeepingPreparation: res.housekeepingPreparation,
+          hasRoomHistory: !!res.roomHistory?.length,
           checkIn: res.checkInDate,
           checkOut: res.checkOutDate,
           status: res.status as ReservationStatus,
@@ -2372,7 +2380,7 @@ export class DatabaseStorage implements IStorage {
       for (const day of days) {
         // Only block cells when there is a date-range maintenance block (created from Maintenance module)
         // Rooms with status "maintenance" from Housekeeping show the wrench icon but are NOT blocked
-        const matchingReservations = allReservations.filter(r => r.roomId === room.id && day >= r.checkInDate && day < r.checkOutDate);
+        const matchingReservations = allReservations.filter(r => assignmentOn(r,day)?.roomId === room.id);
         const reservation = matchingReservations.find(r => !["checked_out", "no_show"].includes(r.status)) || matchingReservations[0];
         const isBlockedForDay = roomBlocks.some(b => day >= b.blockFrom && day <= b.blockTo);
         // A later maintenance block must not hide a reservation already stored.

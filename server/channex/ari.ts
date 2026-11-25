@@ -85,7 +85,7 @@ export async function buildAriValues(c: Pick<PoolClient, 'query'>, connection: a
    ), unassigned AS (
     SELECT b.room_type_id,b.day,sum(GREATEST(0,b.quantity-(SELECT count(DISTINCT r.id) FROM reservations r
       JOIN group_reservation_links l ON l.reservation_id=r.id JOIN rooms rm ON rm.id=r.room_id
-      WHERE l.group_id=b.id AND rm.room_type_id=b.room_type_id AND NOT COALESCE(rm.is_virtual,false) AND rm.room_number<>'REUB'
+      WHERE l.group_id=b.id AND r.room_type_id=b.room_type_id AND NOT COALESCE(rm.is_virtual,false) AND rm.room_number<>'REUB'
       AND r.status IN ('tentative','pending','reserved','confirmed','web_checkin','checked_in')
       AND r.check_in_date<=b.day AND r.check_out_date>b.day)))::int AS quantity
     FROM blocked_groups b GROUP BY b.room_type_id,b.day

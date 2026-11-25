@@ -1,10 +1,11 @@
+import {assignmentOn, type RoomAssignment} from "@shared/roomAssignments";
 import {sql} from 'drizzle-orm';
 import {db} from '../db';
 import {isOperationalInventoryRoom,ACTIVE_ROOM_RESERVATION_STATUSES} from '@shared/room-availability';
 import {nightlyReportPrices} from '@shared/nightlyReportPrices';
 
 type Room={id:string;roomNumber:string;roomTypeId:string;isActive:boolean;isVirtual:boolean};
-type Stay={id:string;roomId:string|null;roomTypeId:string;status:string;checkInDate:string;checkOutDate:string;totalRoomAmount:string|null;pricingScheme:string;nightlyPricing:any;specialRateReason:string|null;source:string;numberOfGuests:number};
+type Stay={roomHistory?:RoomAssignment[]|null;id:string;roomId:string|null;roomTypeId:string;status:string;checkInDate:string;checkOutDate:string;totalRoomAmount:string|null;pricingScheme:string;nightlyPricing:any;specialRateReason:string|null;source:string;numberOfGuests:number};
 type Block={roomId:string;blockFrom:string;blockTo:string};
 export function nextDate(date:string){return new Date(Date.parse(date+'T00:00:00Z')+86400000).toISOString().slice(0,10);}
 export function dateRange(from:string,to:string){
@@ -22,16 +23,17 @@ export function calculateLodging(from:string,to:string,asOf:string,rooms:Room[],
  const nights:LodgingNight[]=[];const durations=new Map<string,number>();
  for(const stay of stays){
   if(!['checked_in','checked_out',...ACTIVE_ROOM_RESERVATION_STATUSES].includes(stay.status as any))continue;
-  if(!stay.roomId){warnings.unassignedReservations++;continue;}if(!roomMap.has(stay.roomId))continue;
+  if(!stay.roomId){warnings.unassignedReservations++;continue;}
   let stayDates:string[];try{stayDates=dateRange(stay.checkInDate,stay.checkOutDate).slice(0,-1);if(!stayDates.length)throw Error();}catch{warnings.invalidStays++;continue;}
   durations.set(stay.id,stayDates.length);
   const prices=nightlyReportPrices(stay,stayDates);
   for(const date of stayDates){
    if(date<from||date>to)continue;
+   const assignment=assignmentOn(stay as any,date);if(!assignment||!roomMap.has(assignment.roomId))continue;
    const actual=date<=asOf&&['checked_in','checked_out'].includes(stay.status);
    if(!actual&&(date<asOf||!ACTIVE_ROOM_RESERVATION_STATUSES.includes(stay.status as any)))continue;
    const price=prices.get(date);if(!price)warnings.missingRateNights++;else if(price.estimated)warnings.estimatedNights++;
-   nights.push({reservationId:stay.id,roomId:stay.roomId,roomTypeId:roomMap.get(stay.roomId)!.roomTypeId,date,phase:actual?'actual':'forecast',source:stay.source||'directo',guests:Number(stay.numberOfGuests)||0,amount:price?.amount??null,estimated:price?.estimated??false});
+   nights.push({reservationId:stay.id,roomId:assignment.roomId,roomTypeId:roomMap.get(assignment.roomId)!.roomTypeId,date,phase:actual?'actual':'forecast',source:stay.source||'directo',guests:Number(stay.numberOfGuests)||0,amount:price?.amount??null,estimated:price?.estimated??false});
   }
  }
  const daily=dates.map(date=>{
@@ -57,7 +59,7 @@ export async function loadLodging(from:string,to:string):Promise<ReturnType<type
  return db.transaction(async tx=>{
  const [roomRows,stays,blocks]=await Promise.all([
   tx.execute(sql`SELECT id,room_number AS "roomNumber",room_type_id AS "roomTypeId",is_active AS "isActive",is_virtual AS "isVirtual" FROM rooms`),
-  tx.execute(sql`SELECT id,room_id AS "roomId",room_type_id AS "roomTypeId",status,check_in_date::text AS "checkInDate",check_out_date::text AS "checkOutDate",total_room_amount AS "totalRoomAmount",pricing_scheme AS "pricingScheme",nightly_pricing AS "nightlyPricing",special_rate_reason AS "specialRateReason",source,number_of_guests AS "numberOfGuests" FROM reservations WHERE check_in_date<=${to} AND check_out_date>${from}`),
+  tx.execute(sql`SELECT id,room_history AS "roomHistory",room_id AS "roomId",room_type_id AS "roomTypeId",status,check_in_date::text AS "checkInDate",check_out_date::text AS "checkOutDate",total_room_amount AS "totalRoomAmount",pricing_scheme AS "pricingScheme",nightly_pricing AS "nightlyPricing",special_rate_reason AS "specialRateReason",source,number_of_guests AS "numberOfGuests" FROM reservations WHERE check_in_date<=${to} AND check_out_date>${from}`),
   tx.execute(sql`SELECT room_id AS "roomId",block_from::text AS "blockFrom",block_to::text AS "blockTo" FROM maintenance_blocks WHERE block_from<=${to} AND block_to>${from}`),
  ]);
  const asOf=new Date().toLocaleDateString('en-CA',{timeZone:'America/Argentina/Buenos_Aires'});

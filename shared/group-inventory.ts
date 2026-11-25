@@ -50,6 +50,8 @@ export type InventoryBlock = {
 };
 
 export type InventoryReservation = {
+  /** Physical capacity may differ from the contracted category after a room-only upgrade. */
+  physicalRoomTypeId?: string;
   id: string;
   roomId?: string;
   roomTypeId: string;
@@ -156,7 +158,7 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     .map(reservation=>({reservation,releasedOn:departureDay(reservation)}));
   const active = input.reservations.filter(reservation =>
     reservation.id !== input.excludeReservationId &&
-    reservation.roomTypeId === input.roomTypeId &&
+    (reservation.roomTypeId === input.roomTypeId || reservation.physicalRoomTypeId === input.roomTypeId) &&
     !IGNORED_RESERVATION_STATUSES.has(reservation.status) &&
     overlaps(input.checkIn, input.checkOut, reservation.checkInDate, reservation.checkOutDate),
   );
@@ -184,7 +186,8 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     const candidateInBlock = !!input.contextGroupId && blocksByGroup.has(input.contextGroupId);
     const normalDemand = active.filter(reservation => {
       if (!(reservation.checkInDate <= date && date < reservation.checkOutDate)) return false;
-      return !reservation.groupId || !blocksByGroup.has(reservation.groupId);
+      if ((reservation.physicalRoomTypeId||reservation.roomTypeId)!==input.roomTypeId) return false;
+      return reservation.roomTypeId!==input.roomTypeId || !reservation.groupId || !blocksByGroup.has(reservation.groupId);
     }).length + (candidateInBlock ? 0 : candidateUnits);
 
     let hardDemand = normalDemand;
@@ -196,12 +199,14 @@ export function evaluateGroupInventory(input: GroupInventoryInput): GroupInvento
     }> = [];
     for (const [groupId, { group, quantity, intervals }] of blocksByGroup) {
       const linkedCount = active.filter(reservation =>
-        reservation.groupId === groupId &&
+        reservation.groupId === groupId && reservation.roomTypeId===input.roomTypeId &&
         reservation.checkInDate <= date && date < reservation.checkOutDate,
       ).length;
       const isCandidateInBlock = input.contextGroupId === groupId;
-      const effectiveLinkedCount = linkedCount + (isCandidateInBlock ? candidateUnits : 0);
-      const remainingCommitment=Math.max(0,quantity-releasedGroupUnits(completedStays,groupId,date,intervals,active));
+      const movedElsewhere = active.filter(r=>r.groupId===groupId && r.roomTypeId===input.roomTypeId &&
+        r.physicalRoomTypeId && r.physicalRoomTypeId!==input.roomTypeId && r.checkInDate<=date && date<r.checkOutDate).length;
+      const effectiveLinkedCount = linkedCount - movedElsewhere + (isCandidateInBlock ? candidateUnits : 0);
+      const remainingCommitment=Math.max(0,quantity-movedElsewhere-releasedGroupUnits(completedStays,groupId,date,intervals,active));
       if (HARD_GROUP_STATUSES.has(group.status)) {
         hardDemand += Math.max(remainingCommitment, effectiveLinkedCount);
         const remaining = Math.max(remainingCommitment - effectiveLinkedCount, 0);
