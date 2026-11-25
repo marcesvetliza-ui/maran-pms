@@ -1,3 +1,5 @@
+import {restaurantEventsSchemaReady} from './restaurantEventsSchema';
+import {registerRestaurantEventsRoutes} from './restaurantEventsRoutes';
 import { purchaseInvoiceMetadataInput, correctPurchaseInvoiceMetadata } from './purchaseInvoiceMetadata';
 import { normalizePurchaseCreditNotePayment } from '@shared/purchase-credit-note-payment';
 import {productionEnabled} from './channex/connectionPolicy';
@@ -321,6 +323,7 @@ export async function registerRoutes(
       // indicador debe verse también en la pantalla de login.
       appEnv: getAppEnv(),
       isPilot: isPilotEnv(),
+      ...(isPilotEnv()?{restaurantEventsReady:restaurantEventsSchemaReady()}:{}),
       version: "1.0.0",
       revision: BUILD_REVISION,
       financialReady,
@@ -3898,6 +3901,7 @@ export async function registerRoutes(
   registerReservationWaitlistRoutes(app);
   registerGroupsRoutes(app);
   registerHousekeepingRoutes(app);
+  registerRestaurantEventsRoutes(app);
   registerRestaurantRoutes(app);
   registerInventoryRoutes(app);
   registerBreakfastRoutes(app);

@@ -80,7 +80,7 @@ async function ingresosAlojamiento(desde: string, hasta: string): Promise<number
 
 async function ingresosRestaurant(desde: string, hasta: string): Promise<number> {
   const r = await db.execute(sql`
-    SELECT COALESCE(SUM(total::numeric), 0) AS total
+    SELECT COALESCE(SUM(total::numeric + COALESCE((SELECT s.advance_applied FROM restaurant_event_services s WHERE s.order_id=restaurant_orders.id),0)), 0) AS total
     FROM restaurant_orders
     WHERE status = 'closed'
       AND DATE(closed_at) BETWEEN ${desde} AND ${hasta}
@@ -407,7 +407,7 @@ export function registerReportsRoutes(app: Express) {
         SELECT
           day_series::date::text AS fecha,
           0::numeric AS alojamiento,
-          COALESCE((SELECT SUM(ro.total::numeric) FROM restaurant_orders ro WHERE ro.status='closed' AND DATE(ro.closed_at) = day_series::date), 0) AS restaurant,
+          COALESCE((SELECT SUM(ro.total::numeric + COALESCE((SELECT s.advance_applied FROM restaurant_event_services s WHERE s.order_id=ro.id),0)) FROM restaurant_orders ro WHERE ro.status='closed' AND DATE(ro.closed_at) = day_series::date), 0) AS restaurant,
           COALESCE((SELECT SUM(sp.amount::numeric) FROM spa_payments sp WHERE sp.status = 'active' AND DATE(sp.created_at) = day_series::date), 0) AS spa,
           COALESCE((SELECT SUM(ep.amount::numeric) FROM event_payments ep WHERE DATE(ep.created_at) = day_series::date), 0) AS eventos,
           COALESCE((SELECT SUM(c.amount::numeric) FROM charges c WHERE c.category IN ('otros','minibar') AND (c.status IS NULL OR c.status = 'active') AND c.date = day_series::date), 0) AS otros
