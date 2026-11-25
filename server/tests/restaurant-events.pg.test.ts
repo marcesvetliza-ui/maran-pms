@@ -53,7 +53,9 @@ let pool: any,
   raw: any,
   warehouse: any,
   table1: any,
-  table2: any;
+  table2: any,
+  ordinaryArea: any,
+  ordinaryTable: any;
 const actor = "restaurant-event-test-" + randomUUID(),
   events: string[] = [],
   reservations: string[] = [],
@@ -207,6 +209,8 @@ describe.skipIf(!url)(
         `INSERT INTO pos_configs(nombre,numero,area,tipo,activo) VALUES($1,88652,'restaurant','fiscal',true)`,
         [actor],
       );
+      ordinaryArea = await storage.createRestaurantArea({name: actor + '-ordinary', areaType: 'indoor', capacity: 20, isActive: 'true'});
+      ordinaryTable = await storage.createRestaurantTable({tableNumber: 'O1', areaId: ordinaryArea.id, capacity: 4, status: 'available'});
       const app = express();
       app.use(express.json());
       app.use((req: any, _res, next) => {
@@ -309,6 +313,8 @@ describe.skipIf(!url)(
         area.id,
       ]);
       await pool.query("DELETE FROM restaurant_areas WHERE id=$1", [area.id]);
+      await pool.query("DELETE FROM restaurant_tables WHERE area_id=$1", [ordinaryArea.id]);
+      await pool.query("DELETE FROM restaurant_areas WHERE id=$1", [ordinaryArea.id]);
       await pool.query(
         "DELETE FROM recipe_ingredients WHERE recipe_id IN(SELECT id FROM recipes WHERE menu_item_id=$1)",
         [product.id],
@@ -801,7 +807,7 @@ describe.skipIf(!url)(
       expect(close.body.total).toBe("350.05");
       expect(close.body.documentStatus).toBe("pending");
       const ordinary = await request("POST", "/api/restaurant/orders", {
-        tableId: table2.id,
+        tableId: ordinaryTable.id,
         covers: 1,
         waiterName: "",
       });
@@ -874,6 +880,62 @@ describe.skipIf(!url)(
           ])
         ).rows,
       ).toHaveLength(1);
+    });
+
+    it('rejects new legacy precargas, advances and event reservations while keeping the physical tables', async () => {
+      const count = async () => Number((await pool.query('SELECT count(*) FROM restaurant_tables WHERE area_id=$1',[area.id])).rows[0].count);
+      const before=await count();
+      for (const data of [{status:'preloaded'},{eventClientName:'New legacy guest'},{eventAdvanceAmount:'50.00'},{eventAdvanceAmount:'-50.00'}]) {
+        expect((await request('POST','/api/restaurant/tables',{tableNumber:'Rejected',areaId:area.id,capacity:4,...data})).status).toBe(409);
+      }
+      expect(await count()).toBe(before);
+      expect((await request('PATCH','/api/restaurant/tables/'+table2.id,{status:'preloaded',eventClientName:'New guest'})).status).toBe(409);
+      expect((await request('POST','/api/restaurant/orders',{tableId:table2.id,covers:2,waiterName:''})).status).toBe(409);
+      expect((await request('POST','/api/restaurant/orders',{areaId:area.id,orderLabel:'New legacy event',covers:2,waiterName:''})).status).toBe(409);
+      expect((await request('POST','/api/restaurant/table-reservations',{areaId:area.id,guestName:'New guest',guestPhone:'123',partySize:2,reservationDate:today,reservationTime:'21:00'})).status).toBe(409);
+      expect((await request('POST','/api/restaurant/table-reservations',{tableId:table2.id,guestName:'New guest',guestPhone:'123',partySize:2,reservationDate:today,reservationTime:'21:00'})).status).toBe(409);
+      expect((await storage.getRestaurantTable(table2.id)).status).toBe('available');
+      const ordinary=await storage.createTableReservation({areaId:ordinaryArea.id,guestName:'Ordinary booking',guestPhone:'123',partySize:2,reservationDate:today,reservationTime:'20:00',status:'confirmed',createdAt:new Date()});reservations.push(ordinary.id);
+      expect((await request('PATCH','/api/restaurant/table-reservations/'+ordinary.id,{areaId:area.id,tableId:table2.id})).status).toBe(409);
+      expect((await storage.getTableReservation(ordinary.id)).areaId).toBe(ordinaryArea.id);
+    });
+    it('conserves the entire legacy advance and allows physical layout changes without editing the precarga', async () => {
+      await pool.query("UPDATE restaurant_tables SET status='preloaded',event_client_name='Legacy owner',event_client_phone='12345',event_notes='Legacy menu',event_seats=3,event_advance_amount=150,event_advance_method='transferencia',event_advance_date='2026-11-22' WHERE id=$1",[table1.id]);
+      const snapshot=async()=> (await pool.query('SELECT status,event_client_name,event_client_phone,event_notes,event_seats,event_advance_amount,event_advance_method,event_advance_date FROM restaurant_tables WHERE id=$1',[table1.id])).rows[0];
+      const before=await snapshot();
+      expect((await request('PATCH','/api/restaurant/tables/'+table1.id,{eventAdvanceAmount:'200.00'})).status).toBe(409);
+      expect((await request('PATCH','/api/restaurant/tables/'+table1.id,{eventClientName:'Another guest'})).status).toBe(409);
+      expect((await request('PATCH','/api/restaurant/tables/'+table1.id,{status:'available'})).status).toBe(409);
+      expect((await request('DELETE','/api/restaurant/tables/'+table1.id)).status).toBe(409);
+      expect((await request('PATCH','/api/restaurant/tables/'+table1.id,{capacity:6,eventAdvanceAmount:150})).status).toBe(200);
+      expect(await snapshot()).toEqual(before);
+    });
+    it('starts an existing precarga once, uses its saved identity and deducts the advance only at normal closing', async () => {
+      const cashBefore=Number((await pool.query('SELECT count(*) FROM cash_movements')).rows[0].count);
+      const opened=await Promise.all([1,2].map(()=>request('POST','/api/restaurant/orders',{tableId:table1.id,covers:99,waiterName:'',orderLabel:'Untrusted replacement'})));
+      expect(opened.map(r=>r.status).sort()).toEqual([201,409]);
+      const order=opened.find(r=>r.status===201)!.body;extraOrders.push(order.id);
+      expect(order).toMatchObject({covers:3,orderLabel:'Legacy owner',notes:'Legacy menu'});
+      expect(Number((await pool.query('SELECT count(*) FROM cash_movements')).rows[0].count)).toBe(cashBefore);
+      expect((await storage.getRestaurantTable(table1.id)).eventAdvanceAmount).toBe('150.00');
+      await storage.createOrderItem({orderId:order.id,menuItemId:product.id,quantity:1,unitPrice:'200.00',subtotal:'200.00',status:'pending'});
+      await storage.updateRestaurantOrder(order.id,{total:'200.00'});
+      const closed=await request('POST',`/api/restaurant/orders/${order.id}/close`,{paymentMethod:'efectivo',receiptType:'ticket',reservationAdvanceCredit:150});
+      expect(closed.status,JSON.stringify(closed.body)).toBe(200);
+      expect(closed.body.total).toBe('50.00');
+      expect((await pool.query("SELECT amount FROM cash_movements WHERE source_type='restaurant_order' AND source_id=$1",[order.id])).rows.map((r:any)=>r.amount)).toEqual(['50.00']);
+      const table=await storage.getRestaurantTable(table1.id);expect(table.status).toBe('available');expect(table.eventAdvanceAmount).toBeNull();
+      expect((await request('POST','/api/restaurant/orders',{tableId:table1.id,covers:3,waiterName:''})).status).toBe(409);
+    });
+    it('keeps existing dated reservations and all their advances usable without creating a duplicate reservation', async () => {
+      const existing=await storage.createTableReservation({tableId:table2.id,areaId:area.id,guestName:'Existing reservation',guestPhone:'123',partySize:2,reservationDate:today,reservationTime:'23:00',status:'confirmed',createdAt:new Date()});reservations.push(existing.id);
+      await storage.createReservationAdvance({reservationId:existing.id,amount:'75.00',paymentMethod:'transferencia',createdBy:actor});
+      expect((await request('PATCH','/api/restaurant/table-reservations/'+existing.id,{status:'check_in'})).status).toBe(200);
+      const opened=await request('POST','/api/restaurant/orders',{tableId:table2.id,covers:99,waiterName:'',legacyReservationId:existing.id});
+      expect(opened.status,JSON.stringify(opened.body)).toBe(201);extraOrders.push(opened.body.id);
+      expect(opened.body).toMatchObject({covers:2,orderLabel:'Existing reservation'});
+      expect((await pool.query('SELECT amount,applied_to_order_id FROM restaurant_reservation_advances WHERE reservation_id=$1',[existing.id])).rows).toEqual([{amount:'75.00',applied_to_order_id:null}]);
+      await storage.updateRestaurantOrder(opened.body.id,{status:'closed'});
     });
   },
 );
