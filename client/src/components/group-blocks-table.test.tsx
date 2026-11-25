@@ -33,7 +33,7 @@ const stay = (id: string, date: string) => ({
   guest: { firstName: "Fixture", lastName: id },
   room: { roomNumber: id },
 });
-it("shows the missing room on the right date block and lists each actual room", () => {
+it("keeps each block's progress visible and reveals its rooms only when expanded", async () => {
   const g = {
     id: "fixture-group",
     checkInDate: "2026-01-01",
@@ -63,8 +63,15 @@ it("shows the missing room on the right date block and lists each actual room", 
     within(screen.getByTestId("row-block-later")).getByText("Completo"),
   ).toBeInTheDocument();
   expect(
+    within(screen.getByTestId("row-block-earlier")).queryByRole("link"),
+  ).not.toBeInTheDocument();
+  await userEvent.setup().click(within(screen.getByTestId("row-block-earlier")).getByRole("button", {
+    name: "Habitaciones y pasajeros del bloque 2",
+  }));
+  expect(
     within(screen.getByTestId("row-block-earlier")).getByRole("link"),
   ).toHaveAttribute("href", "/reservations?view=9001");
+  expect(within(screen.getByTestId("row-block-later")).queryByRole("link")).not.toBeInTheDocument();
 });
 it("identifies ambiguous metadata through its own endpoint without a room, payment or invoice write", async () => {
   const g = {
@@ -90,14 +97,43 @@ it("identifies ambiguous metadata through its own endpoint without a room, payme
     </QueryClientProvider>,
   );
   const user = userEvent.setup();
+  const toggle = screen.getByRole("button", { name: "1 asignación por ubicar en su bloque" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByLabelText("Bloque de la reserva 9001")).not.toBeInTheDocument();
+  await user.click(toggle);
   await user.selectOptions(
     screen.getByLabelText("Bloque de la reserva 9001"),
     "two",
   );
+  await user.click(toggle);
+  await user.click(toggle);
+  expect(screen.getByLabelText("Bloque de la reserva 9001")).toHaveValue("two");
+  expect(fetcher).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Ubicar en bloque" }));
   await waitFor(() => expect(saved).toHaveBeenCalledOnce());
   expect(fetcher).toHaveBeenCalledOnce();
   expect(String(fetcher.mock.calls[0][0])).toBe(
     "/api/groups/fixture-group/reservations/9001/block",
   );
+});
+it("uses surnames in the compact list while preserving the full identity and reservation link", async () => {
+  const g = {
+    id: "fixture-group", checkInDate: "2026-01-01", checkOutDate: "2026-01-02",
+    blocks: [block("one", "2026-01-01", 1)],
+    reservations: [{ ...stay("9010", "2026-01-01"), guest: { firstName: "Juan Carlos", lastName: "DE LA VEGA" } }],
+  } as any;
+  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+  render(<QueryClientProvider client={new QueryClient()}><GroupBlocksTable group={g}
+    onAssign={vi.fn()} onDelete={vi.fn()} onSaved={vi.fn()} /></QueryClientProvider>);
+  const toggle = screen.getByRole("button", { name: "Habitaciones y pasajeros del bloque 1" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  const user = userEvent.setup(); await user.click(toggle);
+  const link = screen.getByRole("link", { name: "Hab. 9010 · DE LA VEGA Juan Carlos" });
+  expect(link).toHaveTextContent(/^Hab\. 9010 · DE LA VEGA$/);
+  expect(link).toHaveAttribute("title", "Hab. 9010 · DE LA VEGA Juan Carlos");
+  expect(link).toHaveAttribute("href", "/reservations?view=9010");
+  await user.click(toggle);
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(fetcher).not.toHaveBeenCalled();
 });
