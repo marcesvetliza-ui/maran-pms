@@ -44,7 +44,9 @@ it("keeps unassigned units of the original group committed", () => {
       blocks: [{ groupId: "g", roomTypeId: "executive", quantity: 2 }],
     }),
   ).toMatchObject({
-    code: "GROUP_BLOCK_SHORTAGE",
+    code: "GROUP_BLOCK_WARNING",
+    canOverride: true,
+    hardDemand: 2,
     unassignedConfirmedGroupUnits: 1,
   });
 });
