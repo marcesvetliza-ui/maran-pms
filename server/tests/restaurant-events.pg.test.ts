@@ -621,6 +621,45 @@ describe.skipIf(!url)(
         fixture.actualInvoice = false;
       }
     });
+    it("preserves legacy table preloads and refuses to overwrite their customer or advance", async () => {
+      const e = await event(),
+        id = await reserve(e);
+      await assigned(id, [table1.id]);
+      await pool.query(
+        "UPDATE restaurant_tables SET status='preloaded',event_client_name='Legacy Guest',event_advance_amount=150 WHERE id=$1",
+        [table1.id],
+      );
+      try {
+        await expect(
+          service.startRestaurantEventService(id, op(), actor),
+        ).rejects.toThrow("precarga");
+        const saved = (
+          await pool.query(
+            "SELECT status,event_client_name,event_advance_amount FROM restaurant_tables WHERE id=$1",
+            [table1.id],
+          )
+        ).rows[0];
+        expect(saved).toMatchObject({
+          status: "preloaded",
+          event_client_name: "Legacy Guest",
+          event_advance_amount: "150.00",
+        });
+        expect(
+          (
+            await pool.query(
+              "SELECT order_id FROM restaurant_event_services WHERE reservation_id=$1",
+              [id],
+            )
+          ).rows,
+        ).toHaveLength(0);
+      } finally {
+        await pool.query(
+          "UPDATE restaurant_tables SET status='available',event_client_name=NULL,event_advance_amount=NULL WHERE id=$1",
+          [table1.id],
+        );
+        await assigned(id, []);
+      }
+    });
     it("keeps an overnight event open across the operational midnight boundary", async () => {
       const tomorrow = (await import("@shared/nightAuditDate")).addCalendarDays(
           today,

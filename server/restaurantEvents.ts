@@ -289,6 +289,10 @@ async function assertTables(b: Row, tableIds: string[], starting = false) {
    UNION ALL SELECT 1 FROM table_reservations r WHERE r.table_id=${id} AND r.id<>${b.reservation_id} AND r.reservation_date=${b.date}::date AND r.status NOT IN ('cancelled','no_show','completed','historical') AND NOT EXISTS(SELECT 1 FROM restaurant_event_bookings eb WHERE eb.reservation_id=r.id)`);
     if (conflicts.length)
       fail("Una de las mesas ya está asignada a otra reserva en esa fecha.");
+    if (starting && ["preloaded", "reserved"].includes(t.status))
+      fail(
+        "La mesa tiene una precarga o reserva del circuito actual. Revisala antes de iniciar el evento.",
+      );
     if (starting) {
       const active = await rows(
         sql`SELECT id FROM restaurant_orders WHERE table_id=${id} AND status NOT IN ('closed','cancelled')`,
