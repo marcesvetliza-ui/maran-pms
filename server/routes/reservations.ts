@@ -454,6 +454,7 @@ export function registerReservationsRoutes(app: Express) {
       delete req.body.acknowledgeHousekeepingPreparation;
       delete req.body.housekeepingPreparation;
       delete req.body.housekeepingBedPreparation;
+      delete req.body.roomHistory;
       const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
       delete req.body.contextGroupId;
