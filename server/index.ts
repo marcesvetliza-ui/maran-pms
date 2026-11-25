@@ -193,6 +193,8 @@ app.use((req, res, next) => {
 
     try {
       await runMigrations();
+      const { ensureBookingEngineSchema } = await import("./bookingEngineSchema");
+      await ensureBookingEngineSchema();
       const { ensureGroupReservationsSchema } = await import("./groupReservationsSchema");
       await ensureGroupReservationsSchema();
       const { ensureSupplierExpenseSchema } = await import("./accounting/supplierExpenseSchema");

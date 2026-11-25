@@ -3,12 +3,16 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import { db, pool } from "./db";
 import { withInvoiceAdvisoryLock } from "./billing/invoiceAdvisoryLock";
-import { initialNightlyPricing, nightlyTotal, amountString, pricingError, isStayExtension, moneyCents } from "@shared/nightlyPricing";
+import { initialNightlyPricing, nightlyTotal, amountString, pricingError, isStayExtension, moneyCents, calendarNights, type PricedNight } from "@shared/nightlyPricing";
 
 const financialScope = new AsyncLocalStorage<Set<string>>();
 /** Recovery must not wait on an owner lock already held by its own request. */
 export const hasFinancialScopeLock = (key: string) => financialScope.getStore()?.has(key) === true;
 const nightlyWriter = new AsyncLocalStorage<{ revision:number; dates?:string[]; extension?:boolean }>();
+// Trusted server-only initialization; raw request nightlyPricing is still deleted.
+const initialQuote = new AsyncLocalStorage<PricedNight[]>();
+export const withInitialNightlyQuote = <T>(lines: PricedNight[], action: () => Promise<T>) =>
+  initialQuote.run(lines.map(line => ({ ...line })), action);
 export const withNightlyWriter = <T>(revision: number, action: () => Promise<T>, dates?:string[]) => nightlyWriter.run({revision,dates}, action);
 /** Only the validated stay route can request the exception for new nights. */
 export const withStayExtensionWriter = <T>(revision:number,action:()=>Promise<T>)=>nightlyWriter.run({revision,extension:true},action);
@@ -88,7 +92,13 @@ export async function accommodationFiscalBlock(id: string): Promise<string | nul
 export async function initializeNightlyPricing(data: Record<string, any>) {
   // Never accept a client-supplied pricing identity or reconstruct an existing reservation.
   delete data.nightlyPricing; delete data.pricingScheme; delete data.pricingRevision;
-  const lines = initialNightlyPricing(data);
+  const lines = initialQuote.getStore() ?? initialNightlyPricing(data);
+  if (initialQuote.getStore()) {
+    const dates = calendarNights(data.checkInDate, data.checkOutDate);
+    if (JSON.stringify(lines.map(n => n.date)) !== JSON.stringify(dates) ||
+        nightlyTotal(lines) !== moneyCents(data.totalRoomAmount))
+      pricingError("La cotización no coincide con las noches o el total de la reserva.");
+  }
   data.pricingScheme = "nightly_v1";
   data.nightlyPricing = lines;
   data.pricingRevision = 0;

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { fmtMoney } from "@/lib/utils";
 import { Link } from "wouter";
 import {
   ArrowLeft, Globe, Settings, Eye, EyeOff,
-  Plus, X, Edit2, Save, ExternalLink, Check, BedDouble,
+  Plus, X, Edit2, Save, ExternalLink, Check, BedDouble, Upload, ArrowUp,
   Calendar, User, Phone, Mail, Hash, ClipboardList, CheckCircle2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { RoomType } from "@shared/schema";
+import type { RoomType, RatePlan } from "@shared/schema";
 
 type RoomTypeWithBooking = RoomType & {
   amenities?: string[] | null;
@@ -34,6 +34,14 @@ type RoomTypeWithBooking = RoomType & {
   publicDescription?: string | null;
   sortOrder?: number | null;
   showInBooking?: boolean | null;
+  bookingRatePlanId?: string | null;
+  bookingDiscountPercent?: number | null;
+};
+
+type BookingConfigResponse = {
+  salesEnabled: boolean;
+  roomTypes: RoomTypeWithBooking[];
+  ratePlans: RatePlan[];
 };
 
 const AMENITY_PRESETS = [
@@ -51,16 +59,32 @@ function fmt(d: string) {
 
 // ─── Room Type Editor ─────────────────────────────────────────────────────────
 
-function RoomTypeEditor({ rt, onSave }: { rt: RoomTypeWithBooking; onSave: () => void }) {
+function RoomTypeEditor({ rt, ratePlans, onSave }: {
+  rt: RoomTypeWithBooking;
+  ratePlans: RatePlan[];
+  onSave: () => Promise<unknown> | void;
+}) {
   const { toast } = useToast();
   const [publicDesc, setPublicDesc] = useState(rt.publicDescription || "");
   const [amenities, setAmenities] = useState<string[]>(rt.amenities || []);
   const [newAmenity, setNewAmenity] = useState("");
   const [photos, setPhotos] = useState<string[]>(rt.photos || []);
+  const [photoPreviews, setPhotoPreviews] = useState<Record<string, string>>({});
   const [newPhoto, setNewPhoto] = useState("");
   const [showInBooking, setShowInBooking] = useState(rt.showInBooking !== false);
   const [sortOrder, setSortOrder] = useState(rt.sortOrder || 0);
+  const [ratePlanId, setRatePlanId] = useState(rt.bookingRatePlanId || "");
+  const [discountPercent, setDiscountPercent] = useState(String(rt.bookingDiscountPercent ?? 0));
+  const [discountError, setDiscountError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [photoError, setPhotoError] = useState("");
   const [editing, setEditing] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  const roomRatePlans = ratePlans.filter(plan => plan.roomTypeId === rt.id);
+  const normalizedDiscount = Number(discountPercent);
+  const discountValid = discountPercent.trim() !== "" && Number.isFinite(normalizedDiscount)
+    && normalizedDiscount >= 0 && normalizedDiscount <= 99.99;
 
   const saveMutation = useMutation({
     mutationFn: () => apiRequest("PATCH", `/api/admin/room-types/${rt.id}/booking-config`, {
@@ -69,13 +93,20 @@ function RoomTypeEditor({ rt, onSave }: { rt: RoomTypeWithBooking; onSave: () =>
       photos: photos.length ? photos : null,
       showInBooking,
       sortOrder,
+      ratePlanId: ratePlanId || null,
+      discountPercent: normalizedDiscount,
     }),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast({ title: `${rt.name} actualizado` });
       setEditing(false);
-      onSave();
+      const refreshed = await onSave();
+      if (refreshed !== false) setPhotoPreviews({});
     },
-    onError: () => toast({ title: "Error al guardar", variant: "destructive" }),
+    onError: (error: Error) => toast({
+      title: "Error al guardar",
+      description: error.message || "No se pudo guardar la configuración.",
+      variant: "destructive",
+    }),
   });
 
   const addAmenity = (a: string) => {
@@ -84,9 +115,99 @@ function RoomTypeEditor({ rt, onSave }: { rt: RoomTypeWithBooking; onSave: () =>
   };
 
   const addPhoto = () => {
-    if (newPhoto.trim() && !photos.includes(newPhoto.trim())) setPhotos([...photos, newPhoto.trim()]);
+    if (newPhoto.trim() && !photos.includes(newPhoto.trim())) {
+      if (photos.length >= 10) {
+        setPhotoError("Podés guardar hasta 10 fotos por tipo de habitación.");
+        return;
+      }
+      setPhotos([...photos, newPhoto.trim()]);
+      setEditing(true);
+      setPhotoError("");
+    }
     setNewPhoto("");
   };
+
+  async function fileToBoundedJpeg(file: File): Promise<string> {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      throw new Error("Formato no admitido. Elegí una imagen JPEG, PNG o WebP.");
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      throw new Error("La imagen original supera el límite de 12 MB.");
+    }
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      throw new Error("No se pudo leer la imagen. Probá con otro archivo.");
+    }
+    try {
+      let scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("No se pudo preparar la imagen en este navegador.");
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        for (const quality of [0.82, 0.7, 0.58, 0.46]) {
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          const base64 = dataUrl.split(",")[1] || "";
+          const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+          const decodedBytes = Math.floor(base64.length * 3 / 4) - padding;
+          if (decodedBytes <= 600 * 1024) return dataUrl;
+        }
+        scale *= 0.78;
+      }
+      throw new Error("No se pudo reducir la imagen al límite permitido. Elegí una imagen más pequeña.");
+    } finally {
+      bitmap.close();
+    }
+  }
+
+  async function uploadPhotos(files: FileList | null) {
+    if (!files?.length) return;
+    const selected = Array.from(files);
+    if (photos.length + selected.length > 10) {
+      setPhotoError(`Hay ${photos.length} foto${photos.length === 1 ? "" : "s"}. Podés sumar hasta ${10 - photos.length} más.`);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+      return;
+    }
+    setUploading(true);
+    setPhotoError("");
+    let uploaded = 0;
+    try {
+      for (const file of selected) {
+        const imageData = await fileToBoundedJpeg(file);
+        const response = await apiRequest("POST", `/api/admin/room-types/${rt.id}/booking-photos`, { imageData });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "No se pudo subir la foto.");
+        if (!result.url || typeof result.url !== "string") throw new Error("La respuesta de carga no incluyó una URL válida.");
+        setPhotos(current => [...current, result.url]);
+        setPhotoPreviews(current => ({ ...current, [result.url]: imageData }));
+        setEditing(true);
+        uploaded += 1;
+      }
+      toast({ title: uploaded === 1 ? "Foto cargada" : `${uploaded} fotos cargadas`, description: "Guardá la configuración para hacerlas públicas." });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo cargar la foto.";
+      setPhotoError(message);
+      toast({ title: "Error al cargar la foto", description: message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  }
+
+  function save() {
+    if (!discountValid) {
+      setDiscountError("Ingresá un porcentaje entre 0 y 99,99.");
+      return;
+    }
+    setDiscountError("");
+    saveMutation.mutate();
+  }
 
   return (
     <Card className={`transition-all ${!showInBooking ? "opacity-60" : ""}`}>
@@ -110,16 +231,64 @@ function RoomTypeEditor({ rt, onSave }: { rt: RoomTypeWithBooking; onSave: () =>
             </div>
             <Button
               size="sm" variant={editing ? "default" : "outline"}
-              onClick={() => editing ? saveMutation.mutate() : setEditing(true)}
-              disabled={saveMutation.isPending}
+              onClick={() => editing ? save() : setEditing(true)}
+              disabled={saveMutation.isPending || uploading}
               data-testid={`btn-save-roomtype-${rt.id}`}
             >
-              {editing ? <><Save className="h-3.5 w-3.5 mr-1" />Guardar</> : <><Edit2 className="h-3.5 w-3.5 mr-1" />Editar</>}
+              {editing ? (
+                <><Save className="h-3.5 w-3.5 mr-1" />{saveMutation.isPending ? "Guardando…" : "Guardar"}</>
+              ) : (
+                <><Edit2 className="h-3.5 w-3.5 mr-1" />Editar</>
+              )}
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 text-xs leading-relaxed text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-100">
+          <p className="font-semibold">Tarifa para ventas online</p>
+          <p className="mt-1">La tarifa elegida se usa para cotizar este tipo de habitación. El plan tarifario original no se modifica. Se aplican las restricciones compartidas del calendario (disponibilidad y cierres).</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
+          <div className="space-y-1.5">
+            <Label htmlFor={`booking-rate-plan-${rt.id}`} className="text-xs text-muted-foreground">Plan tarifario online</Label>
+            <Select value={ratePlanId || "none"} onValueChange={value => { setRatePlanId(value === "none" ? "" : value); setEditing(true); }}>
+              <SelectTrigger id={`booking-rate-plan-${rt.id}`} data-testid={`select-booking-rate-plan-${rt.id}`}>
+                <SelectValue placeholder="Seleccionar plan" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Sin ventas online</SelectItem>
+                {roomRatePlans.map(plan => (
+                  <SelectItem key={plan.id} value={plan.id}>{plan.name} · {plan.currency} {plan.baseRate}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {roomRatePlans.length === 0 && <p className="text-xs text-muted-foreground">No hay planes tarifarios disponibles para este tipo.</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`booking-discount-${rt.id}`} className="text-xs text-muted-foreground">Descuento online (%)</Label>
+            <Input
+              id={`booking-discount-${rt.id}`}
+              type="number"
+              min="0"
+              max="99.99"
+              step="0.01"
+              inputMode="decimal"
+              value={discountPercent}
+              aria-invalid={!!discountError}
+              aria-describedby={discountError ? `booking-discount-error-${rt.id}` : undefined}
+              onChange={event => {
+                setDiscountPercent(event.target.value);
+                setDiscountError("");
+                setEditing(true);
+              }}
+              className="h-9"
+              data-testid={`input-booking-discount-${rt.id}`}
+            />
+            {discountError && <p id={`booking-discount-error-${rt.id}`} role="alert" className="text-xs text-destructive">{discountError}</p>}
+          </div>
+        </div>
+        {!ratePlanId && <p className="text-xs text-amber-700 dark:text-amber-300">Sin plan seleccionado, esta habitación no se ofrecerá para venta online.</p>}
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">Descripción pública (aparece en la web)</Label>
           <Textarea
@@ -168,19 +337,45 @@ function RoomTypeEditor({ rt, onSave }: { rt: RoomTypeWithBooking; onSave: () =>
         </div>
 
         <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Fotos (URLs de imágenes)</Label>
+          <Label className="text-xs text-muted-foreground">Fotos de la habitación</Label>
+          <p className="text-xs text-muted-foreground">La primera foto será la principal. Las fotos nuevas quedan públicas al guardar.</p>
           <div className="space-y-1">
             {photos.map((url, i) => (
               <div key={i} className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 rounded-lg px-2 py-1">
-                <img src={url} alt="" className="h-8 w-12 object-cover rounded" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                <img src={photoPreviews[url] || url} alt="" className="h-8 w-12 object-cover rounded" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                <span className="text-xs font-medium">{i === 0 ? "Principal" : `Foto ${i + 1}`}</span>
                 <span className="text-xs text-muted-foreground flex-1 truncate">{url}</span>
+                {i > 0 && <Button type="button" size="icon" variant="ghost" className="h-7 w-7 shrink-0" aria-label={`Hacer foto ${i + 1} principal`} title="Hacer principal" onClick={() => {
+                  setPhotos(current => [current[i], ...current.filter((_, index) => index !== i)]);
+                  setEditing(true);
+                }}>
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </Button>}
                 <button onClick={() => { setPhotos(photos.filter((_, j) => j !== i)); setEditing(true); }}
-                  className="hover:text-destructive shrink-0">
+                  type="button" aria-label={`Quitar foto ${i + 1}`} className="hover:text-destructive shrink-0">
                   <X className="h-3 w-3" />
                 </button>
               </div>
             ))}
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              className="sr-only"
+              aria-label="Seleccionar fotos JPEG, PNG o WebP"
+              onChange={event => uploadPhotos(event.target.files)}
+              disabled={uploading || photos.length >= 10}
+            />
+            <Button type="button" size="sm" variant="outline" onClick={() => uploadInputRef.current?.click()} disabled={uploading || photos.length >= 10}>
+              <Upload className="h-3.5 w-3.5 mr-1" />{uploading ? "Subiendo..." : "Subir fotos"}
+            </Button>
+            <span className="text-xs text-muted-foreground">JPEG, PNG o WebP · máximo 10 fotos · 12 MB por archivo</span>
+            {uploading && <span role="status" className="text-xs text-muted-foreground">Preparando y subiendo imágenes…</span>}
+          </div>
+          {photoError && <p role="alert" className="text-xs text-destructive">{photoError}</p>}
           <div className="flex gap-2">
             <Input
               value={newPhoto}
@@ -189,8 +384,9 @@ function RoomTypeEditor({ rt, onSave }: { rt: RoomTypeWithBooking; onSave: () =>
               placeholder="https://... URL de imagen"
               className="h-8 text-sm"
               data-testid={`input-photo-${rt.id}`}
+              disabled={uploading || photos.length >= 10}
             />
-            <Button size="sm" variant="outline" onClick={addPhoto}><Plus className="h-3.5 w-3.5" /></Button>
+            <Button type="button" size="sm" variant="outline" onClick={addPhoto} disabled={uploading || photos.length >= 10}><Plus className="h-3.5 w-3.5" /></Button>
           </div>
         </div>
 
@@ -464,9 +660,26 @@ function WebReservationsPanel() {
 export default function AdminBookingEnginePage() {
   const { toast } = useToast();
 
-  const { data: roomTypesList = [], isLoading, refetch } = useQuery<RoomTypeWithBooking[]>({
-    queryKey: ["/api/room-types"],
-    queryFn: () => fetch("/api/room-types", { credentials: "include" }).then(r => r.json()),
+  const {
+    data: bookingConfig,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery<BookingConfigResponse>({
+    queryKey: ["/api/admin/booking-engine/config"],
+    queryFn: async () => {
+      const response = await fetch("/api/admin/booking-engine/config", { credentials: "include" });
+      if (!response.ok) {
+        let message = "No se pudo cargar la configuración del motor.";
+        try {
+          const body = await response.json();
+          if (body.error) message = body.error;
+        } catch { /* Keep the actionable default message. */ }
+        throw new Error(message);
+      }
+      return response.json();
+    },
   });
 
   const { data: pendingCount = 0 } = useQuery<number>({
@@ -506,6 +719,14 @@ export default function AdminBookingEnginePage() {
       </div>
 
       {/* Booking URL & Iframe code */}
+      {bookingConfig?.salesEnabled !== true && (
+        <Card role="status" className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
+          <CardContent className="p-4 text-sm">
+            <p className="font-semibold">Ventas online deshabilitadas — pendientes de autorización</p>
+            <p>Podés preparar planes, descuentos y fotos. Guardar esta configuración no habilita las reservas públicas ni modifica las conexiones OTA.</p>
+          </CardContent>
+        </Card>
+      )}
       <div className="grid md:grid-cols-2 gap-4">
         <Card>
           <CardHeader className="pb-2">
@@ -578,10 +799,31 @@ export default function AdminBookingEnginePage() {
               <div className="grid gap-4">
                 {[1, 2, 3].map(i => <div key={i} className="h-32 rounded-xl bg-muted animate-pulse" />)}
               </div>
+            ) : isError ? (
+              <Card role="alert">
+                <CardContent className="flex flex-col items-start gap-3 py-6">
+                  <p className="text-sm text-destructive">{(error as Error)?.message || "No se pudo cargar la configuración."}</p>
+                  <Button variant="outline" size="sm" onClick={() => refetch()}>Reintentar</Button>
+                </CardContent>
+              </Card>
+            ) : !bookingConfig?.roomTypes?.length ? (
+              <Card>
+                <CardContent className="py-8 text-center text-sm text-muted-foreground">
+                  No hay tipos de habitación configurados.
+                </CardContent>
+              </Card>
             ) : (
               <div className="grid gap-4">
-                {roomTypesList.map(rt => (
-                  <RoomTypeEditor key={rt.id} rt={rt} onSave={refetch} />
+                {bookingConfig.roomTypes.map(rt => (
+                  <RoomTypeEditor
+                    key={rt.id}
+                    rt={rt}
+                    ratePlans={bookingConfig.ratePlans || []}
+                    onSave={async () => {
+                      const result = await refetch();
+                      return !result.isError;
+                    }}
+                  />
                 ))}
               </div>
             )}

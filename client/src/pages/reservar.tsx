@@ -36,6 +36,7 @@ const btnOutlineBrand =
 
 /* ─── Types ────────────────────────────────────────────────────── */
 type HotelInfo = {
+  bookingSalesEnabled: boolean;
   name: string; tagline: string; phone: string; email: string;
   address: string; checkInTime: string; checkOutTime: string;
   currency: string; logoUrl: string; heroImageUrl: string;
@@ -47,6 +48,7 @@ type RoomTypeResult = {
   publicDescription: string | null; baseOccupancy: number; maxOccupancy: number;
   amenities: string[]; photos: string[]; availableRooms: number;
   ratePlanId: string; ratePlanName: string; pricePerNight: number;
+  variableNightlyRates: boolean;
   totalPrice: number; nights: number; currency: string;
   cancellationPolicy: string | null;
 };
@@ -146,7 +148,7 @@ function RoomCard({ rt, selected, onSelect }: { rt: RoomTypeResult; selected: bo
           </div>
         )}
         <Badge className="absolute top-2 left-2 bg-black/60 text-white border-0 text-xs">
-          {rt.availableRooms} disponible{rt.availableRooms !== 1 ? "s" : ""}
+          Disponible
         </Badge>
       </div>
 
@@ -162,7 +164,9 @@ function RoomCard({ rt, selected, onSelect }: { rt: RoomTypeResult; selected: bo
             <p className="text-lg font-bold font-['Playfair_Display']" style={{ color: BRAND }}>
               {fmt(rt.pricePerNight, rt.currency)}
             </p>
-            <p className="text-xs text-gray-400 font-['Montserrat']">por noche</p>
+            <p className="text-xs text-gray-400 font-['Montserrat']">
+              {rt.variableNightlyRates ? "promedio por noche" : "por noche"}
+            </p>
           </div>
         </div>
 
@@ -245,10 +249,14 @@ export default function ReservarPage() {
 
   const { data: availability, isLoading: loadingAvail, refetch: refetchAvail, isError: availError } =
     useQuery<AvailabilityResponse>({
-      queryKey: ["/api/public/booking/availability", checkIn, checkOut, totalGuests],
+      queryKey: ["/api/public/booking/availability", checkIn, checkOut, adults, children],
       queryFn: () => fetch(
-        `/api/public/booking/availability?checkIn=${checkIn}&checkOut=${checkOut}&adults=${totalGuests}`
-      ).then(r => r.json()),
+        `/api/public/booking/availability?checkIn=${checkIn}&checkOut=${checkOut}&adults=${adults}&children=${children}`
+      ).then(async r => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "No se pudo consultar disponibilidad");
+        return data;
+      }),
       enabled: false,
     });
 
@@ -283,6 +291,7 @@ export default function ReservarPage() {
       checkIn, checkOut, adults, children, childrenAges,
       roomTypeId: selectedRoomType.roomTypeId,
       ratePlanId: selectedRoomType.ratePlanId,
+      expectedTotalAmount: selectedRoomType.totalPrice,
       firstName, lastName, email, phone,
       documentType: docType, documentNumber: docNum,
       notes, bedPreference: bedPreference || undefined, paymentMethod: "hotel",
@@ -308,6 +317,16 @@ export default function ReservarPage() {
   ) : null;
 
   /* ─── Step 0: Dates & Guests ─────────────────────────────────── */
+  if (hotelInfo?.bookingSalesEnabled !== true) return (
+    <PublicLayout hotelInfo={hotelInfo}>
+      <div className="max-w-lg mx-auto space-y-4 px-4 py-12 text-center" role="status">
+        <h2 className="text-xl font-semibold">Reservas online no habilitadas</h2>
+        <p>Para reservar, comunicate directamente con el hotel.</p>
+        {hotelInfo?.phone && <p>Teléfono: {hotelInfo.phone}</p>}
+        {hotelInfo?.email && <a href={`mailto:${hotelInfo.email}`}>{hotelInfo.email}</a>}
+      </div>
+    </PublicLayout>
+  );
   if (step === 0) return (
     <PublicLayout hotelInfo={hotelInfo}>
       <StepIndicator step={0} total={4} />
