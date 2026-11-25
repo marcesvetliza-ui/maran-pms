@@ -20,7 +20,23 @@ const parse = (v: any) => { try {
 catch {
     return null;
 } };
-export async function groupAccountSnapshot(reservationId: string) {
+// Shared only within one consistent database snapshot. The batch planner reuses
+// group-wide facts instead of rereading the entire group for every room.
+export type GroupAccountEvidence = {
+ ledger: Awaited<ReturnType<typeof storage.getGroupReservationLedger>>;
+ billing: Awaited<ReturnType<typeof getGroupInvoiceSnapshot>>;
+ receipts: any[];
+ invoices: any[];
+};
+export async function loadGroupAccountEvidence(groupId:string, ledger?:GroupAccountEvidence['ledger'], billing?:GroupAccountEvidence['billing']):Promise<GroupAccountEvidence> {
+ const [roomLedger, fiscal, receipts, invoices] = await Promise.all([
+   ledger || storage.getGroupReservationLedger(groupId), billing || getGroupInvoiceSnapshot(groupId),
+   db.execute(sql`SELECT gp.*,coalesce((SELECT jsonb_agg(jsonb_build_object('reservation_id',p.reservation_id,'amount',p.amount,'method',p.method)) FROM payments p WHERE p.group_payment_id=gp.id AND coalesce(p.status,'active')<>'anulado'),'[]'::jsonb) children FROM group_payments gp WHERE gp.group_id=${groupId} ORDER BY gp.date,gp.id`),
+   db.execute(sql`SELECT si.*,coalesce((SELECT jsonb_agg(n.source_charge_amounts) FROM sales_invoices n WHERE n.nota_credito_id=si.id AND n.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB') AND n.estado IN ('emitida','parcial','anulada') AND (n.reconciliation_status IS NULL OR n.reconciliation_status='conciliada')),'[]'::jsonb) credit_source_charge_amounts FROM sales_invoices si WHERE (si.group_id=${groupId} OR (si.group_id IS NULL AND EXISTS(SELECT 1 FROM group_reservation_links gl WHERE gl.group_id=${groupId} AND gl.reservation_id=si.reserva_id))) AND si.tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB') AND si.estado IN ('emitida','parcial','autorizacion_pendiente')`),
+ ]);
+ return {ledger:roomLedger,billing:fiscal,receipts:receipts.rows as any[],invoices:invoices.rows as any[]};
+}
+export async function groupAccountSnapshot(reservationId: string, evidence?:GroupAccountEvidence) {
     return withReadOnlyDatabaseTransaction(async () => {
     const reservation = await storage.getReservation(reservationId);
     if (!reservation)
@@ -29,11 +45,10 @@ export async function groupAccountSnapshot(reservationId: string) {
     if (links.length !== 1)
         throw fail('La reserva debe pertenecer a un único grupo.');
     const groupId = String(links[0].group_id);
-    const [ledger, billing, receipts, invoices] = await Promise.all([
-        storage.getGroupReservationLedger(groupId), getGroupInvoiceSnapshot(groupId),
-        db.execute(sql `SELECT gp.*,coalesce((SELECT jsonb_agg(jsonb_build_object('reservation_id',p.reservation_id,'amount',p.amount,'method',p.method)) FROM payments p WHERE p.group_payment_id=gp.id AND coalesce(p.status,'active')<>'anulado'),'[]'::jsonb) children FROM group_payments gp WHERE gp.group_id=${groupId} ORDER BY gp.date,gp.id`),
-        db.execute(sql `SELECT si.*,coalesce((SELECT jsonb_agg(n.source_charge_amounts) FROM sales_invoices n WHERE n.nota_credito_id=si.id AND n.tipo_comprobante IN ('NCA','NCB','NCC','NCT','NCM','NCMB') AND n.estado IN ('emitida','parcial','anulada') AND (n.reconciliation_status IS NULL OR n.reconciliation_status='conciliada')),'[]'::jsonb) credit_source_charge_amounts FROM sales_invoices si WHERE (si.group_id=${groupId} OR (si.group_id IS NULL AND si.reserva_id=${reservationId})) AND si.tipo_comprobante IN ('FA','FB','FC','FT','FM','FMB') AND si.estado IN ('emitida','parcial','autorizacion_pendiente')`),
-    ]);
+    const facts = evidence || await loadGroupAccountEvidence(groupId);
+    const {ledger,billing}=facts;
+    const receipts={rows:facts.receipts};
+    const invoices={rows:facts.invoices.filter(invoice=>invoice.group_id===groupId||invoice.reserva_id===reservationId)};
     const room = ledger.find(r => r.reservationId === reservationId);
     if (!room)
         throw fail('La reserva no tiene un saldo grupal verificable.');

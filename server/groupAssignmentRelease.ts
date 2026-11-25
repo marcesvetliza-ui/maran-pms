@@ -28,7 +28,7 @@ export async function inspectGroupAssignment(groupId: string, reservationId: str
     await db.execute(sql`SELECT id FROM reservations WHERE id=${reservationId} FOR UPDATE`);
   }
   const [reservation] = await db.select().from(reservations).where(eq(reservations.id, reservationId));
-  const links = (await db.execute(sql`SELECT group_id FROM group_reservation_links WHERE reservation_id=${reservationId}`)).rows as any[];
+  const links = (await db.execute(sql`SELECT group_id,block_id FROM group_reservation_links WHERE reservation_id=${reservationId}`)).rows as any[];
   if (!reservation || links.length !== 1 || links[0].group_id !== groupId) throw assignmentError('La reserva no pertenece a este grupo.', 404);
   const [guest] = await db.select().from(guests).where(eq(guests.id, reservation.guestId));
   const paymentRows = (await db.execute(sql`SELECT * FROM payments WHERE reservation_id=${reservationId} AND status<>'anulado' ORDER BY id ${lock ? sql`FOR UPDATE` : sql``}`)).rows as any[];
@@ -98,8 +98,8 @@ export async function inspectGroupAssignment(groupId: string, reservationId: str
   }
   const personalCents = personal.reduce((n, p) => n + groupMoneyCents(p.amount), 0);
   const groupCents = parents.reduce((n, p) => n + p.releasedCents, 0);
-  const fingerprint = payloadHash({ reservation, paymentRows, parents, invoices, pending, extraCharges, folioExtras, blocks, managed, cash, accounts });
-  return { reservation, guest, paymentRows, parents, personal, replacementBlockers: [...new Set([...blockers, ...fiscal])], blockers: [...new Set([...blockers, ...fiscal, ...releaseOnly])], fingerprint,
+  const fingerprint = payloadHash({ reservation, links, paymentRows, parents, invoices, pending, extraCharges, folioExtras, blocks, managed, cash, accounts });
+  return { reservation, blockId:links[0].block_id || null, guest, paymentRows, parents, personal, replacementBlockers: [...new Set([...blockers, ...fiscal])], blockers: [...new Set([...blockers, ...fiscal, ...releaseOnly])], fingerprint,
     groupAdvance: groupCents / 100, personalAdvance: personalCents / 100, availableAdvance: (groupCents + personalCents) / 100 };
 }
 export const assignmentPreview = (s: Awaited<ReturnType<typeof inspectGroupAssignment>>) => ({
@@ -165,7 +165,7 @@ export async function releaseGroupAssignment(groupId: string, reservationId: str
       specialRateReason: r.specialRateReason, createdAt: new Date(), lastModifiedBy: actor.id,
       notes: `Cupo del grupo sin pasajero. Reemplaza la asignación ${r.reservationCode}.`,
     }).returning();
-    await db.insert(groupReservationLinks).values({ groupId, reservationId: replacement.id });
+    await db.insert(groupReservationLinks).values({ groupId, reservationId: replacement.id, blockId:state.blockId });
     for (const receipt of state.parents) {
       await db.execute(sql`UPDATE group_payments SET distribution_detail=${JSON.stringify(receipt.detail)}::jsonb WHERE id=${receipt.parent.id}`);
       for (const p of receipt.own) await releasePaymentApplication(p, operator, body.reason.trim());

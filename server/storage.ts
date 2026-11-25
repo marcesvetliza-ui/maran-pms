@@ -444,6 +444,8 @@ export interface IStorage {
       agreedRate?: string;
       ratePlanId?: string | null;
       guestId?: string | null;
+      canonicalRoomTypeId?: string;
+      blockId?: string;
       overrideTentativeGroupWarning?: boolean;
     }
   ): Promise<Reservation | undefined>;
@@ -454,6 +456,7 @@ export interface IStorage {
   deleteGroupCharge(id: string): Promise<boolean>;
   createGroupPayment(payment: InsertGroupPayment): Promise<GroupPayment>;
   recordGroupPayment(input: {
+    roomInvoiceBatchId?: string;
     creditAdvanceAuthorization?: import("@shared/groupCreditAdvance").GroupCreditAdvanceConfirmation & { userId: string };
     paymentRequest?: import("./reservationPaymentRequest").ReservationPaymentRequest;
     groupId: string;

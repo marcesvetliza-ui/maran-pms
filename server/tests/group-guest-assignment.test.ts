@@ -17,7 +17,9 @@ const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 
 vi.mock("../db", () => ({
+  withDatabaseTransaction: async (action: () => Promise<unknown>) => action(),
   db: {
+    execute: vi.fn().mockResolvedValue({rows:[{id:"group-assignment-001"}]}),
     select: () => ({
       from: () => ({
         where: () => ({
@@ -48,6 +50,8 @@ vi.mock("../auth", () => ({
   requirePermission: (_key: string) => (_req: any, _res: any, next: () => void) => next(),
   requireAuth: (_req: any, _res: any, next: () => void) => next(),
 }));
+
+vi.mock("../inventoryMutationLock", () => ({withLodgingInventoryMutationLock: (action: () => Promise<unknown>) => action()}));
 
 vi.mock("../audit", () => ({ audit: vi.fn() }));
 vi.mock("pdfkit", () => ({
@@ -196,8 +200,8 @@ describe("group guest assignment", () => {
   it("does not block a guest-only replacement because of a pre-existing group shortage", async () => {
     const selectedGuest = {
       id: EXISTING_GUEST_ID,
-      firstName: "Marcelo",
-      lastName: "Svetliza",
+      firstName: "Fixture",
+      lastName: "Synthetic",
       codigo: "GUEST-702",
     };
     mockDbSelectRows = [
@@ -223,7 +227,7 @@ describe("group guest assignment", () => {
       id: PLACEHOLDER_RESERVATION_ID,
       roomId: "room-702",
       guestId: EXISTING_GUEST_ID,
-      guestName: "Svetliza Marcelo",
+      guestName: "Synthetic Fixture",
     });
 
     const response = await fetch(
@@ -233,8 +237,8 @@ describe("group guest assignment", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           guestId: EXISTING_GUEST_ID,
-          guestFirstName: "Marcelo",
-          guestLastName: "Svetliza",
+          guestFirstName: "Fixture",
+          guestLastName: "Synthetic",
           roomTypeId: "rt1",
         }),
       },
@@ -244,7 +248,7 @@ describe("group guest assignment", () => {
     expect(mockStorage.evaluateReservationInventory).not.toHaveBeenCalled();
     expect(mockStorage.updateReservation).toHaveBeenCalledWith(
       PLACEHOLDER_RESERVATION_ID,
-      expect.objectContaining({ guestId: EXISTING_GUEST_ID, guestName: "Svetliza Marcelo" }),
+      expect.objectContaining({ guestId: EXISTING_GUEST_ID, guestName: "Synthetic Fixture" }),
     );
   });
 

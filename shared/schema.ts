@@ -844,6 +844,7 @@ export const groupReservationLinks = pgTable("group_reservation_links", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   groupId: varchar("group_id").notNull(),
   reservationId: varchar("reservation_id").notNull(),
+  blockId: varchar("block_id"),
 });
 
 export const insertGroupReservationLinkSchema = createInsertSchema(groupReservationLinks).omit({ id: true });
@@ -861,6 +862,8 @@ export type GroupWithDetails = Group & {
   reservations: ReservationWithDetails[];
   totalRooms: number;
   assignedRooms: number;
+  reservationBlockIds?: Record<string, string | null>;
+  conflictingReservationBlockIds?: string[];
 };
 
 // Group Charges (Cargos del folio grupal)

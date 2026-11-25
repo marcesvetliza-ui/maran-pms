@@ -11,7 +11,7 @@ export function isUncollectedRoomInvoice(invoice:any):boolean {
     && Number(invoice.monto_total)>0 && Number(invoice.monto_acreditado||0)===0
     && !invoice.group_id && !invoice.group_payment_id && !invoice.payment_id
     && !invoice.cash_forma_pago && !invoice.cash_forma_pago_detalle
-    && intent?.groupDocumentationOnly===true && intent?.settlement?.destination==='none'
+    && intent?.groupDocumentationOnly===true && !intent.groupRoomInvoiceBatchId && intent?.settlement?.destination==='none'
     && intent?.settlement?.status==='completed' && !intent.payments?.length
     && !intent.ordinaryAdvances?.length && !intent.individualGroupSettlement;
 }
