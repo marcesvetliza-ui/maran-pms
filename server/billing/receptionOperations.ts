@@ -62,8 +62,10 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const collectionCorrectionCompleted = operation.stage === 'corrected' && operation.error_code === 'BILLING_CANCELLED_COLLECTION_REVERSED';
   const cancelledCollection = collectionCorrectionCompleted ? null : await cancelledReceptionCollection(db, operation, invoice);
   const departure = recovery?.checkoutRequested
-    ? (await db.execute(sql`SELECT status, checked_out_at >= (SELECT created_at FROM billing_operations WHERE operation_id=${operation.operation_id}) AS completed_after_intent
-        FROM reservations WHERE id=${operation.owner_id}`)).rows[0] as any : null;
+    ? (await db.execute(sql`SELECT r.status, (r.checked_out_at >= bo.created_at OR EXISTS(
+          SELECT 1 FROM reservation_changelog c WHERE c.reservation_id=r.id AND c.tipo='undo_checkout' AND c.fecha>=bo.created_at
+        )) AS completed_after_intent FROM reservations r JOIN billing_operations bo ON bo.operation_id=${operation.operation_id}
+        WHERE r.id=${operation.owner_id}`)).rows[0] as any : null;
   const debt = recovery?.checkoutDebtAccount;
   // Reopening a stay does not undo its already committed account transfer.
   // Prove that exact departure by its payment key, linked account movement and

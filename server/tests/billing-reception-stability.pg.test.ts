@@ -103,12 +103,18 @@ suite("Estabilidad de facturación de Recepción con PostgreSQL y ARCA simulado"
       expect(found.body.pending).toMatchObject({operationId:f.op,financiallyComplete:true,recoveryComplete:false});
       await pool!.query("UPDATE reservations SET status='checked_out',checked_out_at=now()+interval '1 second' WHERE id=$1",[f.reservation]);
       expect((await request(`/api/billing/reservations/${f.reservation}/pending-operation`)).body.pending).toBeNull();
-      await pool!.query("UPDATE reservations SET status='checked_in' WHERE id=$1",[f.reservation]);
+      // The real reversal clears checked_out_at; its durable changelog must
+      // still prevent recovery from silently closing that stay again.
+      await pool!.query("UPDATE reservations SET status='checked_in',checked_out_at=NULL WHERE id=$1",[f.reservation]);
+      await pool!.query("INSERT INTO reservation_changelog(reservation_id,tipo,descripcion) VALUES($1,'undo_checkout','Synthetic reversal fixture')",[f.reservation]);
       expect((await request(`/api/billing/reservations/${f.reservation}/pending-operation`)).body.pending).toBeNull();
       expect((await request(`/api/billing/reservations/${f.reservation}/operations/${f.op}/reception-status`)).body)
         .toMatchObject({recoveryComplete:true,departureReopened:true});
       expect(mocks.authorize).toHaveBeenCalledTimes(1);
-    } finally { await pool!.query('DELETE FROM reservations WHERE id=$1',[f.reservation]); }
+    } finally {
+      await pool!.query('DELETE FROM reservation_changelog WHERE reservation_id=$1',[f.reservation]);
+      await pool!.query('DELETE FROM reservations WHERE id=$1',[f.reservation]);
+    }
   }));
 
   it("no reutiliza la operación con otros datos ni con otro ambiente", async () => fixture(async f => {
