@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Table,
   TableBody,
@@ -22,7 +23,16 @@ import type {
   GroupWithDetails,
   GroupRoomBlockWithDetails,
 } from "@shared/schema";
-import { DoorOpen, Trash2 } from "lucide-react";
+import { ChevronRight, DoorOpen, Trash2 } from "lucide-react";
+
+function passengerNames(groupId: string, reservation: GroupWithDetails["reservations"][number]) {
+  const guest = reservation.guest;
+  if (guest?.codigo === `GROUP-${groupId}`) return { short: "Sin pasajero", full: "Sin pasajero" };
+  return {
+    short: guest?.lastName?.trim() || guest?.firstName?.trim() || "Sin pasajero",
+    full: [guest?.lastName, guest?.firstName].filter(Boolean).join(" ") || "Sin pasajero",
+  };
+}
 
 export function GroupBlocksTable({
   group,
@@ -68,88 +78,96 @@ export function GroupBlocksTable({
   return (
     <div className="space-y-4">
       {summary.unresolved.length > 0 && (
-        <section
-          aria-label="Asignaciones por revisar"
-          className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20"
-        >
-          <p className="font-medium text-amber-900 dark:text-amber-200">
-            {summary.unresolved.length} asignación(es) por ubicar en su bloque
-          </p>
-          <p className="mb-3 text-sm text-muted-foreground">
-            Elegí el bloque correcto según la categoría y las fechas. Esto
-            identifica la asignación y conserva la reserva y su cuenta.
-          </p>
-          {summary.unresolved.map(({ reservation }) => {
-            const full = group.reservations.find(
-              (r) => r.id === reservation.id,
-            )!;
-            const candidates = compatibleGroupBlocks(group, reservation, false);
-            return (
-              <div
-                key={reservation.id}
-                className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background/80 p-3"
-                data-testid={`block-review-${reservation.id}`}
+        <Collapsible asChild>
+          <section
+            aria-label="Asignaciones por revisar"
+            className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-800 dark:bg-amber-950/20"
+          >
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="group flex min-h-9 w-full items-center gap-2 rounded-md text-left text-sm font-medium text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-200"
               >
-                <div className="min-w-0 flex-1 text-sm">
-                  <p className="font-medium">
-                    Hab. {full.room?.roomNumber || "Sin asignar"} ·{" "}
-                    {[full.guest?.lastName, full.guest?.firstName]
-                      .filter(Boolean)
-                      .join(" ") || "Sin pasajero"}
-                  </p>
-                  <p className="text-muted-foreground">
-                    {formatDateAR(reservation.checkInDate)} →{" "}
-                    {formatDateAR(reservation.checkOutDate)}
-                  </p>
-                </div>
-                <select
-                  aria-label={`Bloque de la reserva ${reservation.id}`}
-                  className="h-9 max-w-full rounded-md border bg-background px-2 text-sm"
-                  value={choices[reservation.id] || ""}
-                  onChange={(e) =>
-                    setChoices((old) => ({
-                      ...old,
-                      [reservation.id]: e.target.value,
-                    }))
-                  }
-                >
-                  <option value="">Seleccionar bloque…</option>
-                  {candidates.map((b) => {
-                    const item = summary.byBlock[b.id];
-                    return (
-                      <option key={b.id} value={b.id}>
-                        Bloque{" "}
-                        {group.blocks.findIndex((block) => block.id === b.id) +
-                          1}{" "}
-                        · {formatDateAR(item.checkInDate)} →{" "}
-                        {formatDateAR(item.checkOutDate)} ·{" "}
-                        {item.reservations.length}/{b.quantity}
-                      </option>
-                    );
-                  })}
-                </select>
-                <Button
-                  size="sm"
-                  disabled={!choices[reservation.id] || associate.isPending}
-                  onClick={() =>
-                    associate.mutate({
-                      reservationId: reservation.id,
-                      blockId: choices[reservation.id],
-                    })
-                  }
-                >
-                  Ubicar en bloque
-                </Button>
-                {!candidates.length && (
-                  <p className="w-full text-xs text-amber-800">
-                    No hay un bloque compatible. Revisá las fechas y la
-                    categoría del contrato.
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </section>
+                <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                {summary.unresolved.length} {summary.unresolved.length === 1 ? "asignación" : "asignaciones"} por ubicar en su bloque
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-2">
+              <p className="mb-3 text-sm text-muted-foreground">
+                Elegí el bloque correcto según la categoría y las fechas. Esto
+                identifica la asignación y conserva la reserva y su cuenta.
+              </p>
+              {summary.unresolved.map(({ reservation }) => {
+                const full = group.reservations.find(
+                  (r) => r.id === reservation.id,
+                )!;
+                const candidates = compatibleGroupBlocks(group, reservation, false);
+                return (
+                  <div
+                    key={reservation.id}
+                    className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border bg-background/80 p-3"
+                    data-testid={`block-review-${reservation.id}`}
+                  >
+                    <div className="min-w-0 flex-1 text-sm">
+                      <p className="truncate text-xs font-medium" title={passengerNames(group.id, full).full}>
+                        Hab. {full.room?.roomNumber || "Sin asignar"} ·{" "}
+                        {passengerNames(group.id, full).short}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDateAR(reservation.checkInDate)} →{" "}
+                        {formatDateAR(reservation.checkOutDate)}
+                      </p>
+                    </div>
+                    <select
+                      aria-label={`Bloque de la reserva ${reservation.id}`}
+                      className="h-9 max-w-full rounded-md border bg-background px-2 text-sm"
+                      value={choices[reservation.id] || ""}
+                      onChange={(e) =>
+                        setChoices((old) => ({
+                          ...old,
+                          [reservation.id]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Seleccionar bloque…</option>
+                      {candidates.map((b) => {
+                        const item = summary.byBlock[b.id];
+                        return (
+                          <option key={b.id} value={b.id}>
+                            Bloque{" "}
+                            {group.blocks.findIndex((block) => block.id === b.id) +
+                              1}{" "}
+                            · {formatDateAR(item.checkInDate)} →{" "}
+                            {formatDateAR(item.checkOutDate)} ·{" "}
+                            {item.reservations.length}/{b.quantity}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <Button
+                      size="sm"
+                      disabled={!choices[reservation.id] || associate.isPending}
+                      onClick={() =>
+                        associate.mutate({
+                          reservationId: reservation.id,
+                          blockId: choices[reservation.id],
+                        })
+                      }
+                    >
+                      Ubicar en bloque
+                    </Button>
+                    {!candidates.length && (
+                      <p className="w-full text-xs text-amber-800">
+                        No hay un bloque compatible. Revisá las fechas y la
+                        categoría del contrato.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </CollapsibleContent>
+          </section>
+        </Collapsible>
       )}
       <div className="overflow-x-auto rounded-xl border">
         <Table>
@@ -174,9 +192,10 @@ export function GroupBlocksTable({
                   key={block.id}
                   data-testid={`row-block-${block.id}`}
                   className={
-                    review || item.pendingRooms > 0
+                    "[&>td]:align-top " +
+                    (review || item.pendingRooms > 0
                       ? "bg-amber-50/30 dark:bg-amber-950/10"
-                      : ""
+                      : "")
                   }
                 >
                   <TableCell>
@@ -233,39 +252,52 @@ export function GroupBlocksTable({
                     )}
                   </TableCell>
                   <TableCell>
-                    <div className="space-y-1">
-                      {item.reservations.map((r) => {
-                        const full = group.reservations.find(
-                          (res) => res.id === r.id,
-                        )!;
-                        const name =
-                          full.guest?.codigo === `GROUP-${group.id}`
-                            ? "Sin pasajero"
-                            : [full.guest?.lastName, full.guest?.firstName]
-                                .filter(Boolean)
-                                .join(" ") || "Sin pasajero";
-                        return (
-                          <a
-                            className="block text-sm text-primary hover:underline"
-                            key={r.id}
-                            href={`/reservations?view=${r.id}`}
-                            target="_blank"
-                            rel="noreferrer"
+                    {item.reservations.length > 0 ? (
+                      <Collapsible className="w-44 max-w-full">
+                        <CollapsibleTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="group h-8 gap-1 px-0 text-xs font-normal text-primary hover:bg-transparent hover:underline"
+                            aria-label={`Habitaciones y pasajeros del bloque ${index + 1}`}
                           >
-                            Hab. {full.room?.roomNumber || "Sin asignar"} ·{" "}
-                            {name}
-                            {r.status === "checked_out" ? " · Salida" : ""}
-                          </a>
-                        );
-                      })}
-                      {!item.reservations.length && (
-                        <span className="text-sm text-muted-foreground">
-                          {review
-                            ? "Asignación por identificar"
-                            : "Sin habitaciones asignadas"}
-                        </span>
-                      )}
-                    </div>
+                            <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                            {item.reservations.length} {item.reservations.length === 1 ? "habitación" : "habitaciones"}
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="space-y-0.5 pt-1">
+                          {item.reservations.map((r) => {
+                            const full = group.reservations.find(
+                              (res) => res.id === r.id,
+                            )!;
+                            const name = passengerNames(group.id, full);
+                            const fullLabel = `Hab. ${full.room?.roomNumber || "Sin asignar"} · ${name.full}${r.status === "checked_out" ? " · Salida" : ""}`;
+                            return (
+                              <a
+                                className="block truncate text-xs leading-5 text-primary hover:underline"
+                                key={r.id}
+                                href={`/reservations?view=${r.id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={fullLabel}
+                                aria-label={fullLabel}
+                              >
+                                Hab. {full.room?.roomNumber || "Sin asignar"} ·{" "}
+                                {name.short}
+                                {r.status === "checked_out" ? " · Salida" : ""}
+                              </a>
+                            );
+                          })}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        {review
+                          ? "Asignación por identificar"
+                          : "Sin habitaciones asignadas"}
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <p className="text-sm">
