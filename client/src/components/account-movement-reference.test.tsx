@@ -27,3 +27,20 @@ it("conserva el nombre histórico cuando falta el perfil y muestra una sola fech
   render(<AccountMovementReference movement={{ ...base, guestName: "Pérez, Ana", reservationDisplay: { guestName: null, checkInDate: "2026-11-20", checkOutDate: "2026-11-20" } }} />);
   expect(screen.getByText("Pérez, Ana")).toBeInTheDocument(); expect(screen.getByText("Estadía: 20/11/2026")).toBeInTheDocument();
 });
+
+it("muestra tipo y número del comprobante antes que la reserva, sin el identificador interno", () => {
+  const { container } = render(<AccountMovementReference movement={{ ...base,
+    invoiceDisplay: { id: 1956, type: "FA", pointOfSale: 5, number: 123, status: "emitida" },
+    reservationDisplay: { guestName: "Pérez, Ana", checkInDate: "2026-11-20", checkOutDate: "2026-11-22" },
+  }} />);
+  expect(container.querySelector('p')?.textContent).toBe('Factura A 00005-00000123');
+  expect(screen.getByText('Pérez, Ana')).toBeInTheDocument();
+  expect(container.textContent).not.toContain('credit-operation');
+});
+it("muestra el comprobante sin reserva y advierte si fue anulado", () => {
+  render(<AccountMovementReference movement={{ ...base, reservationId: null,
+    invoiceDisplay: { id: 1957, type: "NCB", pointOfSale: 21, number: 51, status: "anulada" },
+  }} />);
+  expect(screen.getByText('Nota de crédito B 00021-00000051 (anulada)')).toBeInTheDocument();
+  expect(screen.queryByText('Sin reserva vinculada')).not.toBeInTheDocument();
+});

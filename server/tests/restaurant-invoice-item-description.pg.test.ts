@@ -65,9 +65,10 @@ async function makeOpenOrderWithItem(menuItemId: string, notes: string | null): 
 async function cleanup(orderId: string | undefined, invoiceId: number | undefined, categoryId: string | undefined) {
   if (invoiceId) await pool!.query("DELETE FROM sales_invoices WHERE id = $1", [invoiceId]);
   if (orderId) {
-    await pool!.query("DELETE FROM cash_movements WHERE source_type = 'restaurant_order' AND source_id = $1", [orderId]);
+    await pool!.query("DELETE FROM cash_movements WHERE source_type IN ('restaurant_order', 'restaurant_partial', 'restaurant_split') AND source_id = $1", [orderId]);
     await pool!.query(`DELETE FROM folio_movements WHERE folio_id IN (SELECT id FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1)`, [orderId]);
     await pool!.query("DELETE FROM folios WHERE entity_type = 'restaurant_order' AND entity_id = $1", [orderId]);
+    await pool!.query("DELETE FROM order_splits WHERE order_id = $1", [orderId]);
     await pool!.query("DELETE FROM order_items WHERE order_id = $1", [orderId]);
     await pool!.query("DELETE FROM restaurant_orders WHERE id = $1", [orderId]);
   }
@@ -98,6 +99,90 @@ suite("PostgreSQL real: descripción de ítem de Restaurante en la factura", () 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
     await pool?.end();
+  });
+
+  it("split: factura solo el concepto personalizado y conserva los importes de ambas partes, Caja y Folio", async () => {
+    if (!pool) return;
+    let orderId: string | undefined, categoryId: string | undefined;
+    const invoiceIds: number[] = [];
+    try {
+      const menu = await makeMenuItem("Fuera de Menú");
+      categoryId = menu.categoryId;
+      const order = await makeOpenOrderWithItem(menu.itemId, "[Cena romántica]");
+      orderId = order.orderId;
+      await pool.query("UPDATE restaurant_orders SET total='800000.00' WHERE id=$1", [orderId]);
+      await pool.query("UPDATE order_items SET quantity=10,unit_price='80000.00',subtotal='800000.00' WHERE id=$1", [order.itemId]);
+      const splits = (await pool.query(
+        "INSERT INTO order_splits(order_id,split_number,amount) VALUES($1,1,'240000.00'),($1,2,'560000.00') RETURNING id,split_number,amount",
+        [orderId],
+      )).rows.sort((a, b) => a.split_number - b.split_number);
+
+      for (const [index, split] of splits.entries()) {
+        const method = index === 0 ? "tarjeta_credito" : "mercadopago";
+        const paid = await request("PATCH", `/api/restaurant/orders/${orderId}/split/${split.id}`, {
+          method, receiptType: "factura_b", emitInvoice: true,
+        });
+        expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+        const invoiceId = Number(paid.body.invoiceId);
+        invoiceIds.push(invoiceId);
+        expect(invoiceId).toBeGreaterThan(0);
+        expect(paid.body.allPaid).toBe(index === 1);
+        const invoice = (await pool.query("SELECT items,monto_total,observaciones FROM sales_invoices WHERE id=$1", [invoiceId])).rows[0];
+        expect(invoice.monto_total).toBe(split.amount);
+        expect(invoice.items).toHaveLength(1);
+        expect(invoice.items[0]).toMatchObject({ descripcion: "Cena romántica", cantidad: 1, subtotal: Number(split.amount) });
+        expect(invoice.observaciones).toContain(`Parte ${split.split_number}`);
+        expect(invoice.observaciones).toContain("ORD-TEST-");
+        const cash = (await pool.query("SELECT amount,payment_method FROM cash_movements WHERE source_type='restaurant_split' AND source_id=$1 ORDER BY amount::numeric", [orderId])).rows;
+        expect(cash).toHaveLength(index + 1);
+        expect(cash[index]).toMatchObject({ amount: split.amount, payment_method: method });
+        const folio = (await pool.query("SELECT total_charges,total_payments,balance FROM folios WHERE entity_type='restaurant_order' AND entity_id=$1", [orderId])).rows[0];
+        const collected = index === 0 ? "240000.00" : "800000.00";
+        expect(folio).toMatchObject({ total_charges: collected, total_payments: collected, balance: "0.00" });
+        const remaining = (await pool.query("SELECT coalesce(sum(amount::numeric),0)::numeric(14,2)::text AS amount FROM order_splits WHERE order_id=$1 AND is_paid='false'", [orderId])).rows[0];
+        expect(remaining.amount).toBe(index === 0 ? "560000.00" : "0.00");
+      }
+
+      const duplicate = await request("PATCH", `/api/restaurant/orders/${orderId}/split/${splits[0].id}`, {
+        method: "tarjeta_credito", receiptType: "factura_b", emitInvoice: true,
+      });
+      expect(duplicate.status).toBe(409);
+      expect((await pool.query("SELECT count(*)::int AS count FROM cash_movements WHERE source_type='restaurant_split' AND source_id=$1", [orderId])).rows[0].count).toBe(2);
+    } finally {
+      for (const id of invoiceIds) if (id) await pool.query("DELETE FROM sales_invoices WHERE id=$1", [id]);
+      await cleanup(orderId, undefined, categoryId);
+    }
+  });
+
+  it("split: reúne conceptos reales sin repetirlos y excluye consumos anulados o sin importe", async () => {
+    if (!pool) return;
+    let orderId: string | undefined, categoryId: string | undefined, invoiceId: number | undefined;
+    try {
+      const menu = await makeMenuItem("Cena para dos");
+      categoryId = menu.categoryId;
+      const order = await makeOpenOrderWithItem(menu.itemId, null);
+      orderId = order.orderId;
+      await pool.query(
+        `INSERT INTO order_items(order_id,menu_item_id,quantity,unit_price,subtotal,notes,status) VALUES
+        ($1,$2,1,'121.00','121.00',NULL,'pending'),
+        ($1,$2,1,'121.00','121.00','[Postre]','pending'),
+        ($1,$2,1,'999.00','999.00','[Producto anulado]','cancelled'),
+        ($1,$2,1,'0.00','0.00','[Invitación]','pending')`, [orderId, menu.itemId]);
+      await pool.query("UPDATE restaurant_orders SET total='363.00' WHERE id=$1", [orderId]);
+      const split = (await pool.query("INSERT INTO order_splits(order_id,split_number,amount) VALUES($1,1,'121.00'),($1,2,'242.00') RETURNING id,split_number", [orderId])).rows.find((s) => s.split_number === 1);
+      const paid = await request("PATCH", `/api/restaurant/orders/${orderId}/split/${split.id}`, {
+        method: "efectivo", receiptType: "factura_b", emitInvoice: true,
+      });
+      expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+      invoiceId = Number(paid.body.invoiceId);
+      const invoice = (await pool.query("SELECT items,monto_total FROM sales_invoices WHERE id=$1", [invoiceId])).rows[0];
+      expect(invoice.monto_total).toBe("121.00");
+      expect(invoice.items).toHaveLength(1);
+      expect(invoice.items[0].descripcion.split("; ").sort()).toEqual(["Cena para dos", "Postre"]);
+      expect(invoice.items[0].cantidad).toBe(1);
+    } finally {
+      await cleanup(orderId, invoiceId, categoryId);
+    }
   });
 
   it("pay-items: sin override usa el nombre real del ítem de menú (antes mandaba 'Ítem restaurante' siempre)", async () => {

@@ -12,7 +12,7 @@ export function ClosedReservationBilling({ reservation }: { reservation: Reserva
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<"menu" | "consumption">("menu");
   const [correction, setCorrection] = useState(false);
-  const [invoice, setInvoice] = useState(false);
+  const [invoice, setInvoice] = useState<"pending" | "consumption" | null>(null);
   const billing = reservation.status === "checked_out" && hasPermission("sidebar:/billing");
   const correct = hasPermission("api:billing:nc-reconciliation");
   if (!billing && !correct) return null;
@@ -23,6 +23,9 @@ export function ClosedReservationBilling({ reservation }: { reservation: Reserva
       <DialogDescription>{reservation.guest?.lastName} {reservation.guest?.firstName} · Hab. {reservation.room?.roomNumber} · Estadía cerrada</DialogDescription>
     </DialogHeader>
       {section === "menu" ? <div className="grid gap-3 sm:grid-cols-2">
+        {billing && <Button type="button" variant="outline" className="h-auto min-h-24 whitespace-normal flex-col items-start text-left p-4" onClick={() => { setOpen(false); setInvoice("pending"); }}>
+          <span className="font-semibold">Facturar pendientes de la estadía</span><span className="text-sm font-normal">Facturar alojamiento y cargos que quedaron sin facturar. Conserva los cobros y el check-out.</span>
+        </Button>}
         {billing && reservation.status === "checked_out" && <Button type="button" variant="outline" className="h-auto min-h-24 whitespace-normal flex-col items-start text-left p-4" onClick={() => setSection("consumption")}>
           <span className="font-semibold">Consumos posteriores</span><span className="text-sm font-normal">Agregar consumos, facturarlos y cobrar o enviar a cuenta corriente.</span>
         </Button>}
@@ -31,10 +34,10 @@ export function ClosedReservationBilling({ reservation }: { reservation: Reserva
         </Button>}
       </div> : <>
         <Button type="button" variant="ghost" size="sm" onClick={() => setSection("menu")}>Volver a la cuenta</Button>
-        <PostCheckoutConsumption key={reservation.id} reservationId={reservation.id} onInvoice={() => { setOpen(false); setInvoice(true); }} />
+        <PostCheckoutConsumption key={reservation.id} reservationId={reservation.id} onInvoice={() => { setOpen(false); setInvoice("consumption"); }} />
       </>}
     </DialogContent></Dialog>
     {correction && <ClosedReservationCorrection key={reservation.id} reservationId={reservation.id} open={correction} onOpenChange={setCorrection} />}
-    {invoice && <PrefacturaDialog open={invoice} onClose={() => { setInvoice(false); setOpen(true); setSection("consumption"); }} reservationId={reservation.id} reservation={reservation} mode="billing" postCheckoutOnly />}
+    {invoice && <PrefacturaDialog open onClose={() => { setSection(invoice === "consumption" ? "consumption" : "menu"); setInvoice(null); setOpen(true); }} reservationId={reservation.id} reservation={reservation} mode="billing" postCheckoutOnly={invoice === "consumption"} closedStayOnly={invoice === "pending"} />}
   </>;
 }
