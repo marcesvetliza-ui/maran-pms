@@ -1,3 +1,4 @@
+import { assertClosedStayInvoiceRequest } from "./closedStayInvoice";
 import { assertRoomBatchInvoice } from '../groupRoomInvoiceBatch';
 import { groupRoomAdvanceInvoicePreview } from './groupRoomAdvanceInvoice';
 import {isStandaloneSpaCashReceipt,settleStandaloneSpaCashReceipt} from './spaReceiptSettlement';
@@ -1321,7 +1322,7 @@ export function registerBillingRoutes(app: Express) {
       const reservationId = reservaId === undefined || reservaId === null
         ? ""
         : String(reservaId).trim();
-      if (reservationId && req.body.groupDocumentationOnly!==true) {
+      if (reservationId && req.body.groupDocumentationOnly!==true && req.body.closedStayDocumentationOnly!==true) {
         const invoiceTotal = calcularMontos(items, tipoComprobante).montoTotal;
         validateReservationInvoicePaymentDetail(normalizedCashFormaPagoDetalle, invoiceTotal);
       }
@@ -1331,13 +1332,17 @@ export function registerBillingRoutes(app: Express) {
       let individualGroupId:string|undefined;
       let individualGroupPayments:any[]|undefined;
       const groupDocumentationOnly=req.body.groupDocumentationOnly===true;
+      const closedStayDocumentationOnly = req.body.closedStayDocumentationOnly === true;
+      if (closedStayDocumentationOnly && !hasPermission(String(req.user?.role || ""), "sidebar:/billing")) {
+        return res.status(403).json({ error: "No tenés permiso para facturar la estadía." });
+      }
       if(groupDocumentationOnly){
         if(!reservationId||groupId||!['FA','FB','FC','FM','FMB'].includes(tipoComprobante)||req.body.prefacturaRecovery?.version!==2||req.body.prefacturaRecovery.payments?.length||rawPaymentId||cashArea||cashFormaPago||reservationSettlementMethod||normalizedCashFormaPagoDetalle?.length||!creditOperationId||creditReapplications?.length||ordinaryAdvanceApplications?.length)throw new FolioInvoiceValidationError('La documentación grupal no admite cobros, aplicaciones de crédito ni traslados de deuda.',400);
         const membership=(await db.execute(sql`SELECT group_id FROM group_reservation_links WHERE reservation_id=${reservationId}`)).rows as any[];
         if(membership.length!==1)throw new FolioInvoiceValidationError('La reserva debe pertenecer a un único grupo.',409);
         individualGroupId=String(membership[0].group_id);individualGroupPayments=[];
       }
-      if (reservationId && !paymentId && !groupDocumentationOnly) {
+      if (reservationId && !paymentId && !groupDocumentationOnly && !closedStayDocumentationOnly) {
         const directSettlementMethods = new Set([
           "efectivo", "cash", "tarjeta", "tarjeta_debito", "tarjeta_credito",
           "debito", "transferencia", "mercadopago", "cheque", "echeq",
@@ -1571,6 +1576,7 @@ export function registerBillingRoutes(app: Express) {
       let reusedExistingClaim = false;
       let paymentRecoveryInvoiceId: number | undefined;
       const emitInvoice = async () => {
+        if (closedStayDocumentationOnly) assertClosedStayInvoiceRequest(await storage.getReservation(reservationId), req.body);
         await assertRoomBatchInvoice(req.body);
         if (groupRoomAdvance) {
           // Recover the receipt's exact document before recalculating mutable
@@ -1837,6 +1843,7 @@ export function registerBillingRoutes(app: Express) {
               : {}),
           };
           creditIntent = {
+            ...(closedStayDocumentationOnly ? { closedStayDocumentationOnly: true } : {}),
             ...(groupDocumentationOnly?{groupDocumentationOnly:true,...(req.body.groupRoomInvoiceBatchId?{groupRoomInvoiceBatchId:req.body.groupRoomInvoiceBatchId}:{})}:{}),
             ...(individualGroupId&&!groupDocumentationOnly?{individualGroupSettlement:{groupId:individualGroupId,payments:individualGroupPayments,acknowledgeUnassignedAdvance:req.body.acknowledgeUnassignedAdvance===true}}:{}),
             ...(req.body.correctionOriginalInvoiceId ? {correctionOriginalInvoiceId:Number(req.body.correctionOriginalInvoiceId)} : {}),

@@ -1,3 +1,6 @@
+import { AccountMovementReference } from "@/components/account-movement-reference";
+import { accountMovementReferenceHtml } from "@/lib/account-movement-reference";
+import type { AccountMovementReferenceData } from "@shared/account-movement-reference";
 import { CcCorrectAllocationsAction } from "@/components/cc-correct-allocations-action";
 import { formatDisplayDate } from "@shared/date-display";
 import { useState } from "react";
@@ -62,7 +65,7 @@ type Movement = {
 
 type ExpandedCard = "companies" | "agencies" | "guests" | "all" | null;
 
-type AccountMovement = {
+type AccountMovement = AccountMovementReferenceData & {
   id: string;
   entityType: string;
   entityId: string;
@@ -130,7 +133,7 @@ function printEntityStatement(entityName: string, entityType: string, movements:
 
   const rows = movements.map((m) => {
     const amt = parseFloat(m.amount);
-    const ref = m.reservationCode ?? m.guestName ?? m.reference ?? "—";
+    const ref = accountMovementReferenceHtml(m);
     const color = amt > 0 ? "#dc2626" : "#16a34a";
     const typeColor = m.type === "cargo" ? "#dc2626" : m.type === "pago" ? "#16a34a" : "#2563eb";
     return `
@@ -398,7 +401,7 @@ function EntityMovementsInline({
             <th className="text-left px-3 py-1.5 font-medium">Tipo</th>
             <th className="text-left px-3 py-1.5 font-medium">Área</th>
             <th className="text-left px-3 py-1.5 font-medium">Descripción</th>
-            <th className="text-left px-3 py-1.5 font-medium">Reserva / Ref.</th>
+            <th className="text-left px-3 py-1.5 font-medium">Comprobante / Reserva</th>
             <th className="text-right px-3 py-1.5 font-medium">Importe</th>
             <th className="w-8"></th>
           </tr>
@@ -458,13 +461,7 @@ function EntityMovementsInline({
                 </td>
                 <td className="px-3 py-1.5 max-w-[200px] truncate">{m.description}</td>
                 <td className="px-3 py-1.5 text-muted-foreground">
-                  {m.reservationCode ? (
-                    <span className="font-mono">{m.reservationCode}</span>
-                  ) : m.guestName ? (
-                    m.guestName
-                  ) : (
-                    m.reference ?? "—"
-                  )}
+                  <AccountMovementReference movement={m} />
                 </td>
                 <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${isDebt ? "text-red-600" : "text-green-600"}`}>
                   <div>{fmtMoney(m.amount)}</div>

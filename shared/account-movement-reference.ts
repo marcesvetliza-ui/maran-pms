@@ -8,4 +8,23 @@ export type AccountMovementReservationDisplay = {
 };
 export type AccountMovementWithReservation = AccountMovement & {
   reservationDisplay?: AccountMovementReservationDisplay;
+  invoiceDisplay?: AccountMovementInvoiceDisplay;
+};
+
+/** Display metadata only. Never replaces the ledger's durable reference. */
+export type AccountMovementInvoiceDisplay = {
+  id: number;
+  type: string;
+  pointOfSale: number;
+  number: number;
+  status: string;
+};
+
+export type AccountMovementReferenceData = {
+  reservationDisplay?: AccountMovementReservationDisplay;
+  invoiceDisplay?: AccountMovementInvoiceDisplay;
+  guestName?: string | null;
+  reservationCode?: string | null;
+  reservationId?: string | null;
+  reference?: string | null;
 };

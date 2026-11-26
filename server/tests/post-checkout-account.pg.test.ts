@@ -66,6 +66,9 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
       for (const [table, column] of [["account_movements", "reservation_id"], ["billing_operations", "owner_id"], ["sales_invoices", "reserva_id"], ["payments", "reservation_id"], ["charges", "reservation_id"], ["reservation_changelog", "reservation_id"], ["audit_logs", "entity_id"]]) await pool.query(`DELETE FROM ${table} WHERE ${column}=$1`, [f.id]);
       await pool.query("DELETE FROM folio_movements WHERE folio_id IN(SELECT id FROM folios WHERE entity_id=$1)", [f.id]);
       await pool.query("DELETE FROM folios WHERE entity_id=$1", [f.id]);
+      await pool.query("DELETE FROM group_invoices WHERE group_id=$1", [f.id]);
+      await pool.query("DELETE FROM group_reservation_links WHERE group_id=$1", [f.id]);
+      await pool.query("DELETE FROM groups WHERE id=$1", [f.id]);
       await pool.query("DELETE FROM reservations WHERE id IN($1,$2)", [f.id, f.other]);
       await pool.query("DELETE FROM rooms WHERE id=$1", [f.room]); await pool.query("DELETE FROM room_types WHERE id=$1", [f.type]); await pool.query("DELETE FROM guests WHERE id IN($1,$2)", [f.guest,f.otherGuest]); await pool.query("DELETE FROM cash_shifts WHERE id=$1", [f.shift]);
     }
@@ -140,5 +143,81 @@ describe.skipIf(!enabled)("financial work after departure is independent of curr
     expect((await request(`/api/reservations/${f.id}/undo-checkout`, {})).status).toBe(409);
     await pool.query("DELETE FROM reservations WHERE id=$1", [f.other]);
     expect((await request(`/api/reservations/${f.id}/undo-checkout`, {})).status).toBe(200);
+  });
+
+  async function pendingRequest(f: any, grouped = false, partial = false) {
+    // Fixtures model departure with an existing receipt, but no fiscal document.
+    // The application must preserve that receipt rather than applying it again.
+    await pool.query("UPDATE payments SET invoice_ref=NULL WHERE id=$1", [`${f.id}-paid`]);
+    await pool.query("DELETE FROM sales_invoices WHERE id=$1", [f.oldInvoice]);
+    await pool.query("INSERT INTO charges(id,reservation_id,description,amount,category,date,status) VALUES($1,$2,'Cochera anterior',21,'otros','2026-11-17','active')", [`${f.id}-charge`, f.id]);
+    if (grouped) {
+      await pool.query("INSERT INTO groups(id,group_code,name,check_in_date,check_out_date,status,created_at) VALUES($1::text,$1::text,'Grupo sintético','2026-11-10','2026-11-18','in_house',NOW())", [f.id]);
+      await pool.query("INSERT INTO group_reservation_links(group_id,reservation_id) VALUES($1,$2)", [f.id, f.id]);
+    }
+    if (partial) await pool.query(`INSERT INTO sales_invoices(tipo_comprobante,punto_venta,numero,fecha_emision,cliente_razon_social,cliente_condicion_iva,monto_neto,monto_total,estado,reserva_id,source_charge_ids,source_charge_amounts,items)
+      VALUES('FB',998,floor(random()*100000000)::int,'2026-11-18','Anterior','Consumidor Final',50,50,'emitida',$1,'["accommodation"]','{"accommodation":50}','[]')`, [f.id]);
+    const sources = { accommodation: partial ? 50 : 100, [`${f.id}-charge`]: 21 };
+    const amount = Object.values(sources).reduce((sum, value) => sum + value, 0);
+    return { tipoComprobante: 'FB', cliente: { razonSocial: 'Huésped Anterior', condicionIva: 'Consumidor Final', dni: '12345678' },
+      items: [{ descripcion: 'Alojamiento y cochera pendientes', cantidad: 1, precioUnitario: amount, subtotalNeto: Number((amount / 1.21).toFixed(2)), subtotal: amount, alicuotaIva: '21' }],
+      reservaId: f.id, creditOperationId: randomUUID(), closedStayDocumentationOnly: true,
+      ...(grouped ? { groupDocumentationOnly: true, reservationBillingAction: 'invoice_only' } : {}),
+      sourceChargeIds: Object.keys(sources), sourceChargeAmounts: sources, creditReapplications: [], ordinaryAdvanceApplications: [],
+      prefacturaRecovery: { version: 2, payments: [], checkoutRequested: false },
+    };
+  }
+  async function financialState(f: any) {
+    return { ...await snapshots(f),
+      payments: (await pool.query('SELECT * FROM payments WHERE reservation_id=$1 ORDER BY id', [f.id])).rows,
+      account: (await pool.query('SELECT * FROM account_movements WHERE reservation_id=$1 ORDER BY id', [f.id])).rows,
+      charges: (await pool.query('SELECT * FROM charges WHERE reservation_id=$1 ORDER BY id', [f.id])).rows,
+      cash: (await pool.query('SELECT * FROM cash_movements WHERE source_id=$1 ORDER BY id', [f.id])).rows,
+    };
+  }
+  it.each([false,true])('invoices original pending lodging after departure, with no collection or room changes (group=%s)', async grouped => {
+    const f = await fixture(), body = await pendingRequest(f, grouped), before = await financialState(f);
+    const concurrent = await Promise.all([request('/api/billing/invoices', body), request('/api/billing/invoices', body)]);
+    for (const result of concurrent) expect(result.status, JSON.stringify(result.body)).toBeLessThan(300);
+    expect(concurrent[0].body.id).toBe(concurrent[1].body.id);
+    const invoiceId = concurrent[0].body.id;
+    const row = (await pool.query('SELECT * FROM sales_invoices WHERE id=$1', [invoiceId])).rows[0];
+    expect(row.monto_total).toBe('121.00'); expect(row.source_charge_amounts).toEqual(body.sourceChargeAmounts);
+    expect(row.credit_reapplication_intent).toMatchObject({ closedStayDocumentationOnly: true, settlement: { destination: 'none', status: 'completed' } });
+    expect(row.cash_forma_pago).toBeNull(); expect(row.cash_forma_pago_detalle).toBeNull();
+    expect(await financialState(f)).toEqual(before);
+    // A different request cannot invoice those same sources a second time.
+    const duplicate = await request('/api/billing/invoices', { ...body, creditOperationId: randomUUID() });
+    expect(duplicate.status, JSON.stringify(duplicate.body)).toBe(409);
+    expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1', [f.id])).rows).toHaveLength(1);
+    expect(await financialState(f)).toEqual(before);
+  });
+  it('invoices only the remaining value of original charges when part was already documented', async () => {
+    const f = await fixture(), body = await pendingRequest(f, false, true), before = await financialState(f);
+    const result = await request('/api/billing/invoices', body);
+    expect(result.status, JSON.stringify(result.body)).toBe(201);
+    expect((await pool.query('SELECT monto_total FROM sales_invoices WHERE id=$1', [result.body.id])).rows[0].monto_total).toBe('71.00');
+    expect(await financialState(f)).toEqual(before);
+  });
+  it('rejects payments, checkout changes and an open/cancelled stay before issuing a document', async () => {
+    const f = await fixture(), body = await pendingRequest(f), before = await financialState(f);
+    role = 'restaurant';
+    try { expect((await request('/api/billing/invoices', body)).status).toBe(403); }
+    finally { role = 'admin'; }
+    const mutations = [
+      { cashFormaPago: 'efectivo', cashFormaPagoDetalle: [{ method: 'efectivo', amount: 121 }] },
+      { ordinaryAdvanceApplications: [{ paymentId: `${f.id}-paid`, amount: 100 }] },
+      { prefacturaRecovery: { version: 2, payments: [], checkoutRequested: true } },
+    ];
+    for (const mutation of mutations) {
+      const result = await request('/api/billing/invoices', { ...body, ...mutation, creditOperationId: randomUUID() });
+      expect(result.status, JSON.stringify(result.body)).toBe(400);
+    }
+    expect(await financialState(f)).toEqual(before);
+    for (const status of ['checked_in', 'cancelled']) {
+      await pool.query('UPDATE reservations SET status=$2 WHERE id=$1', [f.id, status]);
+      expect((await request('/api/billing/invoices', { ...body, creditOperationId: randomUUID() })).status).toBe(409);
+    }
+    expect((await pool.query('SELECT id FROM sales_invoices WHERE reserva_id=$1', [f.id])).rows).toHaveLength(0);
   });
 });

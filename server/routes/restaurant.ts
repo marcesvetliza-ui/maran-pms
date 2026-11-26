@@ -1333,16 +1333,29 @@ export function registerRestaurantRoutes(app: Express) {
         try {
           const tipo = receiptType === "factura_a" ? "FA" : receiptType === "factura_b" ? "FB" : "FC";
           const condicion = vatCondition || (receiptType === "factura_a" ? "responsable_inscripto" : "consumidor_final");
-          const splitOrder = order;
+          // A split divides an amount, not product quantities. Keep its one
+          // financial line and describe the actual consumption on that line.
+          const splitItems = await storage.getOrderItems(order.id);
+          const conceptNames = await Promise.all(splitItems
+            .filter((item) => item.status !== "cancelled" && Number(item.subtotal) > 0)
+            .map(async (item) => {
+              const customName = (item.notes || "").match(/^\[(.+?)\]/)?.[1]?.trim();
+              if (customName) return customName;
+              return (await storage.getMenuItem(item.menuItemId))?.name?.trim() || "Consumos de restaurante";
+            }));
+          const description = [...new Set(conceptNames)].join("; ") || "Consumos de restaurante";
           await queueRestaurantInvoice({
             tipoComprobante: tipo as "FA" | "FB" | "FC",
+            // Preserve the existing order/part reference as metadata, outside
+            // the printed consumption description.
+            observaciones: `Restaurante — Pedido ${order.orderNumber} (Parte ${split.splitNumber})`,
             cliente: {
               razonSocial: customerRazonSocial || "CONSUMIDOR FINAL",
               cuit: customerCuit || undefined,
               condicionIva: condicion,
             },
             items: [{
-              descripcion: `Restaurante — Pedido ${splitOrder?.orderNumber || req.params.id} (Parte ${split.splitNumber})`,
+              descripcion: description,
               cantidad: 1,
               precioUnitario: parseFloat((parseFloat(split.amount) / 1.21).toFixed(4)),
               alicuotaIva: "21" as const,

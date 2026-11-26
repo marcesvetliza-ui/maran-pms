@@ -1,5 +1,6 @@
 import { registerCcReceiptAllocationRoutes } from './cc-receipt-allocations';
 import { enrichAccountMovementReservations } from '../accountMovementReservations';
+import { enrichAccountMovementInvoices } from '../accountMovementInvoices';
 import type { Express } from "express";
 import { storage } from "../db-storage";
 import { requireAuth, requirePermission } from "../auth";
@@ -386,7 +387,7 @@ export function registerGuestsRoutes(app: Express) {
   // Account Movements (Cuenta Corriente)
   app.get("/api/guests/:id/account", async (req, res) => {
     try {
-      const movements = await enrichAccountMovementReservations(db, await storage.getAccountMovements("guest", req.params.id));
+      const movements = await enrichAccountMovementInvoices(db, await enrichAccountMovementReservations(db, await storage.getAccountMovements("guest", req.params.id)));
       const balance = await storage.getAccountBalance("guest", req.params.id);
       res.json({ movements, balance });
     } catch (error) {
@@ -446,7 +447,7 @@ export function registerGuestsRoutes(app: Express) {
       const companyId = req.params.id;
 
       // All CC movements (cargos + pagos) — used to display movement history
-      const movements = await enrichAccountMovementReservations(db, await storage.getAccountMovements("company", companyId));
+      const movements = await enrichAccountMovementInvoices(db, await enrichAccountMovementReservations(db, await storage.getAccountMovements("company", companyId)));
 
       // Balance = SUM de todos los account_movements (cargos positivos + pagos negativos).
       // Usamos account_movements como fuente de verdad para que el saldo coincida
@@ -467,7 +468,7 @@ export function registerGuestsRoutes(app: Express) {
 
   app.get("/api/agencies/:id/account", async (req, res) => {
     try {
-      const movements = await enrichAccountMovementReservations(db, await storage.getAccountMovements("agency", req.params.id));
+      const movements = await enrichAccountMovementInvoices(db, await enrichAccountMovementReservations(db, await storage.getAccountMovements("agency", req.params.id)));
       const balance = await storage.getAccountBalance("agency", req.params.id);
       res.json({ movements, balance });
     } catch (error) {
@@ -642,7 +643,7 @@ export function registerGuestsRoutes(app: Express) {
   app.get("/api/account-movements/:entityType(company|agency|guest)/:entityId", async (req, res) => {
     try {
       const { entityType, entityId } = req.params as { entityType: string; entityId: string };
-      const movements = await enrichAccountMovementReservations(db, await storage.getAccountMovements(entityType as any, entityId));
+      const movements = await enrichAccountMovementInvoices(db, await enrichAccountMovementReservations(db, await storage.getAccountMovements(entityType as any, entityId)));
       res.json(movements);
     } catch (error) {
       console.error("Error fetching account movements:", error);
