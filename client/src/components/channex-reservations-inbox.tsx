@@ -1,3 +1,4 @@
+import { OtaRoomDetailsSummary } from "./ota-room-details";
 import { useState } from 'react';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
@@ -21,7 +22,7 @@ type Revision = {
  amount: string | null; currency: string | null;
 };
 type Booking = Revision & { revision_count: number; inbox_view: View; reservations: {
- id: string; code: string; guestName: string; roomNumber: string; category: string;
+ id: string; code: string; guestName: string; otaRoomDetails?: import("@shared/otaRoomDetails").OtaRoomDetails | null; roomNumber: string; category: string;
  checkInDate: string; checkOutDate: string; status: string;
 }[] };
 type Inbox = { channels?:string[]; counts: Record<View, number>; bookings: Booking[]; page: number; pageSize: number };
@@ -91,6 +92,8 @@ function BookingDetail({connectionId,booking:r,canRetry,pending,onRetry,assignOp
      <div className="flex flex-wrap items-center justify-between gap-2"><h3 id="ota-rooms-heading" className="flex items-center gap-2 font-semibold"><BedDouble className="h-4 w-4"/>Habitaciones en el PMS</h3>{r.reservations.length>1&&<span className="text-xs text-muted-foreground">{r.reservations.length} habitaciones</span>}</div>
      {r.reservations.length?<div className="grid gap-3">{r.reservations.map(local=><div key={local.id} className="rounded-lg border p-4 space-y-3 min-w-0">
        <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs text-muted-foreground">Habitación</p><p className="text-xl font-semibold text-primary">{local.roomNumber||'Sin asignar'}</p><p className="font-medium">{local.category||'Categoría no informada'}</p></div><Badge variant="outline">{stayLabel(local.status)}</Badge></div>
+       <p className="text-sm">Huésped: {local.guestName||"No informado"}</p>
+       <OtaRoomDetailsSummary details={local.otaRoomDetails}/>
        <p className="text-xs text-muted-foreground">{formatDisplayDate(local.checkInDate)} → {formatDisplayDate(local.checkOutDate)}</p>
        <a className="inline-flex items-center gap-1 font-medium text-primary underline underline-offset-4" href={pmsLink(local.id)}>Ver reserva en PMS<ArrowUpRight className="h-4 w-4"/></a>
      </div>)}</div>:<div className="rounded-lg border border-dashed p-4 space-y-3"><p className="text-muted-foreground">Todavía no hay una reserva vinculada en el PMS.</p>{canAssign(r)&&<p>La habitación la asigna recepción.</p>}

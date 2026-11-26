@@ -1,3 +1,6 @@
+import { BookingOtaSourcePanel } from "@/components/booking-ota-source-panel";
+import { Checkbox } from "@/components/ui/checkbox";
+import type { BookingOtaSourceSummary, BookingOtaVariantConfig } from "@shared/booking-engine";
 import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { fmtMoney } from "@/lib/utils";
@@ -36,10 +39,15 @@ type RoomTypeWithBooking = RoomType & {
   showInBooking?: boolean | null;
   bookingRatePlanId?: string | null;
   bookingDiscountPercent?: number | null;
+  bookingInheritOtaRanges?: boolean;
+  bookingOtaAdjustmentPercent?: number;
+  bookingOtaReferencePlans?: Record<string, string>;
+  bookingOtaVariants?: BookingOtaVariantConfig[];
 };
 
 type BookingConfigResponse = {
   salesEnabled: boolean;
+  otaSource?: BookingOtaSourceSummary;
   roomTypes: RoomTypeWithBooking[];
   ratePlans: RatePlan[];
 };
@@ -76,6 +84,14 @@ function RoomTypeEditor({ rt, ratePlans, onSave }: {
   const [ratePlanId, setRatePlanId] = useState(rt.bookingRatePlanId || "");
   const [discountPercent, setDiscountPercent] = useState(String(rt.bookingDiscountPercent ?? 0));
   const [discountError, setDiscountError] = useState("");
+  const [inheritOtaRanges, setInheritOtaRanges] = useState(rt.bookingInheritOtaRanges === true);
+  const [otaDirection, setOtaDirection] = useState((rt.bookingOtaAdjustmentPercent || 0) > 0 ? "increase" : "decrease");
+  const [otaMagnitude, setOtaMagnitude] = useState(String(Math.abs(rt.bookingOtaAdjustmentPercent || 0)));
+  const [otaReferencePlans, setOtaReferencePlans] = useState<Record<string, string>>(() => Object.fromEntries(
+    Object.entries(rt.bookingOtaReferencePlans || {}).filter(([id, planId]) => rt.bookingOtaVariants?.some(variant => variant.id === id && variant.plans.some(plan => plan.id === planId)))));
+  const otaAdjustmentPercent = (otaDirection === "decrease" ? -1 : 1) * Number(otaMagnitude);
+  const otaAdjustmentValid = /^\d{1,4}(?:\.\d{1,2})?$/.test(otaMagnitude) && Number.isFinite(otaAdjustmentPercent)
+    && otaAdjustmentPercent >= -99.99 && otaAdjustmentPercent <= 1000;
   const [uploading, setUploading] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [editing, setEditing] = useState(false);
@@ -95,6 +111,7 @@ function RoomTypeEditor({ rt, ratePlans, onSave }: {
       sortOrder,
       ratePlanId: ratePlanId || null,
       discountPercent: normalizedDiscount,
+      inheritOtaRanges, otaAdjustmentPercent, otaReferencePlans,
     }),
     onSuccess: async () => {
       toast({ title: `${rt.name} actualizado` });
@@ -205,6 +222,10 @@ function RoomTypeEditor({ rt, ratePlans, onSave }: {
       setDiscountError("Ingresá un porcentaje entre 0 y 99,99.");
       return;
     }
+    if (!otaAdjustmentValid) {
+      toast({ title: "Revisá el ajuste del rango OTA", description: "Usá hasta dos decimales dentro del rango indicado.", variant: "destructive" });
+      return;
+    }
     setDiscountError("");
     saveMutation.mutate();
   }
@@ -287,6 +308,36 @@ function RoomTypeEditor({ rt, ratePlans, onSave }: {
             />
             {discountError && <p id={`booking-discount-error-${rt.id}`} role="alert" className="text-xs text-destructive">{discountError}</p>}
           </div>
+        </div>
+        <div className="rounded-lg border p-3 space-y-3">
+          <div className="flex items-start gap-2">
+            <Checkbox id={`booking-ota-ranges-${rt.id}`} checked={inheritOtaRanges} onCheckedChange={value => { setInheritOtaRanges(value === true); setEditing(true); }} data-testid={`checkbox-booking-ota-ranges-${rt.id}`} />
+            <Label htmlFor={`booking-ota-ranges-${rt.id}`} className="leading-5">Usar rangos tarifarios cargados desde OTAs</Label>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1"><Label htmlFor={`booking-ota-direction-${rt.id}`} className="text-xs">Ajuste del motor sobre el rango OTA</Label>
+              <select id={`booking-ota-direction-${rt.id}`} className="flex h-9 rounded-md border bg-background px-3 text-sm" value={otaDirection} disabled={!inheritOtaRanges} onChange={event => { setOtaDirection(event.target.value); setEditing(true); }}>
+                <option value="decrease">Bajar</option><option value="increase">Subir</option>
+              </select>
+            </div>
+            <div className="w-28 space-y-1"><Label htmlFor={`booking-ota-adjustment-${rt.id}`} className="text-xs">Porcentaje (%)</Label>
+              <Input id={`booking-ota-adjustment-${rt.id}`} type="number" min="0" max={otaDirection === "decrease" ? "99.99" : "1000"} step="0.01" value={otaMagnitude} disabled={!inheritOtaRanges} aria-invalid={!otaAdjustmentValid} onChange={event => { setOtaMagnitude(event.target.value); setEditing(true); }} data-testid={`input-booking-ota-adjustment-${rt.id}`} />
+            </div>
+          </div>
+          {!otaAdjustmentValid && <p role="alert" className="text-xs text-destructive">Usá hasta dos decimales: baja máxima 99,99 % y aumento máximo 1000 %.</p>}
+          <p className="text-xs text-muted-foreground">Se heredan los rangos guardados desde el calendario de OTAs, sin tomar su tarifa base ni las copias automáticas. Con la casilla marcada, el rango OTA usa sólo este ajuste. Fuera de esos rangos se conserva el plan y descuento online elegidos arriba. La moneda sigue siendo la del plan del motor; si difiere de la de OTAs, se usa su cotización configurada.</p>
+        </div>
+        <div className="rounded-lg border p-3 space-y-2">
+          <p className="text-sm font-medium">Habitaciones incluidas desde OTAs</p>
+          {!rt.bookingOtaVariants?.length && <p className="text-xs text-muted-foreground">Esta categoría no tiene habitaciones compartidas verificables. Revisá la conexión y la selección de OTAs.</p>}
+          {rt.bookingOtaVariants?.map(variant => <div key={variant.id} className="space-y-1 border-t pt-2 first:border-t-0 first:pt-0">
+            <details><summary className="cursor-pointer text-sm">{variant.name} · {variant.roomNumbers.length} habitación(es)</summary><p className="mt-1 text-xs text-muted-foreground">{variant.roomNumbers.join(", ")}</p></details>
+            {variant.plans.length > 1 || (variant.error && variant.plans.length > 0) ? <label className="block text-xs">Plan de referencia de OTAs · {variant.name}
+              <select aria-label={`Plan de referencia de OTAs ${variant.name}`} className="mt-1 flex h-9 w-full rounded-md border bg-background px-2 text-sm" value={otaReferencePlans[variant.id] || variant.planId || ""} onChange={event => { setOtaReferencePlans(current => ({ ...current, [variant.id]: event.target.value })); setEditing(true); }}>
+                <option value="" disabled>Seleccionar plan</option>{variant.plans.map(plan => <option key={plan.id} value={plan.id}>{plan.name} · {plan.currency}</option>)}
+              </select></label> : variant.planName ? <p className="text-xs text-muted-foreground">Referencia: {variant.planName} · {variant.plans[0]?.currency}</p> : null}
+            {variant.error && <p className="text-xs text-amber-700">{variant.error}</p>}
+          </div>)}
         </div>
         {!ratePlanId && <p className="text-xs text-amber-700 dark:text-amber-300">Sin plan seleccionado, esta habitación no se ofrecerá para venta online.</p>}
         <div className="space-y-1.5">
@@ -695,16 +746,16 @@ export default function AdminBookingEnginePage() {
   return (
     <div className="flex flex-col gap-6 p-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Link href="/administration">
           <Button variant="ghost" size="sm" className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             Administración
           </Button>
         </Link>
-        <div className="flex-1">
+        <div className="order-first min-w-0 flex-1 basis-full sm:order-none sm:basis-0">
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Globe className="h-6 w-6 text-blue-500" />
+            <Globe className="h-6 w-6 shrink-0 text-blue-500" />
             Motor de Reservas Online
           </h1>
           <p className="text-muted-foreground text-sm">
@@ -790,6 +841,7 @@ export default function AdminBookingEnginePage() {
 
         {/* ── Config tab ── */}
         <TabsContent value="config" className="mt-4 space-y-6">
+          {bookingConfig?.otaSource && <BookingOtaSourcePanel key={`${bookingConfig.otaSource.configuredConnectionId || "auto"}:${bookingConfig.otaSource.connectionId || "none"}`} source={bookingConfig.otaSource} onSaved={async () => { const result = await refetch(); return !result.isError; }} />}
           <div>
             <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
               <Settings className="h-4 w-4" />
@@ -816,7 +868,7 @@ export default function AdminBookingEnginePage() {
               <div className="grid gap-4">
                 {bookingConfig.roomTypes.map(rt => (
                   <RoomTypeEditor
-                    key={rt.id}
+                    key={`${rt.id}:${bookingConfig.otaSource?.connectionId || "none"}`}
                     rt={rt}
                     ratePlans={bookingConfig.ratePlans || []}
                     onSave={async () => {

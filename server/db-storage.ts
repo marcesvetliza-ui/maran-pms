@@ -2358,7 +2358,7 @@ export class DatabaseStorage implements IStorage {
           movedFromRoomNumber: (res as any).movedFromRoomNumber ?? null,
           color: (res as any).color ?? null,
           numberOfGuests: res.numberOfGuests ?? null,
-          bedTypeName: res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) ?? null) : null,
+          bedTypeName: res.bedTypeId ? (bedTypeMap.get(res.bedTypeId) ?? null) : res.otaRoomDetails?.bedRequest ? "Pedido de camas del canal: confirmar preparación" : null,
         };
       }
     }

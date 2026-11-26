@@ -36,3 +36,14 @@ describe('daily selling calendar', () => {
   });
 
 });
+it('tracks general and occupancy provenance independently, clears resets and never tags restriction-only changes',()=>{
+ const before=calendarEffective(plan,'2026-11-01',{rate:'140',rate_origin:'ota_calendar',occupancy_rates:{'1':'120','2':'150'},occupancy_price_origins:{'1':'ota_calendar'}});
+ const restricted=applyCalendarValues(before,{stopSell:true},plan.base_rate,'ota_calendar');
+ expect(restricted.rateOrigin).toBe('ota_calendar');expect(restricted.occupancyPriceOrigins).toEqual({'1':'ota_calendar'});
+ const changed=applyCalendarValues(before,{occupancyRates:{'1':null,'2':'160'}},plan.base_rate,'ota_calendar');
+ expect(changed.occupancyPriceOrigins).toEqual({'2':'ota_calendar'});expect(changed.rateOrigin).toBe('ota_calendar');
+ expect(applyCalendarValues(before,{rate:null},plan.base_rate,'ota_calendar')).not.toHaveProperty('rateOrigin');
+ const unmarked=calendarEffective(plan,'2026-11-01',{rate:'140',occupancy_rates:{'2':'150'}});
+ expect(applyCalendarValues(unmarked,{stopSell:true},plan.base_rate,'ota_calendar')).not.toHaveProperty('rateOrigin');
+ expect(applyCalendarValues(unmarked,{stopSell:true},plan.base_rate,'ota_calendar')).not.toHaveProperty('occupancyPriceOrigins');
+});

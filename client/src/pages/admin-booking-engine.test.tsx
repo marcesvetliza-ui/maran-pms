@@ -78,3 +78,49 @@ it("uploads a converted image, previews it locally and saves it as the main phot
   const saved = fetcher.mock.calls.find(([, init]) => init?.method === "PATCH")!;
   expect(JSON.parse(String(saved[1]?.body)).photos).toEqual(["/api/public/booking/photos/example", "https://example.invalid/old.jpg"]);
 });
+it('defaults OTA prices off, keeps the own discount and saves a signed adjustment', async()=>{
+ const user=await settings();
+ expect(screen.getByRole('checkbox',{name:/Usar rangos tarifarios/})).not.toBeChecked();
+ expect(screen.getByLabelText('Porcentaje (%)')).toBeDisabled();
+ await user.click(screen.getByRole('checkbox',{name:/Usar rangos tarifarios/}));
+ await user.clear(screen.getByLabelText('Porcentaje (%)'));await user.type(screen.getByLabelText('Porcentaje (%)'),'12.5');
+ await user.click(screen.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==='PATCH')).toBe(true));
+ expect(JSON.parse(String(fetcher.mock.calls.find(([,init])=>init?.method==='PATCH')![1]?.body))).toMatchObject({discountPercent:10,inheritOtaRanges:true,otaAdjustmentPercent:-12.5});
+});
+it('saves a markup and blocks an invalid downward percentage', async()=>{
+ const user=await settings();await user.click(screen.getByRole('checkbox',{name:/Usar rangos tarifarios/}));
+ await user.clear(screen.getByLabelText('Porcentaje (%)'));await user.type(screen.getByLabelText('Porcentaje (%)'),'100');
+ await user.click(screen.getByRole('button',{name:'Guardar'}));
+ expect(fetcher.mock.calls.some(([,init])=>init?.method==='PATCH')).toBe(false);
+ await user.selectOptions(screen.getByLabelText('Ajuste del motor sobre el rango OTA'),'increase');
+ await user.click(screen.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==='PATCH')).toBe(true));
+ expect(JSON.parse(String(fetcher.mock.calls.find(([,init])=>init?.method==='PATCH')![1]?.body))).toMatchObject({otaAdjustmentPercent:100,discountPercent:10});
+});
+it('keeps physical room details collapsed and chooses a reference only when necessary', async()=>{
+ const variant={id:'remote',name:'Premium dos personas',roomIds:['r1','r2'],roomNumbers:['201','202'],planId:null,planName:null,error:'Elegí una referencia',plans:[{id:'ota1',name:'OTA flexible',currency:'USD'},{id:'ota2',name:'OTA otra',currency:'USD'}]};
+ fetcher.mockImplementation(async(input:RequestInfo|URL,init?:RequestInit)=>init?.method==='PATCH'?Response.json({success:true}):Response.json(String(input).endsWith('/config')?{roomTypes:[{...room,bookingOtaVariants:[variant]}],ratePlans:[plan]}:[]));
+ const user=await settings();
+ const details=screen.getByText(/Premium dos personas.*2 habitación/).closest('details');expect(details).not.toHaveAttribute('open');
+ await user.selectOptions(screen.getByLabelText('Plan de referencia de OTAs Premium dos personas'),'ota2');
+ await user.click(screen.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==='PATCH')).toBe(true));
+ expect(JSON.parse(String(fetcher.mock.calls.find(([,init])=>init?.method==='PATCH')![1]?.body))).toMatchObject({otaReferencePlans:{remote:'ota2'}});
+});
+it('saves the motor reference without calling any OTA write endpoint or sales activation',async()=>{
+ const source={configuredConnectionId:null,connectionId:'real',label:'Conexión real',sourceMode:'automatic',paused:true,roomCount:56,error:null,connections:[{id:'real',label:'Conexión real'}]};
+ fetcher.mockImplementation(async(input:RequestInfo|URL,init?:RequestInit)=>init?.method==='PATCH'?Response.json({success:true}):Response.json(String(input).endsWith('/config')?{roomTypes:[room],ratePlans:[plan],otaSource:source,salesEnabled:false}:[]));
+ const user=await settings();expect(screen.getByText(/sincronización pausada/)).toBeInTheDocument();
+ await user.selectOptions(screen.getByLabelText('Conexión de referencia'),'real');await user.click(screen.getByRole('button',{name:'Guardar referencia'}));
+ await waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==='PATCH')).toBe(true));
+ const writes=fetcher.mock.calls.filter(([,init])=>init?.method==='PATCH');expect(writes).toHaveLength(1);expect(String(writes[0][0])).toBe('/api/admin/booking-engine/ota-source');expect(JSON.parse(String(writes[0][1]?.body))).toEqual({connectionId:'real'});
+});
+it('lets an operator replace a retired reference even when only one valid plan remains',async()=>{
+ const variant={id:'remote',name:'Premium',roomIds:['r1'],roomNumbers:['201'],planId:null,planName:null,error:'El plan de referencia ya no está mapeado',plans:[{id:'current',name:'Plan vigente',currency:'USD'}]};
+ fetcher.mockImplementation(async(input:RequestInfo|URL,init?:RequestInit)=>init?.method==='PATCH'?Response.json({success:true}):Response.json(String(input).endsWith('/config')?{roomTypes:[{...room,bookingOtaReferencePlans:{remote:'retired'},bookingOtaVariants:[variant]}],ratePlans:[plan]}:[]));
+ const user=await settings();expect(screen.getByText(variant.error)).toBeInTheDocument();
+ await user.selectOptions(screen.getByLabelText('Plan de referencia de OTAs Premium'),'current');await user.click(screen.getByRole('button',{name:'Guardar'}));
+ await waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==='PATCH')).toBe(true));
+ expect(JSON.parse(String(fetcher.mock.calls.find(([,init])=>init?.method==='PATCH')![1]?.body))).toMatchObject({otaReferencePlans:{remote:'current'}});
+});

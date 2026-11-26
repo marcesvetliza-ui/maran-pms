@@ -282,6 +282,7 @@ export const reservations = pgTable("reservations", {
   stayDetails: jsonb("stay_details").$type<StaySelection>(),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   housekeepingPreparation: jsonb("housekeeping_preparation").$type<HousekeepingPreparation>(),
+  otaRoomDetails: jsonb("ota_room_details").$type<import("./otaRoomDetails").OtaRoomDetails>(),
   housekeepingBedPreparation: jsonb("housekeeping_bed_preparation").$type<import("./housekeepingPlanning").BedPreparation>(),
   hospitalityPackageId: varchar("hospitality_package_id"),
   reservationCode: text("reservation_code").notNull(),

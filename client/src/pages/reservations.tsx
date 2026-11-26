@@ -1,3 +1,4 @@
+import { OtaRoomDetailsSummary } from "@/components/ota-room-details";
 import type { ChargeType } from "@shared/schema";
 import { RoomChargeHospitalityPreview, useRoomChargeHospitality, roomChargeHospitalityFields } from "@/components/room-charge-hospitality";
 import { RestaurantConsumptionDetail, restaurantOrderNumberForCharge } from "@/components/restaurant-consumption-detail";
@@ -1709,6 +1710,7 @@ export function ReservationFormDialog({
             </div>
 
             <div className="grid gap-2">
+              <OtaRoomDetailsSummary details={reservation?.otaRoomDetails} />
               <Label htmlFor="bedConfig">Tipo de camaje</Label>
               <Select
                 value={formData.bedTypeId || "none"}
@@ -3462,6 +3464,7 @@ export function ReservationDetailDialog({
               </div>
             </div>
 
+            <OtaRoomDetailsSummary details={reservation.otaRoomDetails} />
             {reservation.reservationCode?.startsWith("CHX-") && <ReservationChannexSettlement reservationId={reservation.id} open={open}/> }
             {(reservation.notes || reservation.groupNotes || reservation.groupMasterFolioConfig) && (
               <div className="p-3 border rounded-lg">

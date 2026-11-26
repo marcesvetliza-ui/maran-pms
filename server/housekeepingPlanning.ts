@@ -28,7 +28,7 @@ export async function loadHousekeepingPlanning(
     db.execute(
       sql`SELECT id,room_number,floor,status,housekeeping_service_date,bed_config,bed_config_revision,allowed_bed_configs,is_active FROM rooms WHERE COALESCE(is_virtual,false)=false AND room_number<>'REUB' ORDER BY floor,room_number`,
     ),
-    db.execute(sql`SELECT r.id,r.room_history,r.room_type_id,r.room_id,r.reservation_code,r.check_in_date,r.check_out_date,r.late_check_out,r.late_check_out_time,r.status,r.bed_type_id,r.bed_type_notes,r.number_of_guests,r.housekeeping_bed_preparation,r.housekeeping_preparation,b.code AS bed_code,b.name AS bed_name,concat(g.last_name,' ',g.first_name) AS guest_name
+    db.execute(sql`SELECT r.ota_room_details,r.id,r.room_history,r.room_type_id,r.room_id,r.reservation_code,r.check_in_date,r.check_out_date,r.late_check_out,r.late_check_out_time,r.status,r.bed_type_id,r.bed_type_notes,r.number_of_guests,r.housekeeping_bed_preparation,r.housekeeping_preparation,b.code AS bed_code,b.name AS bed_name,concat(g.last_name,' ',g.first_name) AS guest_name
     FROM reservations r LEFT JOIN bed_types b ON b.id=r.bed_type_id LEFT JOIN guests g ON g.id=r.guest_id
     WHERE r.check_in_date<=${date} AND r.check_out_date>=${date} AND r.status IN ('confirmed','web_checkin','checked_in','checked_out') AND (${mode}='past' OR r.status<>'checked_out')
     AND NOT EXISTS(SELECT 1 FROM rooms v WHERE v.id=r.room_id AND (v.is_virtual=true OR v.room_number='REUB')) ORDER BY r.check_in_date,r.id`),
@@ -56,6 +56,7 @@ export async function loadHousekeepingPlanning(
     bedTypeCode: r.bed_code || null,
     bedTypeName: r.bed_name || null,
     bedTypeNotes: r.bed_type_notes || null,
+    otaRoomDetails: r.ota_room_details || null,
     numberOfGuests: r.number_of_guests,
     comparison: compareBeds(
       byRoom.get(r.room_id)?.bed_config || null,

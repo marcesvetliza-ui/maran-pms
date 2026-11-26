@@ -96,6 +96,7 @@ export function startInboundWorker(pool: Pool) {
   // Startup catch-up recovers webhook interruptions, without periodic source
   // table polling or activating a connection that has not opted in.
   void import("./inbound").then(({ recoverStoredInboundRevisions }) => recoverStoredInboundRevisions(pool))
+    .then(() => import("./inbound").then(({recoverStoredRoomDetails}) => recoverStoredRoomDetails(pool)))
     .then(() => pool.query("UPDATE channex_inbound_settings SET notification_pending=true,notification_version=notification_version+1 WHERE enabled"))
     .then(tick).catch(() => undefined);
   const timer = setInterval(tick, 3500); timer.unref();
