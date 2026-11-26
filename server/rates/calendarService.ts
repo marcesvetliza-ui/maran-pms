@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { calendarDays, calendarIntents, calendarEffective, applyCalendarValues, calendarAddDays, MAX_CALENDAR_CELLS, type CalendarRequest, type CalendarCell, type CalendarSegment } from '@shared/rate-calendar';
+import { calendarDays, calendarIntents, calendarEffective, applyCalendarValues, calendarAddDays, MAX_CALENDAR_CELLS, OTA_CALENDAR_PRICE_ORIGIN, type CalendarRequest, type CalendarCell, type CalendarSegment } from '@shared/rate-calendar';
 export class CalendarConflict extends Error { }
 export class CalendarInputError extends Error { }
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v);
@@ -50,7 +50,7 @@ export async function editCalendar(pool: Pool, request: CalendarRequest, actorId
       const plan = byPlan.get(intent.ratePlanId)!;
       if ((plan.valid_from && intent.date < plan.valid_from) || (plan.valid_to && intent.date > plan.valid_to)) throw new CalendarInputError(`El período elegido está fuera de la vigencia de uno de los planes (${intent.date})`);
       const before = calendarEffective(plan, intent.date, byDay.get(key(intent.ratePlanId, intent.date)));
-      let after: CalendarCell; try { after = applyCalendarValues(before, intent.values, plan.base_rate); } catch (error) { throw new CalendarInputError((error as Error).message); }
+      let after: CalendarCell; try { after = applyCalendarValues(before, intent.values, plan.base_rate, OTA_CALENDAR_PRICE_ORIGIN); } catch (error) { throw new CalendarInputError((error as Error).message); }
       return { before, after };
     }).filter(({ before, after }) => canonical(before) !== canonical(after));
     // Includes selected plan metadata and all selected cells; a concurrent price/currency/calendar edit invalidates review.
@@ -66,11 +66,12 @@ export async function editCalendar(pool: Pool, request: CalendarRequest, actorId
     if (previewToken) {
       if (previewToken !== token) throw new CalendarConflict('El calendario cambió desde la revisión. Revisá la propuesta nuevamente antes de guardar');
       if (changes.length) {
-        await c.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate,min_stay_arrival,min_stay_through,max_stay,stop_sell,closed_to_arrival,closed_to_departure,occupancy_rates,updated_by)
-     SELECT x."ratePlanId",x.date::date,x."rateOverride",x."minStayArrival",x."minStayThrough",x."maxStay",x."stopSell",x."closedToArrival",x."closedToDeparture",COALESCE(x."occupancyOverrides",'{}'::jsonb),$2
-     FROM jsonb_to_recordset($1::jsonb) AS x("ratePlanId" varchar,date text,"rateOverride" numeric,"minStayArrival" int,"minStayThrough" int,"maxStay" int,"stopSell" boolean,"closedToArrival" boolean,"closedToDeparture" boolean,"occupancyOverrides" jsonb)
+        await c.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,rate,min_stay_arrival,min_stay_through,max_stay,stop_sell,closed_to_arrival,closed_to_departure,occupancy_rates,updated_by,rate_origin,occupancy_price_origins)
+     SELECT x."ratePlanId",x.date::date,x."rateOverride",x."minStayArrival",x."minStayThrough",x."maxStay",x."stopSell",x."closedToArrival",x."closedToDeparture",COALESCE(x."occupancyOverrides",'{}'::jsonb),$2,x."rateOrigin",COALESCE(x."occupancyPriceOrigins",'{}'::jsonb)
+     FROM jsonb_to_recordset($1::jsonb) AS x("ratePlanId" varchar,date text,"rateOverride" numeric,"minStayArrival" int,"minStayThrough" int,"maxStay" int,"stopSell" boolean,"closedToArrival" boolean,"closedToDeparture" boolean,"occupancyOverrides" jsonb,"rateOrigin" text,"occupancyPriceOrigins" jsonb)
      ON CONFLICT(rate_plan_id,stay_date) DO UPDATE SET rate=EXCLUDED.rate,min_stay_arrival=EXCLUDED.min_stay_arrival,min_stay_through=EXCLUDED.min_stay_through,max_stay=EXCLUDED.max_stay,
-       occupancy_rates=EXCLUDED.occupancy_rates,stop_sell=EXCLUDED.stop_sell,closed_to_arrival=EXCLUDED.closed_to_arrival,closed_to_departure=EXCLUDED.closed_to_departure,updated_at=now(),updated_by=EXCLUDED.updated_by`, [JSON.stringify(changes.map(c => c.after)), actorId]);
+       occupancy_rates=EXCLUDED.occupancy_rates,stop_sell=EXCLUDED.stop_sell,closed_to_arrival=EXCLUDED.closed_to_arrival,closed_to_departure=EXCLUDED.closed_to_departure,updated_at=now(),updated_by=EXCLUDED.updated_by,
+       rate_origin=EXCLUDED.rate_origin,occupancy_price_origins=EXCLUDED.occupancy_price_origins`, [JSON.stringify(changes.map(c => c.after)), actorId]);
         await c.query('INSERT INTO rate_calendar_edits(actor_id,changes,summary) VALUES($1,$2,$3)', [actorId, JSON.stringify(request), JSON.stringify({ selectedCells: intents.length, changedCells: changes.length, segments })]);
       }
     }

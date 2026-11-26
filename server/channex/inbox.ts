@@ -33,7 +33,7 @@ const summary = `v.revision_id,v.booking_id,v.status,v.review_code,v.acked_at,v.
  v.payload#>>'{attributes,amount}' AS amount,v.payload#>>'{attributes,currency}' AS currency`;
 const reservations = `COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'id',r.id,'code',r.reservation_code,'guestName',concat_ws(' ',g.first_name,g.last_name),
- 'roomNumber',rm.room_number,'category',rt.name,'checkInDate',r.check_in_date,'checkOutDate',r.check_out_date,'status',r.status)
+ 'otaRoomDetails',r.ota_room_details,'roomNumber',rm.room_number,'category',rt.name,'checkInDate',r.check_in_date,'checkOutDate',r.check_out_date,'status',r.status)
  ORDER BY rm.room_number)
  FROM channex_inbound_rooms link JOIN reservations r ON r.id=link.reservation_id
  JOIN guests g ON g.id=r.guest_id JOIN rooms rm ON rm.id=r.room_id

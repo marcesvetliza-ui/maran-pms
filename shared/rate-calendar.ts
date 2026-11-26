@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const MAX_CALENDAR_CELLS = 5000;
+export const OTA_CALENDAR_PRICE_ORIGIN = "ota_calendar";
 export function calendarDay(value: string) {
   if (value.startsWith('0000') || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -35,6 +36,7 @@ export type CalendarCell = {
   ratePlanId: string; date: string; rate: string; rateOverride: string | null; currency: string; isValidDate: boolean;
   minStayArrival: number; minStayThrough: number; maxStay: number; stopSell: boolean; closedToArrival: boolean; closedToDeparture: boolean;
   occupancyRates?: OccupancyRates; occupancyOverrides?: OccupancyRates; baseOccupancyRates?: OccupancyRates;
+  rateOrigin?: string; occupancyPriceOrigins?: Record<string, string>;
 };
 export type CalendarSegment = { ratePlanId: string; dateFrom: string; dateTo: string; before: CalendarCell; after: CalendarCell };
 export type CalendarPreview = { previewToken: string; changedCells: number; selectedCells: number; segments: CalendarSegment[] };
@@ -49,19 +51,28 @@ export function calendarEffective(plan: { id: string; base_rate: string; currenc
   return {
     ratePlanId: plan.id, date: day, rate: entry?.rate ?? plan.base_rate, rateOverride: entry?.rate ?? null, currency: plan.currency, isValidDate: (!plan.valid_from || day >= plan.valid_from) && (!plan.valid_to || day <= plan.valid_to),
     ...(Object.keys(baseOccupancyRates).length || Object.keys(occupancyOverrides).length ? {baseOccupancyRates,occupancyOverrides,occupancyRates:{...baseOccupancyRates,...occupancyOverrides}} : {}),
+    ...(entry?.rate_origin ? { rateOrigin: entry.rate_origin } : {}),
+    ...(Object.keys(entry?.occupancy_price_origins || {}).length ? { occupancyPriceOrigins: entry.occupancy_price_origins } : {}),
     minStayArrival: entry?.min_stay_arrival ?? 1, minStayThrough: entry?.min_stay_through ?? 1, maxStay: entry?.max_stay ?? 0,
     stopSell: entry?.stop_sell ?? false, closedToArrival: entry?.closed_to_arrival ?? false, closedToDeparture: entry?.closed_to_departure ?? false
   };
 }
-export function applyCalendarValues(before: CalendarCell, values: CalendarValues, baseRate: string): CalendarCell {
+export function applyCalendarValues(before: CalendarCell, values: CalendarValues, baseRate: string, priceOrigin?: string): CalendarCell {
   const {occupancyRates: occupancyChanges,...otherValues}=values;
   const after: CalendarCell = { ...before, ...otherValues, rateOverride: values.rate === undefined ? before.rateOverride : values.rate === null ? null : Number(values.rate).toFixed(2), rate: before.rate };
+  if (values.rate !== undefined) {
+    if (values.rate === null) delete after.rateOrigin;
+    else if (priceOrigin) after.rateOrigin = priceOrigin;
+  }
   if (occupancyChanges !== undefined) {
     const overrides = {...before.occupancyOverrides};
+    const origins = { ...before.occupancyPriceOrigins };
     for (const [occupancy,rate] of Object.entries(occupancyChanges)) {
-      if (rate === null) delete overrides[occupancy];
-      else overrides[occupancy] = Number(rate).toFixed(2);
+      if (rate === null) { delete overrides[occupancy]; delete origins[occupancy]; }
+      else { overrides[occupancy] = Number(rate).toFixed(2); if (priceOrigin) origins[occupancy] = priceOrigin; }
     }
+    if (Object.keys(origins).length) after.occupancyPriceOrigins = origins;
+    else delete after.occupancyPriceOrigins;
     after.occupancyOverrides = overrides;
     after.baseOccupancyRates = before.baseOccupancyRates ?? {};
     after.occupancyRates = {...after.baseOccupancyRates,...overrides};

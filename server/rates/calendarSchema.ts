@@ -14,6 +14,8 @@ export const rateCalendarSchemaSql = `
   created_at timestamptz NOT NULL DEFAULT now()
  );
  ALTER TABLE rate_calendar_entries ADD COLUMN IF NOT EXISTS occupancy_rates jsonb NOT NULL DEFAULT '{}'::jsonb CHECK(jsonb_typeof(occupancy_rates)='object');
+ ALTER TABLE rate_calendar_entries ADD COLUMN IF NOT EXISTS rate_origin text;
+ ALTER TABLE rate_calendar_entries ADD COLUMN IF NOT EXISTS occupancy_price_origins jsonb NOT NULL DEFAULT '{}'::jsonb CHECK(jsonb_typeof(occupancy_price_origins)='object');
 `;
 export async function ensureRateCalendarSchema(pool: Pool) {
   const c = await pool.connect(); try {

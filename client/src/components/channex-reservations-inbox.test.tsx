@@ -9,7 +9,7 @@ const revision={revision_id:'r3',booking_id:'booking',booking_status:'cancelled'
 const booking={...revision,revision_count:3,inbox_view:'cancelled',reservations:[{id:'pms',code:'RES123',roomNumber:'307',category:'Premium',status:'confirmed',checkInDate:'2026-12-01',checkOutDate:'2026-12-02'}]};
 function mount(canRetry=true){const client=new QueryClient({defaultOptions:{queries:{retry:false}}});const onRetry=vi.fn();render(<QueryClientProvider client={client}><ChannexReservationsInbox connectionId="conn" canRetry={canRetry} pending={false} onRetry={onRetry}/></QueryClientProvider>);return onRetry;}
 afterEach(()=>{cleanup();vi.resetAllMocks();});
-function mock(detailBooking=booking){vi.mocked(apiRequest).mockImplementation(async(_method,url)=>{
+function mock(detailBooking:unknown=booking){vi.mocked(apiRequest).mockImplementation(async(_method,url)=>{
  const path=String(url);
  const data=path.includes('/booking-detail/')?{notes:'Llegada después de las 22 hs',notesStatus:'available',settlements:[{reservation_id:'pms',source_currency:'USD',source_total:'145.00',exchange_rate:'1545.000000',settlement_currency:'ARS',settlement_total:'224025.00',created_at:'2026-11-16T12:00:00Z'}]}:
  path.includes('/history/')?{total:3,revisions:[revision,{...revision,revision_id:'r2',status:'applied',booking_status:'modified'},{...revision,revision_id:'r1',status:'applied',booking_status:'new'}]}:
@@ -59,4 +59,11 @@ it('shows an accepted new booking as waiting for reception and never retries or 
  vi.mocked(apiRequest).mockImplementation(async(_method,url)=>new Response(JSON.stringify(String(url).includes('/booking-detail/')?{notes:null,notesStatus:'none',settlements:[]}:String(url).includes('/history/')?{total:1,revisions:[waiting]}:{counts:{attention:1,new:1,modified:0,cancelled:0,all:1},channels:['Booking.com'],bookings:[waiting],page:1,pageSize:25}),{headers:{'Content-Type':'application/json'}}));
  const onRetry=mount();await screen.findByText('Pendiente de asignación');const user=userEvent.setup();await user.click(screen.getByRole('button',{name:/Ver detalle de Ana Perez/}));const dialog=await screen.findByRole('dialog');
  expect(within(dialog).getByRole('button',{name:'Asignar al PMS'})).toBeEnabled();expect(within(dialog).queryByRole('button',{name:'Reintentar revisión'})).not.toBeInTheDocument();expect(within(dialog).getByText('Todavía no hay una reserva vinculada en el PMS.')).toBeInTheDocument();expect(onRetry).not.toHaveBeenCalled();expect(vi.mocked(apiRequest).mock.calls.every(([method])=>method==='GET')).toBe(true);
+});
+it('shows the local guest and the original per-room guest and shared bed request without mutating the booking',async()=>{
+ const details={version:1,bookerName:'Ana Perez',guestNames:['Guest Beta'],guestSource:'room',guestStatus:'imported',bedRequest:{text:'BED PREFERENCE: 2 singoli - 1 matrimoniale alla francese',scope:'booking'},importedBedNotes:null};
+ const named={...booking,booking_status:'new',status:'applied',review_code:null,reservations:[{...booking.reservations[0],guestName:'Guest Beta',otaRoomDetails:details}]};
+ mock(named);mount();await screen.findByText('Ana Perez');const user=userEvent.setup();await user.click(screen.getByRole('button',{name:/Ver detalle de Ana Perez/}));
+ const dialog=await screen.findByRole('dialog');expect(within(dialog).getByText('Huésped: Guest Beta')).toBeInTheDocument();expect(within(dialog).getByText(/2 camas individuales/)).toBeInTheDocument();expect(within(dialog).getByText(/confirmá con recepción/i)).toBeInTheDocument();
+ expect(vi.mocked(apiRequest).mock.calls.every(([method])=>method==='GET')).toBe(true);
 });

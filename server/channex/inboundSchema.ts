@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 export const inboundSchemaSql = `
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS ota_room_details jsonb;
 CREATE TABLE IF NOT EXISTS channex_inbound_settings (
  connection_id varchar PRIMARY KEY REFERENCES channex_connections(id) ON DELETE CASCADE,
  enabled boolean NOT NULL DEFAULT false, token_hash text,
@@ -39,6 +40,7 @@ CREATE TABLE IF NOT EXISTS channex_inbound_rooms (
  PRIMARY KEY(connection_id,booking_id,remote_room_id),
  FOREIGN KEY(connection_id,booking_id) REFERENCES channex_inbound_bookings(connection_id,booking_id)
 );
+ALTER TABLE channex_inbound_rooms ADD COLUMN IF NOT EXISTS guest_hash text;
 CREATE TABLE IF NOT EXISTS channex_inbound_dispatch(id int PRIMARY KEY CHECK(id=1), next_request_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS channex_inbound_settlements (
  connection_id varchar NOT NULL, revision_id text NOT NULL, remote_room_id text NOT NULL,

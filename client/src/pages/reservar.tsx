@@ -47,7 +47,8 @@ type RoomTypeResult = {
   roomTypeId: string; code: string; name: string; description: string | null;
   publicDescription: string | null; baseOccupancy: number; maxOccupancy: number;
   amenities: string[]; photos: string[]; availableRooms: number;
-  ratePlanId: string; ratePlanName: string; pricePerNight: number;
+  ratePlanId: string;
+  offerId?: string; ratePlanName: string; pricePerNight: number;
   variableNightlyRates: boolean;
   totalPrice: number; nights: number; currency: string;
   cancellationPolicy: string | null;
@@ -291,6 +292,7 @@ export default function ReservarPage() {
       checkIn, checkOut, adults, children, childrenAges,
       roomTypeId: selectedRoomType.roomTypeId,
       ratePlanId: selectedRoomType.ratePlanId,
+      offerId: selectedRoomType.offerId,
       expectedTotalAmount: selectedRoomType.totalPrice,
       firstName, lastName, email, phone,
       documentType: docType, documentNumber: docNum,

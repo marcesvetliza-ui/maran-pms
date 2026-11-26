@@ -18,6 +18,15 @@ CREATE TABLE IF NOT EXISTS booking_engine_photos (
  created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS booking_engine_photos_room_idx ON booking_engine_photos(room_type_id);
+ALTER TABLE booking_engine_configs ADD COLUMN IF NOT EXISTS inherit_ota_ranges boolean NOT NULL DEFAULT false;
+ALTER TABLE booking_engine_configs ADD COLUMN IF NOT EXISTS ota_adjustment_percent numeric(6,2) NOT NULL DEFAULT 0 CHECK(ota_adjustment_percent BETWEEN -99.99 AND 1000);
+ALTER TABLE booking_engine_configs ADD COLUMN IF NOT EXISTS ota_reference_plans jsonb NOT NULL DEFAULT '{}'::jsonb CHECK(jsonb_typeof(ota_reference_plans)='object');
+CREATE TABLE IF NOT EXISTS booking_engine_ota_source (
+ singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+ connection_id varchar,
+ updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO booking_engine_ota_source(singleton,connection_id) VALUES(true,NULL) ON CONFLICT DO NOTHING;
 `;
 
 /** Additive startup/CI migration. Never enables public sales. */

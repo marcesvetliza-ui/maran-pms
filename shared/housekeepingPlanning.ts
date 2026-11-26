@@ -83,6 +83,7 @@ export type PlanningTask = {
   inspectedAt: string | null;
 };
 export type PlanningRequest = {
+  otaRoomDetails?: import("./otaRoomDetails").OtaRoomDetails | null;
   id: string;
   roomId: string | null;
   reservationCode: string;

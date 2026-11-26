@@ -1,5 +1,5 @@
 import type { Express } from "express";
-import { db, withDatabaseTransaction } from "../db";
+import { db, withReadOnlyDatabaseTransaction, withRepeatableReadDatabaseTransaction } from "../db";
 import { storage } from "../db-storage";
 import {
   rooms, roomTypes, reservations, guests,
@@ -42,9 +42,9 @@ export function registerPublicBookingRoutes(app: Express) {
       for (const rt of allRoomTypes) {
         if (bookingOccupancy(stay) > rt.maxOccupancy) continue;
         let quote;
-        try { quote = await loadBookingQuote(rt.id, stay); }
+        try { quote = await withReadOnlyDatabaseTransaction(() => loadBookingQuote(rt.id, stay)); }
         catch (error) { if (error instanceof BookingRuleError) continue; throw error; }
-        const freeRooms = await bookingAvailableRooms(rt.id, stay);
+        const freeRooms = await bookingAvailableRooms(rt.id, stay, quote);
         if (!freeRooms.length) continue;
         const bestPlan = quote.plan;
 
@@ -61,6 +61,9 @@ export function registerPublicBookingRoutes(app: Express) {
           // Do not advertise a physical count which ignores group commitments.
           availableRooms: 1,
           ratePlanId: bestPlan.id,
+          offerId: quote.offerId,
+          pricingSource: quote.pricingSource,
+          otaAdjustmentPercent: quote.otaAdjustmentPercent,
           ratePlanName: (bestPlan as any).name,
           pricePerNight: quote.pricePerNight,
           totalPrice: quote.totalAmount,
@@ -135,6 +138,7 @@ export function registerPublicBookingRoutes(app: Express) {
   bedPreference: z.string().optional(),
     paymentMethod: z.string().default("hotel"), // "hotel" = pay at hotel
     expectedTotalAmount: z.number().positive(),
+    offerId: z.string().min(1).max(250).optional(),
   });
 
   app.post("/api/public/booking/confirm", async (req, res) => {
@@ -143,7 +147,7 @@ export function registerPublicBookingRoutes(app: Express) {
       const stay = bookingStaySchema.parse(data);
       assertFutureStay(stay);
       await assertBookingSalesEnabled();
-      const response = await withLodgingInventoryMutationLock(() => withDatabaseTransaction(async () => {
+      const response = await withLodgingInventoryMutationLock(() => withRepeatableReadDatabaseTransaction(async () => {
       await assertBookingSalesEnabled(true);
       // A confirmation uses the same inventory mutex as other lodging writes.
       // Calendar edits and USD conversion lock their rate_plan rows FOR UPDATE
@@ -152,13 +156,13 @@ export function registerPublicBookingRoutes(app: Express) {
       await db.execute(sql`SELECT rt.id FROM room_types rt WHERE rt.id=${data.roomTypeId} FOR SHARE`);
       await db.execute(sql`SELECT p.id FROM booking_engine_configs c JOIN rate_plans p ON p.id=c.rate_plan_id
         WHERE c.room_type_id=${data.roomTypeId} FOR SHARE OF c,p`);
-      const quote = await loadBookingQuote(data.roomTypeId, stay);
+      const quote = await loadBookingQuote(data.roomTypeId, stay, { lockSource: true, offerId: data.offerId });
       if (quote.plan.id !== data.ratePlanId || Math.round(data.expectedTotalAmount * 100) !== Math.round(quote.totalAmount * 100))
         throw new BookingRuleError("La tarifa cambió. Volvé a consultar disponibilidad antes de confirmar");
       const { nights, pricePerNight, totalAmount } = quote;
 
       // 1) Find an available room of the requested type
-      const [freeRoom] = await bookingAvailableRooms(data.roomTypeId, stay) as any[];
+      const [freeRoom] = await bookingAvailableRooms(data.roomTypeId, stay, quote) as any[];
       if (!freeRoom) {
         throw new BookingRuleError("Lo sentimos, no quedan habitaciones disponibles para esas fechas. Intentá con otras fechas.");
       }
@@ -207,6 +211,7 @@ export function registerPublicBookingRoutes(app: Express) {
         discountValue: String(quote.discountPercent),
         notes: [`Reserva web: ${data.firstName} ${data.lastName}`, `Contacto: ${data.email} ${data.phone ?? ""}`,
           `Pasajeros: ${stay.adults} adulto(s), ${stay.children} niño(s)${stay.childrenAges ? `; edades: ${stay.childrenAges.join(", ")}` : ""}`,
+          quote.pricingSource !== "own" ? `Tarifa web con rangos OTA; ajuste ${quote.otaAdjustmentPercent}% en ${quote.inheritedNights} noche(s).` : null,
           data.notes].filter(Boolean).join("\n"),
         bedTypeNotes: data.bedPreference || null,
         createdAt: new Date(),
@@ -232,6 +237,8 @@ export function registerPublicBookingRoutes(app: Express) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: "Datos incompletos", details: error.errors });
       }
+      if (error?.code === "40001" || error?.cause?.code === "40001")
+        return res.status(409).json({ error: "La disponibilidad o configuración cambió. Volvé a consultar antes de confirmar" });
       console.error("Public booking confirm error:", error);
       res.status(error?.statusCode || 500).json(error?.response || { error: error instanceof BookingRuleError ? error.message : "Error al confirmar la reserva. Intentá nuevamente." });
     }

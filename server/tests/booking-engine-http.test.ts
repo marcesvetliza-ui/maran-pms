@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   sales: vi.fn(),
 }));
 vi.mock("../db", () => ({ db: { execute: mocks.execute, select: mocks.select, update: mocks.update, insert: mocks.insert },
-  pool: {}, withDatabaseTransaction: (run: any) => run() }));
+  pool: {}, withDatabaseTransaction: (run: any) => run(), withReadOnlyDatabaseTransaction: (run: any) => run(), withRepeatableReadDatabaseTransaction: (run: any) => run() }));
 vi.mock("../permissions", () => ({ hasPermission: (role: string, permission: string) =>
   ["admin", "comercial", "reception"].includes(role) && permission === "sidebar:/admin/booking-engine" }));
 vi.mock("../db-storage", () => ({ storage: { createReservation: mocks.create, generateReservationCode: () => "WEB-test" } }));
@@ -106,3 +106,14 @@ it.each([{ checkOut: confirmation.checkIn }, { checkIn: "2027-02-30" }, { adults
     expect(mocks.quote).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled();
   });
+it('returns a retryable availability conflict when the confirmation snapshot becomes stale',async()=>{
+ mocks.quote.mockRejectedValue(Object.assign(new Error('synthetic serialization'),{code:'40001'}));
+ const response=await send('/api/public/booking/confirm',confirmation);expect(response.status).toBe(409);
+ expect((await response.json()).error).toContain('Volvé a consultar');expect(mocks.create).not.toHaveBeenCalled();
+});
+it('requires authentication and motor configuration permission for changing its OTA reference',async()=>{
+ for(const role of [undefined,'housekeeping'])expect((await send('/api/admin/booking-engine/ota-source',{connectionId:null},role,'PATCH')).status).toBe(role?403:401);
+ expect(mocks.execute).not.toHaveBeenCalled();
+ expect((await send('/api/admin/booking-engine/ota-source',{connectionId:null,salesEnabled:true},'admin','PATCH')).status).toBe(400);
+ expect(mocks.execute).not.toHaveBeenCalled();
+});

@@ -1,3 +1,4 @@
+import { roomGuests } from "./roomDetails";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { addDays, daysBetween } from "./ari";
@@ -47,6 +48,7 @@ const insertedAt = z.string().transform(value =>
 ).pipe(z.string().datetime({ offset: true }));
 const roomSchema = z.object({
   id: id.optional(), booking_room_id: id.optional(), room_type_id: id, rate_plan_id: id.nullish().transform(value => value ?? null),
+  guests: z.unknown().optional(),
   amount: money.optional(), taxes: z.array(z.unknown()).nullish(),
   days: z.record(day, money), occupancy: z.object({ adults: z.number().int().min(1).max(20), children: z.number().int().min(0).max(20).default(0), infants: z.number().int().min(0).max(20).default(0) }),
 });
@@ -106,6 +108,7 @@ export function parseBookingRevision(raw: any, property: string) {
   const rooms = b.rooms.map((room, index) => {
     if (Object.keys(room.days).length !== dates.length || dates.some(date => room.days[date] === undefined)) return review("INCOMPLETE_NIGHTLY_RATES");
     return {
+      guests: roomGuests(room.guests),
       key: keys[index], remoteType: room.room_type_id, remotePlan: room.rate_plan_id,
       occupancy: room.occupancy.adults + room.occupancy.children + room.occupancy.infants,
       ...roomPrices(room, dates)

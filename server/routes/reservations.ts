@@ -330,6 +330,7 @@ export function registerReservationsRoutes(app: Express) {
           delete req.body[field];
         }
       }
+      delete req.body.otaRoomDetails;
       const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId"];
       for (const field of nullableStringFields) {
         if (req.body[field] === "") {
@@ -454,6 +455,7 @@ export function registerReservationsRoutes(app: Express) {
       delete req.body.acknowledgeHousekeepingPreparation;
       delete req.body.housekeepingPreparation;
       delete req.body.housekeepingBedPreparation;
+      delete req.body.otaRoomDetails;
       delete req.body.roomHistory;
       const requestedContextGroupId = req.body.contextGroupId as string | undefined;
       const overrideTentativeGroupWarning = req.body.overrideTentativeGroupWarning === true;
@@ -529,6 +531,7 @@ export function registerReservationsRoutes(app: Express) {
           delete req.body[field];
         }
       }
+      delete req.body.otaRoomDetails;
       const nullableStringFields = ["ratePlanId", "companyId", "bedTypeId", "bedTypeNotes", "earlyCheckInTime", "lateCheckOutTime", "notes", "otaChannelId", "externalReservationId"];
       for (const field of nullableStringFields) {
         if (req.body[field] === "") {

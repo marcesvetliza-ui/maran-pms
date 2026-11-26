@@ -26,8 +26,24 @@ export const bookingConfigSchema = z.object({
   photos: z.array(z.string().min(1).max(2048)).max(10).nullable(),
   sortOrder: z.number().int().min(0).max(99),
   showInBooking: z.boolean(),
+  inheritOtaRanges: z.boolean().optional(),
+  otaAdjustmentPercent: z.number().min(-99.99).max(1000).multipleOf(0.01).optional(),
+  otaReferencePlans: z.record(z.string().min(1).max(100), z.string().min(1).max(100))
+    .refine(value => Object.keys(value).length <= 30).optional(),
 }).strict();
 export type BookingConfig = z.infer<typeof bookingConfigSchema>;
+export type BookingOtaVariantConfig = {
+  id: string; name: string; roomIds: string[]; roomNumbers: string[];
+  planId: string | null; planName: string | null;
+  plans: Array<{ id: string; name: string; currency: string }>;
+  error: string | null;
+};
+export type BookingOtaSourceSummary = {
+  configuredConnectionId: string | null; connectionId: string | null;
+  label: string | null; sourceMode: "automatic" | "selected" | "unavailable";
+  paused: boolean; roomCount: number; error: string | null;
+  connections: Array<{ id: string; label: string }>;
+};
 export type BookingPlan = {
   id: string; room_type_id: string; base_rate: string; currency: string;
   valid_from?: string | null; valid_to?: string | null;

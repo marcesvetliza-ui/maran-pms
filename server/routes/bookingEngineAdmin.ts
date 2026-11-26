@@ -7,6 +7,7 @@ import { requireAuth, requirePermission } from "../auth";
 import { bookingConfigSchema } from "@shared/booking-engine";
 import { readBookingImage } from "../bookingEngineImages";
 import { bookingSalesEnabled } from "../bookingEngineSales";
+import { bookingOtaAdminSummary, bookingOtaConnections, loadBookingOtaSource, bookingCategoryVariants } from "../bookingEngineOtaSource";
 
 const permission = "sidebar:/admin/booking-engine";
 const photoPath = (id: string) => `/api/public/booking/photos/${id}`;
@@ -17,21 +18,46 @@ export function registerBookingEngineAdminRoutes(app: Express) {
   app.get("/api/admin/booking-engine/config", ...guards, async (_req, res) => {
     try {
       const types = await db.execute(sql`SELECT rt.*,c.rate_plan_id AS "bookingRatePlanId",
-        COALESCE(c.discount_percent,0)::float AS "bookingDiscountPercent"
+        COALESCE(c.discount_percent,0)::float AS "bookingDiscountPercent",
+        COALESCE(c.inherit_ota_ranges,false) AS "bookingInheritOtaRanges",
+        COALESCE(c.ota_adjustment_percent,0)::float AS "bookingOtaAdjustmentPercent",
+        COALESCE(c.ota_reference_plans,'{}'::jsonb) AS "bookingOtaReferencePlans"
         FROM room_types rt LEFT JOIN booking_engine_configs c ON c.room_type_id=rt.id
         ORDER BY rt.sort_order,rt.name`);
       // ORM mapping preserves the existing client RoomType/RatePlan contract.
       const { roomTypes, ratePlans } = await import("@shared/schema");
       const [roomRows, planRows] = await Promise.all([db.select().from(roomTypes), db.select().from(ratePlans)]);
       const config = new Map(types.rows.map((r: any) => [r.id, r]));
+      const { summary: otaSource, source } = await bookingOtaAdminSummary();
       res.set("Cache-Control", "no-store").json({
         salesEnabled: await bookingSalesEnabled(),
+        otaSource,
         roomTypes: roomRows.map(rt => ({ ...rt, bookingRatePlanId: (config.get(rt.id) as any)?.bookingRatePlanId ?? null,
-          bookingDiscountPercent: (config.get(rt.id) as any)?.bookingDiscountPercent ?? 0 }))
+          bookingDiscountPercent: (config.get(rt.id) as any)?.bookingDiscountPercent ?? 0,
+          bookingInheritOtaRanges: (config.get(rt.id) as any)?.bookingInheritOtaRanges ?? false,
+          bookingOtaAdjustmentPercent: (config.get(rt.id) as any)?.bookingOtaAdjustmentPercent ?? 0,
+          bookingOtaReferencePlans: (config.get(rt.id) as any)?.bookingOtaReferencePlans ?? {},
+          bookingOtaVariants: source ? bookingCategoryVariants(source, rt.id, (config.get(rt.id) as any)?.bookingRatePlanId ?? null,
+            (config.get(rt.id) as any)?.bookingOtaReferencePlans ?? {}) : [],
+        }))
           .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name)),
         ratePlans: planRows,
       });
     } catch { res.status(503).json({ error: "La configuración del motor no está disponible; verificá sus migraciones" }); }
+  });
+
+  app.patch("/api/admin/booking-engine/ota-source", ...guards, async (req, res) => {
+    const parsed = z.object({ connectionId: z.string().min(1).max(100).nullable() }).strict().safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Elegí una conexión real de OTAs" });
+    try {
+      await withDatabaseTransaction(async () => {
+        await db.execute(sql`SELECT singleton FROM booking_engine_ota_source WHERE singleton=true FOR UPDATE`);
+        if (parsed.data.connectionId && !(await bookingOtaConnections()).some(connection => connection.id === parsed.data.connectionId))
+          throw Object.assign(new Error("La referencia debe ser una conexión real del hotel"), { status: 400 });
+        await db.execute(sql`UPDATE booking_engine_ota_source SET connection_id=${parsed.data.connectionId},updated_at=now() WHERE singleton=true`);
+      });
+      res.json({ success: true });
+    } catch (error: any) { res.status(error.status ?? 503).json({ error: error.status ? error.message : "No se pudo guardar la referencia de OTAs" }); }
   });
 
   app.patch("/api/admin/room-types/:id/booking-config", ...guards, async (req, res) => {
@@ -42,6 +68,17 @@ export function registerBookingEngineAdminRoutes(app: Express) {
         const { rows } = await db.execute(sql`SELECT id FROM room_types WHERE id=${req.params.id} FOR UPDATE`);
         if (!rows.length) throw Object.assign(new Error("Tipo de habitación inexistente"), { status: 404 });
         const v = parsed.data;
+        const stored = (await db.execute(sql`SELECT inherit_ota_ranges,ota_reference_plans FROM booking_engine_configs WHERE room_type_id=${req.params.id} FOR UPDATE`)).rows[0] as any;
+        const references = v.otaReferencePlans ?? stored?.ota_reference_plans ?? {};
+        const inherit = v.inheritOtaRanges ?? stored?.inherit_ota_ranges ?? false;
+        if ((inherit && v.ratePlanId) || (v.otaReferencePlans && Object.keys(v.otaReferencePlans).length)) {
+          const source = await loadBookingOtaSource(true);
+          const variants = bookingCategoryVariants(source, req.params.id, v.ratePlanId, references);
+          if (Object.entries(references).some(([id,plan]) => !variants.some(variant => variant.id===id && variant.plans.some(option => option.id===plan))))
+            throw Object.assign(new Error("Elegí planes mapeados en las variantes actuales de esta categoría"), { status: 400 });
+          if (inherit && !variants.some(variant => variant.planId && !variant.error))
+            throw Object.assign(new Error("Configurá las habitaciones y el plan de referencia de OTAs antes de heredar rangos"), { status: 400 });
+        }
         if (v.ratePlanId) {
           const plan = await db.execute(sql`SELECT id FROM rate_plans WHERE id=${v.ratePlanId}
             AND room_type_id=${req.params.id} FOR SHARE`);
@@ -66,10 +103,14 @@ export function registerBookingEngineAdminRoutes(app: Express) {
           publicDescription: v.publicDescription, amenities: v.amenities, photos: v.photos,
           showInBooking: v.showInBooking, sortOrder: v.sortOrder,
         }).where(eq(roomTypes.id, req.params.id));
-        await db.execute(sql`INSERT INTO booking_engine_configs(room_type_id,rate_plan_id,discount_percent)
-          VALUES(${req.params.id},${v.ratePlanId},${v.discountPercent})
+        await db.execute(sql`INSERT INTO booking_engine_configs(room_type_id,rate_plan_id,discount_percent,inherit_ota_ranges,ota_adjustment_percent,ota_reference_plans)
+          VALUES(${req.params.id},${v.ratePlanId},${v.discountPercent},${v.inheritOtaRanges ?? false},${v.otaAdjustmentPercent ?? 0},${JSON.stringify(v.otaReferencePlans ?? {})}::jsonb)
           ON CONFLICT(room_type_id) DO UPDATE SET rate_plan_id=excluded.rate_plan_id,
-          discount_percent=excluded.discount_percent,updated_at=now()`);
+          discount_percent=excluded.discount_percent,
+          inherit_ota_ranges=CASE WHEN ${v.inheritOtaRanges !== undefined} THEN excluded.inherit_ota_ranges ELSE booking_engine_configs.inherit_ota_ranges END,
+          ota_adjustment_percent=CASE WHEN ${v.otaAdjustmentPercent !== undefined} THEN excluded.ota_adjustment_percent ELSE booking_engine_configs.ota_adjustment_percent END,
+          ota_reference_plans=CASE WHEN ${v.otaReferencePlans !== undefined} THEN excluded.ota_reference_plans ELSE booking_engine_configs.ota_reference_plans END,
+          updated_at=now()`);
         // Blobs removed from the gallery are no longer public. Keep unused drafts
         // briefly so another open editor does not lose its just-uploaded files.
         await db.execute(sql`DELETE FROM booking_engine_photos p WHERE room_type_id=${req.params.id}
@@ -79,7 +120,7 @@ export function registerBookingEngineAdminRoutes(app: Express) {
       });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(error.status ?? 500).json({ error: error.status ? error.message : "No se pudo guardar la configuración" });
+      res.status(error.status ?? error.statusCode ?? 500).json({ error: error.status || error.statusCode ? error.message : "No se pudo guardar la configuración" });
     }
   });
 

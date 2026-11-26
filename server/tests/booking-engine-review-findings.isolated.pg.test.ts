@@ -1,3 +1,4 @@
+import { seedBookingOtaScope } from "./booking-ota-fixture";
 import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
@@ -40,6 +41,7 @@ beforeAll(async () => {
   await pool.query("INSERT INTO room_types(id,code,name,base_occupancy,max_occupancy,show_in_booking) VALUES($1,'SYN','Synthetic room',2,2,true)", [typeId]);
   await pool.query("INSERT INTO rooms(id,room_number,room_type_id,floor,status) VALUES($1,'SYN-1',$2,1,'available')", [roomId, typeId]);
   await pool.query("INSERT INTO rate_plans(id,name,room_type_id,base_rate,rate_2pax,currency) VALUES($1,'Rack',$2,100000,120000,'ARS'),($3,'Cheaper internal plan',$2,1,1,'ARS')", [planId, typeId, otherPlan]);
+  await seedBookingOtaScope(pool, typeId, planId);
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use((req: any, _res, next) => { req.user = { id: "synthetic-reviewer", role: req.headers["x-role"] }; req.isAuthenticated = () => !!req.headers["x-role"]; next(); });

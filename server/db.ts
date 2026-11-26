@@ -45,6 +45,12 @@ export function withDatabaseTransaction<T>(action: () => Promise<T>): Promise<T>
   if (transactionContext.getStore()) return action();
   return rootDb.transaction((tx) => transactionContext.run(tx, action));
 }
+/** Web confirmation holds the existing lodging mutex and reads prices, channel
+ * scope and inventory from one snapshot. Other callers keep their semantics. */
+export function withRepeatableReadDatabaseTransaction<T>(action: () => Promise<T>): Promise<T> {
+  if (transactionContext.getStore()) return action();
+  return rootDb.transaction(tx => transactionContext.run(tx, action), { isolationLevel: "repeatable read" });
+}
 /** Consistent reporting snapshot, with database-enforced read-only access.
  * Existing transactions (e.g. caller-owned fixtures) keep their own scope. */
 export function withReadOnlyDatabaseTransaction<T>(action: () => Promise<T>): Promise<T> {

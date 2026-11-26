@@ -5039,6 +5039,7 @@ La entrega de la habitación queda condicionada al pago total del alojamiento al
 
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE purchase_invoices ADD COLUMN special_details jsonb`)));
   await db.execute(sql.raw(incrementalDdlWithoutRerunNotice(`ALTER TABLE reservations ADD COLUMN housekeeping_preparation jsonb`)));
+  await db.execute(sql.raw(addColumnWithoutRerunNotice("reservations", "ota_room_details", "jsonb")));
   await db.execute(sql.raw(addColumnWithoutRerunNotice("reservations", "housekeeping_bed_preparation", "jsonb")));
   await db.execute(sql.raw(addColumnWithoutRerunNotice("reservations", "room_history", "jsonb")));
   await db.execute(sql.raw(createTableWithoutRerunNotice("reservation_relocations", `CREATE TABLE reservation_relocations (

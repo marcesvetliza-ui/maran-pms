@@ -577,4 +577,99 @@ suite("real PMS Channex inbox on disposable PostgreSQL",()=>{
   } finally {vi.unstubAllEnvs();}
  });
 
+ async function namedPayload(f:any,booking:string,id:string,status='new',stamp='2026-11-01T00:00:00Z'){
+  const raw:any=revision(f.id,booking,id,status,stamp,2);
+  raw.attributes.customer={name:'Booker',surname:'Alpha',mail:'booker@example.invalid'};
+  raw.attributes.rooms.forEach((r:any,i:number)=>{r.guests=[{name:i?'Guest':'Booker',surname:i?'Beta':'Alpha'}];r.meta={room_remarks:['BED PREFERENCE: 2 singoli - 1 matrimoniale alla francese']};});
+  return raw;
+ }
+ async function guestState(f:any){return(await pool.query(`SELECT r.id,r.guest_id,g.first_name,g.last_name,g.email,r.bed_type_notes,r.ota_room_details,l.guest_hash
+  FROM channex_inbound_rooms l JOIN reservations r ON r.id=l.reservation_id JOIN guests g ON g.id=r.guest_id WHERE l.connection_id=$1 ORDER BY l.remote_room_id`,[f.id])).rows;}
+ async function financialState(f:any){return(await pool.query(`SELECT r.id,r.room_id,r.room_type_id,r.rate_plan_id,r.status,r.check_in_date,r.check_out_date,r.number_of_guests,r.nights,r.total_room_amount,r.base_rate_per_night,r.final_rate_per_night,r.nightly_pricing,r.pricing_revision FROM channex_inbound_rooms l JOIN reservations r ON r.id=l.reservation_id WHERE l.connection_id=$1 ORDER BY l.remote_room_id`,[f.id])).rows;}
+ async function legacyFixture(){
+  const f=await fixture(2),raw=await namedPayload(f,randomUUID(),randomUUID());
+  const original=structuredClone(raw);original.attributes.rooms.forEach((r:any)=>{delete r.guests;delete r.meta;});
+  expect((await apply(f,original)).status).toBe('applied');
+  // Simulate the previous importer: the complete immutable source existed,
+  // while its per-room guests and remarks had not been used by the PMS.
+  const {redactBooking,revisionHash}=await import('../channex/bookingRevision');const stored=redactBooking(raw);
+  await pool.query('UPDATE channex_inbound_revisions SET payload=$2,payload_hash=$3 WHERE connection_id=$1 AND revision_id=$4',[f.id,stored,revisionHash(stored),raw.id]);
+  await pool.query('UPDATE reservations SET ota_room_details=NULL WHERE id IN(SELECT reservation_id FROM channex_inbound_rooms WHERE connection_id=$1)',[f.id]);
+  await pool.query('UPDATE channex_inbound_rooms SET guest_hash=NULL WHERE connection_id=$1',[f.id]);
+  return {f,raw};
+ }
+ it('imports each named room guest with exact USD totals and an explicitly shared bed request',async()=>{
+  const f=await fixture(2),raw=await namedPayload(f,'named-usd',randomUUID());
+  await pool.query("UPDATE channex_ari_settings SET currency='USD' WHERE connection_id=$1",[f.id]);await pool.query("UPDATE rate_plans SET currency='USD' WHERE id=$1",[f.plan]);
+  await saveSettlementRate(pool,f.id,{rate:'1545',reason:'Synthetic reception quote'},'Synthetic');
+  raw.attributes.currency='USD';raw.attributes.amount='195.20';raw.attributes.rooms.forEach((r:any)=>{r.amount='97.60';r.days={[arrival]:'48.80',[secondNight]:'48.80'};});
+  expect((await apply(f,raw)).status).toBe('applied');
+  const guests=await guestState(f);expect(guests.map(g=>g.first_name)).toEqual(['Booker','Guest']);expect(guests[1].email).toBeNull();expect(guests[0].guest_id).not.toBe(guests[1].guest_id);
+  for(const g of guests){expect(g.ota_room_details.bedRequest.scope).toBe('booking');expect(g.bed_type_notes).toContain('confirmar distribución');expect(g.guest_hash).toBeTruthy();}
+  expect((await linked(f)).map(r=>r.total_room_amount)).toEqual(['150792.00','150792.00']);
+  expect((await pool.query('SELECT source_total FROM channex_inbound_settlements WHERE connection_id=$1 ORDER BY remote_room_id',[f.id])).rows).toEqual([{source_total:'97.60'},{source_total:'97.60'}]);
+ });
+ it('splits a legacy shared booker when a later revision names the second guest and preserves reception edits',async()=>{
+  const f=await fixture(2),raw=await namedPayload(f,'split-guest',randomUUID());const initial=structuredClone(raw);initial.attributes.rooms.forEach((r:any)=>delete r.guests);
+  await apply(f,initial);const before=await guestState(f);expect(before[0].guest_id).toBe(before[1].guest_id);
+  raw.id=randomUUID();raw.attributes.status='modified';raw.attributes.inserted_at='2026-11-02T00:00:00Z';expect((await apply(f,raw)).status).toBe('applied');
+  const after=await guestState(f);expect(after[0].guest_id).toBe(before[0].guest_id);expect(after[1].first_name).toBe('Guest');expect(after[1].guest_id).not.toBe(after[0].guest_id);
+  await pool.query("UPDATE guests SET last_name='Reception correction' WHERE id=$1",[after[1].guest_id]);
+  const next=structuredClone(raw);next.id=randomUUID();next.attributes.inserted_at='2026-11-03T00:00:00Z';
+  expect((await apply(f,next)).review_code).toBe('LOCAL_GUEST_CHANGED');expect((await guestState(f))[1].last_name).toBe('Reception correction');
+ });
+ it('recovers old guest and bed information once without repricing, moving rooms or dispatching inventory',async()=>{
+  vi.stubEnv('CHANNEX_INBOUND_STAGING_ENABLED','true');
+  try{const {f}=await legacyFixture();const before=await financialState(f);
+   const events=(await pool.query('SELECT count(*)::int n FROM channex_ari_outbox WHERE connection_id=$1',[f.id])).rows[0].n;
+   await service.recoverStoredRoomDetails(pool);const after=await guestState(f);expect(after.map(r=>r.first_name)).toEqual(['Booker','Guest']);expect(after.every(r=>r.ota_room_details.guestStatus==='imported')).toBe(true);
+   const planning=await storage.getPlanningData(arrival,departure);expect(planning.reservations[after[1].id]).toMatchObject({guestName:'Beta Guest',bedTypeName:'Pedido de camas del canal: confirmar preparación'});
+   expect(await financialState(f)).toEqual(before);expect((await pool.query('SELECT count(*)::int n FROM channex_ari_outbox WHERE connection_id=$1',[f.id])).rows[0].n).toBe(events);
+   await service.recoverStoredRoomDetails(pool);expect(await guestState(f)).toEqual(after);
+  }finally{vi.unstubAllEnvs();}
+ });
+ it('keeps a locally corrected guest and bed choice during metadata recovery',async()=>{
+  vi.stubEnv('CHANNEX_INBOUND_STAGING_ENABLED','true');
+  try{const {f}=await legacyFixture(),rows=await guestState(f);await pool.query("UPDATE guests SET first_name='Reception guest' WHERE id=$1",[rows[0].guest_id]);
+   await pool.query("UPDATE reservations SET bed_type_notes='Matrimonial confirmed by reception' WHERE id=$1",[rows[1].id]);
+   await service.recoverStoredRoomDetails(pool);const after=await guestState(f);expect(after.every(r=>r.first_name==='Reception guest')).toBe(true);expect(after.every(r=>r.ota_room_details.guestStatus==='preserved_local')).toBe(true);expect(after[1].bed_type_notes).toBe('Matrimonial confirmed by reception');
+  }finally{vi.unstubAllEnvs();}
+ });
+ it('keeps reception stay details during legacy metadata recovery',async()=>{
+  vi.stubEnv('CHANNEX_INBOUND_STAGING_ENABLED','true');
+  try{const {f}=await legacyFixture(),rows=await guestState(f);await pool.query("UPDATE reservations SET stay_details='{\"source\":\"reception\"}'::jsonb WHERE id=$1",[rows[1].id]);
+   const before=await financialState(f);await service.recoverStoredRoomDetails(pool);const after=await guestState(f);expect(after[1].first_name).toBe('Booker');expect(after[1].ota_room_details.guestStatus).toBe('preserved_local');expect(await financialState(f)).toEqual(before);
+   expect((await pool.query('SELECT stay_details FROM reservations WHERE id=$1',[rows[1].id])).rows[0].stay_details).toEqual({source:'reception'});
+  }finally{vi.unstubAllEnvs();}
+ });
+ it('rolls the entire metadata recovery back if writing the second room fails',async()=>{
+  vi.stubEnv('CHANNEX_INBOUND_STAGING_ENABLED','true');
+  const {f}=await legacyFixture(),rows=await guestState(f),before=await financialState(f);
+  await pool.query(`CREATE FUNCTION test_reject_metadata() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN IF NEW.id='${rows[1].id}' AND NEW.ota_room_details IS NOT NULL THEN RAISE EXCEPTION 'synthetic metadata failure'; END IF; RETURN NEW; END$$; CREATE TRIGGER test_reject_metadata BEFORE UPDATE ON reservations FOR EACH ROW EXECUTE FUNCTION test_reject_metadata()`);
+  try{await service.recoverStoredRoomDetails(pool);expect((await guestState(f)).every(r=>r.ota_room_details===null)).toBe(true);expect(await financialState(f)).toEqual(before);}
+  finally{await pool.query('DROP TRIGGER test_reject_metadata ON reservations; DROP FUNCTION test_reject_metadata()');vi.unstubAllEnvs();}
+ });
+
+ it('does not change the guest or existing payments when a legacy stay already has financial movements',async()=>{
+  vi.stubEnv('CHANNEX_INBOUND_STAGING_ENABLED','true');let payment:string|undefined;
+  try{const {f}=await legacyFixture(),rows=await guestState(f);payment=randomUUID();
+   await pool.query("INSERT INTO payments(id,reservation_id,amount,method,date,status) VALUES($1,$2,100,'efectivo',CURRENT_DATE,'active')",[payment,rows[1].id]);
+   const money=(await pool.query('SELECT * FROM payments WHERE id=$1',[payment])).rows,before=await financialState(f);
+   await service.recoverStoredRoomDetails(pool);const after=await guestState(f);
+   expect(after[1].first_name).toBe('Booker');expect(after[1].ota_room_details.guestStatus).toBe('preserved_local');expect(after[1].ota_room_details.guestNames).toEqual(['Guest Beta']);
+   expect((await pool.query('SELECT * FROM payments WHERE id=$1',[payment])).rows).toEqual(money);expect(await financialState(f)).toEqual(before);
+  }finally{if(payment)await pool.query('DELETE FROM payments WHERE id=$1',[payment]);vi.unstubAllEnvs();}
+ });
+ it('does not rewrite a checked-out legacy room or silently clear a registered bed preparation',async()=>{
+  vi.stubEnv('CHANNEX_INBOUND_STAGING_ENABLED','true');
+  try{const {f}=await legacyFixture(),rows=await guestState(f);
+   await pool.query("UPDATE reservations SET status='checked_out' WHERE id=$1",[rows[0].id]);
+   const prep={roomId:'synthetic',bedConfig:'MAT',bedRevision:1,bedTypeId:null,bedTypeNotes:null,confirmedAt:'2026-11-26T12:00:00Z',confirmedBy:'Reception'};
+   await pool.query('UPDATE reservations SET housekeeping_bed_preparation=$2 WHERE id=$1',[rows[1].id,prep]);
+   await service.recoverStoredRoomDetails(pool);
+   expect((await pool.query('SELECT status,ota_room_details FROM reservations WHERE id=$1',[rows[0].id])).rows[0]).toEqual({status:'checked_out',ota_room_details:null});
+   expect((await pool.query('SELECT housekeeping_bed_preparation FROM reservations WHERE id=$1',[rows[1].id])).rows[0].housekeeping_bed_preparation).toEqual(prep);
+  }finally{vi.unstubAllEnvs();}
+ });
+
 });

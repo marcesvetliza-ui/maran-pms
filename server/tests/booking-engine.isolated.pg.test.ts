@@ -1,3 +1,4 @@
+import { seedBookingOtaScope } from "./booking-ota-fixture";
 import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
@@ -40,6 +41,7 @@ beforeAll(async () => {
   await pool.query("INSERT INTO room_types(id,code,name,base_occupancy,max_occupancy,show_in_booking) VALUES($1,'SYN','Synthetic room',2,2,true)", [typeId]);
   await pool.query("INSERT INTO rooms(id,room_number,room_type_id,floor,status) VALUES($1,'SYN-1',$2,1,'available')", [roomId, typeId]);
   await pool.query("INSERT INTO rate_plans(id,name,room_type_id,base_rate,rate_2pax,currency) VALUES($1,'Rack',$2,100000,120000,'ARS'),($3,'Cheaper internal plan',$2,1,1,'ARS')", [planId, typeId, otherPlan]);
+  await seedBookingOtaScope(pool, typeId, planId);
   const app = express();
   app.use(express.json({ limit: "1mb" }));
   app.use((req: any, _res, next) => { req.user = { id: "synthetic-reviewer", role: req.headers["x-role"] }; req.isAuthenticated = () => !!req.headers["x-role"]; next(); });
@@ -186,7 +188,10 @@ it("rolls guest and reservation creation back together if persistence fails", as
   }
 });
 it("confirms exact nightly prices once and rejects sold out and stale/foreign plans before guest writes", async () => {
-  await pool.query("INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,occupancy_rates) VALUES($1,'2091-01-03','{\"2\":\"150000.01\"}')", [planId]);
+  await pool.query("UPDATE booking_engine_configs SET inherit_ota_ranges=true,ota_adjustment_percent=-10 WHERE room_type_id=$1", [typeId]);
+  await pool.query("UPDATE channex_rate_plan_mappings SET sell_mode='per_person',rate_mode='manual',occupancies=ARRAY[1,2] WHERE rate_plan_id=$1 AND connection_id IN (SELECT id FROM channex_connections WHERE environment='real')", [planId]);
+  await pool.query(`INSERT INTO rate_calendar_entries(rate_plan_id,stay_date,occupancy_rates,occupancy_price_origins)
+    VALUES($1,'2091-01-03','{"2":"150000.01"}','{"2":"ota_calendar"}')`, [planId]);
   expect((await availability())[0]).toMatchObject({ totalPrice: 243000.01, variableNightlyRates: true });
   const body = { ...stay, roomTypeId: typeId, ratePlanId: planId, expectedTotalAmount: 243000.01,
     firstName: "Synthetic", lastName: "Review", email: "booking-test@example.invalid" };

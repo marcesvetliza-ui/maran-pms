@@ -1,12 +1,15 @@
+import { OtaRoomDetailsSummary } from "./ota-room-details";
 import type { PlanningRequest } from "@shared/housekeepingPlanning";
 import { useBedCatalog } from "@/hooks/use-bed-catalog";
 import { formatHotelDateTime } from "@/lib/hotelTime";
 
 export function HousekeepingBedSummary({request}:{request:PlanningRequest}) {
   const confirmation=request.bedPreparation;
+  const channelNotes=!!request.otaRoomDetails?.importedBedNotes&&request.bedTypeNotes===request.otaRoomDetails.importedBedNotes;
   const bedCatalog = useBedCatalog();
   return <div className="rounded-md border bg-background/70 p-2 space-y-1 text-sm" aria-label="Camaje solicitado y preparado">
-    <p><span className="font-medium">Solicitado por la reserva:</span> {request.bedTypeName||"Sin especificar"}{request.bedTypeNotes&&<> · {request.bedTypeNotes}</>}</p>
+    <OtaRoomDetailsSummary details={request.otaRoomDetails} bedsOnly />
+    <p><span className="font-medium">Solicitado por la reserva:</span> {channelNotes?"Ver pedido del canal arriba":request.bedTypeName||"Sin especificar"}{request.bedTypeNotes&&!channelNotes&&<> · {request.bedTypeNotes}</>}</p>
     {confirmation ? <>
       <p><span className="font-medium">Preparación registrada:</span> {bedCatalog.label(confirmation.bedConfig)}</p>
       <p className={request.preparationCurrent ? "font-semibold text-green-700 dark:text-green-300" : "font-semibold text-amber-700 dark:text-amber-300"}>

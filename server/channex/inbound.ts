@@ -1,3 +1,6 @@
+import { channelRoomDetails, channelGuestProfile, withChannelBedNotes } from "./roomDetails";
+import { guestFingerprint, syncRoomGuest } from "./roomGuestSync";
+import { readBookingNotes } from "./bookingPrivate";
 import {operationAllowed,workerEnvironment,PRODUCTION_URL} from './connectionPolicy';
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
@@ -81,14 +84,18 @@ export async function persistInboundRevision(target: Pool, connectionId: string,
     return payload.id as string;
   } catch (error) { await c.query("ROLLBACK"); throw error; } finally { c.release(); }
 }
-function guestFingerprint(g: any) {
-  return revisionHash({ firstName: g.firstName, lastName: g.lastName, email: g.email || null, phone: g.phone || null });
-}
 function localFingerprint(r: any) {
   return revisionHash({
     guest: r.guestId, room: r.roomId, type: r.roomTypeId, plan: r.ratePlanId,
     arrival: r.checkInDate, departure: r.checkOutDate, status: r.status, nights: r.nightlyPricing, total: r.totalRoomAmount, occupancy: r.numberOfGuests
   });
+}
+function sourceRoomDetails(source:any,key:string){
+ let details=channelRoomDetails(source.payload,key);
+ if(!details.bedRequest&&source.private_notes_encrypted){try{
+  details=channelRoomDetails(source.payload,key,readBookingNotes(source.private_notes_encrypted,source.connection_id,source.revision_id).notes);
+ }catch{/* Notes are optional; an unavailable archive must not prevent a valid booking. */}}
+ return details;
 }
 /** Canonical storage owns overlap checks, pricing guards, audit and the ARI
  * triggers. The entire multi-room booking and revision cursor commit together. */
@@ -201,26 +208,8 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
         }
         let guestHash = cursor.guest_hash;
         if (booking.status !== "cancelled") {
-          // Each channel booking owns a dedicated guest record; never merge
-          // people based on similar names/email or overwrite a hotel guest.
-          let guestId = links.length ? existing.values().next().value?.guestId : null;
-          const profile = {
-            firstName: booking.customer!.name, lastName: booking.customer!.surname || "—",
-            email: booking.customer!.mail || null, phone: booking.customer!.phone || null
-          };
-          if (!guestId) guestId = (await storage.createGuest(profile)).id;
-          else {
-            await db.execute(sql`SELECT id FROM guests WHERE id=${guestId} FOR UPDATE`);
-            const guest = await storage.getGuest(guestId);
-            if (!guest || (cursor.guest_hash && guestFingerprint(guest) !== cursor.guest_hash)) return review("LOCAL_GUEST_CHANGED");
-            if (guestFingerprint(guest) !== guestFingerprint(profile)) {
-              const foreign = await db.execute(sql`SELECT 1 FROM reservations r WHERE r.guest_id=${guestId}
-                AND NOT EXISTS(SELECT 1 FROM channex_inbound_rooms l WHERE l.connection_id=${connectionId} AND l.booking_id=${booking.bookingId} AND l.reservation_id=r.id) LIMIT 1`);
-              if (foreign.rows.length) return review("SHARED_GUEST_REQUIRES_REVIEW");
-              await storage.updateGuest(guestId, profile);
-            }
-          }
-          guestHash = guestFingerprint(profile);
+          const guestCache = new Map<string,string>();
+          guestHash = guestFingerprint(channelGuestProfile(booking.customer!, []));
           for (const room of settledRooms) {
             const maps = (await db.execute(sql`SELECT rm.room_type_id,rm.room_ids,rp.rate_plan_id,rt.max_occupancy,p.currency,p.room_type_id AS plan_room_type
               FROM channex_room_type_mappings rm JOIN channex_rate_plan_mappings rp ON rp.connection_id=rm.connection_id AND rp.channex_room_type_id=rm.channex_room_type_id
@@ -245,10 +234,15 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
                 AND x.check_in_date<${booking.departure}::date AND x.check_out_date>${booking.arrival}::date)
               ORDER BY (r.id=${old?.roomId || ""}) DESC,r.room_number::text FOR UPDATE OF r`)).rows as any[];
             if (!candidates.length) return review("NO_PILOT_ROOM_AVAILABLE");
+            const linked = links.find(link => link.remote_room_id === room.key) || links.find(link => link.reservation_id === old?.id);
+            const guest = await syncRoomGuest({connectionId,bookingId:booking.bookingId,oldGuestId:old?.guestId,oldReservationId:old?.id,
+              expectedHash:linked?.guest_hash || cursor.guest_hash,profile:channelGuestProfile(booking.customer!,room.guests),cache:guestCache});
+            const details = sourceRoomDetails(source,room.key);
+            const bedPatch = withChannelBedNotes(details,old);
             const average = amountString(Math.round(room.totalCents / room.nights.length));
             const patch = {
               // USD selling plans must not become peso repricing defaults.
-              guestId, roomId: candidates[0].id, roomTypeId: map.room_type_id, ratePlanId: booking.currency === "USD" ? null : map.rate_plan_id,
+              ...bedPatch, guestId: guest.id, roomId: candidates[0].id, roomTypeId: map.room_type_id, ratePlanId: booking.currency === "USD" ? null : map.rate_plan_id,
               checkInDate: booking.arrival!, checkOutDate: booking.departure!, nights: room.nights.length,
               totalRoomAmount: amountString(room.totalCents), baseRatePerNight: average, finalRatePerNight: average,
               discountType: "none" as const, discountValue: "0", status: "confirmed" as const, numberOfGuests: room.occupancy, lastModifiedBy: "Channex"
@@ -275,9 +269,9 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
               VALUES(${saved.id},${manual?.actor.name || 'Channex'},'channex',${manual
                 ? `Asignación manual desde Channex. Categoría original: ${proposal!.options.rooms.find(r => r.key === room.key)!.mappedCategory || proposal!.options.rooms.find(r => r.key === room.key)!.category}. Destino: ${choice!.category}, habitación ${choice!.number}. Motivo: ${manual.reason}. Revisión ${revisionId}.`
                 : `${old ? "Modificación" : "Alta"} recibida de Channex. Estadía ${booking.arrival} → ${booking.departure}. Revisión ${revisionId}.`})`);
-            await db.execute(sql`INSERT INTO channex_inbound_rooms(connection_id,booking_id,remote_room_id,reservation_id,local_hash)
-              VALUES(${connectionId},${booking.bookingId},${room.key},${saved.id},${localFingerprint(saved)})
-              ON CONFLICT(connection_id,booking_id,remote_room_id) DO UPDATE SET local_hash=EXCLUDED.local_hash`);
+            await db.execute(sql`INSERT INTO channex_inbound_rooms(connection_id,booking_id,remote_room_id,reservation_id,local_hash,guest_hash)
+              VALUES(${connectionId},${booking.bookingId},${room.key},${saved.id},${localFingerprint(saved)},${guest.hash})
+              ON CONFLICT(connection_id,booking_id,remote_room_id) DO UPDATE SET local_hash=EXCLUDED.local_hash,guest_hash=EXCLUDED.guest_hash`);
             const original = booking.rooms.find(sourceRoom => sourceRoom.key === room.key)!;
             await db.execute(sql`INSERT INTO channex_inbound_settlements(connection_id,revision_id,remote_room_id,reservation_id,source_currency,source_total,source_nights,source_rate_plan_id,exchange_rate,settlement_total,settlement_nights)
               VALUES(${connectionId},${revisionId},${room.key},${saved.id},${booking.currency},${amountString(original.totalCents)},${JSON.stringify(original.nights)}::jsonb,${original.remotePlan},${settlementRate},${amountString(room.totalCents)},${JSON.stringify(room.nights)}::jsonb)`);
@@ -316,4 +310,69 @@ export async function applyInboundRevision(connectionId: string, revisionId: str
       await db.execute(sql`UPDATE channex_inbound_revisions SET status='review',review_code=${code} WHERE connection_id=${connectionId} AND revision_id=${revisionId} AND status='pending'`);
     }
   });
+}
+
+/** Metadata-only catch-up for already accepted, unarrived channel bookings.
+ * It never replays their financial/stay import or changes assigned rooms. */
+export async function recoverStoredRoomDetails(target:Pool){
+ const environment=workerEnvironment('inbound');if(!environment)return;
+ const baseUrl=environment==='real'?PRODUCTION_URL:STAGING_URL;
+ let updated=0,afterConnection='',afterBooking='';
+ for(;;){
+ const candidates=(await target.query(`SELECT DISTINCT l.connection_id,l.booking_id FROM channex_inbound_rooms l
+  JOIN reservations r ON r.id=l.reservation_id JOIN channex_connections c ON c.id=l.connection_id
+  JOIN channex_inbound_settings i ON i.connection_id=c.id
+  WHERE r.ota_room_details IS NULL AND r.status IN('confirmed','pending','tentative')
+   AND r.check_out_date>(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+   AND c.environment=$1 AND c.base_url=$2 AND c.is_active AND i.enabled AND (l.connection_id,l.booking_id)>($3::varchar,$4::text)
+  ORDER BY l.connection_id,l.booking_id LIMIT 50`,[environment,baseUrl,afterConnection,afterBooking])).rows;
+ if(!candidates.length)break;
+ afterConnection=candidates.at(-1).connection_id;afterBooking=candidates.at(-1).booking_id;
+ for(const candidate of candidates){
+  let recovered=0;
+  try{await withInvoiceAdvisoryLock(pool,`channex-booking:${candidate.connection_id}:${candidate.booking_id}`,async()=>{
+   const prior=(await db.execute(sql`SELECT reservation_id FROM channex_inbound_rooms WHERE connection_id=${candidate.connection_id} AND booking_id=${candidate.booking_id}`)).rows as any[];
+   await withReservationFinancialLocks(prior.map(x=>x.reservation_id),()=>withLodgingInventoryMutationLock(()=>withDatabaseTransaction(async()=>{
+    const cursor=(await db.execute(sql`SELECT b.*,c.channex_property_id FROM channex_inbound_bookings b JOIN channex_connections c ON c.id=b.connection_id
+     JOIN channex_inbound_settings i ON i.connection_id=c.id WHERE b.connection_id=${candidate.connection_id} AND b.booking_id=${candidate.booking_id}
+      AND c.is_active AND c.environment=${environment} AND c.base_url=${baseUrl} AND i.enabled FOR UPDATE OF b FOR SHARE OF c,i`)).rows[0] as any;
+    if(!cursor?.last_revision_id||cursor.cancelled)return;
+    const source=(await db.execute(sql`SELECT * FROM channex_inbound_revisions WHERE connection_id=${candidate.connection_id} AND revision_id=${cursor.last_revision_id} AND status='applied' FOR SHARE`)).rows[0] as any;
+    if(!source)return;
+    const booking=parseBookingRevision(source.payload,cursor.channex_property_id);
+    if(booking.status==='cancelled')return;
+    const links=(await db.execute(sql`SELECT * FROM channex_inbound_rooms WHERE connection_id=${candidate.connection_id} AND booking_id=${candidate.booking_id} ORDER BY remote_room_id FOR UPDATE`)).rows as any[];
+    const cache=new Map<string,string>();
+    for(const link of links){
+     await db.execute(sql`SELECT id FROM reservations WHERE id=${link.reservation_id} FOR UPDATE`);
+     const old=await storage.getReservation(link.reservation_id),room=booking.rooms.find(r=>r.key===link.remote_room_id);
+     if(!old||old.otaRoomDetails||!room||!['confirmed','pending','tentative'].includes(old.status))continue;
+     const details=sourceRoomDetails(source,room.key);
+     await db.execute(sql`SELECT id FROM guests WHERE id=${old.guestId} FOR UPDATE`);
+     const current=await storage.getGuest(old.guestId),expected=link.guest_hash||cursor.guest_hash;
+     const foreign=(await db.execute(sql`SELECT 1 FROM reservations r WHERE r.guest_id=${old.guestId}
+      AND NOT EXISTS(SELECT 1 FROM channex_inbound_rooms l WHERE l.connection_id=${candidate.connection_id} AND l.booking_id=${candidate.booking_id} AND l.reservation_id=r.id) LIMIT 1`)).rows.length;
+     const money=(await db.execute(sql`SELECT 1 FROM payments WHERE reservation_id=${old.id} AND status IS DISTINCT FROM 'anulado'
+      UNION ALL SELECT 1 FROM sales_invoices WHERE reserva_id=${old.id} AND estado<>'descartada'
+      UNION ALL SELECT 1 FROM charges WHERE reservation_id=${old.id} AND status IS DISTINCT FROM 'anulado'
+      UNION ALL SELECT 1 FROM group_reservation_links WHERE reservation_id=${old.id} LIMIT 1`)).rows.length;
+     const companions=(await db.execute(sql`SELECT 1 FROM reservation_companions WHERE reservation_id=${old.id} LIMIT 1`)).rows.length;
+     const pristine=!current?.documentNumber&&!old.stayDetails&&!companions&&!!link.local_hash&&link.local_hash===localFingerprint(old)&&!!current&&!!expected&&guestFingerprint(current)===expected&&!foreign&&!money;
+     let guest={id:old.guestId,hash:expected};
+     if(pristine)guest=await syncRoomGuest({connectionId:candidate.connection_id,bookingId:candidate.booking_id,oldGuestId:old.guestId,oldReservationId:old.id,expectedHash:expected,profile:channelGuestProfile(booking.customer!,room.guests),cache});
+     else if(!current||guestFingerprint(current)!==guestFingerprint(channelGuestProfile(booking.customer!,room.guests)))details.guestStatus='preserved_local';
+     const bed=withChannelBedNotes(details,old);
+     // Use the canonical writer for field validation and history; the patch
+     // intentionally contains only guest and operational bed information.
+     const saved=await storage.updateReservation(old.id,{...bed,...(pristine?{guestId:guest.id}:{}),lastModifiedBy:'Channex'});
+     if(pristine)await db.execute(sql`UPDATE channex_inbound_rooms SET local_hash=${localFingerprint(saved)},guest_hash=${guest.hash}
+      WHERE connection_id=${candidate.connection_id} AND booking_id=${candidate.booking_id} AND remote_room_id=${room.key}`);
+     await db.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion) VALUES(${old.id},'Channex','channex',${pristine?'Datos de huésped por habitación y pedido de camas recuperados del canal. Importes y estadía conservados.':'Pedido del canal recuperado. Se conservaron los datos locales del huésped; recepción debe revisar las diferencias.'})`);
+     recovered++;
+    }
+   })));
+  });updated+=recovered;}catch{/* A failed booking rolls back; other bookings and the normal receiver continue. */}
+ }
+ }
+ return {updated};
 }
