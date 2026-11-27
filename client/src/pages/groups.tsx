@@ -72,6 +72,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest, apiRequestWithGroupInventoryWarning, parseApiError } from "@/lib/queryClient";
 import type { GroupWithDetails, GroupStatus, InsertGroup, RoomType } from "@shared/schema";
+import type { GroupStayPreview, GroupStayRates } from "@shared/groupStayDates";
 import { Trash2 as TrashIcon } from "lucide-react";
 
 interface BlockDraft {
@@ -100,7 +101,7 @@ function GroupStatusBadge({ status }: { status: GroupStatus }) {
   return <Badge variant={config.variant}>{config.label}</Badge>;
 }
 
-function GroupFormDialog({
+export function GroupFormDialog({
   group,
   open,
   onOpenChange,
@@ -158,6 +159,24 @@ function GroupFormDialog({
   const [conflictResolutions, setConflictResolutions] = useState<Record<string, string>>({});
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [pendingFormData, setPendingFormData] = useState<(Partial<InsertGroup> & { roomReassignments?: Record<string, string> }) | null>(null);
+  const [stayPreview, setStayPreview] = useState<GroupStayPreview | null>(null);
+  const [addedRates, setAddedRates] = useState<GroupStayRates>({});
+  const [manualRateDates, setManualRateDates] = useState<Record<string, string[]>>({});
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewNeedsRefresh, setPreviewNeedsRefresh] = useState(false);
+  const money = (value: string | null) => value === null ? "A cotizar" : Number(value).toLocaleString("es-AR", { style: "currency", currency: "ARS" });
+  const loadStayPreview = async (data: Partial<InsertGroup>, choices: Record<string, string>, rates: GroupStayRates) => {
+    setPreviewBusy(true);
+    try {
+      const preview: GroupStayPreview = await (await apiRequest("POST", `/api/groups/${group!.id}/date-change-preview`, {
+        checkInDate: data.checkInDate, checkOutDate: data.checkOutDate, status: data.status,
+        roomReassignments: choices, addedRates: rates,
+      })).json();
+      setStayPreview(preview); setPreviewNeedsRefresh(false);
+      setManualRateDates(previous => Object.fromEntries(preview.rows.map(row => [row.reservationId,
+        [...new Set([...(previous[row.reservationId] || []), ...row.missingRates])]])));
+    } finally { setPreviewBusy(false); }
+  };
 
   const fetchBlockAvailability = async (blockId: string, roomTypeId: string, checkIn: string, checkOut: string) => {
     if (!roomTypeId || !checkIn || !checkOut || checkOut <= checkIn) return;
@@ -173,6 +192,8 @@ function GroupFormDialog({
   // Reset state when dialog opens/closes or mode changes
   useEffect(() => {
     if (open) {
+      setStayPreview(null); setAddedRates({}); setManualRateDates({}); setPreviewNeedsRefresh(false);
+      setPendingFormData(null); setConflictData([]); setConflictResolutions({}); setShowConfirmDialog(false); setShowConflictDialog(false);
       setBlocks([]);
       setCreatedGroupId(null);
       setFormData({
@@ -206,6 +227,11 @@ function GroupFormDialog({
       apiRequestWithGroupInventoryWarning("PATCH", `/api/groups/${group!.id}`, data as Record<string, unknown>).then(r => r.json()),
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/groups"] });
+      queryClient.invalidateQueries({ predicate: query => typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith(`/api/groups/${group!.id}`) });
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/rooms/available"] });
+      setShowConfirmDialog(false); setPendingFormData(null); setStayPreview(null); setConflictData([]); setConflictResolutions({});
       const count = data?.propagatedCount ?? 0;
       toast({
         title: "Grupo actualizado exitosamente",
@@ -215,6 +241,7 @@ function GroupFormDialog({
       onOpenChange(false);
     },
     onError: (e: any) => {
+      if (stayPreview) setPreviewNeedsRefresh(true);
       toast({ title: "Error al actualizar grupo", description: parseApiError(e), variant: "destructive" });
     },
   });
@@ -231,6 +258,7 @@ function GroupFormDialog({
     }
 
     const datesChanged = formData.checkInDate !== group?.checkInDate || formData.checkOutDate !== group?.checkOutDate;
+    setStayPreview(null); setAddedRates({}); setManualRateDates({}); setPreviewNeedsRefresh(false); setConflictResolutions({});
 
     if (!datesChanged) {
       // No date change — go straight to confirmation
@@ -263,6 +291,7 @@ function GroupFormDialog({
 
       if (conflicts.length === 0) {
         // No conflicts — go to confirmation
+        await loadStayPreview(formData, {}, {});
         setPendingFormData(formData);
         setShowConfirmDialog(true);
       } else {
@@ -290,15 +319,18 @@ function GroupFormDialog({
     }
   };
 
-  const handleConflictContinue = () => {
+  const handleConflictContinue = async () => {
     // All conflicts must have a selection
     const missing = conflictData.filter(c => !conflictResolutions[c.reservationId]);
     if (missing.length > 0) {
       toast({ title: "Seleccioná una habitación alternativa para cada conflicto", variant: "destructive" });
       return;
     }
-    setShowConflictDialog(false);
-    setShowConfirmDialog(true);
+    if (!pendingFormData) return;
+    try {
+      await loadStayPreview(pendingFormData, conflictResolutions, {});
+      setShowConflictDialog(false); setShowConfirmDialog(true);
+    } catch (error: any) { toast({ title: "No se pudo revisar la reprogramación", description: parseApiError(error), variant: "destructive" }); }
   };
 
   const handleConfirm = () => {
@@ -309,11 +341,11 @@ function GroupFormDialog({
     if (hasReassignments) {
       dataToSubmit.roomReassignments = conflictResolutions;
     }
+    if (stayPreview) {
+      if (!stayPreview.canConfirm || previewBusy || previewNeedsRefresh) return;
+      dataToSubmit.dateChangeConfirmation = { fingerprint: stayPreview.fingerprint, addedRates };
+    }
     updateMutation.mutate(dataToSubmit);
-    setShowConfirmDialog(false);
-    setConflictData([]);
-    setConflictResolutions({});
-    setPendingFormData(null);
   };
 
   const addBlock = () => {
@@ -965,7 +997,7 @@ function GroupFormDialog({
           <Button variant="outline" onClick={() => setShowConflictDialog(false)}>Cancelar</Button>
           <Button
             onClick={handleConflictContinue}
-            disabled={conflictData.some(c => !conflictResolutions[c.reservationId])}
+            disabled={previewBusy || conflictData.some(c => !conflictResolutions[c.reservationId])}
           >
             Continuar
           </Button>
@@ -975,18 +1007,40 @@ function GroupFormDialog({
 
     {/* 6a: Final confirmation dialog */}
     <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-      <AlertDialogContent>
+      <AlertDialogContent className="max-w-2xl">
         <AlertDialogHeader>
-          <AlertDialogTitle>¿Estás segura de lo que vas a hacer?</AlertDialogTitle>
+          <AlertDialogTitle>{stayPreview ? "Revisar fechas y alojamiento" : "Confirmar cambios del grupo"}</AlertDialogTitle>
           <AlertDialogDescription>
-            {conflictData.length > 0
-              ? `Se cambiarán las fechas del grupo y se reasignarán ${conflictData.length} habitación(es) a alternativas del mismo tipo. Esta acción actualizará todas las reservas pendientes y confirmadas vinculadas.`
-              : "Se cambiarán las fechas del grupo y se propagarán a todas las reservas pendientes y confirmadas vinculadas."}
+            {stayPreview ? "Revisá las noches y los importes de las reservas activas vinculadas. Las habitaciones con fechas propias se indican en el detalle. Los cobros registrados se conservan."
+              : "Se guardarán los datos del grupo."}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {stayPreview && <div className="space-y-3 max-h-[55vh] overflow-y-auto" data-testid="group-stay-preview">
+          <div className="grid grid-cols-3 gap-2 rounded-md border p-3 text-sm">
+            <div>Alojamiento actual<strong className="block">{money(stayPreview.beforeTotal)}</strong></div>
+            <div>Nuevo alojamiento<strong className="block">{money(stayPreview.afterTotal)}</strong></div>
+            <div>Diferencia<strong className="block">{money(stayPreview.difference)}</strong></div>
+          </div>
+          {stayPreview.rows.map(row => <div key={row.reservationId} className="rounded-md border p-2 text-xs space-y-1">
+            <p className="font-medium">Hab. {row.roomNumber}{!row.changed && " · Conserva sus fechas"}</p>
+            <p>{formatDisplayDate(row.before.checkInDate)} → {formatDisplayDate(row.before.checkOutDate)} · {row.before.nights} noches · {money(row.before.total)}</p>
+            {row.changed && <p>{formatDisplayDate(row.after.checkInDate)} → {formatDisplayDate(row.after.checkOutDate)} · {row.after.nights} noches · {money(row.after.total)}</p>}
+            {(manualRateDates[row.reservationId] || []).map(date => <div key={date} className="flex items-center justify-between gap-2">
+              <Label htmlFor={`new-night-${row.reservationId}-${date}`}>Tarifa {formatDisplayDate(date)}</Label>
+              <Input id={`new-night-${row.reservationId}-${date}`} aria-label={`Tarifa Hab. ${row.roomNumber} ${date}`} type="number" min="0" step="0.01" className="w-36 h-8" disabled={previewBusy || updateMutation.isPending}
+                value={addedRates[row.reservationId]?.[date] || ""} onChange={event => { setAddedRates(current => ({ ...current, [row.reservationId]: { ...current[row.reservationId], [date]: event.target.value } })); setPreviewNeedsRefresh(true); }} />
+            </div>)}
+          </div>)}
+          {(!stayPreview.canConfirm || previewNeedsRefresh) && <div className="space-y-2 text-sm" role="status">
+            <p>{!stayPreview.canConfirm ? "Completá las tarifas de las noches nuevas y revisá el importe." : "Actualizá la vista previa antes de confirmar."}</p>
+            <Button type="button" variant="outline" disabled={previewBusy || updateMutation.isPending} onClick={() => {
+              if (pendingFormData) void loadStayPreview(pendingFormData, conflictResolutions, addedRates).catch(error => toast({ title: "No se pudo actualizar la vista previa", description: parseApiError(error), variant: "destructive" }));
+            }}>{previewBusy ? "Revisando..." : "Revisar importes"}</Button>
+          </div>}
+        </div>}
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => { setShowConfirmDialog(false); }}>Cancelar</AlertDialogCancel>
-          <AlertDialogAction onClick={handleConfirm} disabled={updateMutation.isPending}>
+          <AlertDialogAction onClick={event => { event.preventDefault(); handleConfirm(); }} disabled={updateMutation.isPending || previewBusy || (!!stayPreview && (!stayPreview.canConfirm || previewNeedsRefresh))}>
             {updateMutation.isPending ? "Guardando..." : "Confirmar cambio"}
           </AlertDialogAction>
         </AlertDialogFooter>

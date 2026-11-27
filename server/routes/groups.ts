@@ -11,6 +11,8 @@ import { registerGroupOccupantRoutes } from "./group-occupant";
 import { registerGroupAssignmentReleaseRoutes } from "./group-assignment-release";
 import { reverseTransferredPersonalAdvance } from '../groupPersonalAdvance';
 import { withFinancialScopeLock } from '../nightlyPricingGuard';
+import { groupStayTarget } from '@shared/groupStayDates';
+import { groupStayInputSchema, groupStayConfirmationSchema, previewGroupStayDates } from '../groupStayDates';
 import type { Express } from "express";
 import { randomUUID } from "crypto";
 import { storage, getArgentinaToday } from "../db-storage";
@@ -505,16 +507,18 @@ export function registerGroupsRoutes(app: Express) {
         const room = allRooms.find(r => r.id === linked.roomId);
         if (!room) continue;
         const roomType = allRoomTypes.find(rt => rt.id === room.roomTypeId);
+        const block = group.blocks.find(b => b.id === link.blockId);
+        const targetDates = groupStayTarget(group, { checkInDate: checkIn, checkOutDate: checkOut }, linked, block).dates;
 
         // Does this room have a conflict in the NEW date range? (exclude self)
         const hasResConflict = allReservations.some(res => {
           if (!activeStatuses.includes(res.status)) return false;
           if (res.roomId !== room.id) return false;
           if (res.id === linked.id) return false;
-          return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+          return res.checkInDate < targetDates.checkOutDate && res.checkOutDate > targetDates.checkInDate;
         });
         const hasBlockConflict = maintenanceBlocks.some(blk =>
-          blk.roomId === room.id && blk.blockFrom < checkOut && blk.blockTo > checkIn
+          blk.roomId === room.id && blk.blockFrom < targetDates.checkOutDate && blk.blockTo > targetDates.checkInDate
         );
 
         if (!hasResConflict && !hasBlockConflict) continue; // no conflict, skip
@@ -541,11 +545,11 @@ export function registerGroupsRoutes(app: Express) {
               if (!activeStatuses.includes(res.status)) return false;
               if (res.roomId !== r.id) return false;
               if (groupResIds.has(res.id)) return false;
-              return res.checkInDate < checkOut && res.checkOutDate > checkIn;
+              return res.checkInDate < targetDates.checkOutDate && res.checkOutDate > targetDates.checkInDate;
             });
             if (resConflict) return false;
             const blockConflict = maintenanceBlocks.find(blk =>
-              blk.roomId === r.id && blk.blockFrom < checkOut && blk.blockTo > checkIn
+              blk.roomId === r.id && blk.blockFrom < targetDates.checkOutDate && blk.blockTo > targetDates.checkInDate
             );
             if (blockConflict) return false;
             return true;
@@ -570,8 +574,17 @@ export function registerGroupsRoutes(app: Express) {
     }
   });
 
+  app.post('/api/groups/:id/date-change-preview', requireAuth, requirePermission('sidebar:/groups'), async (req, res) => {
+    const input = groupStayInputSchema.safeParse(req.body);
+    if (!input.success) return res.status(400).json({ error: 'Revisá las fechas y las tarifas de las noches nuevas.' });
+    try { res.json(await previewGroupStayDates(req.params.id, input.data)); }
+    catch (error: any) { res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'No se pudo preparar la vista previa. No se guardaron cambios.' }); }
+  });
+
   app.patch("/api/groups/:id", async (req, res) => {
     try {
+      const confirmation = groupStayConfirmationSchema.optional().safeParse(req.body.dateChangeConfirmation);
+      if (!confirmation.success) return res.status(400).json({ error: 'La confirmación de noches e importes no es válida. Volvé a revisar la vista previa.' });
       const { name, contactName, contactPhone, contactEmail, eventDate, eventSalon, eventTime, checkInDate, checkOutDate, status, releaseDate, notes, color, masterFolioConfig, billingEntityType, billingEntityId, roomReassignments } = req.body;
       const nullIfEmpty = (v: any) => (v === "" || v === null || v === undefined) ? null : v;
       const updateData: Record<string, unknown> = {};
@@ -612,6 +625,8 @@ export function registerGroupsRoutes(app: Express) {
         patch: updateData as any,
         roomReassignments: roomReassignments && typeof roomReassignments === "object" ? roomReassignments : undefined,
         overrideTentativeGroupWarning: req.body.overrideTentativeGroupWarning === true,
+        dateChangeConfirmation: confirmation.data,
+        actor: { id: req.user?.id, name: req.user?.username || 'Sistema' },
       });
       if (!atomicGroup) return res.status(404).json({ error: "Group not found" });
       return res.json(atomicGroup);

@@ -70,7 +70,9 @@ function parseGiftVoucherValueType(value: string): GiftVoucher["valueType"] {
 
 import { eq, and, or, desc, asc, sql, ilike, count, ne, lt, gt, lte, gte, inArray, not, isNull, isNotNull, getTableColumns } from "drizzle-orm";
 import { db, pool, withDatabaseTransaction, withReadOnlyDatabaseTransaction } from "./db";
-import { initializeNightlyPricing, guardPricingUpdate, mayChangePricing, withReservationFinancialLock } from "./nightlyPricingGuard";
+import { initializeNightlyPricing, guardPricingUpdate, mayChangePricing, withReservationFinancialLock, withFinancialScopeLock, withReservationFinancialLocks, hasFinancialScopeLock } from "./nightlyPricingGuard";
+import { groupStayTarget } from "@shared/groupStayDates";
+import { planGroupStayDates } from "./groupStayDates";
 import { archiveCancelledReservationFolio } from "./reservation-folio-lifecycle";
 import { IStorage, type AtomicGroupUpdateInput, type AtomicGroupUpdateResult } from "./storage";
 import {
@@ -2787,7 +2789,10 @@ export class DatabaseStorage implements IStorage {
   async updateGroupAtomic(id: string, input: AtomicGroupUpdateInput): Promise<AtomicGroupUpdateResult | undefined> {
     const reassignment = input.roomReassignments || {};
     const override = input.overrideTentativeGroupWarning === true;
-    return db.transaction(async (tx) => {
+    return withFinancialScopeLock(`group-invoice:${id}`, async () => {
+      const owners = await db.select().from(groupReservationLinks).where(eq(groupReservationLinks.groupId, id));
+      const unlocked = owners.map(l => l.reservationId).filter(id => !hasFinancialScopeLock(`folio-invoice:${id}`));
+      return withReservationFinancialLocks(unlocked, () => db.transaction(async (tx) => {
       // This lock is deliberately transaction-scoped: every inventory mutation
       // (including room moves made by the group editor) serializes here.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('lodging-inventory-mutations'))`);
@@ -2807,6 +2812,13 @@ export class DatabaseStorage implements IStorage {
       if (datesChanged && linked.some(row => row.status === "checked_in")) {
         throw Object.assign(new Error("No se pueden cambiar las fechas mientras hay huéspedes en casa."), { statusCode: 409 });
       }
+      const ownBlocks = await tx.select().from(groupRoomBlocks).where(eq(groupRoomBlocks.groupId, id));
+      const stayDates = new Map(linked.map(row => {
+        const link = links.find(l => l.reservationId === row.id);
+        const block = ownBlocks.find(b => b.id === link?.blockId);
+        return [row.id, datesChanged ? groupStayTarget(before, { checkInDate: nextCheckIn, checkOutDate: nextCheckOut }, row, block).dates
+          : { checkInDate: row.checkInDate, checkOutDate: row.checkOutDate }];
+      }));
 
       const targets = Object.entries(reassignment).filter(([, roomId]) => !!roomId) as Array<[string, string]>;
       if (new Set(targets.map(([, roomId]) => roomId)).size !== targets.length) {
@@ -2846,11 +2858,24 @@ export class DatabaseStorage implements IStorage {
       for (const row of active) {
         const roomId = finalRoomByReservation.get(row.id);
         if (!roomId) continue;
+        const dates = stayDates.get(row.id)!;
         const conflict = allOnRooms.some(other => other.id !== row.id
           && other.roomId === roomId && !reservationIds.includes(other.id)
           && !["cancelled", "checked_out", "no_show"].includes(other.status)
-          && other.checkInDate < nextCheckOut && other.checkOutDate > nextCheckIn);
+          && other.checkInDate < dates.checkOutDate && other.checkOutDate > dates.checkInDate);
         if (conflict) throw Object.assign(new Error(`La habitación destino ya no está disponible en esas fechas.`), { statusCode: 409 });
+      }
+      const finalRoomIds = [...new Set(finalRooms as string[])];
+      if (datesChanged && finalRoomIds.length) {
+        const assignedRooms = await tx.select().from(rooms).where(inArray(rooms.id, finalRoomIds));
+        if (assignedRooms.some(room => !isOperationalInventoryRoom(room) || ["maintenance", "oos"].includes(room.status)))
+          throw Object.assign(new Error("Una habitación asignada ya no está habilitada. Elegí una alternativa antes de cambiar fechas."), { statusCode: 409 });
+      }
+      const unavailable = finalRoomIds.length ? await tx.select().from(maintenanceBlocks).where(inArray(maintenanceBlocks.roomId, finalRoomIds)) : [];
+      for (const row of active) {
+        const dates = stayDates.get(row.id)!;
+        if (unavailable.some(block => block.roomId === finalRoomByReservation.get(row.id) && block.blockFrom < dates.checkOutDate && block.blockTo > dates.checkInDate))
+          throw Object.assign(new Error("La habitación tiene un bloqueo de mantenimiento en las nuevas fechas."), { statusCode: 409 });
       }
 
       // Validate group inventory from the same transaction snapshot.
@@ -2883,7 +2908,7 @@ export class DatabaseStorage implements IStorage {
           groups: allGroups.map(group => group.id === id ? { ...group, checkInDate: nextCheckIn, checkOutDate: nextCheckOut, status: String(input.patch.status || group.status) } : group) as any,
           blocks,
           reservations: allReservations.map(row => ({
-            ...row,
+            ...row, ...(stayDates.get(row.id) || {}), roomId: finalRoomByReservation.get(row.id) || row.roomId,
             status: isCancellingGroup && reservationIds.includes(row.id) ? "cancelled" : row.status,
             groupId: groupByReservation.get(row.id),
           })) as any,
@@ -2897,6 +2922,18 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
+      let datePlan: Awaited<ReturnType<typeof planGroupStayDates>> | undefined;
+      if (datesChanged) {
+        if (!input.dateChangeConfirmation || !/^[a-f0-9]{64}$/.test(input.dateChangeConfirmation.fingerprint))
+          throw Object.assign(new Error("Revisá y confirmá la vista previa de noches e importes antes de cambiar fechas."), { statusCode: 409, response: { error: "Revisá y confirmá la vista previa de noches e importes antes de cambiar fechas.", code: "GROUP_DATE_PREVIEW_REQUIRED" } });
+        datePlan = await planGroupStayDates(tx, { group: before, linked, links, blocks: ownBlocks }, {
+          checkInDate: nextCheckIn, checkOutDate: nextCheckOut, status: input.patch.status || before.status,
+          roomReassignments: reassignment, addedRates: input.dateChangeConfirmation.addedRates,
+        });
+        if (!datePlan.preview.canConfirm || datePlan.preview.fingerprint !== input.dateChangeConfirmation.fingerprint)
+          throw Object.assign(new Error("La cuenta, las fechas o las tarifas cambiaron. Volvé a revisar la vista previa antes de guardar."), { statusCode: 409, response: { error: "La cuenta, las fechas o las tarifas cambiaron. Volvé a revisar la vista previa antes de guardar.", code: "GROUP_DATE_PREVIEW_STALE" } });
+      }
+
       const safePatch: Record<string, unknown> = { ...input.patch };
       delete (safePatch as any)._inventoryOverrideTentativeGroupWarning;
       delete (safePatch as any).id;
@@ -2907,17 +2944,17 @@ export class DatabaseStorage implements IStorage {
       if (input.failAfterFirstWrite) throw new Error("test-only atomic group failure");
       let propagatedCount = 0;
       for (const row of linked) {
-        if (["cancelled", "checked_out"].includes(row.status)) continue;
+        if (["cancelled", "checked_out", "no_show"].includes(row.status)) continue;
         const patch: Record<string, unknown> = {};
-        if (datesChanged && row.status !== "checked_in") {
-          patch.checkInDate = nextCheckIn; patch.checkOutDate = nextCheckOut;
-        }
+        if (datePlan?.patches.has(row.id)) Object.assign(patch, datePlan.patches.get(row.id), { lastModifiedBy: input.actor?.id || row.lastModifiedBy });
         if (reassignment[row.id]) {
           patch.roomId = reassignment[row.id]; patch.roomTypeId = roomsById.get(reassignment[row.id]!)!.roomTypeId;
         }
         if (String(input.patch.status) === "cancelled") patch.status = "cancelled";
         if (Object.keys(patch).length) {
           await tx.update(reservations).set(patch as any).where(eq(reservations.id, row.id));
+          if (datePlan?.patches.has(row.id)) await tx.execute(sql`INSERT INTO reservation_changelog(reservation_id,operador,tipo,descripcion)
+            VALUES(${row.id},${input.actor?.name || 'Sistema'},'fechas',${`Reprogramación grupal confirmada: ${row.checkInDate} → ${row.checkOutDate} ($${row.totalRoomAmount}) a ${patch.checkInDate} → ${patch.checkOutDate} ($${patch.totalRoomAmount}). Noches y precios actualizados juntos; cobros conservados.`})`);
           if (patch.status === "cancelled") await archiveCancelledReservationFolio(row.id, "Cancelación de grupo", tx);
           propagatedCount++; writes++;
         }
@@ -2937,7 +2974,12 @@ export class DatabaseStorage implements IStorage {
       if (input.patch.name !== undefined) {
         await tx.update(guests).set({ firstName: String(input.patch.name), lastName: "" }).where(eq(guests.codigo, `GROUP-${id}`));
       }
+      if (datePlan) await tx.execute(sql`INSERT INTO audit_logs(user_id,user_name,action,module,entity_type,entity_id,description,details,timestamp)
+        VALUES(${input.actor?.id || null},${input.actor?.name || 'Sistema'},'update','groups','group',${id},'Fechas, noches y precios grupales actualizados tras confirmar vista previa',
+        ${JSON.stringify({ fingerprint: datePlan.preview.fingerprint, before: { checkInDate: before.checkInDate, checkOutDate: before.checkOutDate }, preview: datePlan.preview,
+          reservations: linked.filter(r => datePlan!.patches.has(r.id)).map(r => ({ id: r.id, before: { checkInDate: r.checkInDate, checkOutDate: r.checkOutDate, nights: r.nights, totalRoomAmount: r.totalRoomAmount, baseRatePerNight: r.baseRatePerNight, finalRatePerNight: r.finalRatePerNight, discountType: r.discountType, discountValue: r.discountValue, pricingScheme: r.pricingScheme, nightlyPricing: r.nightlyPricing, pricingRevision: r.pricingRevision }, after: datePlan!.patches.get(r.id) })) })},now())`);
       return { ...updated, propagatedCount };
+      }));
     });
   }
 
@@ -2950,6 +2992,8 @@ export class DatabaseStorage implements IStorage {
     }
     if (Object.keys(safeData).length === 0) return undefined;
     const current = await this.getGroup(id);
+    if (current && ((safeData.checkInDate !== undefined && safeData.checkInDate !== current.checkInDate) || (safeData.checkOutDate !== undefined && safeData.checkOutDate !== current.checkOutDate)))
+      throw Object.assign(new Error("Usá Editar grupo y confirmá la vista previa de noches e importes para cambiar fechas."), { statusCode: 409 });
     if (current && (safeData.status !== undefined || safeData.checkInDate !== undefined || safeData.checkOutDate !== undefined)) {
       const nextStatus = safeData.status || current.status;
       if (["confirmed", "inhouse"].includes(nextStatus)) {
