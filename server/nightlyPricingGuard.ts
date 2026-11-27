@@ -48,9 +48,9 @@ const parseMap = (value: any): Record<string, any> | null => {
   catch { return null; }
 };
 /** Conservative fiscal policy: no attribution to nights; ambiguous fiscal history fails closed. */
-export async function accommodationFiscalStatus(id: string, totalCents = 0, editableDates?: string[]) {
+export async function accommodationFiscalStatus(id: string, totalCents = 0, editableDates?: string[], executor: Pick<typeof db, "execute"> = db) {
   let coveredCents = 0, ambiguous = false, authorizing = false;
-  const result = await db.execute(sql`
+  const result = await executor.execute(sql`
     SELECT id, estado, source_charge_amounts, source_charge_ids, monto_total, monto_acreditado,
       credit_reapplication_intent
     FROM sales_invoices
@@ -69,7 +69,7 @@ export async function accommodationFiscalStatus(id: string, totalCents = 0, edit
       else coveredCents += Math.round(amount * 100);
     }
   }
-  const group = await db.execute(sql`
+  const group = await executor.execute(sql`
     SELECT si.id FROM sales_invoices si
     JOIN group_reservation_links gl ON gl.group_id=si.group_id
     WHERE gl.reservation_id=${id}

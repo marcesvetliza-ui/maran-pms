@@ -12,6 +12,7 @@ import {
   groupRoomBlocks,
 } from "@shared/schema";
 import { randomUUID } from "node:crypto";
+import { previewGroupStayDates } from "../groupStayDates";
 
 const runIfDatabaseIsConfigured = process.env.DATABASE_URL ? describe : describe.skip;
 
@@ -114,8 +115,10 @@ runIfDatabaseIsConfigured("reprogramación atómica de grupos", () => {
       reservations: await db.select().from(reservations).where(inArray(reservations.id, [ids.reservation1, ids.reservation2])),
       rooms: await db.select().from(rooms).where(inArray(rooms.id, [ids.room1, ids.room2])),
     };
+    const preview = await previewGroupStayDates(ids.group, { checkInDate: "2030-02-10", checkOutDate: "2030-02-12" });
     await expect(storage.updateGroupAtomic(ids.group, {
       patch: { checkInDate: "2030-02-10", checkOutDate: "2030-02-12" },
+      dateChangeConfirmation: { fingerprint: preview.fingerprint },
       failAfterFirstWrite: true,
     })).rejects.toThrow("test-only atomic group failure");
 

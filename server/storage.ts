@@ -937,6 +937,8 @@ export type AtomicGroupUpdateInput = {
   patch: Partial<InsertGroup>;
   roomReassignments?: Record<string, string | null>;
   overrideTentativeGroupWarning?: boolean;
+  dateChangeConfirmation?: { fingerprint: string; addedRates?: import("@shared/groupStayDates").GroupStayRates };
+  actor?: { id?: string; name: string };
   /** Test-only failure injection, never supplied by the HTTP route. */
   failAfterFirstWrite?: boolean;
 };
