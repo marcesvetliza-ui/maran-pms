@@ -1,4 +1,5 @@
 import { assertClosedStayInvoiceRequest } from "./closedStayInvoice";
+import { assertNewGroupCollectionPreflight } from './groupCollectionPreflight';
 import { assertRoomBatchInvoice } from '../groupRoomInvoiceBatch';
 import { groupRoomAdvanceInvoicePreview } from './groupRoomAdvanceInvoice';
 import {isStandaloneSpaCashReceipt,settleStandaloneSpaCashReceipt} from './spaReceiptSettlement';
@@ -1222,12 +1223,15 @@ export function registerBillingRoutes(app: Express) {
       if (req.body.prefacturaRecovery?.version === 2 && !isNonFiscalTipo(String(tipoComprobante)) && reservaId && typeof creditOperationId === "string" && /^[0-9a-f-]{20,}$/i.test(creditOperationId)) {
         assertFinancialSchemaReady();
         const config = await getBillingConfig();
-        if (["homologacion", "produccion"].includes(String(config.arcaAmbiente))) {
-          const selected = puntoVentaOverride ?? pvBody ?? (config.arcaAmbiente === "homologacion" ? config.puntoVentaHomolog : config.puntoVenta);
-          await beginBillingOperation(db, { ...req.body, requestSnapshot: req.body, creditReapplicationIntent: { operationId: creditOperationId } }, {
-            environment: String(config.arcaAmbiente), issuer: String(config.arcaCuit || config.cuit).replace(/\D/g, ""), pointOfSale: Number(selected), type: String(tipoComprobante),
-          });
-        }
+        await withReservationFinancialLock(String(reservaId), async () => {
+          await assertNewGroupCollectionPreflight(req.body);
+          if (["homologacion", "produccion"].includes(String(config.arcaAmbiente))) {
+            const selected = puntoVentaOverride ?? pvBody ?? (config.arcaAmbiente === "homologacion" ? config.puntoVentaHomolog : config.puntoVenta);
+            await beginBillingOperation(db, { ...req.body, requestSnapshot: req.body, creditReapplicationIntent: { operationId: creditOperationId } }, {
+              environment: String(config.arcaAmbiente), issuer: String(config.arcaCuit || config.cuit).replace(/\D/g, ""), pointOfSale: Number(selected), type: String(tipoComprobante),
+            });
+          }
+        });
       }
       const collectionError = nonFiscalCollectionError(tipoComprobante, Array.isArray(cashFormaPagoDetalle) && cashFormaPagoDetalle.length ? cashFormaPagoDetalle.filter((row:any)=>Number(row?.amount)>0).map((row:any)=>row.method) : [cashFormaPago]);
       if (collectionError) return res.status(400).json({error:collectionError});

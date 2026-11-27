@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { automaticPrefacturaAction } from './prefactura-auto-recovery';
 const attempt = { invoiceRequest: { reservaId:'9001',creditOperationId:'operation-9001',prefacturaRecovery:{version:2} },
-  invoice:null,payments:[{reservationId:'9001',paymentRequestId:'payment-9001',amount:'12100',method:'transferencia'}],checkoutRequested:true };
+  invoice:null,payments:[{reservationId:'9001',paymentRequestId:'payment-9001',amount:'12100',method:'transferencia',date:'2026-11-26'}],checkoutRequested:true };
 const status = { operationId:'operation-9001',stage:'prepared',attempt };
 describe('automatic recovery requires a verified original room and operation',()=>{
   it.each(['prepared','numbered','submitting','uncertain','authorized'])('resumes the same idempotent request at stage %s',stage=>{
@@ -20,5 +20,13 @@ describe('automatic recovery requires a verified original room and operation',()
     expect(automaticPrefacturaAction('9001','operation-9001',{...status,stage:'blocked',safeToCorrect:true,attempt:{...attempt,payments:[]}})).toBe('correct');
     expect(automaticPrefacturaAction('9001','operation-9001',{...status,stage:'blocked',safeToCorrect:true})).toBeNull();
     expect(automaticPrefacturaAction('9001','operation-9001',{...status,stage:'blocked',safeToCorrect:true,canRetryNumberConflict:true})).toBe('resume');
+  });
+  it('returns a verified unsent group collection to editing instead of retrying its missing advance choice',()=>{
+    const value={...status,safeToCorrect:true,preflightCorrection:{code:'GROUP_ADVANCE_CHOICE_REQUIRED',message:'Elegí el origen del pago.'}};
+    expect(automaticPrefacturaAction('9001','operation-9001',value)).toBe('correct');
+    expect(automaticPrefacturaAction('9001','operation-9001',{...value,safeToCorrect:false})).toBe('resume');
+    expect(automaticPrefacturaAction('9001','operation-9001',{...value,stage:'submitting'})).toBe('resume');
+    expect(automaticPrefacturaAction('9001','operation-9001',{...value,paymentConflicts:['payment-9001']})).toBeNull();
+    expect(automaticPrefacturaAction('9001','operation-9001',{...value,attempt:{...attempt,payments:[{...attempt.payments[0],date:''}]}})).toBe('resume');
   });
 });

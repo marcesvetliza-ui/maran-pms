@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -7,9 +7,9 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.sessionStorage.clear(
 
 function setup({ local = true, cc = true, stage = 'prepared', invoice = null as any, acknowledged = false,
   failure = false, blocked = false, changed = false, losePaymentOnce = false,
-  invoiceResponse = undefined as Promise<Response> | undefined } = {}) {
+  preflight = false, method = 'transferencia', invoiceResponse = undefined as Promise<Response> | undefined } = {}) {
   const id = 'fixture-room-a', operationId = 'original-fixture-room-a-operation';
-  const payment = { reservationId: id, amount: '12100.00', method: 'transferencia', date: '2026-01-02',
+  const payment = { reservationId: id, amount: '12100.00', method, date: '2026-01-02',
     reference: 'original-reference', notes: null, paymentRequestId: 'original-payment-id' };
   const payments = cc ? [] : [payment];
   const invoiceRequest = { reservaId: id, creditOperationId: operationId, tipoComprobante: 'FA', puntoVentaOverride: 5,
@@ -26,6 +26,7 @@ function setup({ local = true, cc = true, stage = 'prepared', invoice = null as 
     if (path.endsWith('/reception-status')) {
       statusReads++;
       return Response.json({ operationId, stage: blocked ? 'blocked' : invoiceIssued ? 'authorized' : stage, safeToCorrect: stage === 'prepared' || blocked,
+        ...(preflight ? {preflightCorrection:{code:'GROUP_ADVANCE_CHOICE_REQUIRED',message:'Confirmá que este pago se recibió por separado del grupo.'}} : {}),
         attempt: losePaymentOnce && invoiceIssued ? { ...attempt, invoice: { id:9001,reservaId:id }, acknowledgedPaymentIds: paymentCommitted ? [payment.paymentRequestId] : [] } : attempt,
         ...(changed && statusReads > 1 ? { paymentConflicts: [payment.paymentRequestId], paymentConflictMessage: 'El pago requiere conciliación.' } : {}) });
     }
@@ -41,6 +42,7 @@ function setup({ local = true, cc = true, stage = 'prepared', invoice = null as 
       throw Error(`Unexpected POST ${path}`);
     }
     if (path.endsWith('/pending-operation')) return Response.json({ pending: closed || corrected ? null : { operationId, attempt } });
+    if (path.endsWith('/group-account')) return Response.json({groupId:'synthetic-group',unassigned:preflight?30000:0,reviewReceipts:[],groupCoverage:{},advances:[]});
     if (path === `/api/reservations/${id}`) return Response.json({ id, status: closed ? 'checked_out' : 'checked_in' });
     if (path.endsWith('/folio')) return Response.json({ groupId: 'synthetic-group', reservationCode: 'RES204', guestName: 'Persona Fixture', roomNumber: '9001', nights: 1,
       roomRate: '10000', roomTotal: 10000, charges: [{ id: 'parking', description: 'Cochera', amount: 2100 }],
@@ -87,6 +89,27 @@ it('retires a blocked unsent draft under the correction guard, preserving CC for
   await waitFor(()=>expect(screen.getByTestId('select-sale-condition')).toHaveTextContent(/Cuenta corriente/i));
   expect(screen.getByDisplayValue('Empresa de prueba')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Completar operación pendiente' })).not.toBeInTheDocument();
+});
+
+it.each([true,false])('unblocks an unsent group collection while preserving the card and amount (local: %s)',async local=>{
+  const f=setup({local,cc:false,preflight:true,method:'tarjeta_credito'});
+  await screen.findByText('Confirmá que este pago se recibió por separado del grupo.');
+  await waitFor(()=>expect(window.sessionStorage.getItem('prefactura-pending:fixture-room-a')).toBeNull());
+  expect(f.writes().map(([url])=>String(url))).toEqual(['/api/billing/reservations/fixture-room-a/operations/original-fixture-room-a-operation/correct-reception']);
+  expect(screen.getByDisplayValue('12100.00')).toBeInTheDocument();
+  expect(screen.getByTestId('select-payment-method-0')).toHaveTextContent('Tarjeta Crédito');
+  expect(screen.getByLabelText(/Este pago individual se recibió por separado/)).not.toBeChecked();
+  expect(screen.queryByRole('button',{name:'Completar operación pendiente'})).not.toBeInTheDocument();
+  expect(f.close).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByTestId('button-registrar-emitir'));
+  expect(f.writes()).toHaveLength(1);
+  fireEvent.click(screen.getByLabelText(/Este pago individual se recibió por separado/));
+  fireEvent.click(screen.getByTestId('button-registrar-emitir'));
+  await waitFor(()=>expect(f.close).toHaveBeenCalledOnce());
+  const invoiceBody=JSON.parse(String(f.writes().find(([url])=>String(url)==='/api/billing/invoices')![1]?.body));
+  expect(invoiceBody).toMatchObject({acknowledgeUnassignedAdvance:true,cashFormaPago:'tarjeta_credito',prefacturaRecovery:{payments:[{amount:'12100.00',method:'tarjeta_credito',date:'2026-01-02'}]}});
+  expect(f.writes().filter(([url])=>String(url)==='/api/billing/invoices')).toHaveLength(1);
+  expect(f.writes().filter(([url])=>String(url)==='/api/payments')).toHaveLength(1);
 });
 
 it('retains original intent after a failed automatic request without an unbounded render retry loop', async () => {

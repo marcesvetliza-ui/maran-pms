@@ -310,6 +310,32 @@ suite('individual group room from its own prefactura',()=>{
   const paid=await request('/api/payments',{...payment,invoiceData:{id:issued.body.id}});expect(paid.status,JSON.stringify(paid.body)).toBe(201);
   const snapshot=await(await import('../billing/groupAccount')).groupAccountSnapshot(f.ids[0]);expect(snapshot).toMatchObject({balance:0,paid:121,unassigned:0,reviewReceipts:[]});
  });
+ it('rejects a missing group collection choice before freezing an operation and recovers a legacy unsent card intent',async()=>{
+  const f=await fixture();
+  const parent=await request(`/api/groups/${f.group}/master-payment`,{paymentRequestId:randomUUID(),paymentRows:[{method:'transfer',amount:'100.00',reference:'preflight advance'}],receiptType:'none',receiverDetails:{razonSocial:'Synthetic Group',dni:'30123456'},concepts:[{description:'Anticipo',amount:100}],leaveUnassigned:true});
+  expect(parent.status,JSON.stringify(parent.body)).toBe(200);
+  const card={...f.payment,method:'tarjeta_credito'};
+  const body={...f.invoice,reservationBillingAction:'collect_and_invoice',cashFormaPago:'tarjeta_credito',cashFormaPagoDetalle:[{method:'tarjeta_credito',amount:121}],prefacturaRecovery:{version:2,payments:[card],checkoutRequested:false}};
+  const denied=await request('/api/billing/invoices',body);
+  expect(denied.status).toBe(409);
+  expect(denied.body).toMatchObject({code:'GROUP_ADVANCE_CHOICE_REQUIRED',safeToReset:true});
+  expect((await pool.query('SELECT 1 FROM billing_operations WHERE operation_id=$1',[body.creditOperationId])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT 1 FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT 1 FROM payments WHERE reservation_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+  const {db}=await import('../db');
+  const {beginBillingOperation}=await import('../billing/operationJournal');
+  await beginBillingOperation(db,{...body,creditReapplicationIntent:{operationId:body.creditOperationId}},{environment:'ficticio',issuer:'00000000000',pointOfSale:1,type:'FB'});
+  const found=await fetch(url+`/api/billing/reservations/${f.ids[0]}/pending-operation`).then(r=>r.json());
+  expect(found.pending).toMatchObject({stage:'prepared',safeToCorrect:true,preflightCorrection:{code:'GROUP_ADVANCE_CHOICE_REQUIRED'},attempt:{payments:[{amount:'121.00',method:'tarjeta_credito'}]}});
+  const corrected=await request(`/api/billing/reservations/${f.ids[0]}/operations/${body.creditOperationId}/correct-reception`,{});
+  expect(corrected.status,JSON.stringify(corrected.body)).toBe(200);
+  expect(corrected.body).toMatchObject({corrected:true,request:{cashFormaPago:'tarjeta_credito',prefacturaRecovery:{payments:[{amount:'121.00',method:'tarjeta_credito'}]}}});
+  expect((await pool.query('SELECT stage FROM billing_operations WHERE operation_id=$1',[body.creditOperationId])).rows[0].stage).toBe('corrected');
+  expect((await fetch(url+`/api/billing/reservations/${f.ids[0]}/pending-operation`).then(r=>r.json())).pending).toBeNull();
+  expect((await pool.query('SELECT 1 FROM sales_invoices WHERE reserva_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+  expect((await pool.query('SELECT 1 FROM payments WHERE reservation_id=$1',[f.ids[0]])).rows).toHaveLength(0);
+  expect(await(await import('../billing/groupAccount')).groupAccountSnapshot(f.ids[0])).toMatchObject({unassigned:100,paid:0});
+ });
  it('accepts explicitly confirmed new money without consuming unassigned group advances',async()=>{
   const f=await fixture();
   const parent=await request(`/api/groups/${f.group}/master-payment`,{paymentRequestId:randomUUID(),paymentRows:[{method:'transfer',amount:'100.00',reference:'new advance'}],receiptType:'none',receiverDetails:{razonSocial:'Synthetic Group',dni:'30123456'},concepts:[{description:'Anticipo',amount:100}],leaveUnassigned:true});expect(parent.status,JSON.stringify(parent.body)).toBe(200);
