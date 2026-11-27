@@ -48,9 +48,19 @@ function provenDraft(invoice: any, operation: BillingOperation | undefined, iden
 }
 
 async function hasLinks(tx: Pick<Database, "execute">, invoice: any) {
-  if (Number(invoice.monto_acreditado || 0) !== 0 || invoice.payment_id || invoice.group_payment_id || invoice.folio_id ||
+  if (Number(invoice.monto_acreditado || 0) !== 0 || invoice.payment_id || invoice.group_payment_id ||
     invoice.group_payment_intent || invoice.center_settlement_status && invoice.center_settlement_status !== "pending" ||
     invoice.credit_reapplication_intent?.status === "completed" || invoice.credit_reapplication_intent?.settlement?.status === "completed") return true;
+  if (invoice.folio_id) {
+    // A reservation invoice normally points at its room account before ARCA
+    // receives it. That ownership link alone is not a payment or a posting.
+    // Keep unknown/shared owners and adopted funding scopes protected.
+    if (!invoice.reserva_id || invoice.group_id || invoice.spa_account_id || invoice.restaurant_order_id) return true;
+    const folio = (await tx.execute(sql`SELECT entity_type,entity_id FROM folios WHERE id=${invoice.folio_id} FOR UPDATE NOWAIT`)).rows[0] as any;
+    if (folio?.entity_type !== "reservation" || folio.entity_id !== invoice.reserva_id) return true;
+    const registry = (await tx.execute(sql`SELECT to_regclass('payment_funding.scopes') AS name`)).rows[0] as any;
+    if (registry?.name && (await tx.execute(sql`SELECT 1 FROM payment_funding.scopes WHERE kind='reservation' AND id=${invoice.reserva_id}`)).rows.length) return true;
+  }
   const id = Number(invoice.id), textId = String(id);
   const label = `${invoice.tipo_comprobante}-${String(invoice.punto_venta).padStart(4, "0")}-${String(invoice.numero).padStart(8, "0")}`;
   const legacy = `${invoice.tipo_comprobante}-${String(invoice.numero).padStart(8, "0")}`;
@@ -71,7 +81,11 @@ async function hasLinks(tx: Pick<Database, "execute">, invoice: any) {
   if (linked.rows.length) return true;
   const payments = await tx.execute(sql`SELECT invoice_ref FROM payments WHERE invoice_ref LIKE ${`%${id}%`}`);
   return payments.rows.some((row: any) => {
-    try { return Number(JSON.parse(row.invoice_ref)?.id) === id; } catch { return true; }
+    try {
+      const ref = JSON.parse(row.invoice_ref);
+      return Number(ref?.id) === id || Number(ref?.invoiceId) === id ||
+        Array.isArray(ref?.reapplications) && ref.reapplications.some((entry: any) => Number(entry?.invoiceId) === id);
+    } catch { return true; }
   });
 }
 

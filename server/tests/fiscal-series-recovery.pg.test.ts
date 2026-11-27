@@ -18,6 +18,8 @@ let emit: typeof import("../billing/invoiceService").emitirFactura;
 async function fixture(run: (f: any) => Promise<void>, reservation: boolean | 'restaurant' | 'spa' | 'group' = false) {
   mocks.point = 10000 + Math.floor(Math.random() * 70000);
   const point = mocks.point, oldOperation = randomUUID(), newOperation = randomUUID(), reservationId = randomUUID();
+  const folioId = reservation === true ? randomUUID() : null;
+  if (folioId) await pool!.query("INSERT INTO folios(id,codigo,entity_type,entity_id) VALUES($1::text,$1::text,'reservation',$2)", [folioId, reservationId]);
   if (reservation === 'restaurant') await pool!.query("INSERT INTO restaurant_orders(id,order_number,status,total,opened_at) VALUES($1::text,$1::text,'closed','146400',now())",[reservationId]);
   if (reservation === 'spa') await pool!.query("INSERT INTO spa_accounts(id,appointment_id,guest_name,status,total,opened_at) VALUES($1,$1,'Prueba','open','146400',now())",[reservationId]);
   if (reservation === 'group') await pool!.query("INSERT INTO groups(id,group_code,name,check_in_date,check_out_date,created_at) VALUES($1::text,$1::text,'Prueba','2026-11-23','2026-11-24',now())",[reservationId]);
@@ -29,7 +31,9 @@ async function fixture(run: (f: any) => Promise<void>, reservation: boolean | 'r
       : reservation === 'group' ? { groupId: reservationId }
       : { recipientMode: "centro_comprobantes", cashArea: "recepcion" }),
     cashFormaPago: "efectivo", cashFormaPagoDetalle: [{ method: "efectivo", amount: 146400 }] };
-  const data = { ...request, ...(!reservation ? { centerSettlementArea: "recepcion" } : {}), operationId: oldOperation, requestSnapshot: request } as any;
+  // The reservation route resolves folioId on the server, after freezing the
+  // browser request. Reproduce that normal path, including the stored folio.
+  const data = { ...request, ...(folioId ? { folioId } : {}), ...(!reservation ? { centerSettlementArea: "recepcion" } : {}), operationId: oldOperation, requestSnapshot: request } as any;
   mocks.authorize.mockRejectedValueOnce(Object.assign(new Error("ARCA 10015: receptor no registrado"), { code: "ARCA_AUTHORIZATION_REJECTED", statusCode: 400 }));
   try {
     await expect(emit(data)).rejects.toMatchObject({ code: "ARCA_AUTHORIZATION_REJECTED" });
@@ -38,13 +42,17 @@ async function fixture(run: (f: any) => Promise<void>, reservation: boolean | 'r
     const nextRequest = { ...nextBase, reservaId: randomUUID(), cliente: { ...request.cliente, razonSocial: "Otra reserva sintética" },
       prefacturaRecovery: { version: 2, payments: [], checkoutRequested: false } };
     const next = { ...nextRequest, operationId: newOperation, requestSnapshot: nextRequest } as any;
-    await run({ point, invoice, oldOperation, newOperation, next, data, reservationId });
+    await run({ point, invoice, oldOperation, newOperation, next, data, reservationId, folioId });
   } finally {
     const operations = (await pool!.query("SELECT operation_id FROM billing_operations WHERE fiscal_identity->>'pointOfSale'=$1", [String(point)])).rows.map(r => r.operation_id);
     await pool!.query("DELETE FROM audit_logs WHERE entity_type='billing_operation' AND entity_id=ANY($1)", [operations]);
     await pool!.query("DELETE FROM billing_operations WHERE fiscal_identity->>'pointOfSale'=$1", [String(point)]);
     await pool!.query("DELETE FROM sales_invoices WHERE punto_venta=$1", [point]);
     await pool!.query("DELETE FROM invoice_counters WHERE punto_venta=$1", [point]);
+    if (folioId) {
+      await pool!.query("DELETE FROM folio_movements WHERE folio_id=$1", [folioId]);
+      await pool!.query("DELETE FROM folios WHERE id=$1", [folioId]);
+    }
     if (reservation === 'restaurant') await pool!.query('DELETE FROM restaurant_orders WHERE id=$1',[reservationId]);
     if (reservation === 'spa') await pool!.query('DELETE FROM spa_accounts WHERE id=$1',[reservationId]);
     if (reservation === 'group') await pool!.query('DELETE FROM groups WHERE id=$1',[reservationId]);
@@ -58,6 +66,28 @@ suite("Recuperación segura de la serie después de un borrador retenido", () =>
     global.fetch = vi.fn(async (_url, init) => new Response(lastAuthorizedForRequest(mocks.last, init), { status: 200 })) as any;
   });
   afterAll(async () => { global.fetch = originalFetch; await pool?.end(); });
+
+  it("libera la serie de otra habitación sin alterar la cuenta ni los cargos del folio original", async () => fixture(async f => {
+    await pool!.query("UPDATE folios SET total_charges=146400,balance=146400 WHERE id=$1", [f.folioId]);
+    await pool!.query("INSERT INTO folio_movements(folio_id,type,amount,description,source_type,source_id) VALUES($1,'charge',146400,'Alojamiento original','room',$2)", [f.folioId, f.reservationId]);
+    const pendingCredit = { operationId: f.oldOperation, status: "pending", payments: [], ordinaryAdvances: [],
+      settlement: { status: "pending", method: "tarjeta_credito", destination: "none", amount: 146400 } };
+    await pool!.query("UPDATE sales_invoices SET credit_reapplication_intent=$2 WHERE id=$1", [f.invoice.id, JSON.stringify(pendingCredit)]);
+    const folio = (await pool!.query("SELECT * FROM folios WHERE id=$1", [f.folioId])).rows;
+    const movements = (await pool!.query("SELECT * FROM folio_movements WHERE folio_id=$1", [f.folioId])).rows;
+    const result = await emit(f.next);
+    expect(result.numero).toBe(254);
+    expect(result.reservaId).toBe(f.next.reservaId);
+    expect(result.id).not.toBe(f.invoice.id);
+    expect((await pool!.query("SELECT * FROM folios WHERE id=$1", [f.folioId])).rows).toEqual(folio);
+    expect((await pool!.query("SELECT * FROM folio_movements WHERE folio_id=$1", [f.folioId])).rows).toEqual(movements);
+    const archived = (await pool!.query("SELECT request_snapshot FROM billing_operations WHERE operation_id=$1", [f.oldOperation])).rows[0].request_snapshot.discardedDraft;
+    expect(archived).toMatchObject({ id: f.invoice.id, folio_id: f.folioId, credit_reapplication_intent: pendingCredit });
+    expect((await pool!.query("SELECT id FROM payments WHERE reservation_id=ANY($1)", [[f.reservationId, f.next.reservaId]])).rows).toHaveLength(0);
+    expect((await emit(f.next)).id).toBe(result.id);
+    expect(mocks.consult).toHaveBeenCalledTimes(1);
+    expect(mocks.authorize).toHaveBeenCalledTimes(2); // original rejection + new reservation, never a retry of the old sale
+  }, true));
 
   it.each([false, true])("una reserva nueva puede usar 254 tras verificar y archivar el rechazado (reserva original=%s)", async reservation => fixture(async f => {
     const result = await emit(f.next);
@@ -138,12 +168,14 @@ suite("Recuperación segura de la serie después de un borrador retenido", () =>
     expect((await pool!.query("SELECT ultimo_numero FROM invoice_counters WHERE punto_venta=$1", [f.point])).rows[0].ultimo_numero).toBe(254);
   }));
 
-  it.each(["payment", "cash", "account"])("no archiva un rechazo con un vínculo de %s", async kind => fixture(async f => {
+  it.each(["payment", "cash", "account", "folio", "reapplied_payment"])("no archiva un rechazo de habitación con un vínculo de %s", async kind => fixture(async f => {
     const id = randomUUID();
     try {
       if (kind === "payment") await pool!.query("INSERT INTO payments(id,reservation_id,amount,method,date,invoice_ref) VALUES($1,'synthetic',146400,'efectivo',CURRENT_DATE,$2)", [id, JSON.stringify({ id: f.invoice.id })]);
       if (kind === "cash") await pool!.query("INSERT INTO cash_movements(id,area,source_type,source_id,payment_method,amount) VALUES($1,'recepcion','comprobante',$2,'efectivo',146400)", [id, String(f.invoice.id)]);
       if (kind === "account") await pool!.query("INSERT INTO account_movements(entity_type,entity_id,date,type,description,amount,reference) VALUES('guest',$1,CURRENT_DATE,'cargo','Synthetic',146400,$2)", [id, `FB-${String(f.point).padStart(4, "0")}-00000254`]);
+      if (kind === "folio") await pool!.query("INSERT INTO folio_movements(folio_id,type,amount,description,source_type,source_id) VALUES($1,'payment',146400,'Cobro vinculado','invoice',$2)", [f.folioId, String(f.invoice.id)]);
+      if (kind === "reapplied_payment") await pool!.query("INSERT INTO payments(id,reservation_id,amount,method,date,invoice_ref) VALUES($1,'synthetic',146400,'efectivo',CURRENT_DATE,$2)", [id, JSON.stringify({ id: Number(f.invoice.id) + 100000, reapplications: [{ invoiceId: f.invoice.id, amount: 146400 }] })]);
       await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT" });
       expect((await pool!.query("SELECT * FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows[0]).toEqual(f.invoice);
       expect((await pool!.query("SELECT stage FROM billing_operations WHERE operation_id=$1", [f.oldOperation])).rows[0].stage).toBe("rejected");
@@ -152,7 +184,62 @@ suite("Recuperación segura de la serie después de un borrador retenido", () =>
       await pool!.query("DELETE FROM payments WHERE id=$1", [id]); await pool!.query("DELETE FROM cash_movements WHERE id=$1", [id]);
       await pool!.query("DELETE FROM account_movements WHERE entity_id=$1", [id]);
     }
-  }));
+  }, true));
+
+  it.each(["missing", "other_reservation", "other_owner"])("conserva un folio de habitación no verificable: %s", async kind => fixture(async f => {
+    if (kind === "missing") await pool!.query("DELETE FROM folios WHERE id=$1", [f.folioId]);
+    if (kind === "other_reservation") await pool!.query("UPDATE folios SET entity_id=$2 WHERE id=$1", [f.folioId, randomUUID()]);
+    if (kind === "other_owner") await pool!.query("UPDATE folios SET entity_type='group' WHERE id=$1", [f.folioId]);
+    await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT" });
+    expect((await pool!.query("SELECT * FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows[0]).toEqual(f.invoice);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+  }, true));
+
+  it.each(["credit", "settlement"])("conserva un folio con conciliación de %s ya completada", async kind => fixture(async f => {
+    const intent = kind === "credit" ? { status: "completed" } : { status: "pending", settlement: { status: "completed" } };
+    await pool!.query("UPDATE sales_invoices SET credit_reapplication_intent=$2 WHERE id=$1", [f.invoice.id, JSON.stringify(intent)]);
+    await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT" });
+    expect((await pool!.query("SELECT credit_reapplication_intent FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows[0].credit_reapplication_intent).toEqual(intent);
+    expect(mocks.authorize).toHaveBeenCalledTimes(1);
+  }, true));
+
+  it("conserva la cuenta si su folio está siendo modificado, y recupera al liberarse", async () => fixture(async f => {
+    const c = await pool!.connect();
+    try {
+      await c.query("BEGIN");
+      await c.query("SELECT id FROM folios WHERE id=$1 FOR UPDATE", [f.folioId]);
+      await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT" });
+      expect((await pool!.query("SELECT id FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows).toHaveLength(1);
+      expect(mocks.authorize).toHaveBeenCalledTimes(1);
+    } finally { await c.query("ROLLBACK"); c.release(); }
+    expect((await emit(f.next)).numero).toBe(254);
+  }, true));
+
+  it("mantiene protegida una habitación adoptada por el motor de financiación", async () => fixture(async f => {
+    const registry = (await pool!.query("SELECT to_regclass('payment_funding.scopes') AS name")).rows[0].name;
+    await pool!.query("CREATE SCHEMA IF NOT EXISTS payment_funding");
+    await pool!.query("CREATE TABLE IF NOT EXISTS payment_funding.scopes(kind text NOT NULL CHECK(kind IN ('reservation','spa')),id text NOT NULL,adopted_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(kind,id))");
+    try {
+      await pool!.query("INSERT INTO payment_funding.scopes(kind,id) VALUES('reservation',$1)", [f.reservationId]);
+      await expect(emit(f.next)).rejects.toMatchObject({ code: "BILLING_NUMBER_CONFLICT" });
+      expect((await pool!.query("SELECT * FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows[0]).toEqual(f.invoice);
+      expect(mocks.authorize).toHaveBeenCalledTimes(1);
+    } finally {
+      await pool!.query("DELETE FROM payment_funding.scopes WHERE kind='reservation' AND id=$1", [f.reservationId]);
+      if (!registry) await pool!.query("DROP TABLE payment_funding.scopes");
+    }
+  }, true));
+
+  it("recupera un CAE existente de la habitación original sin trasladarlo a la nueva", async () => fixture(async f => {
+    mocks.consult.mockImplementationOnce(async () => { mocks.last = 254; return authorization; });
+    const next = await emit(f.next);
+    expect(next.numero).toBe(255);
+    expect(next.id).not.toBe(f.invoice.id);
+    expect((await pool!.query("SELECT estado,cae,folio_id FROM sales_invoices WHERE id=$1", [f.invoice.id])).rows[0])
+      .toEqual({ estado: "emitida", cae: authorization.cae, folio_id: f.folioId });
+    expect((await pool!.query("SELECT id FROM audit_logs WHERE entity_id=$1 AND entity_type='billing_operation'", [f.oldOperation])).rows).toHaveLength(1);
+    expect(mocks.authorize).toHaveBeenCalledTimes(2);
+  }, true));
 
   it("no confunde una coincidencia parcial de invoice_ref con un pago del borrador", async () => fixture(async f => {
     const id = randomUUID(), reference = JSON.stringify({ id: Number(f.invoice.id) + 100000, notes: `Referencia ${f.invoice.id}` });
