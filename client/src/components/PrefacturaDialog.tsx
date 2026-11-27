@@ -102,6 +102,7 @@ interface PaymentRow {
   retencionEnabled: boolean;
   retencionTipo: "iibb" | "ganancias";
   retencionMonto: string;
+  date?: string;
 }
 
 function newSettlementOperationId() {
@@ -1601,6 +1602,17 @@ export function PrefacturaDialog({
           setDocumentType(request.cliente?.documentType || "");
           setNationality(request.folioContext?.nationality || ""); setNationalityCode(request.folioContext?.nationalityCode || "");
           setGroupBillingAction(request.groupDocumentationOnly || request.closedStayDocumentationOnly || request.reservationBillingAction === 'invoice_only' ? 'invoice_only' : 'collect_and_invoice');
+          const originalPayments = request.prefacturaRecovery?.payments;
+          if (status.preflightCorrection && Array.isArray(originalPayments) && originalPayments.length) {
+            setPaymentRows(originalPayments.map((payment: any) => ({
+              id: newRowId(), amount: String(payment.amount), method: payment.method,
+              date: payment.date, reference: payment.reference || '',
+              retencionEnabled: false, retencionTipo: 'iibb', retencionMonto: '',
+            })));
+            setGroupNewMoneyConfirmed(false);
+            setApplyReleasedCredit(!!(request.ordinaryAdvanceApplications?.length || request.creditReapplications?.length));
+            setSubmitError(status.preflightCorrection.message);
+          }
           setInvoiceObservations(request.observaciones || "");
           if (request.checkoutDiscount) {
             setShowDiscount(true); setDiscountType(request.checkoutDiscount.type);
@@ -1613,6 +1625,8 @@ export function PrefacturaDialog({
           setDoCheckout(status.attempt.checkoutRequested === true);
           if (Array.isArray(request.sourceChargeIds)) setSelectedIds(new Set(request.sourceChargeIds));
           await Promise.all([refetchFolio(), refetchEmittedInvoices()]); assertActive();
+          queryClient.invalidateQueries({ queryKey: pendingOperationKey });
+          void groupAccount.refetch();
           toast({ title: "Prefactura actualizada", description: "El intento sin emisión quedó resuelto. Revisá los datos originales antes de confirmar." });
           return;
         }
@@ -1777,6 +1791,11 @@ export function PrefacturaDialog({
       setSelectionError(null);
     } catch (error) { setSelectionError((error as Error).message); return; }
     if (!retrying && (discoveringOperation || operationDiscoveryError)) { setSubmitError("Estamos verificando si hay una operación anterior. Volvé a intentar cuando termine la consulta."); return; }
+    if (!retrying && canChooseGroupBillingAction && !invoiceOnly && saleCondition === 'contado' && selectedBalance > 0.01 &&
+        !groupNewMoneyConfirmed && (groupAccount.data?.unassigned > 0.009 || groupAccount.data?.reviewReceipts?.length)) {
+      setSubmitError('Confirmá que este pago individual se recibió por separado de los anticipos del grupo. El importe y el medio de pago se conservan.');
+      return;
+    }
     if (correctReceptionAttempt.isPending) return;
     if (retrying && pointError && !alreadyPaidAndInvoiced) { setSubmitError(pointError); return; }
     const isCcPayment = !invoiceOnly && saleCondition === "cuenta_corriente";
@@ -2067,7 +2086,7 @@ export function PrefacturaDialog({
             reservationId,
             amount: netAmount.toFixed(2),
             method: row.method,
-            date: paymentDate,
+            date: row.date || paymentDate,
             reference: null,
             notes: null,
             receiptType,
@@ -2082,7 +2101,7 @@ export function PrefacturaDialog({
             reservationId,
             amount: retMonto.toFixed(2),
             method: `retencion_${row.retencionTipo}`,
-            date: paymentDate,
+            date: row.date || paymentDate,
             reference: null,
             notes,
             receiptType,
@@ -2265,9 +2284,11 @@ export function PrefacturaDialog({
     } catch (err: any) {
       if (!isCurrentView()) return;
       const payload=parseApiErrorPayload(err) as any;
-      if(payload?.code==='GROUP_BILLING_ACTION_REQUIRED'&&payload.safeToReset===true&&!submission.current!.pending(reservationId)?.invoice){
+      if(['GROUP_BILLING_ACTION_REQUIRED','GROUP_ADVANCE_CHOICE_REQUIRED'].includes(payload?.code)&&payload.safeToReset===true&&!submission.current!.pending(reservationId)?.invoice){
         submission.current!.complete(reservationId);setHasPendingSubmission(false);
         const next=newSettlementOperationId();setCreditOperationId(next);window.sessionStorage.setItem(settlementOperationKey(reservationId),next);
+        queryClient.invalidateQueries({ queryKey: pendingOperationKey });
+        void groupAccount.refetch();
       }
       refetchReceptionStatus();
       setSubmitError(parseApiError(err));
@@ -2427,7 +2448,7 @@ export function PrefacturaDialog({
                 <option value="invoice_only">Sólo facturar</option>
               </select>
               <p className="mt-1 text-xs text-muted-foreground">{invoiceOnly ? 'Emite la factura y conserva el saldo por cobrar. No registra dinero en Caja.' : 'Registra el medio de pago y el dinero recibido ahora en Caja, además de emitir la factura.'}</p>
-              {!invoiceOnly&&(groupAccount.data?.unassigned>0||groupAccount.data?.reviewReceipts?.length>0)&&<label className="mt-2 flex items-center gap-2 text-sm"><Checkbox checked={groupNewMoneyConfirmed} onCheckedChange={value=>setGroupNewMoneyConfirmed(value===true)}/>Confirmo que recibo dinero nuevo; los anticipos del grupo siguen sin asignar.</label>}
+              {!invoiceOnly&&(groupAccount.data?.unassigned>0||groupAccount.data?.reviewReceipts?.length>0)&&<label className="mt-2 flex items-center gap-2 text-sm"><Checkbox checked={groupNewMoneyConfirmed} onCheckedChange={value=>setGroupNewMoneyConfirmed(value===true)}/>Este pago individual se recibió por separado del grupo. No utilizar los anticipos grupales.</label>}
             </section>}
             <section className="rounded-lg border bg-card/50 px-4 py-3" aria-label="Identidad y comprobante">
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Identidad y comprobante</h2>

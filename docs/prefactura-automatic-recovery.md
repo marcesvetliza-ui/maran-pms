@@ -8,13 +8,17 @@ Una salida se ejecuta únicamente si el pedido original la incluía y la reserva
 
 Un borrador bloqueado antes de emitir, sin plan de cobros nuevos, se archiva automáticamente mediante el endpoint de corrección existente, que vuelve a verificar sus efectos bajo bloqueo financiero. La prefactura queda editable con receptor, condición de venta y conceptos originales; no se fuerza una emisión con datos rechazados. El circuito de corrección de documentos cancelados conserva sus comprobaciones existentes.
 
+Para cobros individuales de grupos, la elección entre un pago separado y los anticipos sin asignar se valida antes de guardar una nueva operación. La interfaz conserva los campos editables y el servidor repite el control bajo los bloqueos financieros de reserva y grupo; un rechazo sin efectos no queda como una emisión pendiente. Las solicitudes existentes conservan su identidad y los controles posteriores a la validación siguen vigentes.
+
+Si un intento anterior quedó en `prepared` por esa elección pendiente, el servidor lo identifica únicamente cuando no tiene factura ni pagos registrados. Para planes de cobro directo verificables, la recuperación usa la corrección protegida y devuelve la prefactura editable con importe, tarjeta u otro medio, fecha, receptor y conceptos originales. No confirma el uso de anticipos, no emite ni cobra al corregir y no exige un botón de completar. Recepción puede confirmar el pago separado y emitir con una nueva operación; los anticipos grupales conservan su destino.
+
 Las respuestas transitorias de red/502/503/504 tienen hasta dos reintentos automáticos, a los 2 y 10 segundos, siempre consultando otra vez el estado y usando las mismas claves. No hay un bucle de escrituras por renderizado. Cerrar la pantalla o cambiar de reserva frena los pasos siguientes; las respuestas ya comprometidas conservan su seguimiento. Los datos locales no se eliminan ante errores o resultados contradictorios.
 
 La recuperación normal muestra un estado de actualización en lugar del cartel amarillo y el botón de completar. Rechazos fiscales, pagos modificados, planes históricos no verificables y otras inconsistencias conservan sus controles de revisión; no se ocultan como si fueran operaciones exitosas. No se cambian importes ni se asignan anticipos para forzar su resolución. Las demás mesas y habitaciones no forman parte de la operación recuperada.
 
 ## Validación
 
-- Pruebas de interfaz: recuperación local/remota a Cuenta Corriente, factura y pago ya confirmados, conflicto detectado al revalidar, borrador bloqueado sin emisión, reintentos acotados, pérdida de respuesta después de cobrar y cierre de pantalla durante una respuesta fiscal.
+- Pruebas de interfaz: recuperación local/remota a Cuenta Corriente, factura y pago ya confirmados, conflicto detectado al revalidar, borrador bloqueado sin emisión, cobro grupal previo devuelto a edición conservando tarjeta y fecha, reintentos acotados, pérdida de respuesta después de cobrar y cierre de pantalla durante una respuesta fiscal.
 - Regresiones de Prefactura y pruebas del plan inmutable y de la política de recuperación.
 - Pruebas de servidor y PostgreSQL descartable: numeración fiscal, reintentos, pagos individuales de grupos, salidas pendientes y estadías reabiertas.
 - TypeScript, compilación de producción y control de fechas.

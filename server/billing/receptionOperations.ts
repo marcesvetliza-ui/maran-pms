@@ -11,6 +11,7 @@ import { requireAuth, requirePermission } from "../auth";
 import { withReservationFinancialLock } from "../nightlyPricingGuard";
 import { getBillingConfig } from "./billingConfig";
 import { type BillingOperation } from "./operationJournal";
+import { groupCollectionPreflightIssue } from './groupCollectionPreflight';
 
 const fail = (message: string, code = "BILLING_REVIEW_REQUIRED") => Object.assign(new Error(message), { statusCode: 409, code });
 async function withSeriesLock<T>(key: string, action: () => Promise<T>): Promise<T> {
@@ -50,6 +51,8 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const archived = operation.stage === "corrected" && ["BILLING_REJECTED_DRAFT_RETIRED", "BILLING_UNSENT_DRAFT_RETIRED"].includes(String(operation.error_code));
   const safeToCorrect = recovery?.version === 2 && (["prepared", "blocked"].includes(operation.stage) || archived) && !operation.invoice_id && !invoice && payments.length === 0;
   const canRetryNumberConflict = recovery?.version === 2 && operation.stage === "blocked" && operation.error_code === "BILLING_NUMBER_CONFLICT" && !operation.invoice_id && !invoice && payments.length === 0;
+  const preflightCorrection = safeToCorrect && operation.stage === 'prepared'
+    ? await groupCollectionPreflightIssue(operation.request_snapshot) : null;
   const conflict = canRetryNumberConflict && Number.isSafeInteger(operation.request_snapshot?._numberAttempt)
     ? (await db.execute(sql`SELECT id FROM sales_invoices WHERE tipo_comprobante=${operation.fiscal_identity.type} AND punto_venta=${operation.fiscal_identity.pointOfSale} AND numero=${operation.request_snapshot._numberAttempt} LIMIT 1`)).rows[0] as any
     : null;
@@ -97,7 +100,7 @@ export async function receptionOperationStatus(operation: BillingOperation) {
   const recoveryComplete = financiallyComplete && departureComplete;
   return {
     operationId: operation.operation_id, stage: invoice?.estado === "anulada" ? "cancelled" : issued ? "authorized" : operation.stage, safeToCorrect, canVerifyRejection, canCloseCancelled, canRetryNumberConflict,
-    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, recoveryComplete,
+    acknowledgedPaymentIds: acknowledged, paymentConflicts, financiallyComplete, recoveryComplete, preflightCorrection,
     departureReopened: (completedDeparture || departure?.completed_after_intent === true) && departure?.status === 'checked_in',
     cancelledCollection, collectionCorrectionCompleted, code: operation.error_code,
     paymentConflictMessage: paymentConflicts.length ? "El cobro de este intento ya existe, pero fue modificado o requiere conciliación. Administración debe revisar el pago vinculado; no se volverá a cobrar ni a cambiar su forma de pago. El check-out se gestiona por separado desde la reserva, trasladando el saldo actual a Cuenta Corriente si corresponde." : null,
