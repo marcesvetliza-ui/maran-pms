@@ -20,9 +20,11 @@ import { Textarea } from "./ui/textarea";
 export function ReservationHolderCorrection({
   reservationId,
   onClose,
+  onCorrected,
 }: {
   reservationId: string;
   onClose: () => void;
+  onCorrected?: (guest: Guest) => void;
 }) {
   const { toast } = useToast();
   const [guest, setGuest] = useState<Guest | null>(null);
@@ -59,10 +61,14 @@ export function ReservationHolderCorrection({
         })
       ).json(),
     onSuccess: async () => {
+      onCorrected?.(guest!);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/reservations"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/reservations/recent"] }),
+        queryClient.invalidateQueries({ queryKey: [`/api/reservations/${reservationId}`] }),
         queryClient.invalidateQueries({ queryKey: ["/api/planning"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/groups"] }),
+        queryClient.invalidateQueries({ predicate: query => typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("/api/groups/") }),
         queryClient.invalidateQueries({ queryKey: ["/api/rooms/in-house"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/dashboard/inhouse"] }),

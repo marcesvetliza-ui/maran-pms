@@ -4,10 +4,18 @@ Planning o Reservas → abrir la reserva → Datos → Cambiar titular.
 Disponible para estadías con check-in activo y permiso de edición de Reservas.
 Editar datos mantiene su función de corregir la ficha de la misma persona.
 
+Para reservas de grupo en casa también está disponible en **Editar Reserva →
+Cambiar titular**, en la tarjeta del huésped. Usa la misma corrección auditada:
+el titular se guarda al confirmarlo y la ventana de edición conserva las notas
+y otros datos pendientes. Estos últimos se guardan con **Guardar Cambios**.
+Ese guardado general no reenvía al titular, para evitar sobrescribir una
+corrección reciente. La empresa o agencia de la estadía se conserva aunque el
+nuevo huésped tenga otros vínculos en su ficha.
+
 Cambiar titular sirve para corregir quién se alojó desde el ingreso cuando se
 registró otra persona por error. Permite buscar una ficha existente o crear una
 nueva. Crear la ficha es una acción separada; la reserva no cambia hasta elegir
-el destino, escribir un motivo de al menos diez caracteres y confirmar el aviso.
+el destino, escribir un motivo de al menos cinco caracteres y confirmar el aviso.
 
 La operación conserva habitación, fechas, tarifa, cantidad de huéspedes,
 acompañantes, vehículos, mascotas, grupo y movimientos. No cambia las fichas de

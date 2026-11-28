@@ -14,6 +14,10 @@ export async function guardGroupGuestReplacement(existing: { id: string; guestId
   if (!newGuestId || newGuestId === existing.guestId) return;
   const links = (await db.execute(sql`SELECT gl.group_id,g.codigo FROM group_reservation_links gl LEFT JOIN guests g ON g.id=${existing.guestId} WHERE gl.reservation_id=${existing.id}`)).rows as any[];
   if (!links.length) return;
+  if (existing.status === 'checked_in') {
+    const error = 'Para corregir el titular de una reserva de grupo en casa, usá Cambiar titular desde el detalle o la edición de la reserva. Se conservan la estadía y sus movimientos.';
+    throw Object.assign(new Error(error), { statusCode: 409, response: { error, code: 'GROUP_INHOUSE_HOLDER_CORRECTION_REQUIRED' } });
+  }
   if (!['confirmed','pending','tentative'].includes(existing.status)) throw Object.assign(new Error('El pasajero del grupo solo puede reemplazarse antes del check-in.'), { statusCode: 409 });
   if (links.length !== 1 || (links[0].codigo !== `GROUP-${links[0].group_id}` && reviewed.getStore() !== existing.id)) throw Object.assign(new Error('Usá Reemplazar huésped desde Grupos para revisar los anticipos antes de cambiar al pasajero.'), { statusCode: 409 });
   if (reviewed.getStore() !== existing.id) {
