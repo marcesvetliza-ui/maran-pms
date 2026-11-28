@@ -378,7 +378,10 @@ suite("Corrección auditada del titular de una estadía iniciada", () => {
     const { storage } = await import("../db-storage");
     await expect(
       storage.updateReservation(f.reservation, { guestId: f.next }),
-    ).rejects.toThrow("antes del check-in");
+    ).rejects.toMatchObject({ statusCode: 409, response: {
+      code: "GROUP_INHOUSE_HOLDER_CORRECTION_REQUIRED",
+      error: expect.stringContaining("Cambiar titular"),
+    } });
     for (const status of ["checked_out", "cancelled", "confirmed"]) {
       await pool!.query("UPDATE reservations SET status=$2 WHERE id=$1", [
         f.reservation,

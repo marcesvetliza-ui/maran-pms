@@ -230,6 +230,8 @@ export function ReservationFormDialog({
 }) {
   const { toast } = useToast();
   const isEditing = !!reservation;
+  const groupInHouse = reservation?.status === "checked_in" && Boolean((reservation as any).groupId || (reservation as any).isGroup);
+  const [showGroupHolderCorrection, setShowGroupHolderCorrection] = useState(false);
   const editRatesRef = useRef<ReservationNightlyPricingHandle>(null);
   const accommodationAccess = useQuery<{ canEdit: boolean }>({
     queryKey: ["/api/reservation-edit-permission"],
@@ -389,6 +391,7 @@ export function ReservationFormDialog({
   useEffect(() => {
     if (!open) {
       initializedFormSessionRef.current = null;
+      setShowGroupHolderCorrection(false);
       return;
     }
 
@@ -824,6 +827,8 @@ export function ReservationFormDialog({
     mutationFn: async (data: Partial<InsertReservation>) => {
       data = {...data, hospitalityPackageId: selectedPackageId || null};
       if (isEditing) {
+        // In-house group identities use the audited correction, never a stale general PATCH.
+        if (groupInHouse) { data = { ...data }; delete data.guestId; }
         if (reservation.pricingScheme === "nightly_v1") {
           if (data.checkInDate !== reservation.checkInDate || data.checkOutDate !== reservation.checkOutDate) {
             throw new Error("Para agregar o quitar noches usá Modificar estadía desde el Folio.");
@@ -1053,7 +1058,17 @@ export function ReservationFormDialog({
         <form onSubmit={handleSubmit} className="operational-form">
           {reservation?.pricingScheme === "nightly_v1" && <p className="rounded-md border p-3 text-sm bg-muted">Podés cambiar los importes desde Editar tarifas. Las fechas se modifican desde el Folio: Modificar estadía. Los demás datos se guardan con Guardar Cambios.</p>}
           <div className="operational-body grid items-start gap-6 lg:grid-cols-[1fr_1.1fr]"><section className="min-w-0 space-y-4" aria-label="Huésped y vínculos">
-            <GuestSelector
+            {groupInHouse ? <Card>
+              <CardContent className="pt-4 space-y-3">
+                <div>
+                  <p className="text-sm text-muted-foreground">Huésped titular</p>
+                  <p className="font-medium" data-testid="reservation-current-holder">{selectedGuest ? `${selectedGuest.lastName} ${selectedGuest.firstName}` : "Titular actual"}</p>
+                </div>
+                <p className="text-sm text-muted-foreground">La reserva de grupo está en casa. Cambiá el titular registrando el motivo y conservando la estadía y su cuenta.</p>
+                <p className="text-xs text-muted-foreground">El titular se guarda al confirmar ese cambio. Los demás datos se guardan con Guardar Cambios.</p>
+                <Button type="button" variant="outline" disabled={mutation.isPending} data-testid="button-edit-reservation-holder" onClick={() => setShowGroupHolderCorrection(true)}>Cambiar titular</Button>
+              </CardContent>
+            </Card> : <GuestSelector
               selectedGuest={selectedGuest}
               initialCreateGuest={defaultValues?.guest}
               onSelect={(guest) => {
@@ -1080,7 +1095,7 @@ export function ReservationFormDialog({
                 setFormData((prev) => ({ ...prev, guestId: "" }));
               }}
               cardClassName={sectionCardClass(!!selectedGuest, !isEditing)}
-            />
+            />}
             {defaultValues?.guest && !isEditing && (
               <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
                 Datos de la lista de espera: <strong>{defaultValues.guest.firstName} {defaultValues.guest.lastName}</strong>.
@@ -2285,6 +2300,11 @@ export function ReservationFormDialog({
           // Keep unrelated unsaved fields intact. General PATCH still excludes pricing.
           setFormData(previous => ({ ...previous, baseRatePerNight: updated.baseRatePerNight, finalRatePerNight: updated.finalRatePerNight, totalRoomAmount: updated.totalRoomAmount, discountType: updated.discountType, discountValue: updated.discountValue }));
         }} />}
+        {open && groupInHouse && showGroupHolderCorrection && reservation && <ReservationHolderCorrection key={reservation.id} reservationId={reservation.id}
+          onClose={() => setShowGroupHolderCorrection(false)} onCorrected={guest => {
+            setSelectedGuest(guest);
+            setFormData(previous => ({ ...previous, guestId: guest.id }));
+          }} />}
       </DialogContent>
     </Dialog>
 
